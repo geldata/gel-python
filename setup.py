@@ -70,12 +70,18 @@ DOC_DEPENDENCIES = [
 ]
 
 AI_DEPENDENCIES = [
-    'httpx~=0.27.0',
+    'httpx>=0.27',
     'httpx-sse~=0.4.0',
+]
+
+AUTH_DEPENDENCIES = [
+    'pydantic>=2',
+    'httpx>=0.27',
 ]
 
 EXTRA_DEPENDENCIES = {
     'ai': AI_DEPENDENCIES,
+    'auth': AUTH_DEPENDENCIES,
     'docs': DOC_DEPENDENCIES,
     'test': TEST_DEPENDENCIES,
     'sqltest': SQLTEST_DEPENDENCIES,
