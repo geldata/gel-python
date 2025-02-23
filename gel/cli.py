@@ -229,7 +229,7 @@ def _install_cli(os_name: str, arch: str, path: pathlib.Path) -> str:
     else:
         _die(f"unexpected OS: {os}")
 
-    url = f"{PACKAGE_URL_PREFIX}/{triple}/edgedb-cli{ext}"
+    url = f"{PACKAGE_URL_PREFIX}/{triple}/gel-cli{ext}"
 
     if path.exists() and not path.is_file():
         _die(f"{path} exists but is not a regular file, "
