@@ -45,7 +45,7 @@ jobs:
 
     - uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6874  # v4.4.0
       with:
-        name: dist
+        name: dist-version
         path: dist/
 
   build-sdist:
@@ -71,7 +71,7 @@ jobs:
 
     - uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6874  # v4.4.0
       with:
-        name: dist
+        name: dist-source
         path: dist/*.tar.*
 
   build-wheels-matrix:
@@ -155,7 +155,7 @@ jobs:
 
     - uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6874  # v4.4.0
       with:
-        name: dist
+        name: dist-wheel-${{ matrix.only }}
         path: wheelhouse/*.whl
 
   publish:
@@ -179,8 +179,9 @@ jobs:
 
     - uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16  # v4.1.8
       with:
-        name: dist
         path: dist/
+        pattern: dist-*
+        merge-multiple: true
 
     - name: Extract Release Version
       id: relver
