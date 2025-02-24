@@ -176,7 +176,7 @@ class Record:
         """Convert this item to an Record using the provided embedding model."""
         return Vector(
             text=self.text,
-            embedding=embedding_model(self.text),
+            embedding=embedding_model.generate(self.text),
             metadata=self.metadata,
         )
 
@@ -184,7 +184,7 @@ class Record:
         """Convert this item to a Vector using the provided async embedding model."""
         return Vector(
             text=self.text,
-            embedding=await embedding_model(self.text),
+            embedding=await embedding_model.generate(self.text),
             metadata=self.metadata,
         )
 
@@ -245,7 +245,7 @@ class BaseEmbeddingModel(abc.ABC, Generic[T]):
 
 class EmbeddingModel(BaseEmbeddingModel[T], Generic[T]):
     @abc.abstractmethod
-    def __call__(self, item: T) -> Vector:
+    def generate(self, item: T) -> Vector:
         """
         Convert an input item into a list of floating-point values (vector
         embedding). Must be implemented in subclasses.
@@ -265,7 +265,7 @@ class BaseVectorStore(Generic[T]):
         T: The type of items that can be embedded (e.g., str for text...)
     """
 
-    # why is it maybe better to have  class VStoreOptions dataclasses.dataclass?
+    # is it maybe better to have  class VStoreOptions dataclasses.dataclass or it doesnt matter?
     # do I need to use * to require kwargs?
     def __init__(
         self,
@@ -293,6 +293,7 @@ class VectorStore(BaseVectorStore[T]):
 
     def __init__(
         self,
+        *,  # do I need to use this
         embedding_model: Optional[EmbeddingModel] = None,
         **kwargs,
     ):
@@ -404,7 +405,7 @@ class VectorStore(BaseVectorStore[T]):
             for result in results
         ]
 
-    # todo think of a better name, also test, use record instead of item
+    # do I need to use * here and to inforce kwargs?
     def search_by_record(
         self,
         item: T,
@@ -437,7 +438,7 @@ class VectorStore(BaseVectorStore[T]):
                   (higher is more similar)
         """
 
-        vector = self.embedding_model(item)
+        vector = self.embedding_model.generate(item)
         filter_expression = (
             f"filter {get_filter_clause(filters)}" if filters else ""
         )
@@ -445,7 +446,7 @@ class VectorStore(BaseVectorStore[T]):
             vector=vector, filter_expression=filter_expression, limit=limit
         )
 
-    # todo test and rename maybe
+    # todo test
     def search_by_vector(
         self,
         vector: Vector,
@@ -498,7 +499,7 @@ class VectorStore(BaseVectorStore[T]):
     def update_record(
         self,
         id: uuid.UUID,
-        *,
+        *,  # do I need to use this
         text: Union[str, None, object] = _sentinel,
         embedding: Union[Vector, None, object] = _sentinel,
         metadata: Union[Dict[str, Any], None, object] = _sentinel,
@@ -542,7 +543,7 @@ class VectorStore(BaseVectorStore[T]):
             and "embedding" not in updates
         ):
             updates.append("embedding")
-            embedding = self.embedding_model(text)
+            embedding = self.embedding_model.generate(text)
 
         result = self.client.query_single(
             query=UPDATE_QUERY.format(
@@ -647,7 +648,7 @@ class AsyncVectorStore(BaseVectorStore[T]):
             for result in results
         ]
 
-    # todo think of a better name, also test, use record instead of item
+    # todo think of a better name, also test
     async def search_by_record(
         self,
         item: T,
@@ -680,7 +681,7 @@ class AsyncVectorStore(BaseVectorStore[T]):
                   (higher is more similar)
         """
 
-        vector = await self.embedding_model(item)
+        vector = await self.embedding_model.generate(item)
         filter_expression = (
             f"filter {get_filter_clause(filters)}" if filters else ""
         )
@@ -784,7 +785,7 @@ class AsyncVectorStore(BaseVectorStore[T]):
             and "embedding" not in updates
         ):
             updates.append("embedding")
-            embedding = await self.embedding_model(text)
+            embedding = await self.embedding_model.generate(text)
 
         result = await self.client.query_single(
             query=UPDATE_QUERY.format(
