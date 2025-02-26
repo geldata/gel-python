@@ -265,8 +265,6 @@ class BaseVectorStore(Generic[T]):
         T: The type of items that can be embedded (e.g., str for text...)
     """
 
-    # is it maybe better to have  class VStoreOptions dataclasses.dataclass or it doesnt matter?
-    # do I need to use * to require kwargs?
     def __init__(
         self,
         client: Union[gel.Client, gel.AsyncIOClient],
@@ -405,7 +403,6 @@ class VectorStore(BaseVectorStore[T]):
             for result in results
         ]
 
-    # do I need to use * here and to inforce kwargs?
     def search_by_record(
         self,
         item: T,
@@ -446,7 +443,6 @@ class VectorStore(BaseVectorStore[T]):
             vector=vector, filter_expression=filter_expression, limit=limit
         )
 
-    # todo test
     def search_by_vector(
         self,
         vector: Vector,
@@ -499,7 +495,6 @@ class VectorStore(BaseVectorStore[T]):
     def update_record(
         self,
         id: uuid.UUID,
-        *,  # do I need to use this
         text: Union[str, None, object] = _sentinel,
         embedding: Union[Vector, None, object] = _sentinel,
         metadata: Union[Dict[str, Any], None, object] = _sentinel,
@@ -581,7 +576,7 @@ class AsyncVectorStore(BaseVectorStore[T]):
     async def add_records(self, *records: Record) -> List[uuid.UUID]:
         if not self.embedding_model:
             raise ValueError("Embedding model is not set")
-        # todo: this is not async
+
         vectors = [
             record.ato_vector(self.embedding_model) for record in records
         ]
@@ -648,7 +643,6 @@ class AsyncVectorStore(BaseVectorStore[T]):
             for result in results
         ]
 
-    # todo think of a better name, also test
     async def search_by_record(
         self,
         item: T,
