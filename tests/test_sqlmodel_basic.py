@@ -34,10 +34,10 @@ from gel.orm import sqlmodel as sqlm
 
 class TestSQLModelBasic(tb.SQLModelTestCase):
     SCHEMA = os.path.join(os.path.dirname(__file__), 'dbsetup',
-                          'sqlmodel.esdl')
+                          'base.esdl')
 
     SETUP = os.path.join(os.path.dirname(__file__), 'dbsetup',
-                         'sqlmodel.edgeql')
+                         'base.edgeql')
 
     MODEL_PACKAGE = 'sqlmbase'
 
@@ -665,93 +665,6 @@ class TestSQLModelBasic(tb.SQLModelTestCase):
         self.assertEqual(
             upd.lts,
             dt.datetime.fromisoformat('2025-02-01T20:13:45'),
-        )
-
-    def test_sqlmodel_linkprops_01(self):
-        val = self.sess.exec(select(self.sm.HasLinkPropsA)).one()
-        self.assertEqual(val.child.target.num, 0)
-        self.assertEqual(val.child.a, 'single')
-
-    def test_sqlmodel_linkprops_02(self):
-        val = self.sess.exec(select(self.sm.HasLinkPropsA)).one()
-        self.assertEqual(val.child.target.num, 0)
-        self.assertEqual(val.child.a, 'single')
-
-        # replace the single child with a different one
-        ch = self.sess.exec(select(self.sm.Child).filter_by(num=1)).one()
-        val.child = self.sm.HasLinkPropsA_child_link(a='replaced', target=ch)
-        self.sess.flush()
-
-        val = self.sess.exec(select(self.sm.HasLinkPropsA)).one()
-        self.assertEqual(val.child.target.num, 1)
-        self.assertEqual(val.child.a, 'replaced')
-
-        # make sure there's only one link object still
-        vals = self.sess.exec(select(self.sm.HasLinkPropsA_child_link))
-        self.assertEqual(
-            [(val.a, val.target.num) for val in vals],
-            [('replaced', 1)]
-        )
-
-    def test_sqlmodel_linkprops_03(self):
-        val = self.sess.exec(select(self.sm.HasLinkPropsA)).one()
-        self.assertEqual(val.child.target.num, 0)
-        self.assertEqual(val.child.a, 'single')
-
-        # delete the child object
-        val = self.sess.exec(select(self.sm.Child).filter_by(num=0)).one()
-        self.sess.delete(val)
-        self.sess.flush()
-
-        val = self.sess.exec(select(self.sm.HasLinkPropsA)).one()
-        self.assertEqual(val.child, None)
-
-        # make sure the link object is removed
-        vals = self.sess.exec(select(self.sm.HasLinkPropsA_child_link))
-        self.assertEqual(list(vals), [])
-
-    def test_sqlmodel_linkprops_04(self):
-        val = self.sess.exec(select(self.sm.HasLinkPropsB)).one()
-        self.assertEqual(
-            {(c.b, c.target.num) for c in val.children},
-            {('hello', 0), ('world', 1)},
-        )
-
-    def test_sqlmodel_linkprops_05(self):
-        val = self.sess.exec(select(self.sm.HasLinkPropsB)).one()
-        self.assertEqual(
-            {(c.b, c.target.num) for c in val.children},
-            {('hello', 0), ('world', 1)},
-        )
-
-        # Remove one of the children
-        for t in list(val.children):
-            if t.b != 'hello':
-                val.children.remove(t)
-        self.sess.flush()
-
-        val = self.sess.exec(select(self.sm.HasLinkPropsB)).one()
-        self.assertEqual(
-            {(c.b, c.target.num) for c in val.children},
-            {('hello', 0)},
-        )
-
-    def test_sqlmodel_linkprops_06(self):
-        val = self.sess.exec(select(self.sm.HasLinkPropsB)).one()
-        self.assertEqual(
-            {(c.b, c.target.num) for c in val.children},
-            {('hello', 0), ('world', 1)},
-        )
-
-        # Remove one of the children
-        val = self.sess.exec(select(self.sm.Child).filter_by(num=0)).one()
-        self.sess.delete(val)
-        self.sess.flush()
-
-        val = self.sess.exec(select(self.sm.HasLinkPropsB)).one()
-        self.assertEqual(
-            {(c.b, c.target.num) for c in val.children},
-            {('world', 1)},
         )
 
     def test_sqlmodel_sorting(self):
