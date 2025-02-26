@@ -107,8 +107,7 @@ class ModelGenerator(FilePrinter):
             try:
                 self.out = f
                 self.write(f'{COMMENT}\n')
-                relimport = '.' * len(dirpath)
-                self.write(f'from {relimport}._tables import *')
+                self.write(f'from {self.basemodule}._tables import *')
                 yield f
             finally:
                 self.out = None
@@ -142,7 +141,7 @@ class ModelGenerator(FilePrinter):
 
         if len(spec['prop_objects']) > 0:
             warnings.warn(
-                f"Skipping multi properties: SQLAlchemy reflection doesn't "
+                f"Skipping multi properties: SQLModel reflection doesn't "
                 f"support multi properties as they produce models without a "
                 f"clear identity.",
                 GelORMWarning,
@@ -186,51 +185,33 @@ class ModelGenerator(FilePrinter):
                 self.write()
                 self.render_link_table(rec)
 
-        if 'default' not in modules or len(modules) > 1:
-            skipped = ', '.join([repr(m) for m in modules if m != 'default'])
-            warnings.warn(
-                f"Skipping modules {skipped}: SQLModel reflection doesn't "
-                f"support multiple modules or non-default modules.",
-                GelORMWarning,
-            )
-
-        with self.init_module('default', modules):
-            maps = modules['default']
+        for mod, maps in modules.items():
             if not maps:
                 # skip apparently empty modules
-                return
+                continue
 
-            link_objects = sorted(
-                maps.get('link_objects', {}).values(),
-                key=lambda x: x['name']
-            )
-            for lobj in link_objects:
-                self.write()
-                self.render_link_object(lobj, modules)
+            with self.init_module(mod, modules):
+                link_objects = sorted(
+                    maps.get('link_objects', {}).values(),
+                    key=lambda x: x['name']
+                )
+                for lobj in link_objects:
+                    self.write()
+                    self.render_link_object(lobj, modules)
 
-            objects = sorted(
-                maps.get('object_types', {}).values(),
-                key=lambda x: x['name']
-            )
-            for rec in maps.get('object_types', {}).values():
-                self.write()
-                self.render_type(rec, modules)
+                objects = sorted(
+                    maps.get('object_types', {}).values(),
+                    key=lambda x: x['name']
+                )
+                for rec in maps.get('object_types', {}).values():
+                    self.write()
+                    self.render_type(rec, modules)
 
     def render_link_table(self, spec):
         mod, source = get_mod_and_name(spec["source"])
         tmod, target = get_mod_and_name(spec["target"])
         s_fk = self.get_fk(mod, source, 'default')
         t_fk = self.get_fk(tmod, target, 'default')
-
-        if mod != 'default' or tmod != 'default':
-            skipped = ', '.join(
-                [repr(m) for m in {mod, tmod} if m != 'default'])
-            warnings.warn(
-                f"Skipping modules {skipped}: SQLModel reflection doesn't "
-                f"support multiple modules or non-default modules.",
-                GelORMWarning,
-            )
-            return
 
         self.write()
         self.write(f'class {spec["name"]}(sm.SQLModel, table=True):')
@@ -263,14 +244,6 @@ class ModelGenerator(FilePrinter):
         sql_name = spec['table']
         source_name, source_link = sql_name.split('.')
 
-        if mod != 'default':
-            warnings.warn(
-                f"Skipping module {mod!r}: SQLModel reflection doesn't "
-                f"support multiple modules or non-default modules.",
-                GelORMWarning,
-            )
-            return
-
         self.write()
         self.write(f'class {name}(sm.SQLModel, table=True):')
         self.indent()
@@ -291,14 +264,6 @@ class ModelGenerator(FilePrinter):
             for link in spec['links']:
                 lname = link['name']
                 tmod, target = get_mod_and_name(link['target']['name'])
-
-                if tmod != 'default':
-                    warnings.warn(
-                        f"Skipping module {tmod!r}: SQLModel reflection doesn't "
-                        f"support multiple modules or non-default modules.",
-                        GelORMWarning,
-                    )
-                    return
 
                 fk = self.get_fk(tmod, target, mod)
                 sqlafk = self.get_sqla_fk(tmod, target, mod)
@@ -340,14 +305,6 @@ class ModelGenerator(FilePrinter):
         # assume nice names for now
         mod, name = get_mod_and_name(spec['name'])
         sql_name = get_sql_name(spec['name'])
-
-        if mod != 'default':
-            warnings.warn(
-                f"Skipping module {mod!r}: SQLModel reflection doesn't "
-                f"support multiple modules or non-default modules.",
-                GelORMWarning,
-            )
-            return
 
         self.write()
         self.write(f'class {name}(sm.SQLModel, table=True):')
@@ -451,14 +408,6 @@ class ModelGenerator(FilePrinter):
         cardinality = spec['cardinality']
         bklink = f'_{name}_{parent}'
 
-        if tmod != 'default':
-            warnings.warn(
-                f"Skipping module {tmod!r}: SQLModel reflection doesn't "
-                f"support multiple modules or non-default modules.",
-                GelORMWarning,
-            )
-            return
-
         if spec.get('has_link_object'):
             # intermediate object will have the actual source and target
             # links, so the link here needs to be treated similar to a
@@ -525,14 +474,6 @@ class ModelGenerator(FilePrinter):
         cardinality = spec['cardinality']
         exclusive = spec['exclusive']
         bklink = spec['fwname']
-
-        if tmod != 'default':
-            warnings.warn(
-                f"Skipping module {tmod!r}: SQLModel reflection doesn't "
-                f"support multiple modules or non-default modules.",
-                GelORMWarning,
-            )
-            return
 
         if spec.get('has_link_object'):
             # intermediate object will have the actual source and target
