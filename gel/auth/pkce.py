@@ -32,23 +32,31 @@ logger = logging.getLogger("gel_auth_core")
 
 class PKCE:
     def __init__(self, verifier: str, *, base_url: str):
-        self.base_url = base_url
-        self.verifier = verifier
-        self.challenge = (
+        self._base_url = base_url
+        self._verifier = verifier
+        self._challenge = (
             base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest())
             .rstrip(b"=")
             .decode()
         )
 
+    @property
+    def verifier(self) -> str:
+        return self._verifier
+
+    @property
+    def challenge(self) -> str:
+        return self._challenge
+
     async def exchange_code_for_token(self, code: str) -> TokenData:
         async with httpx.AsyncClient() as http_client:
-            url = urljoin(self.base_url, "token")
+            url = urljoin(self._base_url, "token")
             logger.info(f"Exchanging code for token: {url}")
             token_response = await http_client.get(
                 url,
                 params={
                     "code": code,
-                    "verifier": self.verifier,
+                    "verifier": self._verifier,
                 },
             )
 
