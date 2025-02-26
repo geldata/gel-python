@@ -61,7 +61,9 @@ class SignUpFailedResponse(BaseServerFailedResponse):
 
 
 SignUpResponse = Union[
-    SignUpCompleteResponse, SignUpVerificationRequiredResponse, SignUpFailedResponse
+    SignUpCompleteResponse,
+    SignUpVerificationRequiredResponse,
+    SignUpFailedResponse,
 ]
 
 
@@ -87,7 +89,9 @@ class SignInFailedResponse(BaseServerFailedResponse):
 
 
 SignInResponse = Union[
-    SignInCompleteResponse, SignInVerificationRequiredResponse, SignInFailedResponse
+    SignInCompleteResponse,
+    SignInVerificationRequiredResponse,
+    SignInFailedResponse,
 ]
 
 
@@ -128,7 +132,8 @@ class SendPasswordResetEmailFailedResponse(BaseServerFailedResponse):
 
 
 SendPasswordResetEmailResponse = Union[
-    SendPasswordResetEmailCompleteResponse, SendPasswordResetEmailFailedResponse
+    SendPasswordResetEmailCompleteResponse,
+    SendPasswordResetEmailFailedResponse,
 ]
 
 
@@ -435,5 +440,7 @@ class EmailPassword:
                         token_data=token_data,
                     )
                 case _:
-                    logger.error(f"No code in reset response: {json.dumps(reset_json)}")
+                    logger.error(
+                        f"No code in reset response: {json.dumps(reset_json)}"
+                    )
                     return PasswordResetMissingProofResponse()

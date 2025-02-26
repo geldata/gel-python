@@ -35,7 +35,9 @@ class PKCE:
         self._base_url = base_url
         self._verifier = verifier
         self._challenge = (
-            base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest())
+            base64.urlsafe_b64encode(
+                hashlib.sha256(verifier.encode()).digest()
+            )
             .rstrip(b"=")
             .decode()
         )
