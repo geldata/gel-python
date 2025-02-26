@@ -222,35 +222,37 @@ class EmailPassword:
                     message=e.response.text,
                 )
             register_json = register_response.json()
-            match register_json:
-                case {"error": error}:
-                    logger.error(f"Register error: {error}")
-                    return SignUpFailedResponse(
-                        verifier=pkce.verifier,
-                        status_code=register_response.status_code,
-                        message=error,
-                    )
-                case {"code": code}:
-                    logger.info(f"Exchanging code for token: {code}")
-                    token_data = await pkce.exchange_code_for_token(code)
+            if "error" in register_json:
+                error = register_json["error"]
+                logger.error(f"Register error: {error}")
+                return SignUpFailedResponse(
+                    verifier=pkce.verifier,
+                    status_code=register_response.status_code,
+                    message=error,
+                )
+            elif "code" in register_json:
+                code = register_json["code"]
+                logger.info(f"Exchanging code for token: {code}")
+                token_data = await pkce.exchange_code_for_token(code)
 
-                    logger.info(f"PKCE verifier: {pkce.verifier}")
-                    logger.info(f"Token data: {token_data}")
-                    return SignUpCompleteResponse(
-                        verifier=pkce.verifier,
-                        token_data=token_data,
-                        identity_id=token_data.identity_id,
-                    )
-                case _:
-                    logger.info(
-                        "No code in register response, assuming verification required"
-                    )
-                    logger.info(f"PKCE verifier: {pkce.verifier}")
-                    return SignUpVerificationRequiredResponse(
-                        verifier=pkce.verifier,
-                        token_data=None,
-                        identity_id=register_json.get("identity_id"),
-                    )
+                logger.info(f"PKCE verifier: {pkce.verifier}")
+                logger.info(f"Token data: {token_data}")
+                return SignUpCompleteResponse(
+                    verifier=pkce.verifier,
+                    token_data=token_data,
+                    identity_id=token_data.identity_id,
+                )
+            else:
+                logger.info(
+                    "No code in register response, "
+                    "assuming verification required"
+                )
+                logger.info(f"PKCE verifier: {pkce.verifier}")
+                return SignUpVerificationRequiredResponse(
+                    verifier=pkce.verifier,
+                    token_data=None,
+                    identity_id=register_json.get("identity_id"),
+                )
 
     async def sign_in(self, email: str, password: str) -> SignInResponse:
         pkce = generate_pkce(self.auth_ext_url)
@@ -278,35 +280,37 @@ class EmailPassword:
                     message=e.response.text,
                 )
             sign_in_json = sign_in_response.json()
-            match sign_in_json:
-                case {"error": error}:
-                    logger.error(f"Sign in error: {error}")
-                    return SignInFailedResponse(
-                        verifier=pkce.verifier,
-                        status_code=sign_in_response.status_code,
-                        message=error,
-                    )
-                case {"code": code}:
-                    logger.info(f"Exchanging code for token: {code}")
-                    token_data = await pkce.exchange_code_for_token(code)
+            if "error" in sign_in_json:
+                error = sign_in_json["error"]
+                logger.error(f"Sign in error: {error}")
+                return SignInFailedResponse(
+                    verifier=pkce.verifier,
+                    status_code=sign_in_response.status_code,
+                    message=error,
+                )
+            elif "code" in sign_in_json:
+                code = sign_in_json["code"]
+                logger.info(f"Exchanging code for token: {code}")
+                token_data = await pkce.exchange_code_for_token(code)
 
-                    logger.info(f"PKCE verifier: {pkce.verifier}")
-                    logger.info(f"Token data: {token_data}")
-                    return SignInCompleteResponse(
-                        verifier=pkce.verifier,
-                        token_data=token_data,
-                        identity_id=token_data.identity_id,
-                    )
-                case _:
-                    logger.info(
-                        "No code in sign in response, assuming verification required"
-                    )
-                    logger.info(f"PKCE verifier: {pkce.verifier}")
-                    return SignInVerificationRequiredResponse(
-                        verifier=pkce.verifier,
-                        token_data=None,
-                        identity_id=sign_in_json.get("identity_id"),
-                    )
+                logger.info(f"PKCE verifier: {pkce.verifier}")
+                logger.info(f"Token data: {token_data}")
+                return SignInCompleteResponse(
+                    verifier=pkce.verifier,
+                    token_data=token_data,
+                    identity_id=token_data.identity_id,
+                )
+            else:
+                logger.info(
+                    "No code in sign in response, "
+                    "assuming verification required"
+                )
+                logger.info(f"PKCE verifier: {pkce.verifier}")
+                return SignInVerificationRequiredResponse(
+                    verifier=pkce.verifier,
+                    token_data=None,
+                    identity_id=sign_in_json.get("identity_id"),
+                )
 
     async def verify_email(
         self, verification_token: str, verifier: Optional[str]
@@ -330,31 +334,33 @@ class EmailPassword:
                     message=e.response.text,
                 )
             verify_json = verify_response.json()
-            match verify_json:
-                case {"error": error}:
-                    logger.error(f"Verify error: {error}")
-                    return EmailVerificationFailedResponse(
-                        status_code=verify_response.status_code,
-                        message=error,
-                    )
-                case {"code": code}:
-                    if verifier is None:
-                        return EmailVerificationMissingProofResponse()
-
-                    pkce = PKCE(verifier, base_url=self.auth_ext_url)
-                    logger.info(f"Exchanging code for token: {code}")
-                    token_data = await pkce.exchange_code_for_token(code)
-
-                    logger.info(f"PKCE verifier: {pkce.verifier}")
-                    logger.info(f"Token data: {token_data}")
-                    return EmailVerificationCompleteResponse(
-                        token_data=token_data,
-                    )
-                case _:
-                    logger.error(
-                        f"No code in verify response: {json.dumps(verify_json)}"
-                    )
+            if "error" in verify_json:
+                error = verify_json["error"]
+                logger.error(f"Verify error: {error}")
+                return EmailVerificationFailedResponse(
+                    status_code=verify_response.status_code,
+                    message=error,
+                )
+            elif "code" in verify_json:
+                code = verify_json["code"]
+                if verifier is None:
                     return EmailVerificationMissingProofResponse()
+
+                pkce = PKCE(verifier, base_url=self.auth_ext_url)
+                logger.info(f"Exchanging code for token: {code}")
+                token_data = await pkce.exchange_code_for_token(code)
+
+                logger.info(f"PKCE verifier: {pkce.verifier}")
+                logger.info(f"Token data: {token_data}")
+                return EmailVerificationCompleteResponse(
+                    token_data=token_data,
+                )
+            else:
+                logger.error(
+                    f"No code in verify response: "
+                    f"{json.dumps(verify_json)}"
+                )
+                return EmailVerificationMissingProofResponse()
 
     async def send_password_reset_email(
         self, email: str
@@ -383,20 +389,20 @@ class EmailPassword:
                     message=e.response.text,
                 )
             reset_json = reset_response.json()
-            match reset_json:
-                case {"error": error}:
-                    logger.error(f"Reset error: {error}")
-                    return SendPasswordResetEmailFailedResponse(
-                        verifier=pkce.verifier,
-                        status_code=reset_response.status_code,
-                        message=error,
-                    )
-                case _:
-                    logger.info(f"PKCE verifier: {pkce.verifier}")
-                    logger.info(f"Reset response: {reset_json}")
-                    return SendPasswordResetEmailCompleteResponse(
-                        verifier=pkce.verifier,
-                    )
+            if "error" in reset_json:
+                error = reset_json["error"]
+                logger.error(f"Reset error: {error}")
+                return SendPasswordResetEmailFailedResponse(
+                    verifier=pkce.verifier,
+                    status_code=reset_response.status_code,
+                    message=error,
+                )
+            else:
+                logger.info(f"PKCE verifier: {pkce.verifier}")
+                logger.info(f"Reset response: {reset_json}")
+                return SendPasswordResetEmailCompleteResponse(
+                    verifier=pkce.verifier,
+                )
 
     async def reset_password(
         self, reset_token: str, verifier: Optional[str], password: str
@@ -422,25 +428,26 @@ class EmailPassword:
                     message=e.response.text,
                 )
             reset_json = reset_response.json()
-            match reset_json:
-                case {"error": error}:
-                    logger.error(f"Reset error: {error}")
-                    return PasswordResetFailedResponse(
-                        status_code=reset_response.status_code,
-                        message=error,
-                    )
-                case {"code": code}:
-                    if verifier is None:
-                        return PasswordResetMissingProofResponse()
-
-                    pkce = PKCE(verifier, base_url=self.auth_ext_url)
-                    logger.info(f"Exchanging code for token: {code}")
-                    token_data = await pkce.exchange_code_for_token(code)
-                    return PasswordResetCompleteResponse(
-                        token_data=token_data,
-                    )
-                case _:
-                    logger.error(
-                        f"No code in reset response: {json.dumps(reset_json)}"
-                    )
+            if "error" in reset_json:
+                error = reset_json["error"]
+                logger.error(f"Reset error: {error}")
+                return PasswordResetFailedResponse(
+                    status_code=reset_response.status_code,
+                    message=error,
+                )
+            elif "code" in reset_json:
+                code = reset_json["code"]
+                if verifier is None:
                     return PasswordResetMissingProofResponse()
+
+                pkce = PKCE(verifier, base_url=self.auth_ext_url)
+                logger.info(f"Exchanging code for token: {code}")
+                token_data = await pkce.exchange_code_for_token(code)
+                return PasswordResetCompleteResponse(
+                    token_data=token_data,
+                )
+            else:
+                logger.error(
+                    f"No code in reset response: {json.dumps(reset_json)}"
+                )
+                return PasswordResetMissingProofResponse()
