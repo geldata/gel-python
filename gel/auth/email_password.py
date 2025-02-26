@@ -19,7 +19,6 @@
 from __future__ import annotations
 from typing import Union, Optional
 
-import json
 import logging
 import uuid
 from urllib.parse import urljoin
@@ -31,7 +30,7 @@ import gel
 from .pkce import PKCE, generate_pkce
 from .token_data import TokenData
 
-logger = logging.getLogger("gel_auth_core")
+logger = logging.getLogger("gel.auth")
 
 
 class SignUpBody(BaseModel):
@@ -199,7 +198,7 @@ class EmailPassword:
         pkce = generate_pkce(self.auth_ext_url)
         async with httpx.AsyncClient() as http_client:
             url = urljoin(self.auth_ext_url, "register")
-            logger.info(f"Signing up user {email}: {url}")
+            logger.info("signing up user %r: %s", email, url)
             register_response = await http_client.post(
                 url,
                 json={
@@ -211,11 +210,15 @@ class EmailPassword:
                 },
             )
 
-            logger.info(f"Register response: {register_response.text}")
+            logger.debug(
+                "register response: [%d] %s",
+                register_response.status_code,
+                register_response.text,
+            )
             try:
                 register_response.raise_for_status()
             except httpx.HTTPStatusError as e:
-                logger.error(f"Register error: {e}")
+                logger.error("register error: %s", e)
                 return SignUpFailedResponse(
                     verifier=pkce.verifier,
                     status_code=e.response.status_code,
@@ -224,7 +227,7 @@ class EmailPassword:
             register_json = register_response.json()
             if "error" in register_json:
                 error = register_json["error"]
-                logger.error(f"Register error: {error}")
+                logger.error("register error: %s", error)
                 return SignUpFailedResponse(
                     verifier=pkce.verifier,
                     status_code=register_response.status_code,
@@ -232,11 +235,11 @@ class EmailPassword:
                 )
             elif "code" in register_json:
                 code = register_json["code"]
-                logger.info(f"Exchanging code for token: {code}")
+                logger.info("exchanging code for token: %s", code)
                 token_data = await pkce.exchange_code_for_token(code)
 
-                logger.info(f"PKCE verifier: {pkce.verifier}")
-                logger.info(f"Token data: {token_data}")
+                logger.debug("PKCE verifier: %s", pkce.verifier)
+                logger.debug("token data: %s", token_data)
                 return SignUpCompleteResponse(
                     verifier=pkce.verifier,
                     token_data=token_data,
@@ -244,10 +247,10 @@ class EmailPassword:
                 )
             else:
                 logger.info(
-                    "No code in register response, "
+                    "no code in register response, "
                     "assuming verification required"
                 )
-                logger.info(f"PKCE verifier: {pkce.verifier}")
+                logger.debug("PKCE verifier: %s", pkce.verifier)
                 return SignUpVerificationRequiredResponse(
                     verifier=pkce.verifier,
                     token_data=None,
@@ -258,7 +261,7 @@ class EmailPassword:
         pkce = generate_pkce(self.auth_ext_url)
         async with httpx.AsyncClient() as http_client:
             url = urljoin(self.auth_ext_url, "authenticate")
-            logger.info(f"Signing in user {email}: {url}")
+            logger.info("signing in user %r: %s", email, url)
             sign_in_response = await http_client.post(
                 url,
                 json={
@@ -269,11 +272,15 @@ class EmailPassword:
                 },
             )
 
-            logger.info(f"Sign in response: {sign_in_response.text}")
+            logger.debug(
+                "sign in response: [%d] %s",
+                sign_in_response.status_code,
+                sign_in_response.text,
+            )
             try:
                 sign_in_response.raise_for_status()
             except httpx.HTTPStatusError as e:
-                logger.error(f"Sign in error: {e}")
+                logger.error("sign in error: %s", e)
                 return SignInFailedResponse(
                     verifier=pkce.verifier,
                     status_code=e.response.status_code,
@@ -282,7 +289,7 @@ class EmailPassword:
             sign_in_json = sign_in_response.json()
             if "error" in sign_in_json:
                 error = sign_in_json["error"]
-                logger.error(f"Sign in error: {error}")
+                logger.error("sign in error: %s", error)
                 return SignInFailedResponse(
                     verifier=pkce.verifier,
                     status_code=sign_in_response.status_code,
@@ -290,11 +297,11 @@ class EmailPassword:
                 )
             elif "code" in sign_in_json:
                 code = sign_in_json["code"]
-                logger.info(f"Exchanging code for token: {code}")
+                logger.info("exchanging code for token: %s", code)
                 token_data = await pkce.exchange_code_for_token(code)
 
-                logger.info(f"PKCE verifier: {pkce.verifier}")
-                logger.info(f"Token data: {token_data}")
+                logger.debug("PKCE verifier: %s", pkce.verifier)
+                logger.debug("token data: %s", token_data)
                 return SignInCompleteResponse(
                     verifier=pkce.verifier,
                     token_data=token_data,
@@ -302,10 +309,10 @@ class EmailPassword:
                 )
             else:
                 logger.info(
-                    "No code in sign in response, "
+                    "no code in sign in response, "
                     "assuming verification required"
                 )
-                logger.info(f"PKCE verifier: {pkce.verifier}")
+                logger.debug("PKCE verifier: %s", pkce.verifier)
                 return SignInVerificationRequiredResponse(
                     verifier=pkce.verifier,
                     token_data=None,
@@ -317,7 +324,7 @@ class EmailPassword:
     ) -> EmailVerificationResponse:
         async with httpx.AsyncClient() as http_client:
             url = urljoin(self.auth_ext_url, "verify")
-            logger.info(f"Verifying email: {url}")
+            logger.info("verifying email: %s", url)
             verify_response = await http_client.post(
                 url,
                 json={
@@ -328,7 +335,7 @@ class EmailPassword:
             try:
                 verify_response.raise_for_status()
             except httpx.HTTPStatusError as e:
-                logger.error(f"Verify error: {e}")
+                logger.error("verify error: %s", e)
                 return EmailVerificationFailedResponse(
                     status_code=e.response.status_code,
                     message=e.response.text,
@@ -336,7 +343,7 @@ class EmailPassword:
             verify_json = verify_response.json()
             if "error" in verify_json:
                 error = verify_json["error"]
-                logger.error(f"Verify error: {error}")
+                logger.error("verify error: %s", error)
                 return EmailVerificationFailedResponse(
                     status_code=verify_response.status_code,
                     message=error,
@@ -347,19 +354,16 @@ class EmailPassword:
                     return EmailVerificationMissingProofResponse()
 
                 pkce = PKCE(verifier, base_url=self.auth_ext_url)
-                logger.info(f"Exchanging code for token: {code}")
+                logger.info("exchanging code for token: %s", code)
                 token_data = await pkce.exchange_code_for_token(code)
 
-                logger.info(f"PKCE verifier: {pkce.verifier}")
-                logger.info(f"Token data: {token_data}")
+                logger.debug("PKCE verifier: %s", pkce.verifier)
+                logger.debug("token data: %s", token_data)
                 return EmailVerificationCompleteResponse(
                     token_data=token_data,
                 )
             else:
-                logger.error(
-                    f"No code in verify response: "
-                    f"{json.dumps(verify_json)}"
-                )
+                logger.error("no code in verify response: %r", verify_json)
                 return EmailVerificationMissingProofResponse()
 
     async def send_password_reset_email(
@@ -378,11 +382,15 @@ class EmailPassword:
                 },
             )
 
-            logger.info(f"Reset response: {reset_response.text}")
+            logger.debug(
+                "reset response: [%d] %s",
+                reset_response.status_code,
+                reset_response.text,
+            )
             try:
                 reset_response.raise_for_status()
             except httpx.HTTPStatusError as e:
-                logger.error(f"Reset error: {e}")
+                logger.error("reset error: %s", e)
                 return SendPasswordResetEmailFailedResponse(
                     verifier=pkce.verifier,
                     status_code=e.response.status_code,
@@ -391,15 +399,15 @@ class EmailPassword:
             reset_json = reset_response.json()
             if "error" in reset_json:
                 error = reset_json["error"]
-                logger.error(f"Reset error: {error}")
+                logger.error("reset error: %s", error)
                 return SendPasswordResetEmailFailedResponse(
                     verifier=pkce.verifier,
                     status_code=reset_response.status_code,
                     message=error,
                 )
             else:
-                logger.info(f"PKCE verifier: {pkce.verifier}")
-                logger.info(f"Reset response: {reset_json}")
+                logger.debug("PKCE verifier: %s", pkce.verifier)
+                logger.debug("reset response: %s", reset_json)
                 return SendPasswordResetEmailCompleteResponse(
                     verifier=pkce.verifier,
                 )
@@ -418,11 +426,15 @@ class EmailPassword:
                 },
             )
 
-            logger.info(f"Reset response: {reset_response.text}")
+            logger.debug(
+                "reset response: [%d] %s",
+                reset_response.status_code,
+                reset_response.text,
+            )
             try:
                 reset_response.raise_for_status()
             except httpx.HTTPStatusError as e:
-                logger.error(f"Reset error: {e}")
+                logger.error("reset error: %s", e)
                 return PasswordResetFailedResponse(
                     status_code=e.response.status_code,
                     message=e.response.text,
@@ -430,7 +442,7 @@ class EmailPassword:
             reset_json = reset_response.json()
             if "error" in reset_json:
                 error = reset_json["error"]
-                logger.error(f"Reset error: {error}")
+                logger.error("reset error: %s", error)
                 return PasswordResetFailedResponse(
                     status_code=reset_response.status_code,
                     message=error,
@@ -441,13 +453,11 @@ class EmailPassword:
                     return PasswordResetMissingProofResponse()
 
                 pkce = PKCE(verifier, base_url=self.auth_ext_url)
-                logger.info(f"Exchanging code for token: {code}")
+                logger.info("exchanging code for token: %s", code)
                 token_data = await pkce.exchange_code_for_token(code)
                 return PasswordResetCompleteResponse(
                     token_data=token_data,
                 )
             else:
-                logger.error(
-                    f"No code in reset response: {json.dumps(reset_json)}"
-                )
+                logger.error("no code in reset response: %r", reset_json)
                 return PasswordResetMissingProofResponse()

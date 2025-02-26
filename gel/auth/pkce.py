@@ -27,7 +27,7 @@ import httpx
 from .token_data import TokenData
 
 
-logger = logging.getLogger("gel_auth_core")
+logger = logging.getLogger("gel.auth")
 
 
 class PKCE:
@@ -53,7 +53,7 @@ class PKCE:
     async def exchange_code_for_token(self, code: str) -> TokenData:
         async with httpx.AsyncClient() as http_client:
             url = urljoin(self._base_url, "token")
-            logger.info(f"Exchanging code for token: {url}")
+            logger.info("exchanging code for token: %s", url)
             token_response = await http_client.get(
                 url,
                 params={
@@ -62,7 +62,11 @@ class PKCE:
                 },
             )
 
-            logger.info(f"Token response: {token_response.text}")
+            logger.debug(
+                "token response: [%d] %s",
+                token_response.status_code,
+                token_response.text,
+            )
             token_response.raise_for_status()
             token_json = token_response.json()
             return TokenData(
