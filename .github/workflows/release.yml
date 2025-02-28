@@ -103,7 +103,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        edgedb-server-version: 6
+        edgedb-server-version:
+          - 6
         include: ${{ fromJson(needs.build-wheels-matrix.outputs.include) }}
 
     defaults:
