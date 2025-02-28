@@ -111,7 +111,7 @@ jobs:
 
     env:
       PIP_DISABLE_PIP_VERSION_CHECK: 1
-      EDGEDB_SERVER_VERSION: 5
+      EDGEDB_SERVER_VERSION: 6
 
     steps:
     - uses: actions/checkout@v3
@@ -133,7 +133,11 @@ jobs:
       uses: docker/setup-qemu-action@v2
 
     - name: Install EdgeDB
+      # Linux installs via the CIBW_BEFORE_ALL_LINUX command below
+      if: runner.os != 'Linux'
       uses: edgedb/setup-edgedb@v1
+      with:
+        server-version: ${{ env.EDGEDB_SERVER_VERSION }}
 
     - uses: pypa/cibuildwheel@v2.22.0
       with:
