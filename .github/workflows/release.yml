@@ -144,14 +144,14 @@ jobs:
           EDGEDB_SERVER_VERSION=${{ env.EDGEDB_SERVER_VERSION }} .github/workflows/install-edgedb.sh
         CIBW_TEST_EXTRAS: "test"
         CIBW_TEST_COMMAND: >
-          EDGEDB_TEST_CODEGEN_ASSERT_SUFFIX=.assert${{ env.EDGEDB_SERVER_VERSION }} python {project}/tests/__init__.py
+          python {project}/tests/__init__.py
         CIBW_TEST_COMMAND_WINDOWS: >
-          set EDGEDB_TEST_CODEGEN_ASSERT_SUFFIX=.assert${{ env.EDGEDB_SERVER_VERSION }} && python {project}\tests\__init__.py
+          python {project}\tests\__init__.py
         CIBW_TEST_COMMAND_LINUX: >
           PY=`which python`
           && CODEGEN=`which gel-py`
           && chmod -R go+rX "$(dirname $(dirname $(dirname $PY)))"
-          && su -l edgedb -c "EDGEDB_PYTHON_TEST_CODEGEN_CMD=$CODEGEN EDGEDB_TEST_CODEGEN_ASSERT_SUFFIX=.assert${{ env.EDGEDB_SERVER_VERSION }} $PY {project}/tests/__init__.py"
+          && su -l edgedb -c "$PY {project}/tests/__init__.py"
 
     - uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6874  # v4.4.0
       with:
