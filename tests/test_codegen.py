@@ -27,9 +27,6 @@ import tempfile
 from gel import _testbase as tb
 
 
-ASSERT_SUFFIX = os.environ.get("EDGEDB_TEST_CODEGEN_ASSERT_SUFFIX", ".assert")
-
-
 class TestCodegen(tb.AsyncQueryTestCase):
     SETUP = '''
         create extension pgvector;
@@ -40,6 +37,27 @@ class TestCodegen(tb.AsyncQueryTestCase):
         drop scalar type v3;
         drop extension pgvector;
     '''
+
+    maxDiff = None
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+
+        version = cls.loop.run_until_complete(
+            cls.client.query_required_single('''
+                select sys::get_version().major
+            ''')
+        )
+
+        if version >= 6:
+            suffix = ''
+        elif version >= 5:
+            suffix = '5'
+        else:
+            suffix = '3'
+
+        cls.ASSERT_SUFFIX = f'.assert{suffix}'
 
     async def test_codegen(self):
         env = os.environ.copy()
@@ -112,7 +130,7 @@ class TestCodegen(tb.AsyncQueryTestCase):
         )
 
         for f in cwd.rglob("*.py"):
-            a = f.with_suffix(f".py{ASSERT_SUFFIX}")
+            a = f.with_suffix(f".py{self.ASSERT_SUFFIX}")
             if not a.exists():
                 a = f.with_suffix(".py.assert")
             self.assertEqual(f.read_text(), a.read_text(), msg=f.name)
