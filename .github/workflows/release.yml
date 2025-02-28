@@ -103,6 +103,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        edgedb-server-version: 6
         include: ${{ fromJson(needs.build-wheels-matrix.outputs.include) }}
 
     defaults:
@@ -111,7 +112,6 @@ jobs:
 
     env:
       PIP_DISABLE_PIP_VERSION_CHECK: 1
-      EDGEDB_SERVER_VERSION: 6
 
     steps:
     - uses: actions/checkout@v3
@@ -137,7 +137,7 @@ jobs:
       if: runner.os != 'Linux'
       uses: edgedb/setup-edgedb@v1
       with:
-        server-version: ${{ env.EDGEDB_SERVER_VERSION }}
+        server-version: ${{ matrix.edgedb-server-version }}
 
     - uses: pypa/cibuildwheel@v2.22.0
       with:
@@ -145,7 +145,7 @@ jobs:
       env:
         CIBW_BUILD_VERBOSITY: 1
         CIBW_BEFORE_ALL_LINUX: >
-          EDGEDB_SERVER_VERSION=${{ env.EDGEDB_SERVER_VERSION }} .github/workflows/install-edgedb.sh
+          EDGEDB_SERVER_VERSION=${{ matrix.edgedb-server-version }} .github/workflows/install-edgedb.sh
         CIBW_TEST_EXTRAS: "test"
         CIBW_TEST_COMMAND: >
           python {project}/tests/__init__.py
@@ -155,7 +155,7 @@ jobs:
           PY=`which python`
           && CODEGEN=`which gel-py`
           && chmod -R go+rX "$(dirname $(dirname $(dirname $PY)))"
-          && su -l edgedb -c "$PY {project}/tests/__init__.py"
+          && su -l edgedb -c "EDGEDB_PYTHON_TEST_CODEGEN_CMD=$CODEGEN $PY {project}/tests/__init__.py"
 
     - uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6874  # v4.4.0
       with:
