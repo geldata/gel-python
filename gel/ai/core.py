@@ -27,15 +27,15 @@ from . import types
 
 
 def create_rag_client(client: gel.Client, **kwargs) -> RAGClient:
-    client.ensure_connected()
-    return RAGClient(client, types.RAGOptions(**kwargs))
+    info = client.check_connection()
+    return RAGClient(info, types.RAGOptions(**kwargs))
 
 
 async def create_async_rag_client(
     client: gel.AsyncIOClient, **kwargs
 ) -> AsyncRAGClient:
-    await client.ensure_connected()
-    return AsyncRAGClient(client, types.RAGOptions(**kwargs))
+    info = await client.check_connection()
+    return AsyncRAGClient(info, types.RAGOptions(**kwargs))
 
 
 class BaseRAGClient:
@@ -45,25 +45,26 @@ class BaseRAGClient:
 
     def __init__(
         self,
-        client: typing.Union[gel.Client, gel.AsyncIOClient],
+        info: gel.ConnectionInfo,
         options: types.RAGOptions,
         **kwargs,
     ):
-        pool = client._impl
-        host, port = pool._working_addr
-        params = pool._working_params
-        proto = "http" if params.tls_security == "insecure" else "https"
-        branch = params.branch
+        proto = "http" if info.params.tls_security == "insecure" else "https"
+        branch = info.params.branch
         self.options = options
         self.context = types.QueryContext(**kwargs)
         args = dict(
-            base_url=f"{proto}://{host}:{port}/branch/{branch}/ext/ai",
-            verify=params.ssl_ctx,
+            base_url=(
+                f"{proto}://{info.host}:{info.port}/branch/{branch}/ext/ai"
+            ),
+            verify=info.params.ssl_ctx,
         )
-        if params.password is not None:
-            args["auth"] = (params.user, params.password)
-        elif params.secret_key is not None:
-            args["headers"] = {"Authorization": f"Bearer {params.secret_key}"}
+        if info.params.password is not None:
+            args["auth"] = (info.params.user, info.params.password)
+        elif info.params.secret_key is not None:
+            args["headers"] = {
+                "Authorization": f"Bearer {info.params.secret_key}"
+            }
         self._init_client(**args)
 
     def _init_client(self, **kwargs):
