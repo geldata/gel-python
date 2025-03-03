@@ -19,12 +19,12 @@
 from __future__ import annotations
 from typing import Optional
 
+import dataclasses
 import uuid
 
-from pydantic import BaseModel
 
-
-class TokenData(BaseModel):
+@dataclasses.dataclass
+class TokenData:
     auth_token: str
     identity_id: uuid.UUID
     provider_token: Optional[str]

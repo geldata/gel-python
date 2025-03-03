@@ -16,23 +16,28 @@
 # limitations under the License.
 #
 
+from __future__ import annotations
+from typing import Generic, TypeVar, Union
+
 import base64
 import hashlib
 import logging
 import secrets
-from urllib.parse import urljoin
 
 import httpx
 
-from .token_data import TokenData
+from gel import blocking_client
+
+from . import token_data
 
 
 logger = logging.getLogger("gel.auth")
+C = TypeVar("C", bound=Union[httpx.Client, httpx.AsyncClient])
 
 
-class PKCE:
-    def __init__(self, verifier: str, *, base_url: str):
-        self._base_url = base_url
+class BasePKCE(Generic[C]):
+    def __init__(self, http_client: C, verifier: str):
+        self._http_client = http_client
         self._verifier = verifier
         self._challenge = (
             base64.urlsafe_b64encode(
@@ -50,33 +55,66 @@ class PKCE:
     def challenge(self) -> str:
         return self._challenge
 
-    async def exchange_code_for_token(self, code: str) -> TokenData:
-        async with httpx.AsyncClient() as http_client:
-            url = urljoin(self._base_url, "token")
-            logger.info("exchanging code for token: %s", url)
-            token_response = await http_client.get(
-                url,
-                params={
-                    "code": code,
-                    "verifier": self._verifier,
-                },
-            )
+    async def _send_http_request(
+        self, request: httpx.Request
+    ) -> httpx.Response:
+        raise NotImplementedError
 
-            logger.debug(
-                "token response: [%d] %s",
-                token_response.status_code,
-                token_response.text,
-            )
-            token_response.raise_for_status()
-            token_json = token_response.json()
-            return TokenData(
-                auth_token=token_json["auth_token"],
-                identity_id=token_json["identity_id"],
-                provider_token=token_json["provider_token"],
-                provider_refresh_token=token_json["provider_refresh_token"],
-            )
+    async def internal_exchange_code_for_token(
+        self, code: str
+    ) -> token_data.TokenData:
+        request = self._http_client.build_request(
+            "GET",
+            "/token",
+            params={
+                "code": code,
+                "verifier": self._verifier,
+            },
+        )
+        logger.info("exchanging code for token: %s", request.url)
+        token_response = await self._send_http_request(request)
+
+        logger.debug(
+            "token response: [%d] %s",
+            token_response.status_code,
+            token_response.text,
+        )
+        token_response.raise_for_status()
+        token_json = token_response.json()
+        return token_data.TokenData(**token_json)
 
 
-def generate_pkce(base_url: str) -> PKCE:
+class PKCE(BasePKCE[httpx.Client]):
+    async def _send_http_request(
+        self, request: httpx.Request
+    ) -> httpx.Response:
+        return self._http_client.send(request)
+
+    def exchange_code_for_token(self, code: str) -> token_data.TokenData:
+        return blocking_client.iter_coroutine(
+            self.internal_exchange_code_for_token(code)
+        )
+
+
+def generate_pkce(
+    http_client: httpx.Client,
+) -> PKCE:
     verifier = secrets.token_urlsafe(32)
-    return PKCE(verifier, base_url=base_url)
+    return PKCE(http_client, verifier)
+
+
+class AsyncPKCE(BasePKCE[httpx.AsyncClient]):
+    async def _send_http_request(
+        self, request: httpx.Request
+    ) -> httpx.Response:
+        return await self._http_client.send(request)
+
+    async def exchange_code_for_token(self, code: str) -> token_data.TokenData:
+        return await self.internal_exchange_code_for_token(code)
+
+
+def generate_async_pkce(
+    http_client: httpx.AsyncClient,
+) -> AsyncPKCE:
+    verifier = secrets.token_urlsafe(32)
+    return AsyncPKCE(http_client, verifier)

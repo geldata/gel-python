@@ -17,44 +17,43 @@
 #
 
 from __future__ import annotations
-from typing import Union, Optional
+from typing import Generic, Optional, Type, TypeVar, Union
 
+import dataclasses
 import logging
 import uuid
-from urllib.parse import urljoin
 
 import httpx
-from pydantic import BaseModel
 
 import gel
-from .pkce import PKCE, generate_pkce
-from .token_data import TokenData
+from gel import blocking_client
+
+from . import token_data as td_mod
+from . import pkce as pkce_mod
 
 logger = logging.getLogger("gel.auth")
 
 
-class SignUpBody(BaseModel):
-    email: str
-    password: str
-
-
-class BaseServerFailedResponse(BaseModel):
+@dataclasses.dataclass
+class BaseServerFailedResponse:
     status_code: int
     message: str
 
 
-class SignUpCompleteResponse(BaseModel):
+@dataclasses.dataclass
+class SignUpCompleteResponse:
     verifier: str
-    token_data: TokenData
+    token_data: td_mod.TokenData
     identity_id: uuid.UUID
 
 
-class SignUpVerificationRequiredResponse(BaseModel):
+@dataclasses.dataclass
+class SignUpVerificationRequiredResponse:
     verifier: str
-    token_data: None
-    identity_id: uuid.UUID | None
+    identity_id: Optional[uuid.UUID]
 
 
+@dataclasses.dataclass
 class SignUpFailedResponse(BaseServerFailedResponse):
     verifier: str
 
@@ -66,23 +65,20 @@ SignUpResponse = Union[
 ]
 
 
-class SignInBody(BaseModel):
-    email: str
-    password: str
-
-
-class SignInCompleteResponse(BaseModel):
+@dataclasses.dataclass
+class SignInCompleteResponse:
     verifier: str
-    token_data: TokenData
+    token_data: td_mod.TokenData
     identity_id: uuid.UUID
 
 
-class SignInVerificationRequiredResponse(BaseModel):
+@dataclasses.dataclass
+class SignInVerificationRequiredResponse:
     verifier: str
-    token_data: None
-    identity_id: uuid.UUID | None
+    identity_id: Optional[uuid.UUID]
 
 
+@dataclasses.dataclass
 class SignInFailedResponse(BaseServerFailedResponse):
     verifier: str
 
@@ -94,16 +90,12 @@ SignInResponse = Union[
 ]
 
 
-class VerifyBody(BaseModel):
-    verification_token: str
-    verifier: str
+@dataclasses.dataclass
+class EmailVerificationCompleteResponse:
+    token_data: td_mod.TokenData
 
 
-class EmailVerificationCompleteResponse(BaseModel):
-    token_data: TokenData
-
-
-class EmailVerificationMissingProofResponse(BaseModel):
+class EmailVerificationMissingProofResponse:
     pass
 
 
@@ -118,14 +110,12 @@ EmailVerificationResponse = Union[
 ]
 
 
-class SendPasswordResetBody(BaseModel):
-    email: str
-
-
-class SendPasswordResetEmailCompleteResponse(BaseModel):
+@dataclasses.dataclass
+class SendPasswordResetEmailCompleteResponse:
     verifier: str
 
 
+@dataclasses.dataclass
 class SendPasswordResetEmailFailedResponse(BaseServerFailedResponse):
     verifier: str
 
@@ -136,16 +126,12 @@ SendPasswordResetEmailResponse = Union[
 ]
 
 
-class PasswordResetBody(BaseModel):
-    reset_token: str
-    password: str
+@dataclasses.dataclass
+class PasswordResetCompleteResponse:
+    token_data: td_mod.TokenData
 
 
-class PasswordResetCompleteResponse(BaseModel):
-    token_data: TokenData
-
-
-class PasswordResetMissingProofResponse(BaseModel):
+class PasswordResetMissingProofResponse:
     pass
 
 
@@ -160,301 +146,405 @@ PasswordResetResponse = Union[
 ]
 
 
-class LocalIdentity(BaseModel):
-    id: str
+C = TypeVar("C", bound=Union[httpx.Client, httpx.AsyncClient])
 
 
-async def make(
-    *,
-    client: gel.AsyncIOClient,
-    verify_url: str,
-    reset_url: str,
-) -> EmailPassword:
-    info = await client.check_connection()
-    proto = "http" if info.params.tls_security == "insecure" else "https"
-    branch = info.params.branch
-    auth_ext_url = f"{proto}://{info.host}:{info.port}/branch/{branch}/ext/auth/"
-    return EmailPassword(
-        auth_ext_url=auth_ext_url, verify_url=verify_url, reset_url=reset_url
-    )
-
-
-class EmailPassword:
+class BaseEmailPassword(Generic[C]):
     def __init__(
         self,
         *,
         verify_url: str,
-        auth_ext_url: str,
         reset_url: str,
+        connection_info: gel.ConnectionInfo,
+        **kwargs,
     ):
-        self.auth_ext_url = auth_ext_url
         self.verify_url = verify_url
         self.reset_url = reset_url
+        self.provider = "builtin::local_emailpassword"
+        if "base_url" not in kwargs:
+            params = connection_info.params
+            scheme = "http" if params.tls_security == "insecure" else "https"
+            base_url = httpx.URL(
+                scheme=scheme,
+                host=connection_info.host,
+                port=connection_info.port,
+            )
+            kwargs["base_url"] = (
+                base_url.join("branch").join(params.branch).join("ext/auth")
+            )
+        self._client = self._init_http_client(**kwargs)
+
+    def _init_http_client(self, **kwargs) -> C:
+        raise NotImplementedError()
+
+    def _generate_pkce(self) -> pkce_mod.BasePKCE:
+        raise NotImplementedError()
+
+    def _pkce_from_verifier(self, verifier: str) -> pkce_mod.BasePKCE:
+        raise NotImplementedError()
+
+    async def _send_http_request(
+        self, request: httpx.Request
+    ) -> httpx.Response:
+        raise NotImplementedError()
+
+    async def _http_request(self, *args, **kwargs) -> httpx.Response:
+        request = self._client.build_request(*args, **kwargs)
+        try:
+            logger.debug(
+                "sending HTTP %s to %r: %r",
+                request.method,
+                request.url,
+                request.content,
+            )
+        except httpx.RequestNotRead:
+            logger.debug("sending HTTP %s to %r", request.method, request.url)
+        response = await self._send_http_request(request)
+        logger.debug(
+            "%r returned response: [%d] %s",
+            request.url,
+            response.status_code,
+            response.text,
+        )
+        return response
+
+    async def _sign_up(self, email: str, password: str) -> SignUpResponse:
+        logger.info("signing up user: %s", email)
+        pkce = self._generate_pkce()
+        register_response = await self._http_request(
+            "POST",
+            "/register",
+            json={
+                "email": email,
+                "password": password,
+                "verify_url": self.verify_url,
+                "provider": self.provider,
+                "challenge": pkce.challenge,
+            },
+        )
+        try:
+            register_response.raise_for_status()
+        except httpx.HTTPStatusError as e:
+            logger.error("register error: %s", e)
+            return SignUpFailedResponse(
+                verifier=pkce.verifier,
+                status_code=e.response.status_code,
+                message=e.response.text,
+            )
+        register_json = register_response.json()
+        if "error" in register_json:
+            error = register_json["error"]
+            logger.error("register error: %s", error)
+            return SignUpFailedResponse(
+                verifier=pkce.verifier,
+                status_code=register_response.status_code,
+                message=error,
+            )
+        elif "code" in register_json:
+            code = register_json["code"]
+            logger.info("exchanging code for token: %s", code)
+            token_data = await pkce.internal_exchange_code_for_token(code)
+
+            logger.debug("PKCE verifier: %s", pkce.verifier)
+            logger.debug("token data: %s", token_data)
+            return SignUpCompleteResponse(
+                verifier=pkce.verifier,
+                token_data=token_data,
+                identity_id=token_data.identity_id,
+            )
+        else:
+            logger.info(
+                "no code in register response, "
+                "assuming verification required"
+            )
+            logger.debug("PKCE verifier: %s", pkce.verifier)
+            return SignUpVerificationRequiredResponse(
+                verifier=pkce.verifier,
+                identity_id=register_json.get("identity_id"),
+            )
+
+    async def _sign_in(self, email: str, password: str) -> SignInResponse:
+        logger.info("signing in user: %s", email)
+        pkce = self._generate_pkce()
+        sign_in_response = await self._http_request(
+            "POST",
+            "/authenticate",
+            json={
+                "email": email,
+                "provider": self.provider,
+                "password": password,
+                "challenge": pkce.challenge,
+            },
+        )
+        try:
+            sign_in_response.raise_for_status()
+        except httpx.HTTPStatusError as e:
+            logger.error("sign in error: %s", e)
+            return SignInFailedResponse(
+                verifier=pkce.verifier,
+                status_code=e.response.status_code,
+                message=e.response.text,
+            )
+        sign_in_json = sign_in_response.json()
+        if "error" in sign_in_json:
+            error = sign_in_json["error"]
+            logger.error("sign in error: %s", error)
+            return SignInFailedResponse(
+                verifier=pkce.verifier,
+                status_code=sign_in_response.status_code,
+                message=error,
+            )
+        elif "code" in sign_in_json:
+            code = sign_in_json["code"]
+            logger.info("exchanging code for token: %s", code)
+            token_data = await pkce.internal_exchange_code_for_token(code)
+
+            logger.debug("PKCE verifier: %s", pkce.verifier)
+            logger.debug("token data: %s", token_data)
+            return SignInCompleteResponse(
+                verifier=pkce.verifier,
+                token_data=token_data,
+                identity_id=token_data.identity_id,
+            )
+        else:
+            logger.info(
+                "no code in sign in response, assuming verification required"
+            )
+            logger.debug("PKCE verifier: %s", pkce.verifier)
+            return SignInVerificationRequiredResponse(
+                verifier=pkce.verifier,
+                identity_id=sign_in_json.get("identity_id"),
+            )
+
+    async def _verify_email(
+        self, verification_token: str, verifier: Optional[str]
+    ) -> EmailVerificationResponse:
+        logger.info("verifying email")
+        verify_response = await self._http_request(
+            "POST",
+            "/verify",
+            json={
+                "verification_token": verification_token,
+                "provider": self.provider,
+            },
+        )
+        try:
+            verify_response.raise_for_status()
+        except httpx.HTTPStatusError as e:
+            logger.error("verify error: %s", e)
+            return EmailVerificationFailedResponse(
+                status_code=e.response.status_code,
+                message=e.response.text,
+            )
+        verify_json = verify_response.json()
+        if "error" in verify_json:
+            error = verify_json["error"]
+            logger.error("verify error: %s", error)
+            return EmailVerificationFailedResponse(
+                status_code=verify_response.status_code,
+                message=error,
+            )
+        elif "code" in verify_json:
+            code = verify_json["code"]
+            if verifier is None:
+                return EmailVerificationMissingProofResponse()
+
+            pkce = self._pkce_from_verifier(verifier)
+            logger.info("exchanging code for token: %s", code)
+            token_data = await pkce.internal_exchange_code_for_token(code)
+
+            logger.debug("PKCE verifier: %s", pkce.verifier)
+            logger.debug("token data: %s", token_data)
+            return EmailVerificationCompleteResponse(token_data=token_data)
+        else:
+            logger.error("no code in verify response: %r", verify_json)
+            return EmailVerificationMissingProofResponse()
+
+    async def _send_password_reset_email(
+        self, email: str
+    ) -> SendPasswordResetEmailResponse:
+        logger.info("sending password reset email: %s", email)
+        pkce = self._generate_pkce()
+        reset_response = await self._http_request(
+            "POST",
+            "/send-reset-email",
+            json={
+                "email": email,
+                "provider": self.provider,
+                "challenge": pkce.challenge,
+                "reset_url": self.reset_url,
+            },
+        )
+        try:
+            reset_response.raise_for_status()
+        except httpx.HTTPStatusError as e:
+            logger.error("reset error: %s", e)
+            return SendPasswordResetEmailFailedResponse(
+                verifier=pkce.verifier,
+                status_code=e.response.status_code,
+                message=e.response.text,
+            )
+        reset_json = reset_response.json()
+        if "error" in reset_json:
+            error = reset_json["error"]
+            logger.error("reset error: %s", error)
+            return SendPasswordResetEmailFailedResponse(
+                verifier=pkce.verifier,
+                status_code=reset_response.status_code,
+                message=error,
+            )
+        else:
+            logger.debug("PKCE verifier: %s", pkce.verifier)
+            return SendPasswordResetEmailCompleteResponse(
+                verifier=pkce.verifier
+            )
+
+    async def _reset_password(
+        self, reset_token: str, verifier: Optional[str], password: str
+    ) -> PasswordResetResponse:
+        logger.info("resetting password")
+        reset_response = await self._http_request(
+            "POST",
+            "/reset-password",
+            json={
+                "provider": self.provider,
+                "reset_token": reset_token,
+                "password": password,
+            },
+        )
+        try:
+            reset_response.raise_for_status()
+        except httpx.HTTPStatusError as e:
+            logger.error("reset error: %s", e)
+            return PasswordResetFailedResponse(
+                status_code=e.response.status_code,
+                message=e.response.text,
+            )
+        reset_json = reset_response.json()
+        if "error" in reset_json:
+            error = reset_json["error"]
+            logger.error("reset error: %s", error)
+            return PasswordResetFailedResponse(
+                status_code=reset_response.status_code,
+                message=error,
+            )
+        elif "code" in reset_json:
+            code = reset_json["code"]
+            if verifier is None:
+                return PasswordResetMissingProofResponse()
+
+            pkce = self._pkce_from_verifier(verifier)
+            logger.info("exchanging code for token: %s", code)
+            token_data = await pkce.internal_exchange_code_for_token(code)
+            return PasswordResetCompleteResponse(token_data=token_data)
+        else:
+            logger.error("no code in reset response: %r", reset_json)
+            return PasswordResetMissingProofResponse()
+
+
+class EmailPassword(BaseEmailPassword[httpx.Client]):
+    def _init_http_client(self, **kwargs) -> httpx.Client:
+        return httpx.Client(**kwargs)
+
+    def _generate_pkce(self) -> pkce_mod.BasePKCE:
+        return pkce_mod.generate_pkce(self._client)
+
+    def _pkce_from_verifier(self, verifier: str) -> pkce_mod.BasePKCE:
+        return pkce_mod.PKCE(self._client, verifier)
+
+    async def _send_http_request(
+        self, request: httpx.Request
+    ) -> httpx.Response:
+        return self._client.send(request)
+
+    def sign_up(self, email: str, password: str) -> SignUpResponse:
+        return blocking_client.iter_coroutine(self._sign_up(email, password))
+
+    def sign_in(self, email: str, password: str) -> SignInResponse:
+        return blocking_client.iter_coroutine(self._sign_in(email, password))
+
+    def verify_email(
+        self, verification_token: str, verifier: Optional[str]
+    ) -> EmailVerificationResponse:
+        return blocking_client.iter_coroutine(
+            self._verify_email(verification_token, verifier)
+        )
+
+    def send_password_reset_email(
+        self, email: str
+    ) -> SendPasswordResetEmailResponse:
+        return blocking_client.iter_coroutine(
+            self._send_password_reset_email(email)
+        )
+
+    def reset_password(
+        self, reset_token: str, verifier: Optional[str], password: str
+    ) -> PasswordResetResponse:
+        return blocking_client.iter_coroutine(
+            self._reset_password(reset_token, verifier, password)
+        )
+
+
+def make(
+    *,
+    client: gel.Client,
+    verify_url: str,
+    reset_url: str,
+    cls: Type[EmailPassword] = EmailPassword,
+) -> EmailPassword:
+    return cls(
+        verify_url=verify_url,
+        reset_url=reset_url,
+        connection_info=client.check_connection(),
+    )
+
+
+class AsyncEmailPassword(BaseEmailPassword[httpx.AsyncClient]):
+    def _init_http_client(self, **kwargs) -> httpx.AsyncClient:
+        return httpx.AsyncClient(**kwargs)
+
+    def _generate_pkce(self) -> pkce_mod.BasePKCE:
+        return pkce_mod.generate_async_pkce(self._client)
+
+    def _pkce_from_verifier(self, verifier: str) -> pkce_mod.BasePKCE:
+        return pkce_mod.AsyncPKCE(self._client, verifier)
+
+    async def _send_http_request(
+        self, request: httpx.Request
+    ) -> httpx.Response:
+        return await self._client.send(request)
 
     async def sign_up(self, email: str, password: str) -> SignUpResponse:
-        pkce = generate_pkce(self.auth_ext_url)
-        async with httpx.AsyncClient() as http_client:
-            url = urljoin(self.auth_ext_url, "register")
-            logger.info("signing up user %r: %s", email, url)
-            register_response = await http_client.post(
-                url,
-                json={
-                    "email": email,
-                    "password": password,
-                    "verify_url": self.verify_url,
-                    "provider": "builtin::local_emailpassword",
-                    "challenge": pkce.challenge,
-                },
-            )
-
-            logger.debug(
-                "register response: [%d] %s",
-                register_response.status_code,
-                register_response.text,
-            )
-            try:
-                register_response.raise_for_status()
-            except httpx.HTTPStatusError as e:
-                logger.error("register error: %s", e)
-                return SignUpFailedResponse(
-                    verifier=pkce.verifier,
-                    status_code=e.response.status_code,
-                    message=e.response.text,
-                )
-            register_json = register_response.json()
-            if "error" in register_json:
-                error = register_json["error"]
-                logger.error("register error: %s", error)
-                return SignUpFailedResponse(
-                    verifier=pkce.verifier,
-                    status_code=register_response.status_code,
-                    message=error,
-                )
-            elif "code" in register_json:
-                code = register_json["code"]
-                logger.info("exchanging code for token: %s", code)
-                token_data = await pkce.exchange_code_for_token(code)
-
-                logger.debug("PKCE verifier: %s", pkce.verifier)
-                logger.debug("token data: %s", token_data)
-                return SignUpCompleteResponse(
-                    verifier=pkce.verifier,
-                    token_data=token_data,
-                    identity_id=token_data.identity_id,
-                )
-            else:
-                logger.info(
-                    "no code in register response, "
-                    "assuming verification required"
-                )
-                logger.debug("PKCE verifier: %s", pkce.verifier)
-                return SignUpVerificationRequiredResponse(
-                    verifier=pkce.verifier,
-                    token_data=None,
-                    identity_id=register_json.get("identity_id"),
-                )
+        return await self._sign_up(email, password)
 
     async def sign_in(self, email: str, password: str) -> SignInResponse:
-        pkce = generate_pkce(self.auth_ext_url)
-        async with httpx.AsyncClient() as http_client:
-            url = urljoin(self.auth_ext_url, "authenticate")
-            logger.info("signing in user %r: %s", email, url)
-            sign_in_response = await http_client.post(
-                url,
-                json={
-                    "email": email,
-                    "provider": "builtin::local_emailpassword",
-                    "password": password,
-                    "challenge": pkce.challenge,
-                },
-            )
-
-            logger.debug(
-                "sign in response: [%d] %s",
-                sign_in_response.status_code,
-                sign_in_response.text,
-            )
-            try:
-                sign_in_response.raise_for_status()
-            except httpx.HTTPStatusError as e:
-                logger.error("sign in error: %s", e)
-                return SignInFailedResponse(
-                    verifier=pkce.verifier,
-                    status_code=e.response.status_code,
-                    message=e.response.text,
-                )
-            sign_in_json = sign_in_response.json()
-            if "error" in sign_in_json:
-                error = sign_in_json["error"]
-                logger.error("sign in error: %s", error)
-                return SignInFailedResponse(
-                    verifier=pkce.verifier,
-                    status_code=sign_in_response.status_code,
-                    message=error,
-                )
-            elif "code" in sign_in_json:
-                code = sign_in_json["code"]
-                logger.info("exchanging code for token: %s", code)
-                token_data = await pkce.exchange_code_for_token(code)
-
-                logger.debug("PKCE verifier: %s", pkce.verifier)
-                logger.debug("token data: %s", token_data)
-                return SignInCompleteResponse(
-                    verifier=pkce.verifier,
-                    token_data=token_data,
-                    identity_id=token_data.identity_id,
-                )
-            else:
-                logger.info(
-                    "no code in sign in response, "
-                    "assuming verification required"
-                )
-                logger.debug("PKCE verifier: %s", pkce.verifier)
-                return SignInVerificationRequiredResponse(
-                    verifier=pkce.verifier,
-                    token_data=None,
-                    identity_id=sign_in_json.get("identity_id"),
-                )
+        return await self._sign_in(email, password)
 
     async def verify_email(
         self, verification_token: str, verifier: Optional[str]
     ) -> EmailVerificationResponse:
-        async with httpx.AsyncClient() as http_client:
-            url = urljoin(self.auth_ext_url, "verify")
-            logger.info("verifying email: %s", url)
-            verify_response = await http_client.post(
-                url,
-                json={
-                    "verification_token": verification_token,
-                    "provider": "builtin::local_emailpassword",
-                },
-            )
-            try:
-                verify_response.raise_for_status()
-            except httpx.HTTPStatusError as e:
-                logger.error("verify error: %s", e)
-                return EmailVerificationFailedResponse(
-                    status_code=e.response.status_code,
-                    message=e.response.text,
-                )
-            verify_json = verify_response.json()
-            if "error" in verify_json:
-                error = verify_json["error"]
-                logger.error("verify error: %s", error)
-                return EmailVerificationFailedResponse(
-                    status_code=verify_response.status_code,
-                    message=error,
-                )
-            elif "code" in verify_json:
-                code = verify_json["code"]
-                if verifier is None:
-                    return EmailVerificationMissingProofResponse()
-
-                pkce = PKCE(verifier, base_url=self.auth_ext_url)
-                logger.info("exchanging code for token: %s", code)
-                token_data = await pkce.exchange_code_for_token(code)
-
-                logger.debug("PKCE verifier: %s", pkce.verifier)
-                logger.debug("token data: %s", token_data)
-                return EmailVerificationCompleteResponse(
-                    token_data=token_data,
-                )
-            else:
-                logger.error("no code in verify response: %r", verify_json)
-                return EmailVerificationMissingProofResponse()
+        return await self._verify_email(verification_token, verifier)
 
     async def send_password_reset_email(
         self, email: str
     ) -> SendPasswordResetEmailResponse:
-        pkce = generate_pkce(self.auth_ext_url)
-        async with httpx.AsyncClient() as http_client:
-            url = urljoin(self.auth_ext_url, "send-reset-email")
-            reset_response = await http_client.post(
-                url,
-                json={
-                    "email": email,
-                    "provider": "builtin::local_emailpassword",
-                    "challenge": pkce.challenge,
-                    "reset_url": self.reset_url,
-                },
-            )
-
-            logger.debug(
-                "reset response: [%d] %s",
-                reset_response.status_code,
-                reset_response.text,
-            )
-            try:
-                reset_response.raise_for_status()
-            except httpx.HTTPStatusError as e:
-                logger.error("reset error: %s", e)
-                return SendPasswordResetEmailFailedResponse(
-                    verifier=pkce.verifier,
-                    status_code=e.response.status_code,
-                    message=e.response.text,
-                )
-            reset_json = reset_response.json()
-            if "error" in reset_json:
-                error = reset_json["error"]
-                logger.error("reset error: %s", error)
-                return SendPasswordResetEmailFailedResponse(
-                    verifier=pkce.verifier,
-                    status_code=reset_response.status_code,
-                    message=error,
-                )
-            else:
-                logger.debug("PKCE verifier: %s", pkce.verifier)
-                logger.debug("reset response: %s", reset_json)
-                return SendPasswordResetEmailCompleteResponse(
-                    verifier=pkce.verifier,
-                )
+        return await self._send_password_reset_email(email)
 
     async def reset_password(
         self, reset_token: str, verifier: Optional[str], password: str
     ) -> PasswordResetResponse:
-        async with httpx.AsyncClient() as http_client:
-            url = urljoin(self.auth_ext_url, "reset-password")
-            reset_response = await http_client.post(
-                url,
-                json={
-                    "provider": "builtin::local_emailpassword",
-                    "reset_token": reset_token,
-                    "password": password,
-                },
-            )
+        return await self._reset_password(reset_token, verifier, password)
 
-            logger.debug(
-                "reset response: [%d] %s",
-                reset_response.status_code,
-                reset_response.text,
-            )
-            try:
-                reset_response.raise_for_status()
-            except httpx.HTTPStatusError as e:
-                logger.error("reset error: %s", e)
-                return PasswordResetFailedResponse(
-                    status_code=e.response.status_code,
-                    message=e.response.text,
-                )
-            reset_json = reset_response.json()
-            if "error" in reset_json:
-                error = reset_json["error"]
-                logger.error("reset error: %s", error)
-                return PasswordResetFailedResponse(
-                    status_code=reset_response.status_code,
-                    message=error,
-                )
-            elif "code" in reset_json:
-                code = reset_json["code"]
-                if verifier is None:
-                    return PasswordResetMissingProofResponse()
 
-                pkce = PKCE(verifier, base_url=self.auth_ext_url)
-                logger.info("exchanging code for token: %s", code)
-                token_data = await pkce.exchange_code_for_token(code)
-                return PasswordResetCompleteResponse(
-                    token_data=token_data,
-                )
-            else:
-                logger.error("no code in reset response: %r", reset_json)
-                return PasswordResetMissingProofResponse()
+async def make_async(
+    *,
+    client: gel.AsyncIOClient,
+    verify_url: str,
+    reset_url: str,
+    cls: Type[AsyncEmailPassword] = AsyncEmailPassword,
+) -> AsyncEmailPassword:
+    return cls(
+        verify_url=verify_url,
+        reset_url=reset_url,
+        connection_info=await client.check_connection(),
+    )

@@ -75,7 +75,6 @@ AI_DEPENDENCIES = [
 ]
 
 AUTH_DEPENDENCIES = [
-    'pydantic>=2',
     'httpx>=0.27',
 ]
 
