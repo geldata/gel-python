@@ -46,7 +46,7 @@ class MetadataFilter:
 @dataclass
 class CompositeFilter:
     """
-    Allows grouping multiple MetadataFilter instances using AND/OR conditions.
+    Allows grouping multiple MetadataFilter instances using AND/OR.
     """
 
     filters: List[Union[CompositeFilter, MetadataFilter]]
@@ -89,30 +89,35 @@ def get_filter_clause(filters: CompositeFilter) -> str:
                 FilterOperator.ILIKE,
             }:
                 subclause = (
-                    f'<str>json_get(.metadata, "{filter.key}") '
+                    f'<typeof {formatted_value}>json_get(.metadata, "{filter.key}") '
                     f"{filter.operator.value} {formatted_value}"
                 )
-
-            # Array operators
+            # casting should be fixed
             elif filter.operator in {FilterOperator.IN, FilterOperator.NOT_IN}:
                 subclause = (
-                    f'<str>json_get(.metadata, "{filter.key}") '
+                    f"{formatted_value} "
                     f"{filter.operator.value} "
-                    f"array_unpack({formatted_value})"
+                    f'<str>json_get(.metadata, "{filter.key}")'
                 )
-
-            # Array comparison operators
+            # casting should be fixed
+            # works only for equality, should be updated to support the rest,
+            # example: select all({1, 2, 3, 4} < 4);
             elif filter.operator in {FilterOperator.ANY, FilterOperator.ALL}:
                 subclause = (
-                    f"{filter.operator.value}"
-                    f'(<str>json_get(.metadata, "{filter.key}") = '
-                    f"array_unpack({formatted_value}))"
+                    f"{filter.operator.value} ("
+                    f'<str>json_get(.metadata, "{filter.key}")'
+                    f" = {formatted_value})"
                 )
 
-            # Contains/exists operators
-            elif filter.operator in {FilterOperator.CONTAINS, FilterOperator.EXISTS}:
+            elif filter.operator == FilterOperator.EXISTS:
+                subclause = f'exists <str>json_get(.metadata, "{filter.key}")'
+
+            # casting should be fixed
+            # edgeql contains supports different types like range etc which
+            # we don't support here
+            elif filter.operator == FilterOperator.CONTAINS:
                 subclause = (
-                    f'contains(<str>json_get(.metadata, "{filter.key}"), '
+                    f'contains (<str>json_get(.metadata, "{filter.key}"), '
                     f"{formatted_value})"
                 )
             else:
