@@ -30,3 +30,4 @@ docs/_build
 /tmp
 /wheelhouse
 /env*
+/.venv

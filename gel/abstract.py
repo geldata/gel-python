@@ -92,6 +92,7 @@ class QueryContext(typing.NamedTuple):
 class ExecuteContext(typing.NamedTuple):
     query: QueryWithArgs
     cache: QueryCache
+    retry_options: typing.Optional[options.RetryOptions]
     state: typing.Optional[options.State]
     warning_handler: options.WarningHandler
     annotations: typing.Dict[str, str]
@@ -187,8 +188,9 @@ class BaseReadOnlyExecutor(abc.ABC):
     def _get_query_cache(self) -> QueryCache:
         ...
 
+    @abc.abstractmethod
     def _get_retry_options(self) -> typing.Optional[options.RetryOptions]:
-        return None
+        ...
 
     @abc.abstractmethod
     def _get_state(self) -> options.State:
@@ -303,6 +305,7 @@ class ReadOnlyExecutor(BaseReadOnlyExecutor):
         self._execute(ExecuteContext(
             query=QueryWithArgs(commands, args, kwargs),
             cache=self._get_query_cache(),
+            retry_options=self._get_retry_options(),
             state=self._get_state(),
             warning_handler=self._get_warning_handler(),
             annotations=self._get_annotations(),
@@ -317,6 +320,7 @@ class ReadOnlyExecutor(BaseReadOnlyExecutor):
                 input_language=protocol.InputLanguage.SQL,
             ),
             cache=self._get_query_cache(),
+            retry_options=self._get_retry_options(),
             state=self._get_state(),
             warning_handler=self._get_warning_handler(),
             annotations=self._get_annotations(),
@@ -438,6 +442,7 @@ class AsyncIOReadOnlyExecutor(BaseReadOnlyExecutor):
         await self._execute(ExecuteContext(
             query=QueryWithArgs(commands, args, kwargs),
             cache=self._get_query_cache(),
+            retry_options=self._get_retry_options(),
             state=self._get_state(),
             warning_handler=self._get_warning_handler(),
             annotations=self._get_annotations(),
@@ -452,6 +457,7 @@ class AsyncIOReadOnlyExecutor(BaseReadOnlyExecutor):
                 input_language=protocol.InputLanguage.SQL,
             ),
             cache=self._get_query_cache(),
+            retry_options=self._get_retry_options(),
             state=self._get_state(),
             warning_handler=self._get_warning_handler(),
             annotations=self._get_annotations(),

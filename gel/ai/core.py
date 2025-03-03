@@ -26,27 +26,27 @@ import httpx_sse
 from . import types
 
 
-def create_ai(client: gel.Client, **kwargs) -> EdgeDBAI:
+def create_rag_client(client: gel.Client, **kwargs) -> RAGClient:
     client.ensure_connected()
-    return EdgeDBAI(client, types.AIOptions(**kwargs))
+    return RAGClient(client, types.RAGOptions(**kwargs))
 
 
-async def create_async_ai(
+async def create_async_rag_client(
     client: gel.AsyncIOClient, **kwargs
-) -> AsyncEdgeDBAI:
+) -> AsyncRAGClient:
     await client.ensure_connected()
-    return AsyncEdgeDBAI(client, types.AIOptions(**kwargs))
+    return AsyncRAGClient(client, types.RAGOptions(**kwargs))
 
 
-class BaseEdgeDBAI:
-    options: types.AIOptions
+class BaseRAGClient:
+    options: types.RAGOptions
     context: types.QueryContext
     client_cls = NotImplemented
 
     def __init__(
         self,
         client: typing.Union[gel.Client, gel.AsyncIOClient],
-        options: types.AIOptions,
+        options: types.RAGOptions,
         **kwargs,
     ):
         pool = client._impl
@@ -103,7 +103,7 @@ class BaseEdgeDBAI:
         )
 
 
-class EdgeDBAI(BaseEdgeDBAI):
+class RAGClient(BaseRAGClient):
     client: httpx.Client
 
     def _init_client(self, **kwargs):
@@ -146,7 +146,7 @@ class EdgeDBAI(BaseEdgeDBAI):
         return resp.json()["data"][0]["embedding"]
 
 
-class AsyncEdgeDBAI(BaseEdgeDBAI):
+class AsyncRAGClient(BaseRAGClient):
     client: httpx.AsyncClient
 
     def _init_client(self, **kwargs):

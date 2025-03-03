@@ -41,12 +41,12 @@ class Prompt:
 
 
 @dc.dataclass
-class AIOptions:
+class RAGOptions:
     model: str
     prompt: typing.Optional[Prompt] = None
 
     def derive(self, kwargs):
-        return AIOptions(**{**dc.asdict(self), **kwargs})
+        return RAGOptions(**{**dc.asdict(self), **kwargs})
 
 
 @dc.dataclass

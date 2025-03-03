@@ -184,6 +184,9 @@ class BaseTransaction:
     def _get_query_cache(self) -> abstract.QueryCache:
         return self._client._get_query_cache()
 
+    def _get_retry_options(self) -> typing.Optional[options.RetryOptions]:
+        return None
+
     def _get_state(self) -> options.State:
         return self._client._get_state()
 
@@ -206,6 +209,7 @@ class BaseTransaction:
             query=abstract.QueryWithArgs(query, (), {}),
             cache=self._get_query_cache(),
             state=self._get_state(),
+            retry_options=self._get_retry_options(),
             warning_handler=self._get_warning_handler(),
             annotations=self._get_annotations(),
         ))

@@ -40,6 +40,7 @@ from gel import asyncio_client
 from gel import blocking_client
 from gel.orm.introspection import get_schema_json, GelORMWarning
 from gel.orm.sqla import ModelGenerator as SQLAModGen
+from gel.orm.sqlmodel import ModelGenerator as SQLModGen
 from gel.orm.django.generator import ModelGenerator as DjangoModGen
 
 
@@ -678,6 +679,26 @@ class SQLATestCase(ORMTestCase):
     @classmethod
     def setupORM(cls):
         gen = SQLAModGen(
+            outdir=os.path.join(cls.tmpormdir.name, cls.MODEL_PACKAGE),
+            basemodule=cls.MODEL_PACKAGE,
+        )
+        gen.render_models(cls.spec)
+
+    @classmethod
+    def get_dsn_for_sqla(cls):
+        cargs = cls.get_connect_args(database=cls.get_database_name())
+        dsn = (
+            f'postgresql://{cargs["user"]}:{cargs["password"]}'
+            f'@{cargs["host"]}:{cargs["port"]}/{cargs["database"]}'
+        )
+
+        return dsn
+
+
+class SQLModelTestCase(ORMTestCase):
+    @classmethod
+    def setupORM(cls):
+        gen = SQLModGen(
             outdir=os.path.join(cls.tmpormdir.name, cls.MODEL_PACKAGE),
             basemodule=cls.MODEL_PACKAGE,
         )

@@ -33,6 +33,10 @@ Transactions can be customized with different options:
 
         Serializable isolation level
 
+    .. py:attribute:: RepeatableRead
+
+        Repeatable read isolation level (supported in read-only transactions)
+
 :py:class:`TransactionOptions` can be set on :py:class:`~edgedb.Client` or
 :py:class:`~edgedb.AsyncIOClient` using one of these methods:
 

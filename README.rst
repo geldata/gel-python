@@ -1,17 +1,17 @@
-The Python driver for EdgeDB
-============================
+The Python driver for Gel
+=========================
 
-.. image:: https://github.com/edgedb/edgedb-python/workflows/Tests/badge.svg?event=push&branch=master
-    :target: https://github.com/edgedb/edgedb-python/actions
+.. image:: https://github.com/geldata/gel-python/workflows/Tests/badge.svg?event=push&branch=master
+    :target: https://github.com/geldata/gel-python/actions
 
-.. image:: https://img.shields.io/pypi/v/edgedb.svg
-    :target: https://pypi.python.org/pypi/edgedb
+.. image:: https://img.shields.io/pypi/v/gel.svg
+    :target: https://pypi.python.org/pypi/gel
 
 .. image:: https://img.shields.io/badge/join-github%20discussions-green
-    :target: https://github.com/edgedb/edgedb/discussions
+    :target: https://github.com/geldata/gel/discussions
 
 
-**edgedb-python** is the official EdgeDB driver for Python.
+**gel-python** is the official Gel driver for Python.
 It provides both blocking IO and asyncio implementations.
 
 The library requires Python 3.8 or later.
@@ -21,7 +21,7 @@ Documentation
 -------------
 
 The project documentation can be found
-`here <https://edgedb.com/docs/clients/00_python/index>`_.
+`here <https://www.geldata.com/docs/clients/00_python/index>`_.
 
 
 Installation
@@ -29,7 +29,7 @@ Installation
 
 The library is available on PyPI.  Use ``pip`` to install it::
 
-    $ pip install edgedb
+    $ pip install gel
 
 
 Basic Usage
@@ -38,10 +38,10 @@ Basic Usage
 .. code-block:: python
 
     import datetime
-    import edgedb
+    import gel
 
     def main():
-        client = edgedb.create_client()
+        client = gel.create_client()
         # Create a User object type
         client.execute('''
             CREATE TYPE User {
@@ -73,12 +73,12 @@ Basic Usage
 Development
 -----------
 
-Instructions for installing EdgeDB and edgedb-python locally can be found at
-`edgedb.com/docs/reference/dev <https://edgedb.com/docs/reference/dev>`_.
+Instructions for installing Gel and gel-python locally can be found at
+`www.geldata.com/docs/reference/dev <https://www.geldata.com/docs/reference/dev>`_.
 
 To run the test suite, run ``$ python setup.py test``.
 
 License
 -------
 
-edgedb-python is developed and distributed under the Apache 2.0 license.
+gel-python is developed and distributed under the Apache 2.0 license.

@@ -16,6 +16,7 @@
 # limitations under the License.
 #
 
+import datetime as dt
 import os
 import uuid
 import unittest
@@ -29,6 +30,7 @@ else:
     NO_ORM = False
 
 from gel import _testbase as tb
+from gel.orm.django import generator
 
 
 class TestDjangoBasic(tb.DjangoTestCase):
@@ -116,7 +118,7 @@ class TestDjangoBasic(tb.DjangoTestCase):
         # use backlink
         res = self.m.User.objects.order_by('name').all()
         vals = [
-            (u.name, {p.body for p in u.backlink_via_author.all()})
+            (u.name, {p.body for p in u._author_Post.all()})
             for u in res
         ]
         self.assertEqual(
@@ -147,10 +149,10 @@ class TestDjangoBasic(tb.DjangoTestCase):
         )
 
         # prefetch via backlink
-        res = self.m.User.objects.prefetch_related('backlink_via_author') \
-                  .order_by('backlink_via_author__body')
+        res = self.m.User.objects.prefetch_related('_author_Post') \
+                  .order_by('_author_Post__body')
         vals = {
-            (u.name, tuple(p.body for p in u.backlink_via_author.all()))
+            (u.name, tuple(p.body for p in u._author_Post.all()))
             for u in res
         }
         self.assertEqual(
@@ -182,7 +184,7 @@ class TestDjangoBasic(tb.DjangoTestCase):
         # use backlink
         res = self.m.User.objects.all()
         vals = {
-            (u.name, tuple(g.num for g in u.backlink_via_players.all()))
+            (u.name, tuple(g.num for g in u._players_GameSession.all()))
             for u in res
         }
         self.assertEqual(
@@ -214,9 +216,9 @@ class TestDjangoBasic(tb.DjangoTestCase):
         )
 
         # prefetch via backlink
-        res = self.m.User.objects.prefetch_related('backlink_via_players')
+        res = self.m.User.objects.prefetch_related('_players_GameSession')
         vals = {
-            (u.name, tuple(g.num for g in u.backlink_via_players.all()))
+            (u.name, tuple(g.num for g in u._players_GameSession.all()))
             for u in res
         }
         self.assertEqual(
@@ -249,7 +251,7 @@ class TestDjangoBasic(tb.DjangoTestCase):
         # use backlink
         res = self.m.User.objects.order_by('name').all()
         vals = [
-            (u.name, {g.name for g in u.backlink_via_users.all()})
+            (u.name, {g.name for g in u._users_UserGroup.all()})
             for u in res
         ]
         self.assertEqual(
@@ -282,9 +284,9 @@ class TestDjangoBasic(tb.DjangoTestCase):
         )
 
         # prefetch via backlink
-        res = self.m.User.objects.prefetch_related('backlink_via_users')
+        res = self.m.User.objects.prefetch_related('_users_UserGroup')
         vals = {
-            (u.name, tuple(sorted(g.name for g in u.backlink_via_users.all())))
+            (u.name, tuple(sorted(g.name for g in u._users_UserGroup.all())))
             for u in res
         }
         self.assertEqual(
@@ -297,6 +299,28 @@ class TestDjangoBasic(tb.DjangoTestCase):
                 ('Elsa', ()),
                 ('Zoe', ()),
             }
+        )
+
+    def test_django_read_models_08(self):
+        # test arrays, bytes and various date/time scalars
+
+        res = self.m.AssortedScalars.objects.all()[0]
+
+        self.assertEqual(res.name, 'hello world')
+        self.assertEqual(res.vals, ['brown', 'fox'])
+        self.assertEqual(bytes(res.bstr), b'word\x00\x0b')
+        self.assertEqual(
+            res.time,
+            dt.time(20, 13, 45, 678_000),
+        )
+        self.assertEqual(
+            res.date,
+            dt.date(2025, 1, 26),
+        )
+        # time zone aware (default for Django)
+        self.assertEqual(
+            res.ts,
+            dt.datetime.fromisoformat('2025-01-26T20:13:45+00:00'),
         )
 
     def test_django_create_models_01(self):
@@ -323,7 +347,7 @@ class TestDjangoBasic(tb.DjangoTestCase):
             user = self.m.User.objects.get(name=name)
 
             self.assertEqual(user.name, name)
-            self.assertEqual(user.backlink_via_users.all()[0].name, 'cyan')
+            self.assertEqual(user._users_UserGroup.all()[0].name, 'cyan')
             self.assertIsInstance(user.id, uuid.UUID)
 
     def test_django_create_models_03(self):
@@ -335,8 +359,8 @@ class TestDjangoBasic(tb.DjangoTestCase):
         y.save()
         cyan.save()
 
-        x.backlink_via_users.add(cyan)
-        y.backlink_via_users.add(cyan)
+        x._users_UserGroup.add(cyan)
+        y._users_UserGroup.add(cyan)
 
         group = self.m.UserGroup.objects.get(name='cyan')
         self.assertEqual(group.name, 'cyan')
@@ -419,8 +443,8 @@ class TestDjangoBasic(tb.DjangoTestCase):
 
         group.delete()
         # make sure the user object is no longer a link target
-        user.backlink_via_users.clear()
-        user.backlink_via_players.clear()
+        user._users_UserGroup.clear()
+        user._players_GameSession.clear()
         user.delete()
 
         vals = self.m.UserGroup.objects.filter(name='green').all()
@@ -452,13 +476,13 @@ class TestDjangoBasic(tb.DjangoTestCase):
         blue.users.add(user)
 
         self.assertEqual(
-            {g.name for g in user.backlink_via_users.all()},
+            {g.name for g in user._users_UserGroup.all()},
             {'red', 'blue'},
         )
         self.assertEqual(user.name, 'Yvonne')
         self.assertIsInstance(user.id, uuid.UUID)
 
-        group = [g for g in user.backlink_via_users.all()
+        group = [g for g in user._users_UserGroup.all()
                  if g.name == 'red'][0]
         self.assertEqual(
             {u.name for u in group.users.all()},
@@ -469,7 +493,7 @@ class TestDjangoBasic(tb.DjangoTestCase):
         user0 = self.m.User.objects.get(name='Elsa')
         user1 = self.m.User.objects.get(name='Zoe')
         # Replace the author or a post
-        post = user0.backlink_via_author.all()[0]
+        post = user0._author_Post.all()[0]
         body = post.body
         post.author = user1
         post.save()
@@ -492,3 +516,71 @@ class TestDjangoBasic(tb.DjangoTestCase):
 
         post = self.m.Post.objects.get(id=post_id)
         self.assertEqual(post.author.name, 'Zoe')
+
+    def test_django_update_models_05(self):
+        # test arrays, bytes and various date/time scalars
+        #
+        # For the purpose of sending data creating and updating a model are
+        # both testing accurate data transfer.
+
+        res = self.m.AssortedScalars.objects.all()[0]
+
+        res.name = 'New Name'
+        res.vals.append('jumped')
+        res.bstr = b'\x01success\x02'
+        res.time = dt.time(8, 23, 54, 999_000)
+        res.date = dt.date(2020, 2, 14)
+        res.ts = res.ts - dt.timedelta(days=6)
+
+        res.save()
+
+        upd = self.m.AssortedScalars.objects.all()[0]
+
+        self.assertEqual(upd.name, 'New Name')
+        self.assertEqual(upd.vals, ['brown', 'fox', 'jumped'])
+        self.assertEqual(bytes(upd.bstr), b'\x01success\x02')
+        self.assertEqual(
+            upd.time,
+            dt.time(8, 23, 54, 999_000),
+        )
+        self.assertEqual(
+            upd.date,
+            dt.date(2020, 2, 14),
+        )
+        # time zone aware (default for Django)
+        self.assertEqual(
+            upd.ts,
+            dt.datetime.fromisoformat('2025-01-20T20:13:45+00:00'),
+        )
+
+    def test_django_sorting(self):
+        # Test the natural sorting function used for ordering fields, etc.
+
+        unsorted = {
+            'zoo': 1,
+            'apple': 1,
+            'potato': 1,
+            'grape10': 1,
+            'grape1': 1,
+            'grape5': 1,
+            'grape2': 1,
+            'grape20': 1,
+            'grape25': 1,
+            'grape12': 1,
+        }
+
+        self.assertEqual(
+            list(sorted(unsorted.items(), key=generator.field_name_sort)),
+            [
+                ('apple', 1),
+                ('grape1', 1),
+                ('grape2', 1),
+                ('grape5', 1),
+                ('grape10', 1),
+                ('grape12', 1),
+                ('grape20', 1),
+                ('grape25', 1),
+                ('potato', 1),
+                ('zoo', 1),
+            ],
+        )

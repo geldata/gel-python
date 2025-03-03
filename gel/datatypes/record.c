@@ -200,7 +200,7 @@ record_repr(EdgeRecord *o)
     _PyUnicodeWriter_Init(&writer);
     writer.overallocate = 1;
 
-    if (_PyUnicodeWriter_WriteASCIIString(&writer, "Record{", 4) < 0) {
+    if (_PyUnicodeWriter_WriteASCIIString(&writer, "Record{", 7) < 0) {
         goto error;
     }
 

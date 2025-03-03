@@ -16,32 +16,34 @@
 # limitations under the License.
 #
 
-from .types import AIOptions, ChatParticipantRole, Prompt, QueryContext
-from .core import create_ai, EdgeDBAI
-from .core import create_async_ai, AsyncEdgeDBAI
+from .types import RAGOptions, ChatParticipantRole, Prompt, QueryContext
+from .core import create_rag_client, RAGClient
+from .core import create_async_rag_client, AsyncRAGClient
 from .vectorstore import (
     create_vstore,
     create_async_vstore,
     Record,
     Vector,
     SearchResult,
-    BaseEmbeddingModel,
-    VectorStore,
+    EmbeddingModel,
+    AsyncEmbeddingModel,
 )
 
 __all__ = [
-    "AIOptions",
+    "RAGOptions",
     "ChatParticipantRole",
     "Prompt",
     "QueryContext",
-    "create_ai",
-    "EdgeDBAI",
-    "create_async_ai",
+    "create_rag_client",
+    "RAGClient",
+    "create_async_rag_client",
+    "AsyncRAGClient",
     "create_vstore",
     "create_async_vstore",
-    "AsyncEdgeDBAI",
     "Record",
     "Vector",
     "SearchResult",
-    "BaseEmbeddingModel",
+    "EmbeddingModel",
+    "AsyncEmbeddingModel",
+
 ]

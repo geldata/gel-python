@@ -22,9 +22,9 @@ GEL_SCALAR_MAP = {
     # values are controlled in Django via settings (USE_TZ) and are mutually
     # exclusive in the same app under default circumstances.
     'std::datetime': 'DateTimeField',
-    'cal::local_date': 'DateField',
-    'cal::local_datetime': 'DateTimeField',
-    'cal::local_time': 'TimeField',
+    'std::cal::local_date': 'DateField',
+    'std::cal::local_datetime': 'DateTimeField',
+    'std::cal::local_time': 'TimeField',
     # all kinds of durations are not supported due to this error:
     # iso_8601 intervalstyle currently not supported
 }
@@ -38,6 +38,8 @@ BASE_STUB = f'''\
 #
 
 from django.db import models
+from django.contrib.postgres import fields as pgf
+
 
 class GelUUIDField(models.UUIDField):
     # This field must be treated as a auto-generated UUID.
@@ -55,6 +57,17 @@ class GelPGMeta:
 '''
 
 CLOSEPAR_RE = re.compile(r'\)(?=\s+#|$)')
+ARRAY_RE = re.compile(r'^array<(?P<el>.+)>$')
+NAME_RE = re.compile(r'^(?P<alpha>\w+?)(?P<num>\d*)$')
+
+
+def field_name_sort(item):
+    key, val = item
+
+    match = NAME_RE.fullmatch(key)
+    res = (match.group('alpha'), int(match.group('num') or -1))
+
+    return res
 
 
 class ModelClass(object):
@@ -71,8 +84,8 @@ class ModelClass(object):
     def table(self):
         return self.meta['db_table'].strip("'")
 
-    def get_backlink_name(self, name):
-        return self.backlink_renames.get(name, f'backlink_via_{name}')
+    def get_backlink_name(self, name, srcname):
+        return f'_{name}_{srcname}'
 
 
 class ModelGenerator(FilePrinter):
@@ -140,7 +153,7 @@ class ModelGenerator(FilePrinter):
                     continue
 
                 lname = link['name']
-                bklink = mod.get_backlink_name(lname)
+                bklink = mod.get_backlink_name(lname, name)
                 code = self.render_link(link, bklink)
                 if code:
                     mod.links[lname] = code
@@ -166,18 +179,18 @@ class ModelGenerator(FilePrinter):
 
             mod.links['source'] = (
                 f"LTForeignKey({source!r}, models.DO_NOTHING, "
-                f"db_column='source', primary_key=True)"
+                f"db_column='source')"
             )
             mod.links['target'] = (
                 f"LTForeignKey({target!r}, models.DO_NOTHING, "
-                f"db_column='target')"
+                f"db_column='target', primary_key=True)"
             )
 
             # Update the source model with the corresponding
             # ManyToManyField.
             src = modmap[source]
             tgt = modmap[target]
-            bkname = src.get_backlink_name(fwname)
+            bkname = src.get_backlink_name(fwname, source)
             src.mlinks[fwname] = (
                 f'models.ManyToManyField('
                 f'{tgt.name!r}, '
@@ -197,6 +210,12 @@ class ModelGenerator(FilePrinter):
             req = 'blank=True, null=True'
 
         target = prop['target']['name']
+        is_array = False
+        match = ARRAY_RE.fullmatch(target)
+        if match:
+            is_array = True
+            target = match.group('el')
+
         try:
             ftype = GEL_SCALAR_MAP[target]
         except KeyError:
@@ -206,7 +225,10 @@ class ModelGenerator(FilePrinter):
             )
             return ''
 
-        return f'models.{ftype}({req})'
+        if is_array:
+            return f'pgf.ArrayField(models.{ftype}({req}))'
+        else:
+            return f'models.{ftype}({req})'
 
     def render_link(self, link, bklink=None):
         if link['required']:
@@ -267,7 +289,7 @@ class ModelGenerator(FilePrinter):
             self.out = f
             self.write(BASE_STUB)
 
-            for mod in modmap.values():
+            for mod in sorted(modmap.values(), key=lambda x: x.name):
                 self.write()
                 self.write()
                 self.render_model_class(mod)
@@ -284,19 +306,22 @@ class ModelGenerator(FilePrinter):
         if mod.props:
             self.write()
             self.write(f'# properties as Fields')
-            for name, val in mod.props.items():
+            props = sorted(mod.props.items(), key=field_name_sort)
+            for name, val in props:
                 self.write(f'{name} = {val}')
 
         if mod.links:
             self.write()
             self.write(f'# links as ForeignKeys')
-            for name, val in mod.links.items():
+            links = sorted(mod.links.items(), key=field_name_sort)
+            for name, val in links:
                 self.write(f'{name} = {val}')
 
         if mod.mlinks:
             self.write()
             self.write(f'# multi links as ManyToManyFields')
-            for name, val in mod.mlinks.items():
+            mlinks = sorted(mod.mlinks.items(), key=field_name_sort)
+            for name, val in mlinks:
                 self.write(f'{name} = {val}')
 
         if '.' not in mod.table:

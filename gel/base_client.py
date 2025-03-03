@@ -197,32 +197,18 @@ class BaseConnection(metaclass=abc.ABCMeta):
     def get_settings(self) -> typing.Dict[str, typing.Any]:
         return self._protocol.get_settings()
 
-    async def raw_query(self, query_context: abstract.QueryContext):
-        if self.is_closed():
-            await self.connect()
-
+    async def _retry_operation(self, func, retry_options, ctx):
         reconnect = False
         i = 0
-        if self._protocol.is_legacy:
-            allow_capabilities = enums.Capability.LEGACY_EXECUTE
-        else:
-            allow_capabilities = enums.Capability.EXECUTE
-        ctx = query_context.lower(allow_capabilities=allow_capabilities)
         while True:
             i += 1
             try:
                 if reconnect:
                     await self.connect(single_attempt=True)
-                if self._protocol.is_legacy:
-                    return await self._protocol.legacy_execute_anonymous(ctx)
-                else:
-                    res = await self._protocol.query(ctx)
-                    if ctx.warnings:
-                        res = query_context.warning_handler(ctx.warnings, res)
-                    return res
+                return await func()
 
             except errors.EdgeDBError as e:
-                if query_context.retry_options is None:
+                if retry_options is None:
                     raise
                 if not e.has_tag(errors.SHOULD_RETRY):
                     raise e
@@ -234,11 +220,36 @@ class BaseConnection(metaclass=abc.ABCMeta):
                     and not isinstance(e, errors.TransactionConflictError)
                 ):
                     raise e
-                rule = query_context.retry_options.get_rule_for_exception(e)
+                rule = retry_options.get_rule_for_exception(e)
                 if i >= rule.attempts:
                     raise e
                 await self.sleep(rule.backoff(i))
                 reconnect = self.is_closed()
+
+    async def raw_query(self, query_context: abstract.QueryContext):
+        if self.is_closed():
+            await self.connect()
+
+        reconnect = False
+        i = 0
+        if self._protocol.is_legacy:
+            allow_capabilities = enums.Capability.LEGACY_EXECUTE
+        else:
+            allow_capabilities = enums.Capability.EXECUTE
+        ctx = query_context.lower(allow_capabilities=allow_capabilities)
+
+        async def _inner():
+            if self._protocol.is_legacy:
+                return await self._protocol.legacy_execute_anonymous(ctx)
+            else:
+                res = await self._protocol.query(ctx)
+                if ctx.warnings:
+                    res = query_context.warning_handler(ctx.warnings, res)
+                return res
+
+        return await self._retry_operation(
+            _inner, query_context.retry_options, ctx
+        )
 
     async def _execute(self, execute_context: abstract.ExecuteContext) -> None:
         if self._protocol.is_legacy:
@@ -253,9 +264,14 @@ class BaseConnection(metaclass=abc.ABCMeta):
             ctx = execute_context.lower(
                 allow_capabilities=enums.Capability.EXECUTE
             )
-            res = await self._protocol.execute(ctx)
-            if ctx.warnings:
-                res = execute_context.warning_handler(ctx.warnings, res)
+            async def _inner():
+                res = await self._protocol.execute(ctx)
+                if ctx.warnings:
+                    res = execute_context.warning_handler(ctx.warnings, res)
+
+            return await self._retry_operation(
+                _inner, execute_context.retry_options, ctx
+            )
 
     async def describe(
         self, describe_context: abstract.DescribeContext

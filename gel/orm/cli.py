@@ -25,6 +25,7 @@ import gel
 from gel.codegen.generator import _get_conn_args
 from .introspection import get_schema_json, GelORMWarning
 from .sqla import ModelGenerator as SQLAModGen
+from .sqlmodel import ModelGenerator as SQLModGen
 from .django.generator import ModelGenerator as DjangoModGen
 
 
@@ -41,7 +42,7 @@ parser = ArgumentParser(
 )
 parser.add_argument(
     "orm",
-    choices=['sqlalchemy', 'django'],
+    choices=['sqlalchemy', 'sqlmodel', 'django'],
     help="Pick which ORM to generate models for.",
 )
 parser.add_argument("--dsn")
@@ -92,6 +93,16 @@ def generate_models(args, spec):
                 parser.error('sqlalchemy requires to specify --mod')
 
             gen = SQLAModGen(
+                outdir=args.out,
+                basemodule=args.mod,
+            )
+            gen.render_models(spec)
+
+        case 'sqlmodel':
+            if args.mod is None:
+                parser.error('sqlmodel requires to specify --mod')
+
+            gen = SQLModGen(
                 outdir=args.out,
                 basemodule=args.mod,
             )

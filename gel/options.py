@@ -13,6 +13,7 @@ logger = logging.getLogger('gel')
 
 
 _RetryRule = namedtuple("_RetryRule", ["attempts", "backoff"])
+TAG_NAME = "tag"
 
 
 def default_backoff(attempt):
@@ -52,6 +53,7 @@ class RetryCondition:
 class IsolationLevel:
     """Isolation level for transaction"""
     Serializable = "SERIALIZABLE"
+    RepeatableRead = "REPEATABLE READ"
 
 
 class RetryOptions:
@@ -413,17 +415,25 @@ class _OptionsMixin:
         )
         return result
 
-    def with_annotation(self, name: str, value: str):
+    def with_query_tag(self, tag: str):
+        for prefix in ["edgedb/", "gel/"]:
+            if tag.startswith(prefix):
+                raise errors.InvalidArgumentError(f"reserved tag: {prefix}*")
+        if len(tag) > 128:
+            raise errors.InvalidArgumentError(
+                "tag too long (> 128 characters)"
+            )
+
         result = self._shallow_clone()
         result._options = self._options.with_annotations(
-            self._options.annotations | {name: value}
+            self._options.annotations | {TAG_NAME: tag}
         )
         return result
 
-    def without_annotation(self, name: str):
+    def without_query_tag(self):
         result = self._shallow_clone()
         annotations = self._options.annotations.copy()
-        annotations.pop(name, None)
+        annotations.pop(TAG_NAME, None)
         result._options = self._options.with_annotations(annotations)
         return result
 

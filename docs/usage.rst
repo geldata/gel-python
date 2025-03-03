@@ -101,7 +101,7 @@ Below is an example of a web API server running `aiohttp
     async def handle(request):
         """Handle incoming requests."""
         client = request.app['client']
-        username = int(request.match_info.get('name'))
+        username = request.match_info.get('name')
 
         # Execute the query on any pool connection
         result = await client.query_single_json(
@@ -122,7 +122,7 @@ Below is an example of a web API server running `aiohttp
             database='my_service',
             user='my_service')
         # Configure service routes
-        app.router.add_route('GET', '/user/{name:\w+}', handle)
+        app.router.add_route('GET', '/user/{name}', handle)
         return app
 
 

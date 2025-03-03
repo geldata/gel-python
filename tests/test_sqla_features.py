@@ -113,7 +113,7 @@ class TestSQLAFeatures(tb.SQLATestCase):
         val = self.sess.query(self.sm.HasLinkPropsA).one()
         self.assertEqual(val.child, None)
 
-        # make sure there's only one link object still
+        # make sure the link object is removed
         vals = self.sess.query(self.sm.HasLinkPropsA_child_link).all()
         self.assertEqual(vals, [])
 
@@ -224,24 +224,21 @@ class TestSQLAFeatures(tb.SQLATestCase):
 
         # only one link from Bar 123 to foo
         self.assertEqual(
-            [obj.n for obj in foo.backlink_via_foo_from_Bar],
+            [obj.n for obj in foo._foo_Bar],
             [123],
         )
         # only one link from Who 456 to oof
         self.assertEqual(
-            [obj.x for obj in oof.backlink_via_foo_from_Who],
+            [obj.x for obj in oof._foo_Who],
             [456],
         )
 
         # foo is linked via `many_foo` from both Bar and Who
         self.assertEqual(
-            [obj.n for obj in foo.backlink_via_many_foo_from_Bar],
+            [obj.n for obj in foo._many_foo_Bar],
             [123],
         )
         self.assertEqual(
-            [
-                (obj.note, obj.source.x)
-                for obj in foo.backlink_via_many_foo_from_Who
-            ],
+            [(obj.note, obj.source.x) for obj in foo._many_foo_Who],
             [('just one', 456)],
         )

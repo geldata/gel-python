@@ -24,8 +24,8 @@ import re
 if __name__ == '__main__':
     this = pathlib.Path(__file__)
 
-    errors_fn = this.parent.parent / 'edgedb' / 'errors' / '__init__.py'
-    init_fn = this.parent.parent / 'edgedb' / '__init__.py'
+    errors_fn = this.parent.parent / 'gel' / 'errors' / '__init__.py'
+    init_fn = this.parent.parent / 'gel' / '__init__.py'
 
     with open(errors_fn, 'rt') as f:
         errors_txt = f.read()

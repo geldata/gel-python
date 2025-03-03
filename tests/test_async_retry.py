@@ -59,10 +59,6 @@ class TestAsyncRetry(tb.AsyncQueryTestCase):
         };
     '''
 
-    TEARDOWN = '''
-        DROP TYPE test::Counter;
-    '''
-
     async def test_async_retry_01(self):
         async for tx in self.client.transaction():
             async with tx:
@@ -205,6 +201,73 @@ class TestAsyncRetry(tb.AsyncQueryTestCase):
 
         self.assertEqual(set(results), {1, 2})
         self.assertEqual(iterations, 3)
+
+    async def test_async_retry_conflict_nontx_01(self):
+        await self.execute_nontx_conflict(
+            'counter_nontx_01',
+            lambda client, *args, **kwargs: client.query(*args, **kwargs)
+        )
+
+    async def test_async_retry_conflict_nontx_02(self):
+        await self.execute_nontx_conflict(
+            'counter_nontx_02',
+            lambda client, *args, **kwargs: client.execute(*args, **kwargs)
+        )
+
+    async def execute_nontx_conflict(self, name, func):
+        # Test retries on conflicts in a non-tx setting.  We do this
+        # by having conflicting upserts that are made long-running by
+        # adding a sys::_sleep call.
+        #
+        # Unlike for the tx ones, we don't assert that a retry
+        # actually was necessary, since that feels fragile in a
+        # timing-based test like this.
+
+        client1 = self.client
+        client2 = self.make_test_client(database=self.get_database_name())
+        self.addCleanup(client2.aclose)
+
+        await client1.query("SELECT 1")
+        await client2.query("SELECT 1")
+
+        query = '''
+            SELECT (
+                INSERT test::Counter {
+                    name := <str>$name,
+                    value := 1,
+                } UNLESS CONFLICT ON .name
+                ELSE (
+                    UPDATE test::Counter
+                    SET { value := .value + 1 }
+                )
+            ).value
+            ORDER BY sys::_sleep(<int64>$sleep)
+            THEN <int64>$nonce
+        '''
+
+        await func(client1, query, name=name, sleep=0, nonce=0)
+
+        task1 = asyncio.create_task(
+            func(client1, query, name=name, sleep=5, nonce=1)
+        )
+        task2 = asyncio.create_task(
+            func(client2, query, name=name, sleep=5, nonce=2)
+        )
+
+        results = await asyncio.wait_for(asyncio.gather(
+            task1,
+            task2,
+            return_exceptions=True,
+        ), 20)
+
+        excs = [e for e in results if isinstance(e, BaseException)]
+        if excs:
+            raise excs[0]
+        val = await client1.query_single('''
+            select (select test::Counter filter .name = <str>$name).value
+        ''', name=name)
+
+        self.assertEqual(val, 3)
 
     async def test_async_transaction_interface_errors(self):
         with self.assertRaisesRegex(

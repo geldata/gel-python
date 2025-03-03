@@ -15,14 +15,29 @@ type GameSession {
     };
 }
 
-type User extending Named {
-    # test computed backlink
-    groups := .<users[is UserGroup];
-}
+type User extending Named;
 
 type Post {
     required body: str;
     required link author: User;
+}
+
+type Child {
+    required property num: int64 {
+        constraint exclusive;
+    }
+}
+
+type HasLinkPropsA {
+    link child: Child {
+        property a: str;
+    }
+}
+
+type HasLinkPropsB {
+    multi link children: Child {
+        property b: str;
+    }
 }
 
 type AssortedScalars {

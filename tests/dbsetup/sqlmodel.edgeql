@@ -43,6 +43,23 @@ insert Post {
     body := '*magic stuff*',
 };
 
+insert Child {num := 0};
+insert Child {num := 1};
+
+insert HasLinkPropsA {
+    child := (select Child{@a := 'single'} filter .num = 0)
+};
+
+insert HasLinkPropsB;
+update HasLinkPropsB
+set {
+    children += (select Child{@b := 'hello'} filter .num = 0)
+};
+update HasLinkPropsB
+set {
+    children += (select Child{@b := 'world'} filter .num = 1)
+};
+
 insert AssortedScalars {
     name:= 'hello world',
     vals := ['brown', 'fox'],
