@@ -170,13 +170,10 @@ async def make(
     verify_url: str,
     reset_url: str,
 ) -> EmailPassword:
-    await client.ensure_connected()
-    pool = client._impl
-    host, port = pool._working_addr
-    params = pool._working_params
-    proto = "http" if params.tls_security == "insecure" else "https"
-    branch = params.branch
-    auth_ext_url = f"{proto}://{host}:{port}/branch/{branch}/ext/auth/"
+    info = await client.check_connection()
+    proto = "http" if info.params.tls_security == "insecure" else "https"
+    branch = info.params.branch
+    auth_ext_url = f"{proto}://{info.host}:{info.port}/branch/{branch}/ext/auth/"
     return EmailPassword(
         auth_ext_url=auth_ext_url, verify_url=verify_url, reset_url=reset_url
     )

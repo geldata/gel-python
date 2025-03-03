@@ -18,6 +18,7 @@
 
 
 import abc
+import dataclasses
 import random
 import time
 import typing
@@ -411,6 +412,14 @@ class PoolConnectionHolder(abc.ABC):
         self._pool._queue.put_nowait(self)
 
 
+@dataclasses.dataclass
+class ConnectionInfo:
+    host: str
+    port: int
+    params: con_utils.ResolvedConnectConfig
+    config: con_utils.ClientConfiguration
+
+
 class BasePoolImpl(abc.ABC):
     __slots__ = (
         "_connect_args",
@@ -624,7 +633,7 @@ class BasePoolImpl(abc.ABC):
         """
         self._generation += 1
 
-    async def ensure_connected(self):
+    async def ensure_connected(self) -> ConnectionInfo:
         self._ensure_initialized()
 
         for ch in self._holders:
@@ -634,6 +643,16 @@ class BasePoolImpl(abc.ABC):
         ch = self._holders[0]
         ch._con = None
         await ch.connect()
+
+        assert self._working_addr is not None
+        assert self._working_config is not None
+        assert self._working_params is not None
+        return ConnectionInfo(
+            host=self._working_addr[0],
+            port=self._working_addr[1],
+            config=self._working_config,
+            params=self._working_params,
+        )
 
 
 class BaseClient(abstract.BaseReadOnlyExecutor, _options._OptionsMixin):

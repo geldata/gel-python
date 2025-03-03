@@ -39,6 +39,18 @@ DEFAULT_PING_BEFORE_IDLE_TIMEOUT = datetime.timedelta(seconds=5)
 MINIMUM_PING_WAIT_TIME = datetime.timedelta(seconds=1)
 
 
+T = typing.TypeVar("T")
+
+
+def iter_coroutine(coro: typing.Coroutine[None, None, T]) -> T:
+    try:
+        coro.send(None)
+    except StopIteration as ex:
+        return ex.value
+    finally:
+        coro.close()
+
+
 class BlockingIOConnection(base_client.BaseConnection):
     __slots__ = ("_ping_wait_time",)
 
@@ -328,7 +340,7 @@ class Iteration(transaction.BaseTransaction, abstract.Executor):
     def __exit__(self, extype, ex, tb):
         with self._exclusive():
             self._managed = False
-            return self._client._iter_coroutine(self._exit(extype, ex))
+            return iter_coroutine(self._exit(extype, ex))
 
     async def _ensure_transaction(self):
         if not self._managed:
@@ -340,11 +352,11 @@ class Iteration(transaction.BaseTransaction, abstract.Executor):
 
     def _query(self, query_context: abstract.QueryContext):
         with self._exclusive():
-            return self._client._iter_coroutine(super()._query(query_context))
+            return iter_coroutine(super()._query(query_context))
 
     def _execute(self, execute_context: abstract.ExecuteContext) -> None:
         with self._exclusive():
-            self._client._iter_coroutine(super()._execute(execute_context))
+            iter_coroutine(super()._execute(execute_context))
 
     @contextlib.contextmanager
     def _exclusive(self):
@@ -392,22 +404,17 @@ class Client(base_client.BaseClient, abstract.Executor):
     __slots__ = ()
     _impl_class = _PoolImpl
 
-    def _iter_coroutine(self, coro):
-        try:
-            coro.send(None)
-        except StopIteration as ex:
-            return ex.value
-        finally:
-            coro.close()
-
     def _query(self, query_context: abstract.QueryContext):
-        return self._iter_coroutine(super()._query(query_context))
+        return iter_coroutine(super()._query(query_context))
 
     def _execute(self, execute_context: abstract.ExecuteContext) -> None:
-        self._iter_coroutine(super()._execute(execute_context))
+        iter_coroutine(super()._execute(execute_context))
+
+    def check_connection(self) -> base_client.ConnectionInfo:
+        return iter_coroutine(self._impl.ensure_connected())
 
     def ensure_connected(self):
-        self._iter_coroutine(self._impl.ensure_connected())
+        self.check_connection()
         return self
 
     def transaction(self) -> Retry:
@@ -421,7 +428,7 @@ class Client(base_client.BaseClient, abstract.Executor):
         in ``close()`` the pool will terminate by calling
         Client.terminate() .
         """
-        self._iter_coroutine(self._impl.close(timeout))
+        iter_coroutine(self._impl.close(timeout))
 
     def __enter__(self):
         return self.ensure_connected()
@@ -438,7 +445,7 @@ class Client(base_client.BaseClient, abstract.Executor):
         output_format: OutputFormat = OutputFormat.BINARY,
         expect_one: bool = False,
     ) -> abstract.DescribeResult:
-        return self._iter_coroutine(self._describe(abstract.DescribeContext(
+        return iter_coroutine(self._describe(abstract.DescribeContext(
             query=query,
             state=self._get_state(),
             inject_type_names=inject_type_names,
