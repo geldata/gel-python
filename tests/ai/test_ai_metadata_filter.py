@@ -1,6 +1,6 @@
 import unittest
 
-from gel.ai.metadata_filter import (
+from gel.ai import (
     MetadataFilter,
     CompositeFilter,
     FilterOperator,

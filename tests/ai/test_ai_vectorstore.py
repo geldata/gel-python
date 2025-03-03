@@ -19,24 +19,24 @@
 import os
 import unittest
 import uuid
+
 from gel import _testbase as tb
-from gel.ai.vectorstore import (
-    VectorStore,
-    BaseEmbeddingModel,
-    Item,
+from gel import create_client
+
+from gel.ai import (
+    create_vstore,
+    EmbeddingModel,
+    Vector,
     Record,
     SearchResult,
-)
-from gel.ai.metadata_filter import (
     MetadataFilter,
     CompositeFilter,
     FilterOperator,
 )
 
-
 # records to be reused in tests
 records = [
-    Item(
+    Record(
         text="""EdgeQL is a next-generation query language designed
                 to match SQL in power and surpass it in terms of clarity,
                 brevity, and intuitiveness. It's used to query the database,
@@ -44,7 +44,7 @@ records = [
                 manage transactions, and more.""",
         metadata={"category": "edgeql"},
     ),
-    Item(
+    Record(
         text="""Gel schemas are declared using SDL (Gel's
                 Schema Definition Language). Your schema is defined inside
                 .esdl files. It's common to define your entire schema in a
@@ -52,7 +52,7 @@ records = [
                 multiple files if you wish.""",
         metadata={"category": "schema"},
     ),
-    Item(
+    Record(
         text="""Object types can contain computed properties and
                 links. Computed properties and links are not persisted in the
                 database. Instead, they are evaluated on the fly whenever
@@ -62,19 +62,11 @@ records = [
 ]
 
 
-class MockEmbeddingModel(BaseEmbeddingModel):
+class MockEmbeddingModel(EmbeddingModel[str]):
     """Mocked embedding model returns fixed embeddings."""
 
-    def __call__(self, item):
+    def generate(self, item):
         return [0.1] * 1536
-
-    @property
-    def dimensions(self):
-        return 1536
-
-    @property
-    def target_type(self):
-        return str
 
 
 class TestAIVectorStore(tb.SyncQueryTestCase):
@@ -122,29 +114,22 @@ class TestAIVectorStore(tb.SyncQueryTestCase):
 
     def setUp(self):
         super().setUp()
-        self.vectorstore = VectorStore(
+
+        self.vectorstore = create_vstore(
+            client=self.client,
             embedding_model=MockEmbeddingModel(),
-            client_config={
-                "host": "localhost",
-                "port": 5656,
-                "user": "edgedb",
-                "database": "main",
-                "tls_security": "insecure",
-            },
         )
 
     def tearDown(self):
         try:
             self._clean_vectorstore()
         finally:
-            if hasattr(self, "vectorstore"):
-                self.vectorstore.gel_client.close()
             super().tearDown()
 
     def _clean_vectorstore(self):
         """Helper method to remove all records from the vectorstore."""
 
-        self.vectorstore.gel_client.execute(
+        self.client.execute(
             f"""
             delete {self.vectorstore.record_type}
             filter .collection = <str>$collection_name;
@@ -165,36 +150,36 @@ class TestAIVectorStore(tb.SyncQueryTestCase):
         hierarchical queries and accelerated development cycles."""
 
         # insert a record
-        ids = self.vectorstore.add_items(Item(text=text))
-        record_id = ids[0]
+        ids = self.vectorstore.add_records(Record(text=text))
+        vector_id = ids[0]
         self.assertIsNotNone(ids)
         self.assertEqual(len(ids), 1)
         self.assertIsInstance(ids[0], uuid.UUID)
 
-        # verify the inserted record
-        records = self.vectorstore.get(record_id)
-        self.assertEqual(len(records), 1)
-        self.assertEqual(records[0].id, record_id)
-        self.assertIsInstance(records[0], Record)
+        # verify the inserted records
+        vectors = self.vectorstore.get_by_ids(vector_id)
+        self.assertEqual(len(vectors), 1)
+        self.assertEqual(vectors[0].id, vector_id)
+        self.assertIsInstance(vectors[0], Vector)
 
-        # delete the record
-        deleted_records_ids = self.vectorstore.delete(record_id)
-        self.assertEqual(deleted_records_ids[0], record_id)
-        self.assertIsInstance(deleted_records_ids[0], uuid.UUID)
+        # delete a vector
+        deleted_vectors_ids = self.vectorstore.delete(vector_id)
+        self.assertEqual(deleted_vectors_ids[0], vector_id)
+        self.assertIsInstance(deleted_vectors_ids[0], uuid.UUID)
 
-        # verify that the record is deleted
-        records = self.vectorstore.get(record_id)
-        self.assertEqual(len(records), 0)
+        # verify that the vector is deleted
+        vectors = self.vectorstore.get_by_ids(vector_id)
+        self.assertEqual(len(vectors), 0)
 
     def test_add_multiple(self):
-        ids = self.vectorstore.add_items(*records)
+        ids = self.vectorstore.add_records(*records)
         self.assertEqual(len(ids), 3)
 
     def test_search_no_filters(self):
-        self.vectorstore.add_items(*records)
+        self.vectorstore.add_records(*records)
 
         query = "Tell me about edgeql"
-        results = self.vectorstore.search_by_item(item=query, limit=2)
+        results = self.vectorstore.search_by_record(item=query, limit=2)
 
         self.assertEqual(len(results), 2)
         # since we're using a mock embedding model that returns the same vector
@@ -206,7 +191,7 @@ class TestAIVectorStore(tb.SyncQueryTestCase):
             self.assertIsNotNone(result.metadata)
 
     def test_search_with_filters(self):
-        self.vectorstore.add_items(*records)
+        self.vectorstore.add_records(*records)
 
         filters = CompositeFilter(
             filters=[
@@ -217,7 +202,7 @@ class TestAIVectorStore(tb.SyncQueryTestCase):
         )
 
         query = "How do I use computed properties?"
-        results = self.vectorstore.search_by_item(
+        results = self.vectorstore.search_by_record(
             item=query, filters=filters, limit=3
         )
 
@@ -229,59 +214,61 @@ class TestAIVectorStore(tb.SyncQueryTestCase):
 
     def test_update_vector(self):
         # insert a record
-        ids = self.vectorstore.add(Record(embedding=[0.1] * 1536))
-        record_id = ids[0]
+        ids = self.vectorstore.add_vectors(Vector(embedding=[0.1] * 1536))
+        vector_id = ids[0]
 
         # verify the inserted record
-        record = self.vectorstore.get(record_id)[0]
-        self.assertIsInstance(record, Record)
-        self.assertIsNone(record.metadata)
-        self.assertIsNone(record.text)
-        self.assertListAlmostEqual(record.embedding, [0.1] * 1536)
+        vector = self.vectorstore.get_by_ids(vector_id)[0]
+        self.assertIsInstance(vector, Vector)
+        self.assertIsNone(vector.metadata)
+        self.assertIsNone(vector.text)
+        self.assertListAlmostEqual(vector.embedding, [0.1] * 1536)
 
         # update just metadata
         new_metadata = {"test": "test"}
-        updated_id = self.vectorstore.update(id=record_id, metadata=new_metadata)
-        self.assertEqual(updated_id, record_id)
+        updated_id = self.vectorstore.update_vector(id=vector_id, metadata=new_metadata)
+        self.assertEqual(updated_id, vector_id)
 
-        # verify the updated record
-        record = self.vectorstore.get(record_id)[0]
-        self.assertIsNone(record.text)
-        self.assertEqual(record.metadata, new_metadata)
+        # verify the updated vector
+        vector = self.vectorstore.get_by_ids(vector_id)[0]
+        self.assertIsNone(vector.text)
+        self.assertEqual(vector.metadata, new_metadata)
 
         # update both text & embedding
         new_text = "Update text content and embedding"
         new_embedding = [0.0] * 1536
-        self.vectorstore.update(id=record_id, text=new_text, embedding=new_embedding)
+        self.vectorstore.update_vector(
+            id=vector_id, text=new_text, embedding=new_embedding
+        )
 
         # verify the updated record
-        record = self.vectorstore.get(record_id)[0]
-        self.assertEqual(record.metadata, new_metadata)
-        self.assertEqual(record.text, new_text)
-        self.assertListAlmostEqual(record.embedding, new_embedding)
+        vector = self.vectorstore.get_by_ids(vector_id)[0]
+        self.assertEqual(vector.metadata, new_metadata)
+        self.assertEqual(vector.text, new_text)
+        self.assertListAlmostEqual(vector.embedding, new_embedding)
 
         # update just text: embedding should be auto-generated
         new_text = "Update just text content"
-        self.vectorstore.update(id=record_id, text=new_text)
+        self.vectorstore.update_vector(id=vector_id, text=new_text)
 
         # verify the update
-        record = self.vectorstore.get(record_id)[0]
-        self.assertEqual(record.text, new_text)
-        self.assertEqual(record.metadata, new_metadata)
+        vector = self.vectorstore.get_by_ids(vector_id)[0]
+        self.assertEqual(vector.text, new_text)
+        self.assertEqual(vector.metadata, new_metadata)
 
         # remove text and metadata
-        self.vectorstore.update(id=record_id, text=None, metadata=None)
+        self.vectorstore.update_vector(id=vector_id, text=None, metadata=None)
 
         # verify the update
-        record = self.vectorstore.get(record_id)[0]
-        self.assertIsNone(record.text)
-        self.assertIsNone(record.metadata)
+        vector = self.vectorstore.get_by_ids(vector_id)[0]
+        self.assertIsNone(vector.text)
+        self.assertIsNone(vector.metadata)
 
-    def test_update_nonexistent_record(self):
+    def test_update_nonexistent_vector(self):
         fake_id = uuid.uuid4()
-        updated = self.vectorstore.update(id=fake_id, text="This shouldn't work")
+        updated = self.vectorstore.update_vector(id=fake_id, text="This shouldn't work")
         self.assertIsNone(updated)
 
     def test_update_no_fields_specified(self):
         with self.assertRaises(ValueError):
-            self.vectorstore.update(id=uuid.uuid4())
+            self.vectorstore.update_vector(id=uuid.uuid4())

@@ -274,10 +274,16 @@ class VectorStore(BaseVectorStore[T]):
 
     def __init__(
         self,
+        client: gel.Client,
         embedding_model: Optional[EmbeddingModel] = None,
-        **kwargs,
+        collection_name: str = "default",
+        record_type: str = "ext::vectorstore::DefaultRecord",
     ):
-        super().__init__(**kwargs)
+        super().__init__(
+            client=client,
+            collection_name=collection_name,
+            record_type=record_type,
+        )
         self.embedding_model = embedding_model
 
     def add_records(self, *records: Record) -> List[uuid.UUID]:
@@ -376,7 +382,7 @@ class VectorStore(BaseVectorStore[T]):
         )
 
         return [
-            Record(
+            Vector(
                 id=result.id,
                 text=result.text,
                 embedding=result.embedding,
@@ -471,7 +477,7 @@ class VectorStore(BaseVectorStore[T]):
             for result in results
         ]
 
-    def update_record(
+    def update_vector(
         self,
         id: uuid.UUID,
         text: Union[str, None, object] = _sentinel,
@@ -660,10 +666,9 @@ class AsyncVectorStore(BaseVectorStore[T]):
             for result in results
         ]
 
-    async def update_record(
+    async def update_vector(
         self,
         id: uuid.UUID,
-        *,
         text: Union[str, None, object] = _sentinel,
         embedding: Union[Vector, None, object] = _sentinel,
         metadata: Union[Dict[str, Any], None, object] = _sentinel,

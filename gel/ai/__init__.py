@@ -28,6 +28,12 @@ from .vectorstore import (
     EmbeddingModel,
     AsyncEmbeddingModel,
 )
+from .metadata_filter import (
+    MetadataFilter,
+    CompositeFilter,
+    FilterOperator,
+    FilterCondition,
+)
 
 __all__ = [
     "RAGOptions",
@@ -45,5 +51,8 @@ __all__ = [
     "SearchResult",
     "EmbeddingModel",
     "AsyncEmbeddingModel",
-
+    "MetadataFilter",
+    "CompositeFilter",
+    "FilterOperator",
+    "FilterCondition",
 ]

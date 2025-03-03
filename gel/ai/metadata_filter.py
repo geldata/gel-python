@@ -35,7 +35,7 @@ class MetadataFilter:
     operator: FilterOperator = FilterOperator.EQ
 
     def __repr__(self):
-        value = f"{self.value!r}"
+        value = f'"{self.value}"' if isinstance(self.value, str) else self.value
         return (
             f'MetadataFilter(key="{self.key}", '
             f"value={value}, "

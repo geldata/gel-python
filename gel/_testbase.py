@@ -178,12 +178,12 @@ def _start_cluster(*, cleanup_atexit=True):
                         if line.startswith(b'READY='):
                             break
                     else:
-                        raise RuntimeError('not ready')
+                        raise RuntimeError("not ready")
                 break
             except Exception:
                 time.sleep(1)
         else:
-            raise RuntimeError('server status file not found')
+            raise RuntimeError("server status file not found")
 
         data = json.loads(line.split(b'READY=')[1])
         con_args = dict(host='localhost', port=data['port'])
@@ -203,8 +203,7 @@ def _start_cluster(*, cleanup_atexit=True):
                     ]
                 )
             else:
-                con_args['tls_ca_file'] = data['tls_cert_file']
-
+                con_args["tls_ca_file"] = data["tls_cert_file"]
         client = gel.create_client(password='test', **con_args)
         client.ensure_connected()
         client.execute("""
