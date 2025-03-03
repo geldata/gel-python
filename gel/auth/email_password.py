@@ -150,16 +150,7 @@ C = TypeVar("C", bound=Union[httpx.Client, httpx.AsyncClient])
 
 
 class BaseEmailPassword(Generic[C]):
-    def __init__(
-        self,
-        *,
-        verify_url: str,
-        reset_url: str,
-        connection_info: gel.ConnectionInfo,
-        **kwargs,
-    ):
-        self.verify_url = verify_url
-        self.reset_url = reset_url
+    def __init__(self, *, connection_info: gel.ConnectionInfo, **kwargs):
         self.provider = "builtin::local_emailpassword"
         if "base_url" not in kwargs:
             params = connection_info.params
@@ -208,7 +199,9 @@ class BaseEmailPassword(Generic[C]):
         )
         return response
 
-    async def _sign_up(self, email: str, password: str) -> SignUpResponse:
+    async def _sign_up(
+        self, email: str, password: str, *, verify_url: str
+    ) -> SignUpResponse:
         logger.info("signing up user: %s", email)
         pkce = self._generate_pkce()
         register_response = await self._http_request(
@@ -217,7 +210,7 @@ class BaseEmailPassword(Generic[C]):
             json={
                 "email": email,
                 "password": password,
-                "verify_url": self.verify_url,
+                "verify_url": verify_url,
                 "provider": self.provider,
                 "challenge": pkce.challenge,
             },
@@ -361,7 +354,7 @@ class BaseEmailPassword(Generic[C]):
             return EmailVerificationMissingProofResponse()
 
     async def _send_password_reset_email(
-        self, email: str
+        self, email: str, *, reset_url: str
     ) -> SendPasswordResetEmailResponse:
         logger.info("sending password reset email: %s", email)
         pkce = self._generate_pkce()
@@ -372,7 +365,7 @@ class BaseEmailPassword(Generic[C]):
                 "email": email,
                 "provider": self.provider,
                 "challenge": pkce.challenge,
-                "reset_url": self.reset_url,
+                "reset_url": reset_url,
             },
         )
         try:
@@ -457,8 +450,12 @@ class EmailPassword(BaseEmailPassword[httpx.Client]):
     ) -> httpx.Response:
         return self._client.send(request)
 
-    def sign_up(self, email: str, password: str) -> SignUpResponse:
-        return blocking_client.iter_coroutine(self._sign_up(email, password))
+    def sign_up(
+        self, email: str, password: str, *, verify_url: str
+    ) -> SignUpResponse:
+        return blocking_client.iter_coroutine(
+            self._sign_up(email, password, verify_url=verify_url)
+        )
 
     def sign_in(self, email: str, password: str) -> SignInResponse:
         return blocking_client.iter_coroutine(self._sign_in(email, password))
@@ -471,10 +468,10 @@ class EmailPassword(BaseEmailPassword[httpx.Client]):
         )
 
     def send_password_reset_email(
-        self, email: str
+        self, email: str, *, reset_url: str
     ) -> SendPasswordResetEmailResponse:
         return blocking_client.iter_coroutine(
-            self._send_password_reset_email(email)
+            self._send_password_reset_email(email, reset_url=reset_url)
         )
 
     def reset_password(
@@ -486,17 +483,9 @@ class EmailPassword(BaseEmailPassword[httpx.Client]):
 
 
 def make(
-    *,
-    client: gel.Client,
-    verify_url: str,
-    reset_url: str,
-    cls: Type[EmailPassword] = EmailPassword,
+    client: gel.Client, *, cls: Type[EmailPassword] = EmailPassword
 ) -> EmailPassword:
-    return cls(
-        verify_url=verify_url,
-        reset_url=reset_url,
-        connection_info=client.check_connection(),
-    )
+    return cls(connection_info=client.check_connection())
 
 
 class AsyncEmailPassword(BaseEmailPassword[httpx.AsyncClient]):
@@ -514,8 +503,10 @@ class AsyncEmailPassword(BaseEmailPassword[httpx.AsyncClient]):
     ) -> httpx.Response:
         return await self._client.send(request)
 
-    async def sign_up(self, email: str, password: str) -> SignUpResponse:
-        return await self._sign_up(email, password)
+    async def sign_up(
+        self, email: str, password: str, *, verify_url: str
+    ) -> SignUpResponse:
+        return await self._sign_up(email, password, verify_url=verify_url)
 
     async def sign_in(self, email: str, password: str) -> SignInResponse:
         return await self._sign_in(email, password)
@@ -526,9 +517,11 @@ class AsyncEmailPassword(BaseEmailPassword[httpx.AsyncClient]):
         return await self._verify_email(verification_token, verifier)
 
     async def send_password_reset_email(
-        self, email: str
+        self, email: str, *, reset_url: str
     ) -> SendPasswordResetEmailResponse:
-        return await self._send_password_reset_email(email)
+        return await self._send_password_reset_email(
+            email, reset_url=reset_url
+        )
 
     async def reset_password(
         self, reset_token: str, verifier: Optional[str], password: str
@@ -537,14 +530,8 @@ class AsyncEmailPassword(BaseEmailPassword[httpx.AsyncClient]):
 
 
 async def make_async(
-    *,
     client: gel.AsyncIOClient,
-    verify_url: str,
-    reset_url: str,
+    *,
     cls: Type[AsyncEmailPassword] = AsyncEmailPassword,
 ) -> AsyncEmailPassword:
-    return cls(
-        verify_url=verify_url,
-        reset_url=reset_url,
-        connection_info=await client.check_connection(),
-    )
+    return cls(connection_info=await client.check_connection())
