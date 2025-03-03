@@ -21,7 +21,7 @@ Documentation
 -------------
 
 The project documentation can be found
-`here <https://www.geldata.com/docs/clients/00_python/index>`_.
+`here <https://docs.geldata.com/reference/clients/python#gel-python-intro>`_.
 
 
 Installation
@@ -74,7 +74,7 @@ Development
 -----------
 
 Instructions for installing Gel and gel-python locally can be found at
-`www.geldata.com/docs/reference/dev <https://www.geldata.com/docs/reference/dev>`_.
+`docs.geldata.com/resources/guides/contributing/code <https://docs.geldata.com/resources/guides/contributing/code>`_.
 
 To run the test suite, run ``$ python setup.py test``.
 
