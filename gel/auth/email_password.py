@@ -160,8 +160,8 @@ class BaseEmailPassword(Generic[C]):
                 host=connection_info.host,
                 port=connection_info.port,
             )
-            kwargs["base_url"] = (
-                base_url.join("branch").join(params.branch).join("ext/auth")
+            kwargs["base_url"] = base_url.join(
+                f"branch/{params.branch}/ext/auth"
             )
         self._client = self._init_http_client(**kwargs)
 
