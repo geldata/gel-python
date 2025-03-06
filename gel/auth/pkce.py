@@ -20,6 +20,7 @@ from __future__ import annotations
 from typing import Generic, TypeVar, Union
 
 import base64
+import dataclasses
 import hashlib
 import logging
 import secrets
@@ -81,7 +82,11 @@ class BasePKCE(Generic[C]):
         )
         token_response.raise_for_status()
         token_json = token_response.json()
-        return token_data.TokenData(**token_json)
+        args = {
+            field.name: token_json[field.name]
+            for field in dataclasses.fields(token_data.TokenData)
+        }
+        return token_data.TokenData(**args)
 
 
 class PKCE(BasePKCE[httpx.Client]):
