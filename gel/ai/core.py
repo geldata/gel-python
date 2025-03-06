@@ -58,7 +58,7 @@ class BaseRAGClient:
         self.context = types.QueryContext(**kwargs)
         args = dict(
             base_url=f"{proto}://{host}:{port}/branch/{branch}/ext/ai",
-            verify=params.ssl_ctx,
+            verify=params.make_ssl_ctx(),
         )
         if params.password is not None:
             args["auth"] = (params.user, params.password)
