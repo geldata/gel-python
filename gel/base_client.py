@@ -638,12 +638,15 @@ class BasePoolImpl(abc.ABC):
 
         for ch in self._holders:
             if ch._con is not None and not ch._con.is_closed():
-                return
+                return self._make_connection_info()
 
         ch = self._holders[0]
         ch._con = None
         await ch.connect()
 
+        return self._make_connection_info()
+
+    def _make_connection_info(self) -> ConnectionInfo:
         assert self._working_addr is not None
         assert self._working_config is not None
         assert self._working_params is not None
