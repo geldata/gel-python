@@ -57,7 +57,7 @@ class BaseRAGClient:
             base_url=(
                 f"{proto}://{info.host}:{info.port}/branch/{branch}/ext/ai"
             ),
-            verify=info.params.ssl_ctx,
+            verify=info.params.make_ssl_ctx(),
         )
         if info.params.password is not None:
             args["auth"] = (info.params.user, info.params.password)
