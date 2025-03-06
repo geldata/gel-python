@@ -50,7 +50,11 @@ filter
     and
     not .internal
     and
-    not re_test('^(std|cfg|sys|schema)::', .name);
+    not .from_alias
+    and
+    not re_test('^(std|cfg|sys|schema)::', .name)
+    and
+    not any(re_test('^(cfg|sys|schema)::', .ancestors.name));
 '''
 
 MODULE_QUERY = '''

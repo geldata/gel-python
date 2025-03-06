@@ -111,7 +111,7 @@ jobs:
 
     env:
       PIP_DISABLE_PIP_VERSION_CHECK: 1
-      EDGEDB_SERVER_VERSION: 5
+      EDGEDB_SERVER_VERSION: 6
 
     steps:
     - uses: actions/checkout@v3
@@ -133,7 +133,11 @@ jobs:
       uses: docker/setup-qemu-action@v2
 
     - name: Install EdgeDB
+      # Linux installs via the CIBW_BEFORE_ALL_LINUX command below
+      if: runner.os != 'Linux'
       uses: edgedb/setup-edgedb@v1
+      with:
+        server-version: ${{ env.EDGEDB_SERVER_VERSION }}
 
     - uses: pypa/cibuildwheel@v2.22.0
       with:
@@ -144,14 +148,14 @@ jobs:
           EDGEDB_SERVER_VERSION=${{ env.EDGEDB_SERVER_VERSION }} .github/workflows/install-edgedb.sh
         CIBW_TEST_EXTRAS: "test"
         CIBW_TEST_COMMAND: >
-          EDGEDB_TEST_CODEGEN_ASSERT_SUFFIX=.assert${{ env.EDGEDB_SERVER_VERSION }} python {project}/tests/__init__.py
+          python {project}/tests/__init__.py
         CIBW_TEST_COMMAND_WINDOWS: >
-          set EDGEDB_TEST_CODEGEN_ASSERT_SUFFIX=.assert${{ env.EDGEDB_SERVER_VERSION }} && python {project}\tests\__init__.py
+          python {project}\tests\__init__.py
         CIBW_TEST_COMMAND_LINUX: >
           PY=`which python`
           && CODEGEN=`which gel-py`
           && chmod -R go+rX "$(dirname $(dirname $(dirname $PY)))"
-          && su -l edgedb -c "EDGEDB_PYTHON_TEST_CODEGEN_CMD=$CODEGEN EDGEDB_TEST_CODEGEN_ASSERT_SUFFIX=.assert${{ env.EDGEDB_SERVER_VERSION }} $PY {project}/tests/__init__.py"
+          && su -l edgedb -c "EDGEDB_PYTHON_TEST_CODEGEN_CMD=$CODEGEN $PY {project}/tests/__init__.py"
 
     - uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6874  # v4.4.0
       with:

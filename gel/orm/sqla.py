@@ -124,9 +124,8 @@ class ModelGenerator(FilePrinter):
             try:
                 self.out = f
                 self.write(MODELS_STUB)
-                relimport = '.' * len(dirpath)
-                self.write(f'from {relimport}._sqlabase import Base')
-                self.write(f'from {relimport}._tables import *')
+                self.write(f'from {self.basemodule}._sqlabase import Base')
+                self.write(f'from {self.basemodule}._tables import *')
                 yield f
             finally:
                 self.out = None
@@ -201,11 +200,11 @@ class ModelGenerator(FilePrinter):
                 self.render_link_table(rec)
 
         for mod, maps in modules.items():
-            with self.init_module(mod, modules):
-                if not maps:
-                    # skip apparently empty modules
-                    continue
+            if not maps:
+                # skip apparently empty modules
+                continue
 
+            with self.init_module(mod, modules):
                 link_objects = sorted(
                     maps.get('link_objects', {}).values(),
                     key=lambda x: x['name'],

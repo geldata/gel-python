@@ -94,11 +94,6 @@ jobs:
         LOOP_IMPL: ${{ matrix.loop }}
         SERVER_VERSION: ${{ matrix.edgedb-version }}
       run: |
-        if [ "${SERVER_VERSION}" = "nightly" ]; then
-          export EDGEDB_TEST_CODEGEN_ASSERT_SUFFIX=.assert
-        else
-          export EDGEDB_TEST_CODEGEN_ASSERT_SUFFIX=.assert${SERVER_VERSION}
-        fi
         if [ "${LOOP_IMPL}" = "uvloop" ]; then
             env USE_UVLOOP=1 python -m unittest -v tests.suite
         else
