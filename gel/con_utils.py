@@ -378,29 +378,32 @@ class ResolvedConnectConfig:
         if (self._ssl_ctx):
             return self._ssl_ctx
 
-        self._ssl_ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+        self._ssl_ctx = self.make_ssl_ctx()
+        self._ssl_ctx.set_alpn_protocols(['edgedb-binary'])
+        return self._ssl_ctx
+
+    def make_ssl_ctx(self):
+        ssl_ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
 
         if self._tls_ca_data:
-            self._ssl_ctx.load_verify_locations(
+            ssl_ctx.load_verify_locations(
                 cadata=self._tls_ca_data
             )
         else:
-            self._ssl_ctx.load_default_certs(ssl.Purpose.SERVER_AUTH)
+            ssl_ctx.load_default_certs(ssl.Purpose.SERVER_AUTH)
             if platform.IS_WINDOWS:
                 import certifi
-                self._ssl_ctx.load_verify_locations(cafile=certifi.where())
+                ssl_ctx.load_verify_locations(cafile=certifi.where())
 
         tls_security = self.tls_security
-        self._ssl_ctx.check_hostname = tls_security == "strict"
+        ssl_ctx.check_hostname = tls_security == "strict"
 
         if tls_security in {"strict", "no_host_verification"}:
-            self._ssl_ctx.verify_mode = ssl.CERT_REQUIRED
+            ssl_ctx.verify_mode = ssl.CERT_REQUIRED
         else:
-            self._ssl_ctx.verify_mode = ssl.CERT_NONE
+            ssl_ctx.verify_mode = ssl.CERT_NONE
 
-        self._ssl_ctx.set_alpn_protocols(['edgedb-binary'])
-
-        return self._ssl_ctx
+        return ssl_ctx
 
     @property
     def wait_until_available(self):
