@@ -138,7 +138,7 @@ class ModelGenerator(FilePrinter):
             # process properties as fields
             for prop in rec['properties']:
                 pname = prop['name']
-                if pname == 'id' or prop['cardinality'] == 'Many':
+                if prop['cardinality'] == 'Many':
                     continue
 
                 code = self.render_prop(prop)

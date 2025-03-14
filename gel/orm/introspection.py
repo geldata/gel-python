@@ -42,7 +42,7 @@ select ObjectType {
             filter .name = 'std::exclusive'
         ),
         target: {name},
-    } filter not exists .expr,
+    } filter .name != 'id' and not exists .expr,
     backlinks := <array<str>>[],
 }
 filter

@@ -293,8 +293,7 @@ class ModelGenerator(FilePrinter):
             self.write('# Properties:')
 
             for prop in spec['properties']:
-                if prop['name'] != 'id':
-                    self.render_prop(prop, mod, name, {})
+                self.render_prop(prop, mod, name, {})
 
         self.dedent()
 
@@ -340,8 +339,7 @@ class ModelGenerator(FilePrinter):
 
             properties = sorted(spec['properties'], key=field_name_sort)
             for prop in properties:
-                if prop['name'] != 'id':
-                    self.render_prop(prop, mod, name, modules)
+                self.render_prop(prop, mod, name, modules)
 
         if spec['links']:
             self.write()
