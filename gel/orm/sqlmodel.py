@@ -24,6 +24,7 @@ GEL_SCALAR_MAP = {
     'std::datetime': ('datetime.datetime', 'sa.TIMESTAMP(timezone=True)'),
 }
 
+ARRAY_RE = re.compile(r'^array<(?P<el>.+)>$')
 CLEAN_RE = re.compile(r'[^A-Za-z0-9]+')
 NAME_RE = re.compile(r'^(?P<alpha>\w+?)(?P<num>\d*)$')
 
@@ -398,6 +399,13 @@ class ModelGenerator(FilePrinter):
         cardinality = spec['cardinality']
 
         target = spec['target']['name']
+        is_array = False
+        match = ARRAY_RE.fullmatch(target)
+
+        if match:
+            is_array = True
+            target = match.group('el')
+
         try:
             pytype, sa_col = GEL_SCALAR_MAP[target]
 
@@ -409,18 +417,36 @@ class ModelGenerator(FilePrinter):
             # Skip rendering this one
             return
 
+        if is_array:
+            pytype = f'list[{pytype}]'
+
         if cardinality == 'Many':
             # skip it
             return
 
         else:
             # plain property
-            opt = ' | None' if nullable else ''
+            if nullable and not is_array:
+                opt = ' | None'
+            else:
+                opt = ''
+
             if sa_col:
+                if is_array:
+                    sa_col = f'sa.ARRAY({sa_col})'
+
                 self.write(
                     f'{name}: {pytype}{opt} = sm.Field(sa_column=sa.Column(')
                 self.indent()
                 self.write(f'{sa_col},')
+                self.write(f'nullable={nullable},')
+                self.dedent()
+                self.write(f'))')
+            elif is_array:
+                # Needs an sa_column, but no explicit type
+                self.write(
+                    f'{name}: {pytype}{opt} = sm.Field(sa_column=sa.Column(')
+                self.indent()
                 self.write(f'nullable={nullable},')
                 self.dedent()
                 self.write(f'))')
