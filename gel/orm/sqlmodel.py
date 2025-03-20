@@ -204,7 +204,7 @@ class ModelGenerator(FilePrinter):
                     maps.get('object_types', {}).values(),
                     key=lambda x: x['name']
                 )
-                for rec in maps.get('object_types', {}).values():
+                for rec in objects:
                     self.write()
                     self.render_base_type(rec, modules)
                     self.write()
