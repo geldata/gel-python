@@ -1,0 +1,395 @@
+#
+# This source file is part of the EdgeDB open source project.
+#
+# Copyright 2025-present MagicStack Inc. and the EdgeDB authors.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+
+import argparse
+import getpass
+import io
+import os
+import pathlib
+import sys
+import textwrap
+import typing
+
+from collections import defaultdict
+from contextlib import contextmanager
+from pydantic import BaseModel
+
+import gel
+from gel import abstract
+from gel import describe
+from gel.con_utils import find_gel_project_dir
+from gel.color import get_color
+
+from gel.orm.introspection import FilePrinter, get_mod_and_name
+
+
+C = get_color()
+SYS_VERSION_INFO = os.getenv("EDGEDB_PYTHON_CODEGEN_PY_VER")
+if SYS_VERSION_INFO:
+    SYS_VERSION_INFO = tuple(map(int, SYS_VERSION_INFO.split(".")))[:2]
+else:
+    SYS_VERSION_INFO = sys.version_info[:2]
+
+TYPE_MAPPING = {
+    "std::str": "str",
+    "std::float32": "float",
+    "std::float64": "float",
+    "std::int16": "int",
+    "std::int32": "int",
+    "std::int64": "int",
+    "std::bigint": "int",
+    "std::bool": "bool",
+    "std::uuid": "uuid.UUID",
+    "std::bytes": "bytes",
+    "std::decimal": "decimal.Decimal",
+    "std::datetime": "datetime.datetime",
+    "std::duration": "datetime.timedelta",
+    "std::json": "str",
+    "cal::local_date": "datetime.date",
+    "cal::local_time": "datetime.time",
+    "cal::local_datetime": "datetime.datetime",
+    "cal::relative_duration": "gel.RelativeDuration",
+    "cal::date_duration": "gel.DateDuration",
+    "cfg::memory": "gel.ConfigMemory",
+    "ext::pgvector::vector": "array.array",
+}
+
+TYPE_IMPORTS = {
+    "std::uuid": "uuid",
+    "std::decimal": "decimal",
+    "std::datetime": "datetime",
+    "std::duration": "datetime",
+    "cal::local_date": "datetime",
+    "cal::local_time": "datetime",
+    "cal::local_datetime": "datetime",
+    "ext::pgvector::vector": "array",
+}
+
+INPUT_TYPE_MAPPING = TYPE_MAPPING.copy()
+INPUT_TYPE_MAPPING.update(
+    {
+        "ext::pgvector::vector": "typing.Sequence[float]",
+    }
+)
+
+INPUT_TYPE_IMPORTS = TYPE_IMPORTS.copy()
+INPUT_TYPE_IMPORTS.update(
+    {
+        "ext::pgvector::vector": "typing",
+    }
+)
+
+
+def print_msg(msg):
+    print(msg, file=sys.stderr)
+
+
+def print_error(msg):
+    print_msg(f"{C.BOLD}{C.FAIL}error: {C.ENDC}{C.BOLD}{msg}{C.ENDC}")
+
+
+def _get_conn_args(args: argparse.Namespace):
+    if args.password_from_stdin:
+        if args.password:
+            print_error(
+                "--password and --password-from-stdin are "
+                "mutually exclusive",
+            )
+            sys.exit(22)
+        if sys.stdin.isatty():
+            password = getpass.getpass()
+        else:
+            password = sys.stdin.read().strip()
+    else:
+        password = args.password
+    if args.dsn and args.instance:
+        print_error("--dsn and --instance are mutually exclusive")
+        sys.exit(22)
+    return dict(
+        dsn=args.dsn or args.instance,
+        credentials_file=args.credentials_file,
+        host=args.host,
+        port=args.port,
+        database=args.database,
+        user=args.user,
+        password=password,
+        tls_ca_file=args.tls_ca_file,
+        tls_security=args.tls_security,
+    )
+
+INTRO_QUERY = '''
+with module schema
+select ObjectType {
+    name,
+    links: {
+        name,
+        readonly,
+        required,
+        cardinality,
+        exclusive := exists (
+            select .constraints
+            filter .name = 'std::exclusive'
+        ),
+        target: {name},
+        constraints: {
+            name,
+            params: {name, @value},
+        },
+
+        properties: {
+            name,
+            readonly,
+            required,
+            cardinality,
+            exclusive := exists (
+                select .constraints
+                filter .name = 'std::exclusive'
+            ),
+            target: {name},
+            constraints: {
+                name,
+                params: {name, @value},
+            },
+        },
+    } filter .name != '__type__' and not exists .expr,
+    properties: {
+        name,
+        readonly,
+        required,
+        cardinality,
+        exclusive := exists (
+            select .constraints
+            filter .name = 'std::exclusive'
+        ),
+        target: {name},
+        constraints: {
+            name,
+            params: {name, @value},
+        },
+    } filter .name != 'id' and not exists .expr,
+    backlinks := <array<str>>[],
+}
+filter
+    not .builtin
+    and
+    not .internal
+    and
+    not .from_alias
+    and
+    not re_test('^(std|cfg|sys|schema)::', .name)
+    and
+    not any(re_test('^(cfg|sys|schema)::', .ancestors.name));
+'''
+
+MODULE_QUERY = '''
+with
+    module schema,
+    m := (select `Module` filter not .builtin)
+select _ := m.name order by _;
+'''
+
+COMMENT = '''\
+#
+# Automatically generated from Gel schema.
+#
+# Do not edit directly as re-generating this file will overwrite any changes.
+#\
+'''
+
+class Generator(FilePrinter):
+    def __init__(self, args: argparse.Namespace):
+        self._default_module = "default"
+        self._targets = args.target
+        self._async = False
+        try:
+            self._project_dir = pathlib.Path(find_gel_project_dir())
+        except gel.ClientConnectionError:
+            print(
+                "Cannot find gel.toml: "
+                "codegen must be run under an EdgeDB project dir"
+            )
+            sys.exit(2)
+        print_msg(f"Found EdgeDB project: {C.BOLD}{self._project_dir}{C.ENDC}")
+        self._client = gel.create_client(**_get_conn_args(args))
+        self._describe_results = []
+
+        self._cache = {}
+        self._imports = set()
+        self._aliases = {}
+        self._defs = {}
+        self._names = set()
+
+        self._basemodule = 'models'
+        self._outdir = pathlib.Path('models')
+        self._modules = {}
+        self._types = {}
+
+        super().__init__()
+
+    def run(self):
+        try:
+            self._client.ensure_connected()
+        except gel.EdgeDBError as e:
+            print(f"Failed to connect to EdgeDB instance: {e}")
+            sys.exit(61)
+
+        self.get_schema()
+
+        with self._client:
+            for mod, maps in self._modules.items():
+                if not maps:
+                    # skip apparently empty modules
+                    continue
+
+                with self.init_module(mod):
+                    self.write_types(maps)
+
+        print_msg(f"{C.GREEN}{C.BOLD}Done.{C.ENDC}")
+
+    def get_schema(self):
+        for mod in self._client.query(MODULE_QUERY):
+            self._modules[mod] = {
+                'object_types': {},
+                'scalar_types': {},
+            }
+
+        for t in self._client.query(INTRO_QUERY):
+            mod, name = get_mod_and_name(t.name)
+            self._types[t.name] = t
+            self._modules[mod]['object_types'][t.name] = t
+
+    def init_dir(self, dirpath):
+        if not dirpath:
+            # nothing to initialize
+            return
+
+        path = pathlib.Path(dirpath).resolve()
+
+        # ensure `path` directory exists
+        if not path.exists():
+            path.mkdir()
+        elif not path.is_dir():
+            raise NotADirectoryError(
+                f'{path!r} exists, but it is not a directory')
+
+        # ensure `path` directory contains `__init__.py`
+        (path / '__init__.py').touch()
+
+    @contextmanager
+    def init_module(self, mod):
+        if any(m.startswith(f'{mod}::') for m in self._modules):
+            # This is a prefix in another module, thus it is part of a nested
+            # module structure.
+            dirpath = mod.split('::')
+            filename = '__init__.py'
+        else:
+            # This is a leaf module, so we just need to create a corresponding
+            # <mod>.py file.
+            *dirpath, filename = mod.split('::')
+            filename = f'{filename}.py'
+
+        # Along the dirpath we need to ensure that all packages are created
+        path = self._outdir
+        for el in dirpath:
+            path = path / el
+            self.init_dir(path)
+
+        with open(path / filename, 'wt') as f:
+            try:
+                self.out = f
+                self.write(f'{COMMENT}\n')
+                yield f
+            finally:
+                self.out = None
+
+    def write_types(self, maps):
+        object_types = maps['object_types']
+        scalar_types = maps['scalar_types']
+
+        if object_types:
+            self.write(f'from typing import Optional, Any, Annotated')
+            self.write(f'from gel.compatibility import pydmodels as gm')
+
+        objects = sorted(
+            object_types.values(), key=lambda x: x.name
+        )
+        for obj in objects:
+            self.render_type(obj)
+
+    def render_type(self, objtype):
+        mod, name = get_mod_and_name(objtype.name)
+
+        self.write()
+        self.write()
+        self.write(f'class {name}(gm.BaseGelModel):')
+        self.indent()
+        self.write(f'__gel_name__ = {objtype.name!r}')
+
+        if len(objtype.properties) > 0:
+            self.write()
+            self.write('# Properties:')
+            for prop in objtype.properties:
+                self.render_prop(prop, mod)
+
+        if len(objtype.links) > 0:
+            self.write()
+            self.write('# Properties:')
+            for link in objtype.links:
+                self.render_link(link, mod)
+
+        self.dedent()
+
+    def render_prop(self, prop, curmod):
+        pytype = TYPE_MAPPING.get(prop.target.name)
+        defval = ''
+        if not pytype:
+            # skip
+            return
+
+        # FIXME: need to also handle multi
+
+        if not prop.required:
+            pytype = f'Optional[{pytype}]'
+            # A value does not need to be supplied
+            defval = ' = None'
+
+        if prop.exclusive:
+            pytype = f'Annotated[{pytype}, gm.Exclusive]'
+
+        self.write(
+            f'{prop.name}: {pytype}{defval}'
+        )
+
+    def render_link(self, link, curmod):
+        mod, name = get_mod_and_name(link.target.name)
+        if curmod == mod:
+            pytype = name
+        else:
+            pytype = link.target.name.replace('::', '.')
+
+        # FIXME: need to also handle multi
+
+        if link.required:
+            self.write(
+                f'{link.name}: {pytype!r}'
+            )
+        else:
+            # A value does not need to be supplied
+            self.write(
+                f'{link.name}: Optional[{pytype!r}] = None'
+            )
