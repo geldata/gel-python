@@ -20,7 +20,7 @@
 import argparse
 import sys
 
-from . import generator
+from . import generator, models
 
 
 class ColoredArgumentParser(argparse.ArgumentParser):
@@ -68,6 +68,13 @@ parser.add_argument(
     default=["async"],
     help="Choose one or more targets to generate code (default is async)."
 )
+parser.add_argument(
+    "--models",
+    action="store_true",
+    default=False,
+    help="Using the schema generate Pydantic models that can be used for "
+    "bulk inserts.",
+)
 if sys.version_info[:2] >= (3, 9):
     parser.add_argument(
         "--skip-pydantic-validation",
@@ -94,6 +101,10 @@ else:
 
 def main():
     args = parser.parse_args()
+    if args.models:
+        models.Generator(args).run()
+        return
+
     if not hasattr(args, "skip_pydantic_validation"):
         args.skip_pydantic_validation = True
     generator.Generator(args).run()
