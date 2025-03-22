@@ -28,6 +28,7 @@ import logging
 import pathlib
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -96,7 +97,19 @@ def _start_cluster(*, cleanup_atexit=True):
         # not interfere with the server's.
         env.pop('PYTHONPATH', None)
 
-        gel_server = env.get('EDGEDB_SERVER_BINARY', 'edgedb-server')
+        gel_server = env.get('GEL_SERVER_BINARY')
+        if not gel_server:
+            gel_server = env.get('EDGEDB_SERVER_BINARY')
+        if not gel_server:
+            gel_server = shutil.which("gel-server")
+        if not gel_server:
+            gel_server = shutil.which("edgedb-server")
+        if not gel_server:
+            raise RuntimeError(
+                "could not find gel-server binary; modify PATH "
+                "or specify the binary directly via the GEL_SERVER_BINARY "
+                "environment variable",
+            )
 
         version_args = [gel_server, '--version']
         if sys.platform == 'win32':

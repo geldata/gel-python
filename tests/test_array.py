@@ -16,7 +16,9 @@
 # limitations under the License.
 #
 
+import unittest
 
+from gel import errors
 from gel import _testbase as tb
 
 
@@ -24,10 +26,12 @@ class TestArrayOfArray(tb.SyncQueryTestCase):
     def setUp(self):
         super().setUp()
 
-        if self.client.query_required_single('''
-            select sys::get_version().major < 7
-        '''):
-            self.skipTest("Test needs nested arrays")
+        try:
+            self.client.query_required_single("select <array<array<int64>>>[]")
+        except errors.UnsupportedFeatureError:
+            raise unittest.SkipTest(
+                "nested arrays unsupported by server"
+            ) from None
 
     async def test_array_of_array_01(self):
         # basic array of array
