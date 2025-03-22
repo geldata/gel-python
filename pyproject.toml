@@ -5,7 +5,7 @@ authors = [
     { name = "Gel Data Inc.", email = "hello@geldata.com" },
     { name = "Gel Contributors" },
 ]
-requires-python = ">=3.8.0"
+requires-python = ">=3.9.0"
 readme = "README.rst"
 license = { text = "Apache License, Version 2.0" }
 dynamic = ["version"]
@@ -18,7 +18,6 @@ classifiers = [
     "Operating System :: MacOS :: MacOS X",
     "Operating System :: Microsoft :: Windows",
     "Programming Language :: Python :: 3 :: Only",
-    "Programming Language :: Python :: 3.8",
     "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
@@ -88,7 +87,7 @@ exclude = [
     "^target",
 ]
 files = ["edgedb", "gel", "tests"]
-python_version = "3.8"
+python_version = "3.9"
 follow_imports = "normal"
 ignore_missing_imports = true
 warn_redundant_casts = true
@@ -103,7 +102,7 @@ local_partial_types = true
 # ========================
 [tool.black]
 line-length = 79
-target-version = ["py38"]
+target-version = ["py39"]
 
 # ========================
 #           RUFF
@@ -112,6 +111,7 @@ target-version = ["py38"]
 [tool.ruff]
 line-length = 80
 indent-width = 4
+target-version = "py39"
 exclude = [
     ".github",
     ".git",
