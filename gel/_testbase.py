@@ -100,16 +100,37 @@ def _start_cluster(*, cleanup_atexit=True):
         gel_server = env.get('GEL_SERVER_BINARY')
         if not gel_server:
             gel_server = env.get('EDGEDB_SERVER_BINARY')
+
         if not gel_server:
-            gel_server = shutil.which("gel-server")
-        if not gel_server:
-            gel_server = shutil.which("edgedb-server")
-        if not gel_server:
-            raise RuntimeError(
-                "could not find gel-server binary; modify PATH "
-                "or specify the binary directly via the GEL_SERVER_BINARY "
-                "environment variable",
-            )
+            if sys.platform == "win32":
+                which_res = subprocess.run(
+                    ["wsl", "-u", "edgedb", "which", "gel-server"],
+                    capture_output=True,
+                    text=True,
+                )
+                if which_res.returncode != 0:
+                    which_res = subprocess.run(
+                        ["wsl", "-u", "edgedb", "which", "edgedb-server"],
+                        capture_output=True,
+                        text=True,
+                    )
+                if which_res.returncode != 0:
+                    raise RuntimeError(
+                        "could not find gel-server binary; "
+                        "specify the path of the binary (in WSL) directly via "
+                        "the GEL_SERVER_BINARY environment variable",
+                    )
+                gel_server = which_res.stdout.strip()
+            else:
+                gel_server = shutil.which("gel-server")
+                if not gel_server:
+                    gel_server = shutil.which("edgedb-server")
+                if not gel_server:
+                    raise RuntimeError(
+                        "could not find gel-server binary; modify PATH "
+                        "or specify the binary directly via the "
+                        "GEL_SERVER_BINARY environment variable",
+                    )
 
         version_args = [gel_server, '--version']
         if sys.platform == 'win32':
