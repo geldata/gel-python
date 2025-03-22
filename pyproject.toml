@@ -58,6 +58,7 @@ issues = "https://github.com/geldata/gel-python/issues"
 [project.scripts]
 edgedb-py = "gel.codegen.cli:main"
 gel-py = "gel.codegen.cli:main"
+gel-generate = "gel.codegen.cli:generate"
 gel-orm = "gel.orm.cli:main"
 gel = "gel.cli:main"
 
@@ -89,6 +90,7 @@ exclude = [
 files = ["edgedb", "gel", "tests"]
 python_version = "3.9"
 follow_imports = "normal"
+ignore_errors = true
 ignore_missing_imports = true
 warn_redundant_casts = true
 warn_unused_configs = true
@@ -96,6 +98,12 @@ show_column_numbers = true
 show_error_codes = true
 local_partial_types = true
 
+[[tool.mypy.overrides]]
+module = [
+    "gel.codegen.*",
+]
+strict = true
+ignore_errors = false
 
 # ========================
 #          BLACK
@@ -109,7 +117,7 @@ target-version = ["py39"]
 # ========================
 
 [tool.ruff]
-line-length = 80
+line-length = 79
 indent-width = 4
 target-version = "py39"
 exclude = [

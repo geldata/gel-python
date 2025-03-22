@@ -1128,7 +1128,7 @@ def _resolve_config_options(
         return False
 
 
-def find_gel_project_dir():
+def find_gel_project_dir() -> str:
     dir = os.getcwd()
     dev = os.stat(dir).st_dev
 

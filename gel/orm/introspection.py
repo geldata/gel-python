@@ -1,3 +1,8 @@
+from typing import (
+    Optional,
+)
+
+import io
 import json
 import re
 import collections
@@ -78,7 +83,7 @@ def get_sql_name(name):
     return name
 
 
-def get_mod_and_name(name):
+def get_mod_and_name(name: str) -> tuple[str, str]:
     # Assume the names are already validated to be properly formed
     # alphanumeric identifiers that may be prefixed by a module. If the module
     # is present assume it is safe to drop it (currently only defualt module
@@ -86,7 +91,7 @@ def get_mod_and_name(name):
 
     # Split on module separator. Potentially if we ever handle more unusual
     # names, there may be more processing done.
-    return name.rsplit('::', 1)
+    return tuple(name.rsplit('::', 1))  # type: ignore
 
 
 def valid_name(name):
@@ -245,26 +250,26 @@ def _process_links(types, modules):
     }
 
 
-class FilePrinter(object):
+class FilePrinter:
     INDENT = ' ' * 4
 
-    def __init__(self):
+    def __init__(self) -> None:
         # set the output to be stdout by default, but this is generally
         # expected to be overridden
-        self.out = None
+        self.out: Optional[io.TextIOBase] = None
         self._indent_level = 0
 
-    def indent(self):
+    def indent(self) -> None:
         self._indent_level += 1
 
-    def dedent(self):
+    def dedent(self) -> None:
         if self._indent_level > 0:
             self._indent_level -= 1
 
-    def reset_indent(self):
+    def reset_indent(self) -> None:
         self._indent_level = 0
 
-    def write(self, text=''):
+    def write(self, text: str = "") -> None:
         print(
             textwrap.indent(text, prefix=self.INDENT * self._indent_level),
             file=self.out,

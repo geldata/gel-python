@@ -16,159 +16,44 @@
 # limitations under the License.
 #
 
+from typing import (
+    Iterator,
+    Iterable,
+    Optional,
+    Union,
+)
+
 import argparse
-import getpass
 import io
-import os
 import pathlib
 import sys
 import textwrap
-import typing
+import uuid
 
 import gel
 from gel import abstract
 from gel import describe
-from gel.con_utils import find_gel_project_dir
-from gel.color import get_color
+
+from . import base
+from .base import C, print_msg, print_error
 
 
-C = get_color()
-SYS_VERSION_INFO = os.getenv("EDGEDB_PYTHON_CODEGEN_PY_VER")
-if SYS_VERSION_INFO:
-    SYS_VERSION_INFO = tuple(map(int, SYS_VERSION_INFO.split(".")))[:2]
-else:
-    SYS_VERSION_INFO = sys.version_info[:2]
-
-INDENT = "    "
 SUFFIXES = [
     ("async", "_async_edgeql.py", True),
     ("blocking", "_edgeql.py", False),
 ]
+
+INDENT = "    "
 FILE_MODE_OUTPUT_FILE = "generated"
 
-TYPE_MAPPING = {
-    "std::str": "str",
-    "std::float32": "float",
-    "std::float64": "float",
-    "std::int16": "int",
-    "std::int32": "int",
-    "std::int64": "int",
-    "std::bigint": "int",
-    "std::bool": "bool",
-    "std::uuid": "uuid.UUID",
-    "std::bytes": "bytes",
-    "std::decimal": "decimal.Decimal",
-    "std::datetime": "datetime.datetime",
-    "std::duration": "datetime.timedelta",
-    "std::json": "str",
-    "cal::local_date": "datetime.date",
-    "cal::local_time": "datetime.time",
-    "cal::local_datetime": "datetime.datetime",
-    "cal::relative_duration": "gel.RelativeDuration",
-    "cal::date_duration": "gel.DateDuration",
-    "cfg::memory": "gel.ConfigMemory",
-    "ext::pgvector::vector": "array.array",
-}
 
-TYPE_IMPORTS = {
-    "std::uuid": "uuid",
-    "std::decimal": "decimal",
-    "std::datetime": "datetime",
-    "std::duration": "datetime",
-    "cal::local_date": "datetime",
-    "cal::local_time": "datetime",
-    "cal::local_datetime": "datetime",
-    "ext::pgvector::vector": "array",
-}
-
-INPUT_TYPE_MAPPING = TYPE_MAPPING.copy()
-INPUT_TYPE_MAPPING.update(
-    {
-        "ext::pgvector::vector": "typing.Sequence[float]",
-    }
-)
-
-INPUT_TYPE_IMPORTS = TYPE_IMPORTS.copy()
-INPUT_TYPE_IMPORTS.update(
-    {
-        "ext::pgvector::vector": "typing",
-    }
-)
-
-PYDANTIC_MIXIN = """\
-class NoPydanticValidation:
-    @classmethod
-    def __get_pydantic_core_schema__(cls, _source_type, _handler):
-        # Pydantic 2.x
-        from pydantic_core.core_schema import any_schema
-        return any_schema()
-
-    @classmethod
-    def __get_validators__(cls):
-        # Pydantic 1.x
-        from pydantic.dataclasses import dataclass as pydantic_dataclass
-        _ = pydantic_dataclass(cls)
-        cls.__pydantic_model__.__get_validators__ = lambda: []
-        return []\
-"""
-
-
-def print_msg(msg):
-    print(msg, file=sys.stderr)
-
-
-def print_error(msg):
-    print_msg(f"{C.BOLD}{C.FAIL}error: {C.ENDC}{C.BOLD}{msg}{C.ENDC}")
-
-
-def _get_conn_args(args: argparse.Namespace):
-    if args.password_from_stdin:
-        if args.password:
-            print_error(
-                "--password and --password-from-stdin are "
-                "mutually exclusive",
-            )
-            sys.exit(22)
-        if sys.stdin.isatty():
-            password = getpass.getpass()
-        else:
-            password = sys.stdin.read().strip()
-    else:
-        password = args.password
-    if args.dsn and args.instance:
-        print_error("--dsn and --instance are mutually exclusive")
-        sys.exit(22)
-    return dict(
-        dsn=args.dsn or args.instance,
-        credentials_file=args.credentials_file,
-        host=args.host,
-        port=args.port,
-        database=args.database,
-        user=args.user,
-        password=password,
-        tls_ca_file=args.tls_ca_file,
-        tls_security=args.tls_security,
-    )
-
-
-class Generator:
+class QueriesGenerator(base.Generator):
     def __init__(self, args: argparse.Namespace):
-        self._default_module = "default"
-        self._targets = args.target
-        self._skip_pydantic_validation = args.skip_pydantic_validation
-        self._async = False
-        try:
-            self._project_dir = pathlib.Path(find_gel_project_dir())
-        except gel.ClientConnectionError:
-            print(
-                "Cannot find gel.toml: "
-                "codegen must be run under an EdgeDB project dir"
-            )
-            sys.exit(2)
-        print_msg(f"Found EdgeDB project: {C.BOLD}{self._project_dir}{C.ENDC}")
-        self._client = gel.create_client(**_get_conn_args(args))
+        super().__init__(args)
         self._single_mode_files = args.file
         self._search_dirs = []
+        self._targets = args.target
+        self._skip_pydantic_validation = args.skip_pydantic_validation
         for search_dir in args.dir or []:
             search_dir = pathlib.Path(search_dir).absolute()
             if (
@@ -182,17 +67,19 @@ class Generator:
                     f"the project directory: {self._project_dir}"
                 )
                 sys.exit(1)
-        self._method_names = set()
-        self._describe_results = []
+        self._method_names: set[str] = set()
+        self._describe_results: list[
+            tuple[str, pathlib.Path, str, abstract.DescribeResult]
+        ] = []
 
-        self._cache = {}
-        self._imports = set()
-        self._aliases = {}
-        self._defs = {}
-        self._names = set()
+        self._cache: dict[tuple[uuid.UUID, bool], str] = {}
+        self._imports: set[str] = set()
+        self._aliases: dict[str, str] = {}
+        self._defs: dict[str, str] = {}
+        self._names: set[str] = set()
         self._use_pydantic = False
 
-    def _new_file(self):
+    def _new_file(self) -> None:
         self._cache.clear()
         self._imports.clear()
         self._aliases.clear()
@@ -200,7 +87,7 @@ class Generator:
         self._names.clear()
         self._use_pydantic = False
 
-    def run(self):
+    def run(self) -> None:
         try:
             self._client.ensure_connected()
         except gel.EdgeDBError as e:
@@ -222,7 +109,7 @@ class Generator:
                 self._new_file()
         print_msg(f"{C.GREEN}{C.BOLD}Done.{C.ENDC}")
 
-    def _process_dir(self, dir_: pathlib.Path):
+    def _process_dir(self, dir_: pathlib.Path) -> None:
         for file_or_dir in dir_.iterdir():
             if not file_or_dir.exists():
                 continue
@@ -234,7 +121,7 @@ class Generator:
             elif file_or_dir.suffix.lower() == ".edgeql":
                 self._process_file(file_or_dir)
 
-    def _process_file(self, source: pathlib.Path):
+    def _process_file(self, source: pathlib.Path) -> None:
         print_msg(f"{C.BOLD}Processing{C.ENDC} {C.BLUE}{source}{C.ENDC}")
         with source.open() as f:
             query = f.read()
@@ -247,7 +134,7 @@ class Generator:
         dr = self._client._describe_query(query, inject_type_names=True)
         self._describe_results.append((name, source, query, dr))
 
-    def _generate_files(self, suffix: str):
+    def _generate_files(self, suffix: str) -> None:
         for name, source, query, dr in self._describe_results:
             target = source.parent / f"{name}{suffix}"
             print_msg(f"{C.BOLD}Generating{C.ENDC} {C.BLUE}{target}{C.ENDC}")
@@ -260,7 +147,7 @@ class Generator:
             with target.open("w") as f:
                 f.write(buf.getvalue())
 
-    def _generate_single_file(self, suffix: str):
+    def _generate_single_file(self, suffix: str) -> None:
         print_msg(f"{C.BOLD}Generating single file output...{C.ENDC}")
         buf = io.StringIO()
         output = []
@@ -286,8 +173,10 @@ class Generator:
                 f.write(buf.getvalue())
 
     def _write_comments(
-        self, f: io.TextIOBase, src: typing.List[pathlib.Path]
-    ):
+        self,
+        f: io.TextIOBase,
+        src: list[pathlib.Path],
+    ) -> None:
         src_str = map(
             lambda p: repr(p.relative_to(self._project_dir).as_posix()), src
         )
@@ -305,12 +194,12 @@ class Generator:
         else:
             cmd.append(pathlib.Path(sys.argv[0]).name)
         cmd.extend(sys.argv[1:])
-        cmd = " ".join(cmd)
-        print(f"#     $ {cmd}", file=f)
+        cmd_string = " ".join(cmd)
+        print(f"#     $ {cmd_string}", file=f)
         print(file=f)
         print(file=f)
 
-    def _write_definitions(self, f: io.TextIOBase):
+    def _write_definitions(self, f: io.TextIOBase) -> None:
         print("from __future__ import annotations", file=f)
         for m in sorted(self._imports):
             print(f"import {m}", file=f)
@@ -324,7 +213,7 @@ class Generator:
             print(file=f)
 
         if self._use_pydantic:
-            print(PYDANTIC_MIXIN, file=f)
+            print(base.PYDANTIC_MIXIN, file=f)
             print(file=f)
             print(file=f)
 
@@ -334,26 +223,29 @@ class Generator:
             print(file=f)
 
     def _generate(
-        self, name: str, query: str, dr: abstract.DescribeResult
+        self,
+        name: str,
+        query: str,
+        dr: abstract.DescribeResult,
     ) -> str:
         buf = io.StringIO()
 
         name_hint = f"{self._snake_to_camel(name)}Result"
         out_type = self._generate_code(dr.output_type, name_hint)
         if dr.output_cardinality.is_multi():
-            if SYS_VERSION_INFO >= (3, 9):
+            if base.SYS_VERSION_INFO >= (3, 9):
                 out_type = f"list[{out_type}]"
             else:
                 self._imports.add("typing")
                 out_type = f"typing.List[{out_type}]"
         elif dr.output_cardinality == gel.Cardinality.AT_MOST_ONE:
-            if SYS_VERSION_INFO >= (3, 10):
+            if base.SYS_VERSION_INFO >= (3, 10):
                 out_type = f"{out_type} | None"
             else:
                 self._imports.add("typing")
                 out_type = f"typing.Optional[{out_type}]"
 
-        args = {}
+        args: dict[Union[int, str], str] = {}
         kw_only = False
         if isinstance(dr.input_type, describe.ObjectType):
             if "".join(dr.input_type.elements.keys()).isdecimal():
@@ -370,7 +262,7 @@ class Generator:
                         el_name,
                         el.cardinality,
                         keyword_argument=True,
-                        is_input=True
+                        is_input=True,
                     )
 
         if self._async:
@@ -384,8 +276,8 @@ class Generator:
             print(f"{INDENT}executor: gel.Executor,", file=buf)
         if kw_only:
             print(f"{INDENT}*,", file=buf)
-        for name, arg in args.items():
-            print(f"{INDENT}{name}: {arg},", file=buf)
+        for arg_name, arg_val in args.items():
+            print(f"{INDENT}{arg_name}: {arg_val},", file=buf)
         print(f") -> {out_type}:", file=buf)
         if dr.output_cardinality.is_multi():
             method = "query"
@@ -410,17 +302,17 @@ class Generator:
             file=buf,
         )
         print(f'{INDENT}{INDENT}""",', file=buf)
-        for name in args:
+        for arg_name in args:
             if kw_only:
-                print(f"{INDENT}{INDENT}{name}={name},", file=buf)
+                print(f"{INDENT}{INDENT}{arg_name}={arg_name},", file=buf)
             else:
-                print(f"{INDENT}{INDENT}{name},", file=buf)
+                print(f"{INDENT}{INDENT}{arg_name},", file=buf)
         print(f"{INDENT})", file=buf)
         return buf.getvalue()
 
     def _generate_code(
         self,
-        type_: typing.Optional[describe.AnyType],
+        type_: Optional[describe.AnyType],
         name_hint: str,
         is_input: bool = False,
     ) -> str:
@@ -430,8 +322,8 @@ class Generator:
         if (type_.desc_id, is_input) in self._cache:
             return self._cache[(type_.desc_id, is_input)]
 
-        imports = INPUT_TYPE_IMPORTS if is_input else TYPE_IMPORTS
-        mapping = INPUT_TYPE_MAPPING if is_input else TYPE_MAPPING
+        imports = base.INPUT_TYPE_IMPORTS if is_input else base.TYPE_IMPORTS
+        mapping = base.INPUT_TYPE_MAPPING if is_input else base.TYPE_MAPPING
 
         if isinstance(type_, describe.BaseScalarType):
             if import_str := imports.get(type_.name):
@@ -439,21 +331,21 @@ class Generator:
             rv = mapping[type_.name]
 
         elif isinstance(type_, describe.SequenceType):
-            el_type = self._generate_code(
+            seq_el_type = self._generate_code(
                 type_.element_type, f"{name_hint}Item", is_input
             )
-            if SYS_VERSION_INFO >= (3, 9):
-                rv = f"list[{el_type}]"
+            if base.SYS_VERSION_INFO >= (3, 9):
+                rv = f"list[{seq_el_type}]"
             else:
                 self._imports.add("typing")
-                rv = f"typing.List[{el_type}]"
+                rv = f"typing.List[{seq_el_type}]"
 
         elif isinstance(type_, describe.TupleType):
             elements = ", ".join(
                 self._generate_code(el_type, f"{name_hint}Item", is_input)
                 for el_type in type_.element_types
             )
-            if SYS_VERSION_INFO >= (3, 9):
+            if base.SYS_VERSION_INFO >= (3, 9):
                 rv = f"tuple[{elements}]"
             else:
                 self._imports.add("typing")
@@ -496,9 +388,9 @@ class Generator:
                 for el_name, el_code in link_props:
                     print(f"{INDENT}@typing.overload", file=buf)
                     print(
-                        f'{INDENT}def __getitem__'
+                        f"{INDENT}def __getitem__"
                         f'(self, key: {typing_literal}["{el_name}"]) '
-                        f'-> {el_code}:',
+                        f"-> {el_code}:",
                         file=buf,
                     )
                     print(f"{INDENT}{INDENT}...", file=buf)
@@ -507,9 +399,7 @@ class Generator:
                     f"{INDENT}def __getitem__(self, key: str) -> typing.Any:",
                     file=buf,
                 )
-                print(
-                    f"{INDENT}{INDENT}raise NotImplementedError", file=buf
-                )
+                print(f"{INDENT}{INDENT}raise NotImplementedError", file=buf)
 
             self._defs[rv] = buf.getvalue().strip()
 
@@ -546,15 +436,15 @@ class Generator:
 
     def _generate_code_with_cardinality(
         self,
-        type_: typing.Optional[describe.AnyType],
+        type_: Optional[describe.AnyType],
         name_hint: str,
         cardinality: gel.Cardinality,
         keyword_argument: bool = False,
         is_input: bool = False,
-    ):
+    ) -> str:
         rv = self._generate_code(type_, name_hint, is_input)
         if cardinality == gel.Cardinality.AT_MOST_ONE:
-            if SYS_VERSION_INFO >= (3, 10):
+            if base.SYS_VERSION_INFO >= (3, 10):
                 rv = f"{rv} | None"
             else:
                 self._imports.add("typing")
@@ -590,14 +480,12 @@ class Generator:
             return name
 
     def _to_unique_idents(
-        self, names: typing.Iterable[typing.Tuple[str, str]]
-    ) -> typing.Iterator[str]:
+        self,
+        names: Iterable[Union[str, tuple[str, ...]]],
+    ) -> Iterator[tuple[Union[str, tuple[str, ...]], str]]:
         dedup = set()
         for name in names:
-            if name.isidentifier():
-                name_id = name
-                sep = name.endswith("_")
-            else:
+            if isinstance(name, tuple):
                 sep = True
                 result = []
                 for i, c in enumerate(name):
@@ -613,6 +501,13 @@ class Generator:
                         result.append("_")
                         sep = True
                 name_id = "".join(result)
+            elif name.isidentifier():
+                name_id = name
+                sep = name.endswith("_")
+            else:
+                print_error(f"{name} is not a valid identifier")
+                sys.exit(2)
+
             rv = name_id
             if not sep:
                 name_id = name_id + "_"
