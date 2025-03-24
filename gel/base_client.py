@@ -230,8 +230,6 @@ class BaseConnection(metaclass=abc.ABCMeta):
         if self.is_closed():
             await self.connect()
 
-        reconnect = False
-        i = 0
         if self._protocol.is_legacy:
             allow_capabilities = enums.Capability.LEGACY_EXECUTE
         else:
@@ -264,6 +262,7 @@ class BaseConnection(metaclass=abc.ABCMeta):
             ctx = execute_context.lower(
                 allow_capabilities=enums.Capability.EXECUTE
             )
+
             async def _inner():
                 res = await self._protocol.execute(ctx)
                 if ctx.warnings:

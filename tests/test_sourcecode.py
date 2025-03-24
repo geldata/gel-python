@@ -17,45 +17,35 @@
 #
 
 
-import os
+import pathlib
 import subprocess
-import sys
 import unittest
 
 
-def find_edgedb_root():
-    return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+def find_project_root() -> pathlib.Path:
+    return pathlib.Path(__file__).parent.parent
 
 
 class TestFlake8(unittest.TestCase):
-
-    def test_flake8(self):
-        edgepath = find_edgedb_root()
-        config_path = os.path.join(edgepath, '.flake8')
-        if not os.path.exists(config_path):
-            raise RuntimeError('could not locate .flake8 file')
+    def test_cqa_ruff(self):
+        project_root = find_project_root()
 
         try:
-            import flake8  # NoQA
+            import ruff  # NoQA
         except ImportError:
-            raise unittest.SkipTest('flake8 moudule is missing')
+            raise unittest.SkipTest("ruff module is missing") from None
 
-        for subdir in ['edgedb', 'tests']:  # ignore any top-level test files
+        for subdir in ["edgedb", "gel", "tests"]:
             try:
                 subprocess.run(
-                    [
-                        sys.executable,
-                        "-m",
-                        "flake8",
-                        "--config",
-                        config_path,
-                        subdir,
-                    ],
+                    ["ruff", "check", "."],
                     check=True,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
-                    cwd=edgepath)
+                    cwd=project_root / subdir,
+                )
             except subprocess.CalledProcessError as ex:
                 output = ex.output.decode()
                 raise AssertionError(
-                    f'flake8 validation failed:\n{output}') from None
+                    f"ruff validation failed:\n{output}"
+                ) from None

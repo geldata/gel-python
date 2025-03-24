@@ -7,7 +7,7 @@ authors = [
 ]
 requires-python = ">=3.8.0"
 readme = "README.rst"
-license = {text = "Apache License, Version 2.0"}
+license = { text = "Apache License, Version 2.0" }
 dynamic = ["version"]
 keywords = ["gel", "edgedb", "database", "postgres"]
 classifiers = [
@@ -35,8 +35,6 @@ test = [
     'pytest>=3.6.0',
     'pycodestyle~=2.11.1',
     'pyflakes~=3.2.0',
-    'flake8-bugbear~=24.4.26',
-    'flake8~=7.0.0',
     'uvloop>=0.15.1; platform_system != "Windows"',
 ]
 sqltest = [
@@ -110,16 +108,54 @@ target-version = ["py38"]
 # ========================
 #           RUFF
 # ========================
+
 [tool.ruff]
-line-length = 79
+line-length = 80
 indent-width = 4
-exclude = [".github", ".git", "build", "dist", ".eggs", "generated"]
+exclude = [
+    ".github",
+    ".git",
+    "build",
+    "dist",
+    ".eggs",
+    "generated",
+    "tools",
+    "gel/orm",
+]
 
 [tool.ruff.lint]
 preview = true
-select = ["E", "F", "W", "B"]
+extend-select = [
+    # "ASYNC",  # flake8-async
+    "B", # flake8-bugbear
+    # "C4",     # flake8-comprehensions
+    # "C9",     # mccabe
+    # "COM",    # flake8-commas
+    # "D",      # pycodestyle
+    # "DTZ",    # flake8-datetimez
+    "E", # error
+    # "ERA",    # flake8-eradicate
+    "F", # pyflakes
+    # "FBT",    # flake8-boolean-trap
+    "G", # flake8-logging-format
+    # "I",      # isort
+    # "N",      # pep8-naming
+    # "PGH",    # pygrep-hooks
+    # "PIE",    # flake8-pie
+    # "RUF",    # ruff specific
+    # "SIM",    # flake8-simplify
+    # "T20",    # flake8-print
+    # "UP",     # pyupgrade
+    "W", # warning
+]
 ignore = [
-    "F541", # f-string without any placeholders
+    "B018", # useless-expression
+    "B023", # function-uses-loop-variable
+    "B904", # raise-without-from-inside-except
+    "E402", # module-import-not-at-top-of-file
+    "E252", # missing-whitespace-around-parameter-equals
+    "F401", # unused-import
+    "F541", # f-string-missing-placeholders
 ]
 
 # ========================
