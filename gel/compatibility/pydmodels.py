@@ -25,7 +25,7 @@ from pydantic import BaseModel
 
 import gel
 
-from gel.orm.introspection import FilePrinter, get_mod_and_name
+from gel.compatibility.introspection import FilePrinter, get_mod_and_name
 
 
 # FIXME: this should be replaced with a special Annotated value using the

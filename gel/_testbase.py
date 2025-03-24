@@ -38,7 +38,7 @@ import warnings
 import gel
 from gel import asyncio_client
 from gel import blocking_client
-from gel.orm.introspection import get_schema_json, GelORMWarning
+from gel.compatibility.introspection import get_schema_json, GelORMWarning
 from gel.orm.sqla import ModelGenerator as SQLAModGen
 from gel.orm.sqlmodel import ModelGenerator as SQLModGen
 from gel.orm.django.generator import ModelGenerator as DjangoModGen

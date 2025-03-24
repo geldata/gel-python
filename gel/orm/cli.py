@@ -22,8 +22,8 @@ import warnings
 
 import gel
 
-from gel.codegen.generator import _get_conn_args
-from .introspection import get_schema_json, GelORMWarning
+from gel.compatibility.introspection import get_schema_json, GelORMWarning
+from gel.compatibility.clihelper import _get_conn_args
 from .sqla import ModelGenerator as SQLAModGen
 from .sqlmodel import ModelGenerator as SQLModGen
 from .django.generator import ModelGenerator as DjangoModGen

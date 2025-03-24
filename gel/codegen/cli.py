@@ -19,8 +19,16 @@
 
 import argparse
 import sys
+import warnings
 
-from . import generator, models
+import gel
+
+from gel.codegen import generator, models
+from gel.compatibility.introspection import get_schema_json, GelORMWarning
+from gel.compatibility.clihelper import _get_conn_args
+from gel.orm.sqla import ModelGenerator as SQLAModGen
+from gel.orm.sqlmodel import ModelGenerator as SQLModGen
+from gel.orm.django.generator import ModelGenerator as DjangoModGen
 
 
 class ColoredArgumentParser(argparse.ArgumentParser):
@@ -34,7 +42,15 @@ class ColoredArgumentParser(argparse.ArgumentParser):
 
 
 parser = ColoredArgumentParser(
-    description="Generate Python code for .edgeql files."
+    description="Generate Python code for various Gel interfaces."
+)
+parser.add_argument(
+    "mode",
+    choices=['edgeql', 'pydantic', 'sqlalchemy', 'sqlmodel', 'django'],
+    help="Pick which mode to generate code for: "
+    "`edgeql` makes Python code for .edgeql files; "
+    "`pydantic` makes Pydantic models based on the database schema; "
+    "`sqlalchemy`, `sqlmodel`, `django` makes Python ORM code for a database",
 )
 parser.add_argument("--dsn")
 parser.add_argument("--credentials-file", metavar="PATH")
@@ -69,11 +85,13 @@ parser.add_argument(
     help="Choose one or more targets to generate code (default is async)."
 )
 parser.add_argument(
-    "--models",
-    action="store_true",
-    default=False,
-    help="Using the schema generate Pydantic models that can be used for "
-    "bulk inserts.",
+    "--out",
+    help="The output directory for the generated files.",
+)
+parser.add_argument(
+    "--mod",
+    help="The fullname of the Python module corresponding to the output "
+         "directory.",
 )
 if sys.version_info[:2] >= (3, 9):
     parser.add_argument(
@@ -101,10 +119,68 @@ else:
 
 def main():
     args = parser.parse_args()
-    if args.models:
-        models.Generator(args).run()
-        return
 
-    if not hasattr(args, "skip_pydantic_validation"):
-        args.skip_pydantic_validation = True
-    generator.Generator(args).run()
+    match args.mode:
+        case 'edgeql':
+            if not hasattr(args, "skip_pydantic_validation"):
+                args.skip_pydantic_validation = True
+            generator.Generator(args).run()
+
+        case 'pydantic':
+            if args.mod is None:
+                parser.error('pydantic requires to specify --mod')
+            if args.out is None:
+                parser.error('pydantic requires to specify --out')
+
+            models.Generator(args).run()
+
+        case 'sqlalchemy':
+            if args.mod is None:
+                parser.error('sqlalchemy requires to specify --mod')
+            if args.out is None:
+                parser.error('sqlalchemy requires to specify --out')
+
+            with warnings.catch_warnings(record=True) as wlist:
+                warnings.simplefilter("always", GelORMWarning)
+                spec = get_schema_json(
+                    gel.create_client(**generator._get_conn_args(args)))
+                gen = SQLAModGen(
+                    outdir=args.out,
+                    basemodule=args.mod,
+                )
+                gen.render_models(spec)
+
+                for w in wlist:
+                    print(w.message)
+
+        case 'sqlmodel':
+            if args.mod is None:
+                parser.error('sqlmodel requires to specify --mod')
+            if args.out is None:
+                parser.error('sqlmodel requires to specify --out')
+
+            with warnings.catch_warnings(record=True) as wlist:
+                warnings.simplefilter("always", GelORMWarning)
+                spec = get_schema_json(
+                    gel.create_client(**_get_conn_args(args)))
+                gen = SQLModGen(
+                    outdir=args.out,
+                    basemodule=args.mod,
+                )
+                gen.render_models(spec)
+
+                for w in wlist:
+                    print(w.message)
+
+        case 'django':
+            with warnings.catch_warnings(record=True) as wlist:
+                warnings.simplefilter("always", GelORMWarning)
+                spec = get_schema_json(
+                    gel.create_client(**_get_conn_args(args)))
+                gen = DjangoModGen(
+                    out=args.out,
+                )
+                gen.render_models(spec)
+
+                for w in wlist:
+                    print(w.message)

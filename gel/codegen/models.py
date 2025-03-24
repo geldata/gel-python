@@ -17,7 +17,6 @@
 #
 
 import argparse
-import getpass
 import io
 import os
 import pathlib
@@ -35,7 +34,8 @@ from gel import describe
 from gel.con_utils import find_gel_project_dir
 from gel.color import get_color
 
-from gel.orm.introspection import FilePrinter, get_mod_and_name
+from gel.compatibility.introspection import FilePrinter, get_mod_and_name
+from gel.compatibility.clihelper import print_msg, print_error, _get_conn_args
 
 
 C = get_color()
@@ -94,43 +94,6 @@ INPUT_TYPE_IMPORTS.update(
     }
 )
 
-
-def print_msg(msg):
-    print(msg, file=sys.stderr)
-
-
-def print_error(msg):
-    print_msg(f"{C.BOLD}{C.FAIL}error: {C.ENDC}{C.BOLD}{msg}{C.ENDC}")
-
-
-def _get_conn_args(args: argparse.Namespace):
-    if args.password_from_stdin:
-        if args.password:
-            print_error(
-                "--password and --password-from-stdin are "
-                "mutually exclusive",
-            )
-            sys.exit(22)
-        if sys.stdin.isatty():
-            password = getpass.getpass()
-        else:
-            password = sys.stdin.read().strip()
-    else:
-        password = args.password
-    if args.dsn and args.instance:
-        print_error("--dsn and --instance are mutually exclusive")
-        sys.exit(22)
-    return dict(
-        dsn=args.dsn or args.instance,
-        credentials_file=args.credentials_file,
-        host=args.host,
-        port=args.port,
-        database=args.database,
-        user=args.user,
-        password=password,
-        tls_ca_file=args.tls_ca_file,
-        tls_security=args.tls_security,
-    )
 
 INTRO_QUERY = '''
 with module schema
