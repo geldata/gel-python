@@ -1,7 +1,9 @@
 from typing import (
+    Generator,
     Optional,
 )
 
+import contextlib
 import io
 import json
 import re
@@ -259,12 +261,20 @@ class FilePrinter:
         self.out: Optional[io.TextIOBase] = None
         self._indent_level = 0
 
-    def indent(self) -> None:
-        self._indent_level += 1
+    def indent(self, levels: int = 1) -> None:
+        self._indent_level += levels
 
-    def dedent(self) -> None:
+    def dedent(self, levels: int = 1) -> None:
         if self._indent_level > 0:
-            self._indent_level -= 1
+            self._indent_level -= levels
+
+    @contextlib.contextmanager
+    def indented(self) -> Generator[None, None, None]:
+        self._indent_level += 1
+        try:
+            yield
+        finally:
+            self._indent_level -=1
 
     def reset_indent(self) -> None:
         self._indent_level = 0

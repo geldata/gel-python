@@ -96,7 +96,7 @@ select ObjectType {
             name,
             params: {name, @value},
         },
-    } filter .name != 'id' and not exists .expr,
+    } filter not exists .expr,
     backlinks := <array<str>>[],
 }
 filter
@@ -273,8 +273,12 @@ class ModelsGenerator(base.Generator, FilePrinter):
         object_types = maps["object_types"]
 
         if object_types:
-            self.write(f"from typing import Optional, Any, Annotated")
-            self.write(f"from gel.compatibility import pydmodels as gm")
+            self.write(
+                f"from typing import Optional, Annotated, TypeVar, Union, Type"
+            )
+            self.write(f"from gel.models import pydantic as gm")
+
+        self.write("import uuid")
 
         objects = sorted(object_types.values(), key=lambda x: x.name)
         for obj in objects:
@@ -285,23 +289,89 @@ class ModelsGenerator(base.Generator, FilePrinter):
 
         self.write()
         self.write()
+        self.write("#")
+        self.write(f"# type {objtype.name}")
+        self.write("#")
+
+        for prop in objtype.properties:
+            non_opt = self.render_prop_type(prop, optional=False)
+            opt = self.render_prop_type(prop, optional=True)
+            self.write(f"{name}__p__{prop.name}_req = {non_opt}")
+            self.write(f"{name}__p__{prop.name}_opt = {opt}")
+            self.write(f"{name}__p__{prop.name}_selector = Union[")
+            with self.indented():
+                self.write(f"{name}__p__{prop.name}_req,")
+                self.write(f"{name}__p__{prop.name}_opt,")
+            self.write("]")
+
+        # for link in objtype.links:
+        #     non_opt = self.render_prop_type(prop, optional=False)
+        #     opt = self.render_prop_type(prop, optional=True)
+        #     self.write(f"{name}__p__{prop.name}_req = {non_opt}")
+        #     self.write(f"{name}__p__{prop.name}_opt = {opt}")
+        #     self.write(f"{name}__p__{prop.name}_selector = Union[")
+        #     with self.indented():
+        #         self.write(f"{name}__p__{prop.name}_req,")
+        #         self.write(f"{name}__p__{prop.name}_opt,")
+        #     self.write("]")
+
+        if len(objtype.properties):
+            self.write(f"{name}__pointers = TypeVar(")
+            with self.indented():
+                self.write(f"'{name}__pointers',")
+                self.write("bound=Union[")
+                with self.indented():
+                    for prop in objtype.properties:
+                        self.write(f"{name}__p__{prop.name}_selector,")
+                self.write("]")
+            self.write(")")
+
+        self.write()
         self.write(f"class {name}(gm.BaseGelModel):")
-        self.indent()
-        self.write(f"__gel_name__ = {objtype.name!r}")
+        with self.indented():
+            self.write(
+                f"__gel_metadata__ = "
+                f"gm.GelMetadata(schema_name={objtype.name!r})",
+            )
 
-        if len(objtype.properties) > 0:
-            self.write()
-            self.write("# Properties:")
-            for prop in objtype.properties:
-                self.render_prop(prop, mod)
+            if len(objtype.properties) > 0:
+                self.write()
+                self.write("# Properties:")
+                for prop in objtype.properties:
+                    self.write(f"{prop.name}: {name}__p__{prop.name}_opt")
 
-        if len(objtype.links) > 0:
-            self.write()
-            self.write("# Properties:")
-            for link in objtype.links:
-                self.render_link(link, mod)
+            if len(objtype.links) > 0:
+                self.write()
+                self.write("# Links:")
+                for link in objtype.links:
+                    self.render_link(link, mod)
 
-        self.dedent()
+            self.write("@classmethod")
+            self.write(f"def select(cls, *ptrs: Type[{name}__pointers]):")
+            with self.indented():
+                self.write("pass")
+
+        self.write()
+
+    def render_prop_type(
+        self,
+        prop: IntrospectedProperty,
+        optional: bool,
+    ) -> str:
+        gel_type = prop.target.name
+        pytype = base.TYPE_MAPPING.get(gel_type)
+        if not pytype:
+            raise NotImplementedError(f"unsupported Gel type: {gel_type}")
+        if optional:
+            pytype = f"Optional[{pytype}]"
+        annotated = [
+            pytype,
+            f"gm.GelMetadata(schema_name={prop.name!r})",
+        ]
+        if prop.exclusive:
+            annotated.append("gm.Exclusive")
+        annotations = textwrap.indent(",\n".join(annotated), "    ")
+        return f"Annotated[\n{annotations},\n]"
 
     def render_prop(self, prop: IntrospectedProperty, curmod: str) -> None:
         pytype = base.TYPE_MAPPING.get(prop.target.name)
