@@ -2,7 +2,8 @@ import pathlib
 import re
 import warnings
 
-from ..introspection import get_mod_and_name, GelORMWarning, FilePrinter
+from gel.compatibility.introspection import get_mod_and_name
+from gel.compatibility.introspection import GelORMWarning, FilePrinter
 
 
 GEL_SCALAR_MAP = {

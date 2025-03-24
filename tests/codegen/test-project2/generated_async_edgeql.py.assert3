@@ -9,7 +9,7 @@
 #     'scalar/select_scalar.edgeql'
 #     'scalar/select_scalars.edgeql'
 # WITH:
-#     $ gel-py --target async --file --no-skip-pydantic-validation
+#     $ gel-gen edgeql --target async --file --no-skip-pydantic-validation
 
 
 from __future__ import annotations

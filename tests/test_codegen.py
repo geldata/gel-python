@@ -109,12 +109,13 @@ class TestCodegen(tb.AsyncQueryTestCase):
                         p.returncode, args, output=await p.stdout.read(),
                     )
 
-        cmd = env.get("EDGEDB_PYTHON_TEST_CODEGEN_CMD", "gel-py")
+        cmd = env.get("EDGEDB_PYTHON_TEST_CODEGEN_CMD", "gel-gen")
         await run(
-            cmd, extra_env={"EDGEDB_PYTHON_CODEGEN_PY_VER": "3.8.5"}
+            cmd, "edgeql", extra_env={"EDGEDB_PYTHON_CODEGEN_PY_VER": "3.8.5"}
         )
         await run(
             cmd,
+            "edgeql",
             "--target",
             "blocking",
             "--no-skip-pydantic-validation",
@@ -122,6 +123,7 @@ class TestCodegen(tb.AsyncQueryTestCase):
         )
         await run(
             cmd,
+            "edgeql",
             "--target",
             "async",
             "--file",
