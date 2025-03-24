@@ -68,28 +68,13 @@ parser.add_argument(
     default=["async"],
     help="Choose one or more targets to generate code (default is async)."
 )
-if sys.version_info[:2] >= (3, 9):
-    parser.add_argument(
-        "--skip-pydantic-validation",
-        action=argparse.BooleanOptionalAction,
-        default=argparse.SUPPRESS,  # override the builtin help for default
-        help="Add a mixin to generated dataclasses "
-        "to skip Pydantic validation (default is to add the mixin).",
-    )
-else:
-    parser.add_argument(
-        "--skip-pydantic-validation",
-        action="store_true",
-        default=True,
-    )
-    parser.add_argument(
-        "--no-skip-pydantic-validation",
-        dest="skip_pydantic_validation",
-        action="store_false",
-        default=False,
-        help="Add a mixin to generated dataclasses "
-             "to skip Pydantic validation (default is to add the mixin).",
-    )
+parser.add_argument(
+    "--skip-pydantic-validation",
+    action=argparse.BooleanOptionalAction,
+    default=argparse.SUPPRESS,  # override the builtin help for default
+    help="Add a mixin to generated dataclasses "
+    "to skip Pydantic validation (default is to add the mixin).",
+)
 
 
 def main():
