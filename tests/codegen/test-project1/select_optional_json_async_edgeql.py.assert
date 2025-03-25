@@ -5,7 +5,6 @@
 from __future__ import annotations
 import dataclasses
 import gel
-import typing
 import uuid
 
 
@@ -28,7 +27,7 @@ class NoPydanticValidation:
 @dataclasses.dataclass
 class SelectOptionalJsonResultItem(NoPydanticValidation):
     id: uuid.UUID
-    snake_case: typing.Optional[SelectOptionalJsonResultItemSnakeCase]
+    snake_case: SelectOptionalJsonResultItemSnakeCase | None
 
 
 @dataclasses.dataclass
@@ -38,8 +37,8 @@ class SelectOptionalJsonResultItemSnakeCase(NoPydanticValidation):
 
 async def select_optional_json(
     executor: gel.AsyncIOExecutor,
-    arg0: typing.Optional[str],
-) -> typing.List[typing.Tuple[str, SelectOptionalJsonResultItem]]:
+    arg0: str | None,
+) -> list[tuple[str, SelectOptionalJsonResultItem]]:
     return await executor.query(
         """\
         create type TestCase {

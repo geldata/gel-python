@@ -43,118 +43,118 @@ class MyEnum(enum.Enum):
 class MyQueryResult(NoPydanticValidation):
     id: uuid.UUID
     a: uuid.UUID
-    b: typing.Optional[uuid.UUID]
+    b: uuid.UUID | None
     c: str
-    d: typing.Optional[str]
+    d: str | None
     e: bytes
-    f: typing.Optional[bytes]
+    f: bytes | None
     g: int
-    h: typing.Optional[int]
+    h: int | None
     i: int
-    j: typing.Optional[int]
+    j: int | None
     k: int
-    l: typing.Optional[int]
+    l: int | None
     m: float
-    n: typing.Optional[float]
+    n: float | None
     o: float
-    p: typing.Optional[float]
+    p: float | None
     q: bool
-    r: typing.Optional[bool]
+    r: bool | None
     s: datetime.datetime
-    t: typing.Optional[datetime.datetime]
+    t: datetime.datetime | None
     u: datetime.datetime
-    v: typing.Optional[datetime.datetime]
+    v: datetime.datetime | None
     w: datetime.date
-    x: typing.Optional[datetime.date]
+    x: datetime.date | None
     y: datetime.time
-    z: typing.Optional[datetime.time]
+    z: datetime.time | None
     aa: datetime.timedelta
-    ab: typing.Optional[datetime.timedelta]
+    ab: datetime.timedelta | None
     ac: int
-    ad: typing.Optional[int]
+    ad: int | None
     ae: gel.RelativeDuration
-    af: typing.Optional[gel.RelativeDuration]
+    af: gel.RelativeDuration | None
     ag: gel.DateDuration
-    ah: typing.Optional[gel.DateDuration]
+    ah: gel.DateDuration | None
     ai: gel.ConfigMemory
-    aj: typing.Optional[gel.ConfigMemory]
+    aj: gel.ConfigMemory | None
     ak: gel.Range[int]
-    al: typing.Optional[gel.Range[int]]
+    al: gel.Range[int] | None
     am: gel.Range[int]
-    an: typing.Optional[gel.Range[int]]
+    an: gel.Range[int] | None
     ao: gel.Range[float]
-    ap: typing.Optional[gel.Range[float]]
+    ap: gel.Range[float] | None
     aq: gel.Range[float]
-    ar: typing.Optional[gel.Range[float]]
+    ar: gel.Range[float] | None
     as_: gel.Range[datetime.datetime]
-    at: typing.Optional[gel.Range[datetime.datetime]]
+    at: gel.Range[datetime.datetime] | None
     au: gel.Range[datetime.datetime]
-    av: typing.Optional[gel.Range[datetime.datetime]]
+    av: gel.Range[datetime.datetime] | None
     aw: gel.Range[datetime.date]
-    ax: typing.Optional[gel.Range[datetime.date]]
+    ax: gel.Range[datetime.date] | None
     ay: MyScalar
-    az: typing.Optional[MyScalar]
+    az: MyScalar | None
     ba: MyEnum
-    bb: typing.Optional[MyEnum]
+    bb: MyEnum | None
     bc: array.array
-    bd: typing.Optional[array.array]
+    bd: array.array | None
 
 
 async def my_query(
     executor: gel.AsyncIOExecutor,
     *,
     a: uuid.UUID,
-    b: typing.Optional[uuid.UUID] = None,
+    b: uuid.UUID | None = None,
     c: str,
-    d: typing.Optional[str] = None,
+    d: str | None = None,
     e: bytes,
-    f: typing.Optional[bytes] = None,
+    f: bytes | None = None,
     g: int,
-    h: typing.Optional[int] = None,
+    h: int | None = None,
     i: int,
-    j: typing.Optional[int] = None,
+    j: int | None = None,
     k: int,
-    l: typing.Optional[int] = None,
+    l: int | None = None,
     m: float,
-    n: typing.Optional[float] = None,
+    n: float | None = None,
     o: float,
-    p: typing.Optional[float] = None,
+    p: float | None = None,
     q: bool,
-    r: typing.Optional[bool] = None,
+    r: bool | None = None,
     s: datetime.datetime,
-    t: typing.Optional[datetime.datetime] = None,
+    t: datetime.datetime | None = None,
     u: datetime.datetime,
-    v: typing.Optional[datetime.datetime] = None,
+    v: datetime.datetime | None = None,
     w: datetime.date,
-    x: typing.Optional[datetime.date] = None,
+    x: datetime.date | None = None,
     y: datetime.time,
-    z: typing.Optional[datetime.time] = None,
+    z: datetime.time | None = None,
     aa: datetime.timedelta,
-    ab: typing.Optional[datetime.timedelta] = None,
+    ab: datetime.timedelta | None = None,
     ac: int,
-    ad: typing.Optional[int] = None,
+    ad: int | None = None,
     ae: gel.RelativeDuration,
-    af: typing.Optional[gel.RelativeDuration] = None,
+    af: gel.RelativeDuration | None = None,
     ag: gel.DateDuration,
-    ah: typing.Optional[gel.DateDuration] = None,
+    ah: gel.DateDuration | None = None,
     ai: gel.ConfigMemory,
-    aj: typing.Optional[gel.ConfigMemory] = None,
+    aj: gel.ConfigMemory | None = None,
     ak: gel.Range[int],
-    al: typing.Optional[gel.Range[int]] = None,
+    al: gel.Range[int] | None = None,
     am: gel.Range[int],
-    an: typing.Optional[gel.Range[int]] = None,
+    an: gel.Range[int] | None = None,
     ao: gel.Range[float],
-    ap: typing.Optional[gel.Range[float]] = None,
+    ap: gel.Range[float] | None = None,
     aq: gel.Range[float],
-    ar: typing.Optional[gel.Range[float]] = None,
+    ar: gel.Range[float] | None = None,
     as_: gel.Range[datetime.datetime],
-    at: typing.Optional[gel.Range[datetime.datetime]] = None,
+    at: gel.Range[datetime.datetime] | None = None,
     au: gel.Range[datetime.datetime],
-    av: typing.Optional[gel.Range[datetime.datetime]] = None,
+    av: gel.Range[datetime.datetime] | None = None,
     aw: gel.Range[datetime.date],
-    ax: typing.Optional[gel.Range[datetime.date]] = None,
+    ax: gel.Range[datetime.date] | None = None,
     bc: typing.Sequence[float],
-    bd: typing.Optional[typing.Sequence[float]] = None,
+    bd: typing.Sequence[float] | None = None,
 ) -> MyQueryResult:
     return await executor.query_single(
         """\

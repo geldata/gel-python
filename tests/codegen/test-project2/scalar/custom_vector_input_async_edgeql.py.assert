@@ -13,8 +13,8 @@ V3 = typing.Sequence[float]
 async def custom_vector_input(
     executor: gel.AsyncIOExecutor,
     *,
-    input: typing.Optional[V3] = None,
-) -> typing.Optional[int]:
+    input: V3 | None = None,
+) -> int | None:
     return await executor.query_single(
         """\
         select 42 filter exists <optional v3>$input;\
