@@ -38,6 +38,8 @@ import warnings
 import gel
 from gel import asyncio_client
 from gel import blocking_client
+from gel.codegen import cli
+from gel.codegen.models import Generator as PydanticGenerator
 from gel.compatibility.introspection import get_schema_json, GelORMWarning
 from gel.orm.sqla import ModelGenerator as SQLAModGen
 from gel.orm.sqlmodel import ModelGenerator as SQLModGen
@@ -776,6 +778,19 @@ class DjangoTestCase(ORMTestCase):
         models = os.path.join(pkgbase, 'models.py')
         gen = DjangoModGen(out=models)
         gen.render_models(cls.spec)
+
+
+class PydanticTestCase(ORMTestCase):
+    @classmethod
+    def setupORM(cls):
+        cargs = cls.get_connect_args(database=cls.get_database_name())
+        args = cli.parser.parse_args([
+            'pydantic',
+            '--out', str(os.path.join(cls.tmpormdir.name, cls.MODEL_PACKAGE)),
+            '--mod', cls.MODEL_PACKAGE,
+        ])
+        gen = PydanticGenerator(args, client=cls.client)
+        gen.run()
 
 
 _lock_cnt = 0

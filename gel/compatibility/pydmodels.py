@@ -28,28 +28,20 @@ import gel
 from gel.compatibility.introspection import FilePrinter, get_mod_and_name
 
 
-# FIXME: this should be replaced with a special Annotated value using the
-# exact type from the schema. No reason to guess.
-GEL_TYPE_MAPPING = {
-    str: "std::str",
-    float: "std::float64",
-    int: "std::int64",
-    bool: "std::bool",
-    # "uuid.UUID": "std::uuid",
-    bytes: "std::bytes",
-    # "decimal.Decimal": "std::decimal",
-    # "datetime.datetime": "std::datetime",
-    # "datetime.timedelta": "std::duration",
-    # "datetime.date": "cal::local_date",
-    # "datetime.time": "cal::local_time",
-    # "gel.RelativeDuration": "cal::relative_duration",
-    # "gel.DateDuration": "cal::date_duration",
-    # "gel.ConfigMemory": "cfg::memory",
-    # "array.array": "ext::pgvector::vector",
-}
-
-
 class Exclusive:
+    pass
+
+
+class GelType:
+    def __init__(self, name):
+        self.name = name
+
+
+class Link:
+    pass
+
+
+class Multi:
     pass
 
 
@@ -58,17 +50,57 @@ class BaseGelModel(BaseModel):
         results = []
 
         for name, info in self.model_fields.items():
-            for meta in info.metadata:
-                if meta is Exclusive:
-                    results.append(name)
+            if Exclusive in info.metadata:
+                results.append(name)
 
         return results
+
+    def prop_fields(self):
+        results = []
+
+        for name, info in self.model_fields.items():
+            if Link not in info.metadata:
+                results.append(name)
+
+        return results
+
+    def link_fields(self):
+        results = []
+
+        for name, info in self.model_fields.items():
+            if Link in info.metadata:
+                results.append(name)
+
+        return results
+
+    def eq_props(self, other):
+        if other.__class__ is not self.__class__:
+            return False
+
+        for name in self.prop_fields():
+            if getattr(self, name) != getattr(other, name):
+                return False
+
+        return True
+
+    def get_field_gel_type(self, name):
+        info = self.model_fields[name]
+        for anno in info.metadata:
+            if isinstance(anno, GelType):
+                return anno.name
+
+        return None
+
+
+class UpdateGelModel(BaseGelModel):
+    pass
 
 
 class ObjData(BaseModel):
     obj: BaseGelModel
     rank: int | None = None
     gelid: uuid.UUID | None = None
+    exval: tuple | None = None
 
 
 def is_optional(field):
@@ -79,15 +111,20 @@ def is_optional(field):
 
 
 class Session:
-    def __init__(self, data, client):
+    def __init__(self, data, client, *, identity_merge=False):
         self._data = list(data)
         self._client = client
+        self._identity_merge = identity_merge
         # insert order will come in tiers, where each tier is itself a list of
         # objects that have the same insert precedence and can be inserted in
         # parallel.
         self._insert_order = [[]]
         self._idmap = {}
+        # map based on exclusive properties, once an object is inserted, all
+        # other copies will be updated with the gelid
+        self._exmap = defaultdict(list)
 
+        self.process_exclusive()
         self.compute_insert_order()
 
     def commit(self):
@@ -95,15 +132,30 @@ class Session:
             with tx:
                 for objs in self._insert_order:
                     for item in objs:
-                        query, args = self.generate_insert(item)
+                        objdata = self._idmap[id(item)]
+                        if objdata.gelid is not None:
+                            query, args = self.generate_update_new(item)
+                        elif isinstance(item, UpdateGelModel):
+                            query, args = self.generate_update(item)
+                        else:
+                            query, args = self.generate_insert(item)
+
                         gelobj = tx.query_single(query, *args)
-                        self._idmap[id(item)].gelid = gelobj.id
+                        objdata.gelid = gelobj.id
+                        if self._identity_merge:
+                            # Update all identical copies of this object with
+                            # the same gelid
+                            exlist = self._exmap[objdata.exval]
+                            for val in exlist:
+                                self._idmap[id(val)].gelid = gelobj.id
+
         self.clear()
 
     def clear(self):
         self._data = []
         self._insert_order = [[]]
         self._idmap = {}
+        self._exmap = {}
 
     def generate_insert(self, item, *, arg_start=0):
         args = []
@@ -117,18 +169,81 @@ class Session:
                 # skip empty values
                 continue
 
-            if isinstance(val, BaseModel):
-                subquery, subargs = self.generate_select(
-                    val, arg_start=arg)
-                arg += len(subargs)
-                args += subargs
-                query += f'{name} := ({subquery}), '
+            if Link in info.metadata:
+                subqueries = []
+                if Multi in info.metadata:
+                    links = val
+                else:
+                    links = [val]
+
+                # multi link potentially needs several subqueries
+                for el in links:
+                    subquery, subargs = self.generate_select(
+                        el, arg_start=arg)
+                    arg += len(subargs)
+                    args += subargs
+                    subqueries.append(f'({subquery})')
+
+                query += f'{name} := '
+                if len(subqueries) > 1:
+                    subq = ", ".join(subqueries)
+                    query += f'assert_distinct({{ {subq} }}), '
+                else:
+                    query += f'{subqueries[0]}, '
 
             else:
-                geltype = GEL_TYPE_MAPPING[type(val)]
-                query += f'{name} := <{geltype}>${arg}, '
+                query += f'{name} := '
+                geltype = item.get_field_gel_type(name)
+                if Multi in info.metadata:
+                    query += f'array_unpack(<array<{geltype}>>${arg}), '
+                else:
+                    query += f'<{geltype}>${arg}, '
+
                 arg += 1
                 args.append(val)
+
+        query += '}'
+
+        return query, args
+
+    def generate_update_new(self, item, *, arg_start=0):
+        gelid = self._idmap[id(item)].gelid
+        args = []
+        arg = arg_start
+        query = f'update detached {item.__gel_name__} '
+        query += f'filter .id = <uuid>${arg} set {{'
+        arg += 1
+        args.append(gelid)
+
+        for name, info in item.model_fields.items():
+            val = getattr(item, name)
+
+            if val is None:
+                # skip empty values
+                continue
+
+            # only update links
+            if Link in info.metadata:
+                subqueries = []
+                if Multi in info.metadata:
+                    links = val
+                else:
+                    links = [val]
+
+                # multi link potentially needs several subqueries
+                for el in links:
+                    subquery, subargs = self.generate_select(
+                        el, arg_start=arg)
+                    arg += len(subargs)
+                    args += subargs
+                    subqueries.append(f'({subquery})')
+
+                query += f'{name} := '
+                if len(subqueries) > 1:
+                    subq = ", ".join(subqueries)
+                    query += f'assert_distinct({{ {subq} }}), '
+                else:
+                    query += f'{subqueries[0]}, '
 
         query += '}'
 
@@ -148,12 +263,71 @@ class Session:
         else:
             for name in item.exclusive_fields():
                 val = getattr(item, name)
-                geltype = GEL_TYPE_MAPPING[type(val)]
+                geltype = item.get_field_gel_type(name)
                 fquery.append(f'.{name} = <{geltype}>${arg}')
                 arg += 1
                 args.append(val)
 
         query += ' and '.join(fquery)
+
+        return query, args
+
+    def generate_update(self, item, *, arg_start=0):
+        # This is an update query for a pre-existing object, so all fields are
+        # optional except for id.
+        gelid = item.id
+        args = []
+        arg = arg_start
+        query = f'update detached {item.__gel_name__} '
+        query += f'filter .id = <uuid>${arg} set {{'
+        arg += 1
+        args.append(gelid)
+
+        for name, info in item.model_fields.items():
+            if name == 'id':
+                continue
+
+            val = getattr(item, name)
+
+            # FIXME: instead we need to track the modified fields
+            if val is None:
+                # skip empty values
+                continue
+
+            if Link in info.metadata:
+                subqueries = []
+                if Multi in info.metadata:
+                    links = val
+                else:
+                    links = [val]
+
+                # multi link potentially needs several subqueries
+                for el in links:
+                    subquery, subargs = self.generate_select(
+                        el, arg_start=arg)
+                    arg += len(subargs)
+                    args += subargs
+                    subqueries.append(f'({subquery})')
+
+                query += f'{name} := '
+                if len(subqueries) > 1:
+                    subq = ", ".join(subqueries)
+                    query += f'assert_distinct({{ {subq} }}), '
+                else:
+                    query += f'{subqueries[0]}, '
+
+            else:
+                query += f'{name} := '
+                geltype = item.get_field_gel_type(name)
+                if Multi in info.metadata:
+                    query += f'array_unpack(<array<{geltype}>>${arg}), '
+                else:
+                    query += f'<{geltype}>${arg}, '
+
+                arg += 1
+                args.append(val)
+
+        query += '}'
 
         return query, args
 
@@ -168,7 +342,9 @@ class Session:
 
     def rank_object(self, obj):
         oid = id(obj)
-        if self._idmap.get(oid) is not None:
+        # Check if this object has been ranked already.
+        objdata = self._idmap[oid]
+        if objdata.rank is not None:
             return
 
         rank = 0
@@ -176,10 +352,16 @@ class Session:
         for name, info in obj.model_fields.items():
             val = getattr(obj, name)
             # We care about actual link value, because it can be None
-            if isinstance(val, BaseModel):
-                self.rank_object(val)
-                linked = self._idmap[id(val)]
-                rank = max(rank, linked.rank + 1)
+            if val is not None and Link in info.metadata:
+                if Multi in info.metadata:
+                    links = val
+                else:
+                    links = [val]
+
+                for el in links:
+                    self.rank_object(el)
+                    linked = self._idmap[id(el)]
+                    rank = max(rank, linked.rank + 1)
 
         if rank >= len(self._insert_order):
             # We only need to grow the _insert_order by 1 more rank since we
@@ -188,42 +370,94 @@ class Session:
             self._insert_order.append([])
 
         self._insert_order[rank].append(obj)
-        self._idmap[oid] = ObjData(obj=obj, rank=rank)
+        objdata.rank = rank
 
-    # def break_cycle(self):
-    #     # We have a set of objects that form a link cycle. We need to find one
-    #     # of them with optional links to this cycle and set that link to be
-    #     # empty instead. The object's link will be updated separately.
-    #     link_found = False
-    #     for oid in self._cycle:
-    #         obj = self._idmap[oid].obj
+    def _get_ex_values(self, obj):
+        # Make a tuple out of the Gel type name and all of the exclusive
+        # values.
+        vals = [obj.__gel_name__]
+        for name in sorted(obj.exclusive_fields()):
+            val = getattr(obj, name)
+            vals.append(val)
 
-    #         for name, info in obj.model_fields.items():
-    #             val = self.getmodelattr(obj, name)
-    #             # We care about actual link value, because it can be None
-    #             if (
-    #                 isinstance(val, BaseModel) and
-    #                 is_optional(info.annotation)
-    #             ):
-    #                 self._updates[oid].add(name)
-    #                 link_found = True
-    #                 break
+        if len(vals) > 1:
+            return tuple(vals)
+        else:
+            return None
 
-    #     if not link_found:
-    #         cycle = ', '.join(self._idmap[oid].obj for oid in self._cycle)
-    #         raise Exception('Cycle detected: {cycle}')
+    def process_exclusive(self):
+        errors = defaultdict(list)
 
-    #     self._cycle.clear()
+        for obj in self._data:
+            self.map_exclusive(obj, errors)
 
-    # def getmodelattr(self, obj, name):
-    #     links = self._updates.get(id(obj), set())
-    #     if name in links:
-    #         # skip this link
-    #         return None
-    #     else:
-    #         return getattr(obj, name)
+        if len(errors) > 0:
+            num_err = 0
+            msg = 'The following objects have clashing exclusive fields:\n'
+            for key, val in errors.items():
+                first = self._exmap[key][:1]
+                msg += f'{key[0]}: '
+                if num_err + len(val) < 100:
+                    # include all objects
+                    msg += ', '.join(
+                        str(obj) for obj in first + val)
+                    msg += '\n'
+                else:
+                    # clip objects in error message
+                    msg += ', '.join(
+                        str(obj) for obj in (first + val)[:100 - num_err])
+                    break
+
+            raise Exception(msg)
+
+    def map_exclusive(self, obj, errors):
+        oid = id(obj)
+        if self._idmap.get(oid) is not None:
+            return
+
+        exval = self._get_ex_values(obj)
+        self._idmap[oid] = ObjData(obj=obj, exval=exval)
+
+        if exval is not None:
+            # has exclusive fields
+            exlist = self._exmap[exval]
+            if exlist:
+                other = exlist[0]
+            else:
+                other = None
+
+            if other:
+                if self._identity_merge:
+                    # Objects with the same exclusive fields and the same values
+                    # for other properties are asssumed to be the same object.
+                    if other.eq_props(obj):
+                        self._exmap[exval].append(obj)
+                    else:
+                        errors[exval].append(obj)
+
+                else:
+                    # Objects with the same exclusive fields cannot exist and
+                    # should be flagged as an error. But we want to collect them
+                    # all first.
+                    errors[exval].append(obj)
+            else:
+                # No pre-existing copy
+                self._exmap[exval].append(obj)
+
+        # recurse into links
+        for name, info in obj.model_fields.items():
+            val = getattr(obj, name)
+            # We care about actual link value, because it can be None
+            if val is not None and Link in info.metadata:
+                if Multi in info.metadata:
+                    links = val
+                else:
+                    links = [val]
+
+                for el in links:
+                    self.map_exclusive(el, errors)
 
 
 def commit(client, data, *, identity_merge=False):
-    sess = Session(data, client)
+    sess = Session(data, client, identity_merge=identity_merge)
     sess.commit()

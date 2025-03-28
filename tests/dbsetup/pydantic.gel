@@ -1,0 +1,28 @@
+type ToDoList {
+    required name: str {
+        constraint exclusive()
+    }
+}
+
+type Item {
+    required num: int64;
+    required text: str;
+    required done: bool;
+    required list: ToDoList;
+}
+
+type LinkedList {
+    required data: str {
+        constraint exclusive()
+    }
+    multi ints: int64;
+    next: LinkedList;
+}
+
+type Tree {
+    required data: str {
+        constraint exclusive()
+    }
+
+    multi branches: Tree;
+}

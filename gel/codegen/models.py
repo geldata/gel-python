@@ -175,20 +175,14 @@ COMMENT = '''\
 '''
 
 class Generator(FilePrinter):
-    def __init__(self, args: argparse.Namespace):
+    def __init__(self, args: argparse.Namespace, client=None):
         self._default_module = "default"
         self._targets = args.target
         self._async = False
-        try:
-            self._project_dir = pathlib.Path(find_gel_project_dir())
-        except gel.ClientConnectionError:
-            print(
-                "Cannot find gel.toml: "
-                "codegen must be run under an EdgeDB project dir"
-            )
-            sys.exit(2)
-        print_msg(f"Found EdgeDB project: {C.BOLD}{self._project_dir}{C.ENDC}")
-        self._client = gel.create_client(**_get_conn_args(args))
+        if client is not None:
+            self._client = client
+        else:
+            self._client = gel.create_client(**_get_conn_args(args))
         self._describe_results = []
 
         self._cache = {}
@@ -197,10 +191,12 @@ class Generator(FilePrinter):
         self._defs = {}
         self._names = set()
 
-        self._basemodule = 'models'
-        self._outdir = pathlib.Path('models')
+        self._basemodule = args.mod
+        self._outdir = pathlib.Path(args.out)
         self._modules = {}
         self._types = {}
+
+        self.init_dir(self._outdir)
 
         super().__init__()
 
@@ -285,74 +281,117 @@ class Generator(FilePrinter):
         scalar_types = maps['scalar_types']
 
         if object_types:
-            self.write(f'from typing import Optional, Any, Annotated')
+            self.write(f'import pydantic')
+            self.write(f'import typing as pt')
+            self.write(f'import uuid')
             self.write(f'from gel.compatibility import pydmodels as gm')
 
         objects = sorted(
             object_types.values(), key=lambda x: x.name
         )
         for obj in objects:
+            self.render_type(obj, variant='Base')
+            self.render_type(obj, variant='Update')
             self.render_type(obj)
 
-    def render_type(self, objtype):
+    def render_type(self, objtype, *, variant=None):
         mod, name = get_mod_and_name(objtype.name)
+        is_empty = True
 
         self.write()
         self.write()
-        self.write(f'class {name}(gm.BaseGelModel):')
-        self.indent()
-        self.write(f'__gel_name__ = {objtype.name!r}')
+        match variant:
+            case 'Base':
+                self.write(f'class _{variant}{name}(gm.BaseGelModel):')
+                self.indent()
+                self.write(f'__gel_name__ = {objtype.name!r}')
+            case 'Update':
+                self.write(f'class _{variant}{name}(gm.UpdateGelModel):')
+                self.indent()
+                self.write(f'__gel_name__ = {objtype.name!r}')
+                self.write(
+                    f"id: pt.Annotated[uuid.UUID, gm.GelType('std::uuid'), "
+                    f"gm.Exclusive]"
+                )
+            case _:
+                self.write(f'class {name}(_Base{name}):')
+                self.indent()
 
-        if len(objtype.properties) > 0:
+        if variant and len(objtype.properties) > 0:
+            is_empty = False
             self.write()
             self.write('# Properties:')
             for prop in objtype.properties:
-                self.render_prop(prop, mod)
+                self.render_prop(prop, mod, variant=variant)
 
-        if len(objtype.links) > 0:
-            self.write()
-            self.write('# Properties:')
+        if variant != 'Base' and len(objtype.links) > 0:
+            if variant or not is_empty:
+                self.write()
+            is_empty = False
+            self.write('# Links:')
             for link in objtype.links:
-                self.render_link(link, mod)
+                self.render_link(link, mod, variant=variant)
+
+        if not variant:
+            if not is_empty:
+                self.write()
+            self.write('# Class variants:')
+            self.write(f'base: pt.ClassVar = _Base{name}')
+            self.write(f'update: pt.ClassVar = _Update{name}')
 
         self.dedent()
 
-    def render_prop(self, prop, curmod):
+    def render_prop(self, prop, curmod, *, variant=None):
         pytype = TYPE_MAPPING.get(prop.target.name)
+        annotated = [f'gm.GelType({prop.target.name!r})']
         defval = ''
         if not pytype:
             # skip
             return
 
-        # FIXME: need to also handle multi
+        if str(prop.cardinality) == 'Many':
+            annotated.append('gm.Multi')
+            pytype = f'pt.List[{pytype}]'
+            defval = ' = []'
 
-        if not prop.required:
-            pytype = f'Optional[{pytype}]'
+        if variant == 'Update' or not prop.required:
+            pytype = f'pt.Optional[{pytype}]'
             # A value does not need to be supplied
             defval = ' = None'
 
         if prop.exclusive:
-            pytype = f'Annotated[{pytype}, gm.Exclusive]'
+            annotated.append('gm.Exclusive')
+
+        anno = ', '.join([pytype] + annotated)
+        pytype = f'pt.Annotated[{anno}]'
 
         self.write(
             f'{prop.name}: {pytype}{defval}'
         )
 
-    def render_link(self, link, curmod):
+    def render_link(self, link, curmod, *, variant=None):
         mod, name = get_mod_and_name(link.target.name)
+        annotated = [f'gm.GelType({link.target.name!r})', 'gm.Link']
+        defval = ''
         if curmod == mod:
             pytype = name
         else:
             pytype = link.target.name.replace('::', '.')
+        pytype = repr(pytype)
 
-        # FIXME: need to also handle multi
+        if str(link.cardinality) == 'Many':
+            annotated.append('gm.Multi')
+            pytype = f'pt.List[{pytype}]'
+            defval = ' = []'
 
-        if link.required:
-            self.write(
-                f'{link.name}: {pytype!r}'
-            )
-        else:
+        if variant == 'Update' or not link.required:
+            pytype = f'pt.Optional[{pytype}]'
             # A value does not need to be supplied
-            self.write(
-                f'{link.name}: Optional[{pytype!r}] = None'
-            )
+            defval = ' = None'
+
+        anno = ', '.join([pytype] + annotated)
+        pytype = f'pt.Annotated[{anno}]'
+
+        self.write(
+            f'{link.name}: {pytype}{defval}'
+        )
