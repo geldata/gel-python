@@ -31,6 +31,7 @@ import pathlib
 import sys
 import textwrap
 import typing
+import uuid
 
 from collections import defaultdict
 from contextlib import contextmanager
@@ -41,7 +42,9 @@ from gel import describe
 from gel.con_utils import find_gel_project_dir
 from gel.color import get_color
 
+from gel.orm import introspection
 from gel.orm.introspection import FilePrinter, get_mod_and_name
+from gel._internal import _reflection as reflection
 
 from . import base
 from .base import C
@@ -100,8 +103,6 @@ select ObjectType {
     backlinks := <array<str>>[],
 }
 filter
-    not .builtin
-    and
     not .internal
     and
     not .from_alias
@@ -114,7 +115,7 @@ filter
 MODULE_QUERY = """
 with
     module schema,
-    m := (select `Module` filter not .builtin)
+    m := (select `Module`)
 select _ := m.name order by _;
 """
 
@@ -127,52 +128,10 @@ COMMENT = """\
 """
 
 
-class StrEnum(str, enum.Enum):
-    pass
-
-
-class Cardinality(StrEnum):
-    One = "One"
-    Many = "Many"
-
-
-class TypeRef(NamedTuple):
-    name: str
-
-
-class ConstraintParam(NamedTuple):
-    name: str
-    value: str
-
-
-class IntrospectedConstraint(NamedTuple):
-    name: str
-    params: list[NamedTuple]
-
-
-class IntrospectedProperty(NamedTuple):
-    name: str
-    readonly: bool
-    required: bool
-    cardinality: Cardinality
-    exclusive: bool
-    target: TypeRef
-    constraints: list[IntrospectedConstraint]
-
-
-class IntrospectedLink(IntrospectedProperty):
-    properties: list[IntrospectedProperty]
-
-
-class IntrospectedType(NamedTuple):
-    name: str
-    links: list[IntrospectedLink]
-    properties: list[IntrospectedProperty]
-
-
 class IntrospectedModule(TypedDict):
-    object_types: dict[str, IntrospectedType]
-    scalar_types: dict[str, IntrospectedType]
+    imports: dict[str, str]
+    object_types: dict[str, reflection.ObjectType]
+    scalar_types: dict[str, reflection.ScalarType]
 
 
 class ModelsGenerator(base.Generator, FilePrinter):
@@ -183,7 +142,8 @@ class ModelsGenerator(base.Generator, FilePrinter):
         self._basemodule = "models"
         self._outdir = pathlib.Path("models")
         self._modules: dict[str, IntrospectedModule] = {}
-        self._types: dict[str, IntrospectedType] = {}
+        self._types: dict[uuid.UUID, reflection.AnyType] = {}
+        self._wrapped_types: set[str] = set()
 
     def run(self) -> None:
         try:
@@ -201,12 +161,9 @@ class ModelsGenerator(base.Generator, FilePrinter):
                     continue
 
                 with self.init_module(mod):
-                    self.write_types(maps)
+                    self.write_types(mod, maps)
 
         base.print_msg(f"{C.GREEN}{C.BOLD}Done.{C.ENDC}")
-
-    def introspect_types(self) -> list[IntrospectedType]:
-        return self._client.query(INTRO_QUERY)  # type: ignore [no-any-return]
 
     def introspect_modules(self) -> list[str]:
         return self._client.query(MODULE_QUERY)  # type: ignore [no-any-return]
@@ -214,14 +171,24 @@ class ModelsGenerator(base.Generator, FilePrinter):
     def get_schema(self) -> None:
         for mod in self.introspect_modules():
             self._modules[mod] = {
-                "object_types": {},
                 "scalar_types": {},
+                "object_types": {},
+                "imports": {},
             }
 
-        for t in self.introspect_types():
+        self._types = reflection.fetch_types(self._client)
+
+        for t in self._types.values():
+            if t.kind not in {
+                reflection.TypeKind.Scalar.value,
+                reflection.TypeKind.Object.value,
+            }:
+                continue
             mod, name = get_mod_and_name(t.name)
-            self._types[t.name] = t
-            self._modules[mod]["object_types"][t.name] = t
+            if t.kind == reflection.TypeKind.Object.value:
+                self._modules[mod]["object_types"][t.name] = t
+            elif t.kind == reflection.TypeKind.Scalar.value:
+                self._modules[mod]["scalar_types"][t.name] = t
 
     def init_dir(self, dirpath: pathlib.Path) -> None:
         if not dirpath:
@@ -269,23 +236,49 @@ class ModelsGenerator(base.Generator, FilePrinter):
             finally:
                 self.out = None
 
-    def write_types(self, maps: IntrospectedModule) -> None:
+    def write_types(self, modname: str, maps: IntrospectedModule) -> None:
+        self.write("from __future__ import annotations")
+
+        self.write("import uuid")
+
+        scalar_types = maps["scalar_types"]
+        for type_name, type in scalar_types.items():
+            if type.enum_values:
+                self.write(f"class {type_name}(StrEnum):")
+                with self.indented():
+                    for value in type.enum_values:
+                        self.write(f"{value} = {value!r}")
+            else:
+                if type.material_id is not None:
+                    print(type_name)
+
         object_types = maps["object_types"]
 
         if object_types:
             self.write(
-                f"from typing import Optional, Annotated, TypeVar, Union, Type"
+                f"from typing import TYPE_CHECKING, Optional, Annotated, TypeVar, Union, Type, ParamSpec, Any, TypeAlias"
             )
             self.write(f"from gel.models import pydantic as gm")
-
-        self.write("import uuid")
+            self.write(f"from gel.models import expr as gexpr")
 
         objects = sorted(object_types.values(), key=lambda x: x.name)
         for obj in objects:
-            self.render_type(obj)
+            self.render_type(modname, obj)
 
-    def render_type(self, objtype: IntrospectedType) -> None:
+    def render_type(
+        self, modname: str, objtype: reflection.ObjectType
+    ) -> None:
         mod, name = get_mod_and_name(objtype.name)
+
+        # for prop in objtype.pointers:
+        #     prop_type = self.get_prop_type(prop)
+        #     if prop_type not in self._wrapped_types:
+        #         type_wrapper = f"_{prop_type.replace('.', '_')}_Subtype"
+        #         self.write(
+        #             f"class {type_wrapper}({prop_type}, gm.ValidatedType[{prop_type}]):"
+        #         )
+        #         self.write("    pass")
+        #         self._wrapped_types.add(prop_type)
 
         self.write()
         self.write()
@@ -293,15 +286,23 @@ class ModelsGenerator(base.Generator, FilePrinter):
         self.write(f"# type {objtype.name}")
         self.write("#")
 
-        for prop in objtype.properties:
-            non_opt = self.render_prop_type(prop, optional=False)
-            opt = self.render_prop_type(prop, optional=True)
-            self.write(f"{name}__p__{prop.name}_req = {non_opt}")
-            self.write(f"{name}__p__{prop.name}_opt = {opt}")
+        modpath = tuple(modname.split("::"))
+
+        for prop in objtype.pointers:
+            orig_prop_type = self.get_prop_type(modpath, prop)
+            prop_type = f"_{orig_prop_type.replace('.', '_')}_Subtype"
+            self.write(
+                f"class {name}__p__{prop.name}_req_t({prop_type}, gexpr.Expression[{prop_type}]):"
+            )
+            self.write("    pass")
+            self.write(
+                f"{name}__p__{prop.name} = Optional[{name}__p__{prop.name}_req_t]"
+            )
+            self.write(f'"""{objtype.name}.{prop.name} ({orig_prop_type})"""')
             self.write(f"{name}__p__{prop.name}_selector = Union[")
             with self.indented():
-                self.write(f"{name}__p__{prop.name}_req,")
-                self.write(f"{name}__p__{prop.name}_opt,")
+                self.write(f"{name}__p__{prop.name}_req_t,")
+                self.write(f"{name}__p__{prop.name},")
             self.write("]")
 
         # for link in objtype.links:
@@ -327,18 +328,42 @@ class ModelsGenerator(base.Generator, FilePrinter):
             self.write(")")
 
         self.write()
-        self.write(f"class {name}(gm.BaseGelModel):")
+        self.write(f"{name}_T = TypeVar('{name}_T', bound='{name}')")
+        self.write(f"class {name}(gm.GelModel):")
         with self.indented():
             self.write(
                 f"__gel_metadata__ = "
                 f"gm.GelMetadata(schema_name={objtype.name!r})",
             )
 
+            self.write("class __gel_for__:")
+            with self.indented():
+                self.write("class Select(gm.GelModel):")
+                with self.indented():
+                    self.write(
+                        f"__gel_metadata__ = "
+                        f"gm.GelMetadata(schema_name={objtype.name!r})",
+                    )
+
             if len(objtype.properties) > 0:
+                self.write()
+                self.write("# Property types:")
+                self.write("class __gel_fields__:")
+                with self.indented():
+                    for prop in objtype.properties:
+                        orig_prop_type = self.get_prop_type(prop)
+                        self.write(
+                            f"{prop.name}: TypeAlias = {name}__p__{prop.name}"
+                        )
+
                 self.write()
                 self.write("# Properties:")
                 for prop in objtype.properties:
-                    self.write(f"{prop.name}: {name}__p__{prop.name}_opt")
+                    orig_prop_type = self.get_prop_type(prop)
+                    self.write(f"{prop.name}: {name}__p__{prop.name}")
+                    self.write(
+                        f'"""{objtype.name}.{prop.name} ({orig_prop_type})"""'
+                    )
 
             if len(objtype.links) > 0:
                 self.write()
@@ -346,63 +371,26 @@ class ModelsGenerator(base.Generator, FilePrinter):
                 for link in objtype.links:
                     self.render_link(link, mod)
 
-            self.write("@classmethod")
-            self.write(f"def select(cls, *ptrs: Type[{name}__pointers]):")
-            with self.indented():
-                self.write("pass")
-
         self.write()
 
-    def render_prop_type(
+    def get_prop_type(
         self,
-        prop: IntrospectedProperty,
-        optional: bool,
+        modpath: tuple[str, ...],
+        prop: reflection.Pointer,
     ) -> str:
-        gel_type = prop.target.name
-        pytype = base.TYPE_MAPPING.get(gel_type)
-        if not pytype:
-            raise NotImplementedError(f"unsupported Gel type: {gel_type}")
-        if optional:
-            pytype = f"Optional[{pytype}]"
-        annotated = [
-            pytype,
-            f"gm.GelMetadata(schema_name={prop.name!r})",
-        ]
-        if prop.exclusive:
-            annotated.append("gm.Exclusive")
-        annotations = textwrap.indent(",\n".join(annotated), "    ")
-        return f"Annotated[\n{annotations},\n]"
-
-    def render_prop(self, prop: IntrospectedProperty, curmod: str) -> None:
-        pytype = base.TYPE_MAPPING.get(prop.target.name)
-        defval = ""
-        if not pytype:
-            # skip
-            return
-
-        # FIXME: need to also handle multi
-
-        if not prop.required:
-            pytype = f"Optional[{pytype}]"
-            # A value does not need to be supplied
-            defval = " = None"
-
-        if prop.exclusive:
-            pytype = f"Annotated[{pytype}, gm.Exclusive]"
-
-        self.write(f"{prop.name}: {pytype}{defval}")
-
-    def render_link(self, link: IntrospectedLink, curmod: str) -> None:
-        mod, name = get_mod_and_name(link.target.name)
-        if curmod == mod:
-            pytype = name
+        type = self._types[prop.target_id]
+        type_path = pathlib.Path(*type.name.split("::"))
+        mod_path = pathlib.Path(*modpath)
+        common = pathlib.Path(os.path.commonpath([type_path, mod_path]))
+        if common:
+            relative_depth = len(mod_path.parts) - len(common.parts)
+            import_tail = type_path.parts[len(common.parts):]
         else:
-            pytype = link.target.name.replace("::", ".")
+            relative_depth = len(mod_path.parts)
+            import_tail = type_path.parts
 
-        # FIXME: need to also handle multi
-
-        if link.required:
-            self.write(f"{link.name}: {pytype!r}")
-        else:
-            # A value does not need to be supplied
-            self.write(f"{link.name}: Optional[{pytype!r}] = None")
+        module = ".." * relative_depth + ".".join(import_tail[:-1])
+        name = import_tail[-1]
+        print(module, name)
+        1 / 0
+        return relative.parts
