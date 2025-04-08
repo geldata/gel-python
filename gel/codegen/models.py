@@ -377,7 +377,7 @@ class ModelsGenerator(base.Generator, FilePrinter):
         self,
         modpath: tuple[str, ...],
         prop: reflection.Pointer,
-    ) -> str:
+    ) -> tuple[str, str, str]:
         type = self._types[prop.target_id]
         type_path = pathlib.Path(*type.name.split("::"))
         mod_path = pathlib.Path(*modpath)
@@ -391,6 +391,4 @@ class ModelsGenerator(base.Generator, FilePrinter):
 
         module = ".." * relative_depth + ".".join(import_tail[:-1])
         name = import_tail[-1]
-        print(module, name)
-        1 / 0
-        return relative.parts
+        return name, module, "_".join(type_path.parent.parts)

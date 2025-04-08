@@ -15,8 +15,6 @@ from typing import (
 import dataclasses
 import uuid
 
-from pydantic.dataclasses import dataclass
-
 from gel import abstract
 from . import _enums as enums
 from . import _query
