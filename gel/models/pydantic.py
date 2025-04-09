@@ -17,7 +17,7 @@ import pydantic.fields
 from pydantic._internal import _model_construction
 import pydantic_core
 
-from gel._internal.typing_hacks import parametric
+from gel._internal import _typing_parametric as parametric
 
 
 T = TypeVar("T")

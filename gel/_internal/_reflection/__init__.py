@@ -7,6 +7,10 @@ from ._enums import (
     PointerKind,
 )
 
+from ._support import (
+    parse_name,
+)
+
 from ._types import (
     AnyType,
     ObjectType,
@@ -23,5 +27,6 @@ __all__ = (
     "PointerKind",
     "ScalarType",
     "TypeKind",
+    "parse_name",
     "fetch_types",
 )

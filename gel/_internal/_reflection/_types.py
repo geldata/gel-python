@@ -25,6 +25,7 @@ class Type:
     id: uuid.UUID
     kind: enums.TypeKind
     name: str
+    description: Optional[str]
     is_abstract: bool
 
 

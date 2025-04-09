@@ -18,13 +18,19 @@
 
 from typing import (
     Any,
+    Iterator,
+    Optional,
 )
 
 import argparse
+import collections
+import contextlib
 import getpass
+import io
 import os
 import pathlib
 import sys
+import textwrap
 
 import gel
 from gel.con_utils import find_gel_project_dir
@@ -155,8 +161,91 @@ class Generator:
         except gel.ClientConnectionError:
             print(
                 "Cannot find gel.toml: "
-                "codegen must be run under an EdgeDB project dir"
+                "codegen must be run inside a Gel project directory"
             )
             sys.exit(2)
         print_msg(f"Found Gel project: {C.BOLD}{self._project_dir}{C.ENDC}")
+
         self._client = gel.create_client(**_get_conn_args(args))
+
+
+class GeneratedModule:
+    INDENT = " " * 4
+
+    def __init__(self) -> None:
+        self._indent_level = 0
+        self._chunks: list[str] = []
+        self._std_imports: dict[str, set[str]] = collections.defaultdict(set)
+        self._lib_imports: dict[str, set[str]] = collections.defaultdict(set)
+        self._local_imports: dict[str, set[str]] = collections.defaultdict(set)
+
+    def indent(self, levels: int = 1) -> None:
+        self._indent_level += levels
+
+    def dedent(self, levels: int = 1) -> None:
+        if self._indent_level > 0:
+            self._indent_level -= levels
+
+    def import_(self, module: str, *names: str, **aliases: str) -> None:
+        all_names = list(names) + [f"{v} as {k}" for k, v in aliases.items()]
+        if module == "gel" or module.startswith("gel."):
+            self._lib_imports[module].update(all_names)
+        elif module.startswith("."):
+            self._local_imports[module].update(all_names)
+        else:
+            self._std_imports[module].update(all_names)
+
+    @contextlib.contextmanager
+    def indented(self) -> Iterator[None]:
+        self._indent_level += 1
+        try:
+            yield
+        finally:
+            self._indent_level -= 1
+
+    def reset_indent(self) -> None:
+        self._indent_level = 0
+
+    def write(self, text: str = "") -> None:
+        chunk = textwrap.indent(text, prefix=self.INDENT * self._indent_level)
+        self._chunks.append(chunk)
+
+    def write_section_break(self, size: int = 2) -> None:
+        self._chunks.extend([""] * size)
+
+    def get_comment_preamble(self) -> str:
+        raise NotImplementedError
+
+    def render_imports(self) -> str:
+        sections = ["from __future__ import annotations"]
+        sections.append(self._render_imports(self._std_imports))
+        sections.append(self._render_imports(self._lib_imports))
+        sections.append(self._render_imports(self._local_imports))
+
+        return "\n\n".join(filter(None, sections))
+
+    def _render_imports(self, imports: dict[str, set[str]]) -> str:
+        output = []
+        mods = sorted(imports.items(), key=lambda kv: (len(kv[1]) == 0, kv[0]))
+        for modname, names in mods:
+            if names:
+                import_line = f"from {modname} import "
+                names_list = list(names)
+                names_list.sort()
+                names_part = ", ".join(names_list)
+                if len(import_line) + len(names_part) > 79:
+                    names_part = "(\n    " + ",\n    ".join(names_list) + "\n)"
+                import_line += names_part
+            else:
+                import_line = f"import {modname}"
+            output.append(import_line)
+
+        return "\n".join(output)
+
+    def output(self, out: io.TextIOWrapper) -> None:
+        out.write(self.get_comment_preamble())
+        out.write("\n\n")
+        out.write(self.render_imports())
+        out.write("\n\n\n")
+        out.write("\n".join(self._chunks))
+        out.write("\n")

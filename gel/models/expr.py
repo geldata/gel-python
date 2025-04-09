@@ -6,7 +6,7 @@
 from __future__ import annotations
 from typing import Callable, TypeVar, Union
 
-from gel._internal.typing_hacks import parametric
+from gel._internal import _typing_parametric as parametric
 from . import types
 
 

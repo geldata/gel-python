@@ -22,6 +22,15 @@ SELECT Type {
         IF EXISTS [IS ObjectType].union_of
         ELSE .name
     ),
+    description := assert_single((
+        WITH
+            tid := .id,
+        SELECT (ScalarType UNION ObjectType) {
+            description := (SELECT .annotations {
+                value := materialized(@value)
+            } FILTER .name = "std::description"),
+        } FILTER .id = tid
+    ).description.value),
     is_abstract := .abstract,
 
     kind := assert_exists(
