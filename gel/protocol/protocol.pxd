@@ -97,10 +97,12 @@ cdef class ExecuteContext:
         readonly BaseCodec out_dc
         readonly uint64_t capabilities
         readonly tuple warnings
+        readonly tuple unsafe_isolation_dangers
 
     cdef inline bint has_na_cardinality(self)
     cdef bint load_from_cache(self)
     cdef inline store_to_cache(self)
+    cdef prefers_repeatable_read(self)
 
 
 cdef class SansIOProtocol:
@@ -168,7 +170,7 @@ cdef class SansIOProtocol:
 
     cdef ensure_connected(self)
 
-    cdef WriteBuffer encode_parse_params(self, ExecuteContext ctx)
+    cdef WriteBuffer encode_parse_params(self, ExecuteContext ctx, dict state)
 
 
 include "protocol_v0.pxd"
