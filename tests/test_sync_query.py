@@ -38,11 +38,21 @@ class TestSyncQuery(tb.SyncQueryTestCase):
             CREATE REQUIRED PROPERTY tmp -> std::str;
         };
 
+        CREATE TYPE test::TmpConflict {
+            CREATE REQUIRED PROPERTY tmp -> std::str {
+                CREATE CONSTRAINT exclusive;
+            }
+        };
+
+        CREATE TYPE test::TmpConflictChild extending test::TmpConflict;
+
         CREATE SCALAR TYPE MyEnum EXTENDING enum<"A", "B">;
     '''
 
     TEARDOWN = '''
         DROP TYPE test::Tmp;
+        DROP TYPE test::TmpConflictChild;
+        DROP TYPE test::TmpConflict;
     '''
 
     def test_sync_parse_error_recover_01(self):
@@ -883,3 +893,36 @@ class TestSyncQuery(tb.SyncQueryTestCase):
                 tx.execute('''
                     INSERT test::Tmp { id := <uuid>$0, tmp := '' }
                 ''', uuid.uuid4())
+
+    def test_sync_prefer_rr(self):
+        version = self.client.query_required_single('''
+            select sys::get_version()
+        ''')
+
+        if (
+            str(version.stage) != 'dev'
+            or (version.major, version.minor) < (6, 5)
+        ):
+            self.skipTest("DML in RepeatableRead not supported yet")
+
+        with self.client.with_config(
+            default_transaction_isolation=
+            edgedb.IsolationLevel.PreferRepeatableRead
+        ) as db2:
+            # This query can run in RepeatableRead mode
+            res = db2.query_single('''
+                select {
+                    ins := (insert test::Tmp { tmp := "test" }),
+                    level := sys::get_transaction_isolation(),
+                }
+            ''')
+            self.assertEqual(str(res.level), 'RepeatableRead')
+
+            # This one can't
+            res = db2.query_single('''
+                select {
+                    ins := (insert test::TmpConflict { tmp := "test" }),
+                    level := sys::get_transaction_isolation(),
+                }
+            ''')
+            self.assertEqual(str(res.level), 'Serializable')
