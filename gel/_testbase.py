@@ -507,7 +507,10 @@ class DatabaseTestCase(ClusterTestCase, ConnectedTestCaseMixin):
                     self.client.execute(self.TEARDOWN_METHOD))
         finally:
             try:
-                if self.client.connection.is_in_transaction():
+                if (
+                    self.client.connection
+                    and self.client.connection.is_in_transaction()
+                ):
                     raise AssertionError(
                         'test connection is still in transaction '
                         '*after* the test')
