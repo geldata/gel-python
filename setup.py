@@ -38,7 +38,10 @@ from setuptools.command import build_ext as setuptools_build_ext
 
 CYTHON_DEPENDENCY = "Cython(>=3.0.11,<3.1.0)"
 
-CFLAGS = ["-O2"]
+if flag := os.environ.get('EDGEDB_OPT_CFLAG'):
+    CFLAGS = [flag]
+else:
+    CFLAGS = ["-O2"]
 SYSTEM = sys.platform
 
 if SYSTEM != "win32":

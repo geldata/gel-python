@@ -36,6 +36,12 @@ compile: _touch
 	$(PYTHON) setup.py build_ext --inplace
 
 
+compile-fast:
+	rm -fr $(ROOT)/gel/datatypes/datatypes.c
+	rm -fr $(ROOT)/gel/protocol/protocol.c
+	$(PYTHON) setup.py build_ext --inplace
+
+
 gen-errors:
 	edb gen-errors --import "$(echo "from edgedb.errors._base import *"; echo "from edgedb.errors.tags import *")" \
 		--extra-all "_base.__all__" --stdout --client > $(ROOT)/.errors
