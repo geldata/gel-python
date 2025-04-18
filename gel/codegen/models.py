@@ -81,6 +81,7 @@ class ModelsGenerator(base.Generator):
         self._outdir = pathlib.Path("models")
         self._modules: dict[str, IntrospectedModule] = {}
         self._types: dict[uuid.UUID, reflection.AnyType] = {}
+        self._named_tuples: dict[uuid.UUID, reflection.NamedTupleType] = {}
         self._wrapped_types: set[str] = set()
 
     def get_comment_preamble(self) -> str:
@@ -96,6 +97,8 @@ class ModelsGenerator(base.Generator):
         self.get_schema()
 
         with self._client:
+            self._generate_common_types()
+
             for modname, content in self._modules.items():
                 if not content:
                     # skip apparently empty modules
@@ -108,6 +111,12 @@ class ModelsGenerator(base.Generator):
                     module.output(f)
 
         base.print_msg(f"{C.GREEN}{C.BOLD}Done.{C.ENDC}")
+
+    def _generate_common_types(self) -> None:
+        module = GeneratedGlobalModule("__types__", self._named_tuples)
+
+        with self.open_module(module.name) as f:
+            pass
 
     @contextmanager
     def open_module(self, mod: str) -> Generator[io.TextIOWrapper, None, None]:
@@ -149,16 +158,14 @@ class ModelsGenerator(base.Generator):
         self._types = reflection.fetch_types(self._client)
 
         for t in self._types.values():
-            if t.kind not in {
-                reflection.TypeKind.Scalar.value,
-                reflection.TypeKind.Object.value,
-            }:
-                continue
-            mod, name = reflection.parse_name(t.name)
             if t.kind == reflection.TypeKind.Object.value:
+                mod, name = reflection.parse_name(t.name)
                 self._modules[mod]["object_types"][name] = t
             elif t.kind == reflection.TypeKind.Scalar.value:
+                mod, name = reflection.parse_name(t.name)
                 self._modules[mod]["scalar_types"][name] = t
+            elif t.kind == reflection.TypeKind.NamedTuple.value:
+                self._named_tuples[t.id] = t
 
     def init_dir(self, dirpath: pathlib.Path) -> None:
         if not dirpath:
@@ -360,3 +367,15 @@ class GeneratedSchemaModule(base.GeneratedModule):
                 alias = "_".join(type_path.parts)
                 self.import_(module, **{alias: import_tail[-1]})
                 return alias
+
+
+class GeneratedGlobalModule(base.GeneratedModule):
+    def __init__(
+        self,
+        modname: str,
+        global_types: dict[uuid.UUID, reflection.AnyType],
+    ) -> None:
+        super().__init__()
+        self._modname = modname
+        self._modpath = pathlib.Path(*modname.split("::"))
+        self._types = global_types

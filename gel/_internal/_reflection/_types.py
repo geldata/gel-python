@@ -59,7 +59,7 @@ class ObjectType(InheritingType):
 
 
 @dataclasses.dataclass(frozen=True, kw_only=True)
-class ArrayType(InheritingType):
+class ArrayType(Type):
     kind: Literal[enums.TypeKind.Array]
     array_element_id: uuid.UUID
 
@@ -83,16 +83,22 @@ class TupleElement:
 
 
 @dataclasses.dataclass(frozen=True)
-class TupleType(InheritingType):
+class TupleType(Type):
     kind: Literal[enums.TypeKind.Tuple]
     tuple_elements: list[TupleElement]
-    is_named: bool
+
+
+@dataclasses.dataclass(frozen=True)
+class NamedTupleType(Type):
+    kind: Literal[enums.TypeKind.NamedTuple]
+    tuple_elements: list[TupleElement]
 
 
 PrimitiveType = Union[
     ScalarType,
     ArrayType,
     TupleType,
+    NamedTupleType,
     RangeType,
     MultiRangeType,
 ]

@@ -37,6 +37,7 @@ SELECT Type {
         'Object' IF Type IS ObjectType ELSE
         'Scalar' IF Type IS ScalarType ELSE
         'Array' IF Type IS Array ELSE
+        'NamedTuple' IF Type[IS Tuple].named ?? false ELSE
         'Tuple' IF Type IS Tuple ELSE
         'Range' IF Type IS Range ELSE
         'MultiRange' IF Type IS MultiRange ELSE
@@ -120,7 +121,6 @@ SELECT Type {
         target_id := .type.id,
         name
     } ORDER BY @index ASC),
-    tuple_is_named := [IS Tuple].named,
     range_element_id := [IS Range].element_type.id,
     multirange_element_id := [IS MultiRange].element_type.id,
 }

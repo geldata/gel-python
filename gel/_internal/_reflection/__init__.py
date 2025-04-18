@@ -3,8 +3,8 @@
 # SPDX-FileCopyrightText: Copyright Gel Data Inc. and the contributors.
 
 from ._enums import (
-    TypeKind,
     PointerKind,
+    TypeKind,
 )
 
 from ._support import (
@@ -13,20 +13,26 @@ from ._support import (
 
 from ._types import (
     AnyType,
+    ArrayType,
+    NamedTupleType,
     ObjectType,
-    ScalarType,
     Pointer,
+    ScalarType,
+    TupleType,
     fetch_types,
 )
 
 
 __all__ = (
     "AnyType",
+    "ArrayType",
+    "NamedTupleType",
     "ObjectType",
     "Pointer",
     "PointerKind",
     "ScalarType",
+    "TupleType",
     "TypeKind",
-    "parse_name",
     "fetch_types",
+    "parse_name",
 )
