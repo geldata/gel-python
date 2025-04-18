@@ -284,3 +284,7 @@ __all__.extend([
     "InternalClientError",
 ])
 # </ERRORS-AUTOGEN>
+
+
+from .integration.fastapi import patch as fastapi_patch
+fastapi_patch._maybe_patch_fastapi_cli()

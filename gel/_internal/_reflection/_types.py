@@ -132,8 +132,12 @@ class Backlink(Pointer):
     stub = None
 
 
-def fetch_types(db: abstract.ReadOnlyExecutor) -> Types:
-    types: list[AnyType] = db.query(_query.TYPE_REFLECTION_QUERY)
+def fetch_types(
+    db: abstract.ReadOnlyExecutor,
+    schema_part: enums.SchemaPart,
+) -> Types:
+    builtin = schema_part is enums.SchemaPart.STD
+    types: list[AnyType] = db.query(_query.TYPES, builtin=builtin)
     result = {}
     for t in types:
         result[t.id] = t

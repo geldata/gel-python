@@ -5,6 +5,7 @@
 from ._enums import (
     PointerKind,
     TypeKind,
+    SchemaPart,
 )
 
 from ._support import (
@@ -22,6 +23,9 @@ from ._types import (
     fetch_types,
 )
 
+from ._modules import (
+    fetch_modules,
+)
 
 __all__ = (
     "AnyType",
@@ -31,8 +35,11 @@ __all__ = (
     "Pointer",
     "PointerKind",
     "ScalarType",
+    "SchemaPart",
     "TupleType",
     "TypeKind",
-    "fetch_types",
+    "TypeKind",
     "parse_name",
+    "fetch_modules",
+    "fetch_types",
 )

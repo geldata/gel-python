@@ -3,7 +3,18 @@
 # SPDX-FileCopyrightText: Copyright Gel Data Inc. and the contributors.
 
 
-TYPE_REFLECTION_QUERY = """
+MODULES = """
+WITH
+    MODULE schema
+    m := (SELECT Module FILTER builtin = <bool>$builtin)
+SELECT
+    _ := m.name
+ORDER BY
+    _;
+"""
+
+
+TYPES = """
 WITH
     MODULE schema,
 
@@ -124,6 +135,8 @@ SELECT Type {
     range_element_id := [IS Range].element_type.id,
     multirange_element_id := [IS MultiRange].element_type.id,
 }
+FILTER
+    .builtin = <bool>$builtin
 ORDER BY
     .name;
 """

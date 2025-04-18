@@ -18,8 +18,9 @@
 
 from typing import (
     Generator,
-    TypedDict,
+    Mapping,
     NamedTuple,
+    TypedDict,
     Union,
 )
 
@@ -51,13 +52,6 @@ from . import base
 from .base import C, GeneratedModule
 
 
-MODULE_QUERY = """
-with
-    module schema,
-    m := (select `Module`)
-select _ := m.name order by _;
-"""
-
 COMMENT = """\
 #
 # Automatically generated from Gel schema.
@@ -77,6 +71,24 @@ class ModelsGenerator(base.Generator):
     def __init__(self, args: argparse.Namespace):
         super().__init__(args)
 
+    def run(self) -> None:
+        try:
+            self._client.ensure_connected()
+        except gel.EdgeDBError as e:
+            print(f"could not connect to Gel instance: {e}")
+            sys.exit(61)
+
+        with self._client:
+            std_gen = SchemaGenerator(self._client, reflection.SchemaPart.STD)
+            std_gen.run()
+
+        base.print_msg(f"{C.GREEN}{C.BOLD}Done.{C.ENDC}")
+
+
+class SchemaGenerator:
+    def __init__(self, client: gel.Client, schema_part: reflection.SchemaPart) -> None:
+        self._client = client
+        self._schema_part = schema_part
         self._basemodule = "models"
         self._outdir = pathlib.Path("models")
         self._modules: dict[str, IntrospectedModule] = {}
@@ -84,39 +96,30 @@ class ModelsGenerator(base.Generator):
         self._named_tuples: dict[uuid.UUID, reflection.NamedTupleType] = {}
         self._wrapped_types: set[str] = set()
 
+    def run(self) -> None:
+        self.get_schema()
+
+        self._generate_common_types()
+        for modname, content in self._modules.items():
+            if not content:
+                # skip apparently empty modules
+                continue
+
+            module = GeneratedSchemaModule(modname, self._types)
+            module.process(content)
+
+            with self.open_module(modname) as f:
+                module.output(f)
+
     def get_comment_preamble(self) -> str:
         return COMMENT
 
-    def run(self) -> None:
-        try:
-            self._client.ensure_connected()
-        except gel.EdgeDBError as e:
-            print(f"Failed to connect to EdgeDB instance: {e}")
-            sys.exit(61)
-
-        self.get_schema()
-
-        with self._client:
-            self._generate_common_types()
-
-            for modname, content in self._modules.items():
-                if not content:
-                    # skip apparently empty modules
-                    continue
-
-                module = GeneratedSchemaModule(modname, self._types)
-                module.process(content)
-
-                with self.open_module(modname) as f:
-                    module.output(f)
-
-        base.print_msg(f"{C.GREEN}{C.BOLD}Done.{C.ENDC}")
-
     def _generate_common_types(self) -> None:
         module = GeneratedGlobalModule("__types__", self._named_tuples)
+        module.process()
 
-        with self.open_module(module.name) as f:
-            pass
+        with self.open_module("__types__") as f:
+            module.output(f)
 
     @contextmanager
     def open_module(self, mod: str) -> Generator[io.TextIOWrapper, None, None]:
@@ -144,18 +147,15 @@ class ModelsGenerator(base.Generator):
             finally:
                 pass
 
-    def introspect_modules(self) -> list[str]:
-        return self._client.query(MODULE_QUERY)  # type: ignore [no-any-return]
-
     def get_schema(self) -> None:
-        for mod in self.introspect_modules():
+        for mod in reflection.fetch_modules(self._client, self._schema_part):
             self._modules[mod] = {
                 "scalar_types": {},
                 "object_types": {},
                 "imports": {},
             }
 
-        self._types = reflection.fetch_types(self._client)
+        self._types = reflection.fetch_types(self._client, self._schema_part)
 
         for t in self._types.values():
             if t.kind == reflection.TypeKind.Object.value:
@@ -373,9 +373,15 @@ class GeneratedGlobalModule(base.GeneratedModule):
     def __init__(
         self,
         modname: str,
-        global_types: dict[uuid.UUID, reflection.AnyType],
+        global_types: Mapping[uuid.UUID, reflection.AnyType],
     ) -> None:
         super().__init__()
         self._modname = modname
         self._modpath = pathlib.Path(*modname.split("::"))
         self._types = global_types
+
+    def process(self) -> None:
+        graph = defaultdict(set)
+        for tid, t in self._types.items():
+            if isinstance(t, reflection.NamedTupleType):
+                pass

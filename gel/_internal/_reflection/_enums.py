@@ -10,6 +10,11 @@ class StrEnum(str, enum.Enum):
     pass
 
 
+class SchemaPart(enum.Enum):
+    STD = enum.auto()
+    USER = enum.auto()
+
+
 class Cardinality(StrEnum):
     AtMostOne = "AtMostOne"
     One = "One"
