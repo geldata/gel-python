@@ -4,12 +4,11 @@
 
 from __future__ import annotations
 import gel
-import typing
 
 
 async def select_scalars(
     executor: gel.AsyncIOExecutor,
-) -> typing.List[gel.ConfigMemory]:
+) -> list[gel.ConfigMemory]:
     return await executor.query(
         """\
         select <cfg::memory>{1, 2, 3};\
