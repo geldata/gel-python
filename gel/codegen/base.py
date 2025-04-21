@@ -19,12 +19,16 @@
 from typing import (
     Any,
     Iterator,
+    Literal,
     Optional,
+    TypeAlias,
+    Union,
 )
 
 import argparse
 import collections
 import contextlib
+import enum
 import getpass
 import io
 import os
@@ -170,18 +174,33 @@ class Generator:
         self._client = gel.create_client(**_get_conn_args(args))
 
 
+class _ImportSection(enum.Enum):
+    local = enum.auto()
+    lib = enum.auto()
+    std = enum.auto()
+
+
+class _ImportTime(enum.Enum):
+    runtime = enum.auto()
+    typecheck = enum.auto()
+
+
+class _ImportKind(enum.Enum):
+    names = enum.auto()
+    self = enum.auto()
+
+
+_ImportKey: TypeAlias = tuple[_ImportSection, _ImportTime, _ImportKind]
+_Imports: TypeAlias = defaultdict[_ImportKey, defaultdict[str, set[str]]]
+
+
 class GeneratedModule:
     INDENT = " " * 4
 
     def __init__(self) -> None:
         self._indent_level = 0
         self._chunks: list[str] = []
-        self._std_imports: dict[str, set[str]] = defaultdict(set)
-        self._lib_imports: dict[str, set[str]] = defaultdict(set)
-        self._local_imports: dict[str, set[str]] = defaultdict(set)
-        self._tc_std_imports: dict[str, set[str]] = defaultdict(set)
-        self._tc_lib_imports: dict[str, set[str]] = defaultdict(set)
-        self._tc_local_imports: dict[str, set[str]] = defaultdict(set)
+        self._imports: _Imports = defaultdict(lambda: defaultdict(set))
 
     def indent(self, levels: int = 1) -> None:
         self._indent_level += levels
@@ -190,24 +209,67 @@ class GeneratedModule:
         if self._indent_level > 0:
             self._indent_level -= levels
 
-    def import_(self, module: str, *names: str, **aliases: str) -> None:
-        all_names = list(names) + [f"{v} as {k}" for k, v in aliases.items()]
+    def _import_module(
+        self,
+        module: str,
+        imports: dict[_ImportKind, list[str]],
+        import_time: _ImportTime,
+    ) -> None:
         if module == "gel" or module.startswith("gel."):
-            self._lib_imports[module].update(all_names)
+            section = _ImportSection.lib
         elif module.startswith("."):
-            self._local_imports[module].update(all_names)
+            section = _ImportSection.local
         else:
-            self._std_imports[module].update(all_names)
+            section = _ImportSection.std
 
-    def import_types(self, module: str, *names: str, **aliases: str) -> None:
+        for import_kind, import_strings in imports.items():
+            key = section, import_time, import_kind
+            self._imports[key][module].update(import_strings)
+
+    def _import_names(
+        self,
+        module: str,
+        names: tuple[str, ...],
+        aliases: dict[str, str],
+        *,
+        import_time: _ImportTime,
+    ) -> None:
+        all_names: list[str] = []
+        all_self_aliases: list[str] = []
+        for n in names:
+            if n == ".":
+                all_self_aliases.append("")
+            else:
+                all_names.append(n)
+
+        for k, v in aliases.items():
+            if v == ".":  # module import
+                all_self_aliases.append(k)
+            else:
+                all_names.append(f"{v} as {k}")
+
+        if not all_names and not all_self_aliases:
+            all_self_aliases.append("")
+
+        self._import_module(
+            module,
+            {_ImportKind.names: all_names, _ImportKind.self: all_self_aliases},
+            import_time=import_time,
+        )
+
+    def import_(self, module: str, *names: str, **aliases: str) -> None:
+        self._import_names(
+            module, names, aliases, import_time=_ImportTime.runtime)
+
+    def import_type_names(
+        self,
+        module: str,
+        *names: str,
+        **aliases: str,
+    ) -> None:
         self.import_("typing")
-        all_names = list(names) + [f"{v} as {k}" for k, v in aliases.items()]
-        if module == "gel" or module.startswith("gel."):
-            self._tc_lib_imports[module].update(all_names)
-        elif module.startswith("."):
-            self._tc_local_imports[module].update(all_names)
-        else:
-            self._tc_std_imports[module].update(all_names)
+        self._import_names(
+            module, names, aliases, import_time=_ImportTime.typecheck)
 
     @contextlib.contextmanager
     def indented(self) -> Iterator[None]:
@@ -232,40 +294,53 @@ class GeneratedModule:
 
     def render_imports(self) -> str:
         sections = ["from __future__ import annotations"]
-        sections.append(self._render_imports(self._std_imports))
-        sections.append(self._render_imports(self._lib_imports))
-        sections.append(self._render_imports(self._local_imports))
-        if (
-            self._tc_std_imports
-            or self._tc_lib_imports
-            or self._tc_local_imports
-        ):
+        for section_key in _ImportSection.__members__.values():
+            key = (section_key, _ImportTime.runtime)
+            sections.append(self._render_imports(*key))
+
+        typecheck_sections = []
+        for section_key in _ImportSection.__members__.values():
+            key = (section_key, _ImportTime.typecheck)
+            typecheck_sections.append(
+                self._render_imports(*key, indent="    "))
+
+        if any(typecheck_sections):
             sections.append("if typing.TYPE_CHECKING:")
-            indent = " " * 4
-            sections.append(self._render_imports(self._tc_std_imports, indent))
-            sections.append(self._render_imports(self._tc_lib_imports, indent))
-            sections.append(self._render_imports(self._tc_local_imports, indent))
+            sections.extend(typecheck_sections)
 
         return "\n\n".join(filter(None, sections))
 
     def _render_imports(
         self,
-        imports: dict[str, set[str]],
+        section: _ImportSection,
+        import_time: _ImportTime,
+        *,
         indent: str = "",
     ) -> str:
         output = []
+        imports = self._imports[section, import_time, _ImportKind.self]
+        print("self", dict(imports))
+        mods = sorted(imports.items(), key=lambda kv: (len(kv[1]) == 0, kv[0]))
+        for modname, aliases in mods:
+            for alias in aliases:
+                if alias:
+                    import_line = f"import {modname} as {alias}"
+                else:
+                    import_line = f"import {modname}"
+                output.append(import_line)
+
+        imports = self._imports[section, import_time, _ImportKind.names]
         mods = sorted(imports.items(), key=lambda kv: (len(kv[1]) == 0, kv[0]))
         for modname, names in mods:
-            if names:
-                import_line = f"from {modname} import "
-                names_list = list(names)
-                names_list.sort()
-                names_part = ", ".join(names_list)
-                if len(import_line) + len(names_part) > 79:
-                    names_part = "(\n    " + ",\n    ".join(names_list) + "\n)"
-                import_line += names_part
-            else:
-                import_line = f"import {modname}"
+            if not names:
+                continue
+            import_line = f"from {modname} import "
+            names_list = list(names)
+            names_list.sort()
+            names_part = ", ".join(names_list)
+            if len(import_line) + len(names_part) > 79:
+                names_part = "(\n    " + ",\n    ".join(names_list) + "\n)"
+            import_line += names_part
             output.append(import_line)
 
         result = "\n".join(output)

@@ -88,6 +88,9 @@ class ModelsGenerator(base.Generator):
             std_gen = SchemaGenerator(self._client, reflection.SchemaPart.STD)
             std_gen.run()
 
+            usr_gen = SchemaGenerator(self._client, reflection.SchemaPart.USER)
+            usr_gen.run()
+
         base.print_msg(f"{C.GREEN}{C.BOLD}Done.{C.ENDC}")
 
 
@@ -249,10 +252,10 @@ class BaseGeneratedModule(base.GeneratedModule):
             if type.builtin:
                 mod = f"std::{mod}"
             type_name = f"{mod}::{self.get_tuple_name(type)}"
-            alias_import = False
+            import_name = True
         else:
             type_name = type.name
-            alias_import = True
+            import_name = False
 
         type_path = pathlib.Path(*type_name.split("::"))
         mod_path = self._modpath
@@ -271,13 +274,13 @@ class BaseGeneratedModule(base.GeneratedModule):
 
             module = "." * relative_depth + ".".join(import_tail[:-1])
             imported_name = import_tail[-1]
-            if alias_import:
-                alias = "_".join(type_path.parts)
-                self.import_types(module, **{alias: imported_name})
-                return alias
-            else:
-                self.import_types(module, imported_name)
+            if import_name:
+                self.import_type_names(module, imported_name)
                 return imported_name
+            else:
+                alias = "_".join(type_path.parts[:-1])
+                self.import_type_names(module, **{alias: "."})
+                return f"{alias}.{imported_name}"
 
 
 class GeneratedSchemaModule(BaseGeneratedModule):
@@ -336,6 +339,8 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             "Union",
         )
 
+        self.import_("typing_extensions", "TypeAliasType")
+
         self.import_("gel.models", gm="pydantic")
         self.import_("gel.models", gexpr="expr")
 
@@ -352,35 +357,6 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         self.write("#")
         self.write(f"# type {objtype.name}")
         self.write("#")
-
-        for prop in objtype.pointers:
-            orig_prop_type = self.get_prop_type(prop)
-            prop_type = orig_prop_type
-            req_t = f"{name}__p__{prop.name}_req_t"
-            opt_t = f"{name}__p__{prop.name}"
-            self.write(f"class {req_t}(")
-            self.write(f"    {prop_type},")
-            self.write(f"    gexpr.Expression[{prop_type}],")
-            self.write("):")
-            self.write("    pass")
-            self.write(f"{opt_t} = Optional[{req_t}]")
-            self.write(f'"""{objtype.name}.{prop.name} ({orig_prop_type})"""')
-            self.write(f"{name}__p__{prop.name}_selector = Union[")
-            with self.indented():
-                self.write(f"{req_t},")
-                self.write(f"{opt_t},")
-            self.write("]")
-
-        if len(objtype.pointers):
-            self.write(f"{name}__pointers = TypeVar(")
-            with self.indented():
-                self.write(f"'{name}__pointers',")
-                self.write("bound=Union[")
-                with self.indented():
-                    for prop in objtype.pointers:
-                        self.write(f"{name}__p__{prop.name}_selector,")
-                self.write("]")
-            self.write(")")
 
         self.write()
         self.write(f"{name}_T = TypeVar('{name}_T', bound='{name}')")
@@ -402,25 +378,23 @@ class GeneratedSchemaModule(BaseGeneratedModule):
 
             if len(objtype.pointers) > 0:
                 self.write()
-                self.write("class __gel_fields__:")
+                self.write("class __typeof__:")
                 with self.indented():
                     for ptr in objtype.pointers:
-                        orig_prop_type = self.get_prop_type(ptr)
+                        ptr_type = self.get_ptr_type(ptr)
                         self.write(
-                            f"{ptr.name}: TypeAlias = {name}__p__{ptr.name}"
+                            f"{ptr.name} = TypeAliasType('{ptr.name}', '{ptr_type}')"
                         )
 
                 self.write()
                 for ptr in objtype.pointers:
-                    orig_prop_type = self.get_prop_type(ptr)
-                    self.write(f"{ptr.name}: {name}__p__{ptr.name}")
-                    self.write(
-                        f'"""{objtype.name}.{ptr.name} ({orig_prop_type})"""'
-                    )
+                    ptr_type = self.get_ptr_type(ptr)
+                    self.write(f"{ptr.name}: {ptr_type}")
+                    self.write(f'"""{objtype.name}.{ptr.name}"""')
 
         self.write()
 
-    def get_prop_type(self, prop: reflection.Pointer) -> str:
+    def get_ptr_type(self, prop: reflection.Pointer) -> str:
         return self.get_type(self._types[prop.target_id])
 
 
