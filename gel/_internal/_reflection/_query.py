@@ -5,8 +5,8 @@
 
 MODULES = """
 WITH
-    MODULE schema
-    m := (SELECT Module FILTER builtin = <bool>$builtin)
+    MODULE schema,
+    m := (SELECT `Module` FILTER .builtin = <bool>$builtin)
 SELECT
     _ := m.name
 ORDER BY
@@ -43,6 +43,7 @@ SELECT Type {
         } FILTER .id = tid
     ).description.value),
     is_abstract := .abstract,
+    builtin := .builtin,
 
     kind := assert_exists(
         'Object' IF Type IS ObjectType ELSE
@@ -129,7 +130,7 @@ SELECT Type {
     array_element_id := [IS Array].element_type.id,
 
     tuple_elements := (SELECT [IS Tuple].element_types {
-        target_id := .type.id,
+        type_id := .type.id,
         name
     } ORDER BY @index ASC),
     range_element_id := [IS Range].element_type.id,
@@ -137,6 +138,7 @@ SELECT Type {
 }
 FILTER
     .builtin = <bool>$builtin
+    AND NOT .is_from_alias
 ORDER BY
     .name;
 """

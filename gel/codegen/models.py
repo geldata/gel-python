@@ -17,16 +17,22 @@
 #
 
 from typing import (
+    DefaultDict,
     Generator,
     Mapping,
     NamedTuple,
+    Set,
     TypedDict,
     Union,
 )
 
 import argparse
+import base64
+import collections
 import enum
 import getpass
+import graphlib
+import functools
 import io
 import os
 import pathlib
@@ -92,7 +98,7 @@ class SchemaGenerator:
         self._basemodule = "models"
         self._outdir = pathlib.Path("models")
         self._modules: dict[str, IntrospectedModule] = {}
-        self._types: dict[uuid.UUID, reflection.AnyType] = {}
+        self._types: Mapping[uuid.UUID, reflection.AnyType] = {}
         self._named_tuples: dict[uuid.UUID, reflection.NamedTupleType] = {}
         self._wrapped_types: set[str] = set()
 
@@ -115,10 +121,13 @@ class SchemaGenerator:
         return COMMENT
 
     def _generate_common_types(self) -> None:
-        module = GeneratedGlobalModule("__types__", self._named_tuples)
-        module.process()
+        mod = "__types__"
+        if self._schema_part is reflection.SchemaPart.STD:
+            mod = f"std::{mod}"
+        module = GeneratedGlobalModule(mod, self._types)
+        module.process(self._named_tuples)
 
-        with self.open_module("__types__") as f:
+        with self.open_module(mod) as f:
             module.output(f)
 
     @contextmanager
@@ -155,9 +164,15 @@ class SchemaGenerator:
                 "imports": {},
             }
 
-        self._types = reflection.fetch_types(self._client, self._schema_part)
+        refl_types = reflection.fetch_types(self._client, self._schema_part)
+        if self._schema_part is not reflection.SchemaPart.STD:
+            std_types = reflection.fetch_types(
+                self._client, reflection.SchemaPart.STD)
+            self._types = collections.ChainMap(std_types, refl_types)
+        else:
+            self._types = refl_types
 
-        for t in self._types.values():
+        for t in refl_types.values():
             if t.kind == reflection.TypeKind.Object.value:
                 mod, name = reflection.parse_name(t.name)
                 self._modules[mod]["object_types"][name] = t
@@ -186,11 +201,11 @@ class SchemaGenerator:
         (path / "__init__.py").touch()
 
 
-class GeneratedSchemaModule(base.GeneratedModule):
+class BaseGeneratedModule(base.GeneratedModule):
     def __init__(
         self,
         modname: str,
-        all_types: dict[uuid.UUID, reflection.AnyType],
+        all_types: Mapping[uuid.UUID, reflection.AnyType],
     ) -> None:
         super().__init__()
         self._modname = modname
@@ -200,6 +215,72 @@ class GeneratedSchemaModule(base.GeneratedModule):
     def get_comment_preamble(self) -> str:
         return COMMENT
 
+    def get_tuple_name(
+        self,
+        t: reflection.NamedTupleType,
+    ) -> str:
+        names = [elem.name.capitalize() for elem in t.tuple_elements]
+        hash = base64.b64encode(t.id.bytes[:4], altchars=b"__").decode()
+        return "".join(names) + "_Tuple_" + hash.rstrip("=")
+
+    def get_type(self, type: reflection.AnyType) -> str:
+        base_type = base.TYPE_MAPPING.get(type.name)
+        if base_type is not None:
+            base_import = base.TYPE_IMPORTS.get(type.name)
+            if base_import is not None:
+                self.import_(base_import)
+            return base_type
+
+        if reflection.is_array_type(type):
+            elem_type = self.get_type(self._types[type.array_element_id])
+            return f"list[{elem_type}]"
+
+        if reflection.is_pseudo_type(type):
+            if type.name == "anyobject":
+                self.import_("gel.models", gm="pydantic")
+                return "gm.GelModel"
+            elif type.name == "anytuple":
+                return "tuple[typing.Any, ...]"
+            else:
+                raise AssertionError(f"unsupported pseudo-type: {type.name}")
+
+        if reflection.is_named_tuple_type(type):
+            mod = "__types__"
+            if type.builtin:
+                mod = f"std::{mod}"
+            type_name = f"{mod}::{self.get_tuple_name(type)}"
+            alias_import = False
+        else:
+            type_name = type.name
+            alias_import = True
+
+        type_path = pathlib.Path(*type_name.split("::"))
+        mod_path = self._modpath
+        if type_path.parent == mod_path:
+            return type_path.name
+        else:
+            common = pathlib.Path(
+                os.path.commonpath([type_path, mod_path])
+            )
+            if common:
+                relative_depth = len(mod_path.parts) - len(common.parts)
+                import_tail = type_path.parts[len(common.parts) :]
+            else:
+                relative_depth = len(mod_path.parts)
+                import_tail = type_path.parts
+
+            module = "." * relative_depth + ".".join(import_tail[:-1])
+            imported_name = import_tail[-1]
+            if alias_import:
+                alias = "_".join(type_path.parts)
+                self.import_types(module, **{alias: imported_name})
+                return alias
+            else:
+                self.import_types(module, imported_name)
+                return imported_name
+
+
+class GeneratedSchemaModule(BaseGeneratedModule):
     def process(self, mod: IntrospectedModule) -> None:
         self.write_scalar_types(mod["scalar_types"])
         self.write_object_types(mod["object_types"])
@@ -340,48 +421,47 @@ class GeneratedSchemaModule(base.GeneratedModule):
         self.write()
 
     def get_prop_type(self, prop: reflection.Pointer) -> str:
-        type = self._types[prop.target_id]
-        base_type = base.TYPE_MAPPING.get(type.name)
-        if base_type is not None:
-            base_import = base.TYPE_IMPORTS.get(type.name)
-            if base_import is not None:
-                self.import_(base_import)
-            return base_type
-        else:
-            type_path = pathlib.Path(*type.name.split("::"))
-            mod_path = self._modpath
-            if type_path.parent == mod_path:
-                return type_path.name
-            else:
-                common = pathlib.Path(
-                    os.path.commonpath([type_path, mod_path])
-                )
-                if common:
-                    relative_depth = len(mod_path.parts) - len(common.parts)
-                    import_tail = type_path.parts[len(common.parts) :]
-                else:
-                    relative_depth = len(mod_path.parts)
-                    import_tail = type_path.parts
-
-                module = "." * relative_depth + ".".join(import_tail[:-1])
-                alias = "_".join(type_path.parts)
-                self.import_(module, **{alias: import_tail[-1]})
-                return alias
+        return self.get_type(self._types[prop.target_id])
 
 
-class GeneratedGlobalModule(base.GeneratedModule):
-    def __init__(
+class GeneratedGlobalModule(BaseGeneratedModule):
+    def process(self, types: Mapping[uuid.UUID, reflection.AnyType]) -> None:
+        graph: DefaultDict[uuid.UUID, Set[uuid.UUID]] = defaultdict(set)
+
+        @functools.singledispatch
+        def type_dispatch(t: reflection.AnyType, ref_t: uuid.UUID) -> None:
+            if reflection.is_named_tuple_type(t):
+                graph[ref_t].add(t.id)
+                for elem in t.tuple_elements:
+                    type_dispatch(self._types[elem.type_id], t.id)
+            elif reflection.is_tuple_type(t):
+                for elem in t.tuple_elements:
+                    type_dispatch(self._types[elem.type_id], ref_t)
+            elif reflection.is_array_type(t):
+                type_dispatch(self._types[t.array_element_id], ref_t)
+
+        for t in types.values():
+            if reflection.is_named_tuple_type(t):
+                graph[t.id] = set()
+                for elem in t.tuple_elements:
+                    type_dispatch(self._types[elem.type_id], t.id)
+
+        for tid in graphlib.TopologicalSorter(graph).static_order():
+            t = self._types[tid]
+            assert t.kind == reflection.TypeKind.NamedTuple.value
+            self.write_named_tuple_type(t)
+
+    def write_named_tuple_type(
         self,
-        modname: str,
-        global_types: Mapping[uuid.UUID, reflection.AnyType],
+        t: reflection.NamedTupleType,
     ) -> None:
-        super().__init__()
-        self._modname = modname
-        self._modpath = pathlib.Path(*modname.split("::"))
-        self._types = global_types
+        self.import_("typing", "NamedTuple")
 
-    def process(self) -> None:
-        graph = defaultdict(set)
-        for tid, t in self._types.items():
-            if isinstance(t, reflection.NamedTupleType):
-                pass
+        self.write("#")
+        self.write(f"# tuple type {t.name}")
+        self.write("#")
+        self.write(f"class {self.get_tuple_name(t)}(NamedTuple):")
+        for elem in t.tuple_elements:
+            elem_type = self.get_type(self._types[elem.type_id])
+            self.write(f"    {elem.name}: {elem_type}")
+        self.write()

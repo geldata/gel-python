@@ -8,6 +8,7 @@ from typing import (
     Literal,
     Generic,
     Optional,
+    TypeGuard,
     TypeVar,
     Union,
 )
@@ -27,6 +28,7 @@ class Type:
     name: str
     description: Optional[str]
     is_abstract: bool
+    builtin: bool
 
 
 @dataclasses.dataclass(frozen=True, kw_only=True)
@@ -110,6 +112,38 @@ AnyType = Union[
 ]
 
 Types = dict[uuid.UUID, AnyType]
+
+
+def is_pseudo_type(t: AnyType) -> TypeGuard[PseudoType]:
+    return t.kind == enums.TypeKind.Pseudo
+
+
+def is_object_type(t: AnyType) -> TypeGuard[ObjectType]:
+    return t.kind == enums.TypeKind.Object
+
+
+def is_scalar_type(t: AnyType) -> TypeGuard[ScalarType]:
+    return t.kind == enums.TypeKind.Scalar
+
+
+def is_array_type(t: AnyType) -> TypeGuard[ArrayType]:
+    return t.kind == enums.TypeKind.Array
+
+
+def is_range_type(t: AnyType) -> TypeGuard[RangeType]:
+    return t.kind == enums.TypeKind.Range
+
+
+def is_multi_range_type(t: AnyType) -> TypeGuard[MultiRangeType]:
+    return t.kind == enums.TypeKind.MultiRange
+
+
+def is_tuple_type(t: AnyType) -> TypeGuard[TupleType]:
+    return t.kind == enums.TypeKind.Tuple
+
+
+def is_named_tuple_type(t: AnyType) -> TypeGuard[NamedTupleType]:
+    return t.kind == enums.TypeKind.NamedTuple
 
 
 @dataclasses.dataclass(frozen=True)

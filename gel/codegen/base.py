@@ -31,6 +31,7 @@ import os
 import pathlib
 import sys
 import textwrap
+from collections import defaultdict
 
 import gel
 from gel.con_utils import find_gel_project_dir
@@ -175,9 +176,12 @@ class GeneratedModule:
     def __init__(self) -> None:
         self._indent_level = 0
         self._chunks: list[str] = []
-        self._std_imports: dict[str, set[str]] = collections.defaultdict(set)
-        self._lib_imports: dict[str, set[str]] = collections.defaultdict(set)
-        self._local_imports: dict[str, set[str]] = collections.defaultdict(set)
+        self._std_imports: dict[str, set[str]] = defaultdict(set)
+        self._lib_imports: dict[str, set[str]] = defaultdict(set)
+        self._local_imports: dict[str, set[str]] = defaultdict(set)
+        self._tc_std_imports: dict[str, set[str]] = defaultdict(set)
+        self._tc_lib_imports: dict[str, set[str]] = defaultdict(set)
+        self._tc_local_imports: dict[str, set[str]] = defaultdict(set)
 
     def indent(self, levels: int = 1) -> None:
         self._indent_level += levels
@@ -194,6 +198,16 @@ class GeneratedModule:
             self._local_imports[module].update(all_names)
         else:
             self._std_imports[module].update(all_names)
+
+    def import_types(self, module: str, *names: str, **aliases: str) -> None:
+        self.import_("typing")
+        all_names = list(names) + [f"{v} as {k}" for k, v in aliases.items()]
+        if module == "gel" or module.startswith("gel."):
+            self._tc_lib_imports[module].update(all_names)
+        elif module.startswith("."):
+            self._tc_local_imports[module].update(all_names)
+        else:
+            self._tc_std_imports[module].update(all_names)
 
     @contextlib.contextmanager
     def indented(self) -> Iterator[None]:
@@ -221,10 +235,24 @@ class GeneratedModule:
         sections.append(self._render_imports(self._std_imports))
         sections.append(self._render_imports(self._lib_imports))
         sections.append(self._render_imports(self._local_imports))
+        if (
+            self._tc_std_imports
+            or self._tc_lib_imports
+            or self._tc_local_imports
+        ):
+            sections.append("if typing.TYPE_CHECKING:")
+            indent = " " * 4
+            sections.append(self._render_imports(self._tc_std_imports, indent))
+            sections.append(self._render_imports(self._tc_lib_imports, indent))
+            sections.append(self._render_imports(self._tc_local_imports, indent))
 
         return "\n\n".join(filter(None, sections))
 
-    def _render_imports(self, imports: dict[str, set[str]]) -> str:
+    def _render_imports(
+        self,
+        imports: dict[str, set[str]],
+        indent: str = "",
+    ) -> str:
         output = []
         mods = sorted(imports.items(), key=lambda kv: (len(kv[1]) == 0, kv[0]))
         for modname, names in mods:
@@ -240,7 +268,10 @@ class GeneratedModule:
                 import_line = f"import {modname}"
             output.append(import_line)
 
-        return "\n".join(output)
+        result = "\n".join(output)
+        if indent:
+            result = textwrap.indent(result, indent)
+        return result
 
     def output(self, out: io.TextIOWrapper) -> None:
         out.write(self.get_comment_preamble())

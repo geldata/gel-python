@@ -21,6 +21,14 @@ from ._types import (
     ScalarType,
     TupleType,
     fetch_types,
+    is_array_type,
+    is_multi_range_type,
+    is_named_tuple_type,
+    is_object_type,
+    is_pseudo_type,
+    is_range_type,
+    is_scalar_type,
+    is_tuple_type,
 )
 
 from ._modules import (
@@ -42,4 +50,12 @@ __all__ = (
     "parse_name",
     "fetch_modules",
     "fetch_types",
+    "is_array_type",
+    "is_multi_range_type",
+    "is_named_tuple_type",
+    "is_object_type",
+    "is_pseudo_type",
+    "is_range_type",
+    "is_scalar_type",
+    "is_tuple_type",
 )
