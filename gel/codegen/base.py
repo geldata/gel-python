@@ -319,14 +319,19 @@ class GeneratedModule:
     ) -> str:
         output = []
         imports = self._imports[section, import_time, _ImportKind.self]
-        print("self", dict(imports))
         mods = sorted(imports.items(), key=lambda kv: (len(kv[1]) == 0, kv[0]))
         for modname, aliases in mods:
             for alias in aliases:
-                if alias:
-                    import_line = f"import {modname} as {alias}"
+                if modname.startswith("."):
+                    relative, _, modname = modname.rpartition(".")
+                    import_line = f"from .{relative} import {modname}"
+                    if alias:
+                        import_line += f" as {alias}"
                 else:
-                    import_line = f"import {modname}"
+                    if alias:
+                        import_line = f"import {modname} as {alias}"
+                    else:
+                        import_line = f"import {modname}"
                 output.append(import_line)
 
         imports = self._imports[section, import_time, _ImportKind.names]

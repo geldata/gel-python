@@ -16,6 +16,7 @@
 # limitations under the License.
 #
 
+from __future__ import annotations
 from typing import (
     DefaultDict,
     Generator,
@@ -67,6 +68,22 @@ COMMENT = """\
 """
 
 
+class SchemaPath(pathlib.PurePosixPath):
+    @classmethod
+    def from_schema_name(cls, name: str) -> SchemaPath:
+        return SchemaPath(*name.split("::"))
+
+    def common_parts(self, other: SchemaPath) -> list[str]:
+        prefix = []
+        for a, b in zip(self.parts, other.parts):
+            if a == b:
+                prefix.append(a)
+            else:
+                break
+
+        return prefix
+
+
 class IntrospectedModule(TypedDict):
     imports: dict[str, str]
     object_types: dict[str, reflection.ObjectType]
@@ -114,7 +131,8 @@ class SchemaGenerator:
                 # skip apparently empty modules
                 continue
 
-            module = GeneratedSchemaModule(modname, self._types)
+            is_pkg = any(m.startswith(f"{modname}::") for m in self._modules)
+            module = GeneratedSchemaModule(modname, self._types, is_pkg)
             module.process(content)
 
             with self.open_module(modname) as f:
@@ -127,7 +145,7 @@ class SchemaGenerator:
         mod = "__types__"
         if self._schema_part is reflection.SchemaPart.STD:
             mod = f"std::{mod}"
-        module = GeneratedGlobalModule(mod, self._types)
+        module = GeneratedGlobalModule(mod, self._types, False)
         module.process(self._named_tuples)
 
         with self.open_module(mod) as f:
@@ -209,11 +227,13 @@ class BaseGeneratedModule(base.GeneratedModule):
         self,
         modname: str,
         all_types: Mapping[uuid.UUID, reflection.AnyType],
+        is_package: bool,
     ) -> None:
         super().__init__()
         self._modname = modname
-        self._modpath = pathlib.Path(*modname.split("::"))
+        self._modpath = SchemaPath.from_schema_name(modname)
         self._types = all_types
+        self._is_package = is_package
 
     def get_comment_preamble(self) -> str:
         return COMMENT
@@ -257,19 +277,17 @@ class BaseGeneratedModule(base.GeneratedModule):
             type_name = type.name
             import_name = False
 
-        type_path = pathlib.Path(*type_name.split("::"))
+        type_path = SchemaPath.from_schema_name(type_name)
         mod_path = self._modpath
         if type_path.parent == mod_path:
             return type_path.name
         else:
-            common = pathlib.Path(
-                os.path.commonpath([type_path, mod_path])
-            )
-            if common:
-                relative_depth = len(mod_path.parts) - len(common.parts)
-                import_tail = type_path.parts[len(common.parts) :]
+            common_parts = type_path.common_parts(mod_path)
+            if common_parts:
+                relative_depth = len(mod_path.parts) - len(common_parts)
+                import_tail = type_path.parts[len(common_parts) :]
             else:
-                relative_depth = len(mod_path.parts)
+                relative_depth = len(mod_path.parts) + int(self._is_package)
                 import_tail = type_path.parts
 
             module = "." * relative_depth + ".".join(import_tail[:-1])
@@ -279,7 +297,10 @@ class BaseGeneratedModule(base.GeneratedModule):
                 return imported_name
             else:
                 alias = "_".join(type_path.parts[:-1])
-                self.import_type_names(module, **{alias: "."})
+                if module == ".":
+                    self.import_type_names("..", **{alias: type_path.parts[-2]})
+                else:
+                    self.import_type_names(module, **{alias: "."})
                 return f"{alias}.{imported_name}"
 
 
@@ -312,7 +333,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                 self.import_("gel.polyfills", "StrEnum")
                 self.import_("gel.models", gexpr="expr")
                 self.write(
-                    f"class {type_name}(StrEnum, gexpr.Expression[StrEnum]):")
+                    f"class {type_name}(gexpr.Expression[StrEnum], StrEnum):")
                 with self.indented():
                     self.write_description(type)
                     for value in type.enum_values:
@@ -326,19 +347,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         if not object_types:
             return
 
-        self.import_(
-            "typing",
-            "TYPE_CHECKING",
-            "Annotated",
-            "Any",
-            "Optional",
-            "ParamSpec",
-            "Type",
-            "TypeAlias",
-            "TypeVar",
-            "Union",
-        )
-
+        self.import_("typing")
         self.import_("typing_extensions", "TypeAliasType")
 
         self.import_("gel.models", gm="pydantic")
@@ -359,7 +368,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         self.write("#")
 
         self.write()
-        self.write(f"{name}_T = TypeVar('{name}_T', bound='{name}')")
+        self.write(f"{name}_T = typing.TypeVar('{name}_T', bound='{name}')")
         self.write(f"class {name}(gm.GelModel):")
         with self.indented():
             self.write(
