@@ -131,11 +131,17 @@ class SchemaGenerator:
                 # skip apparently empty modules
                 continue
 
-            is_pkg = any(m.startswith(f"{modname}::") for m in self._modules)
-            module = GeneratedSchemaModule(modname, self._types, is_pkg)
+            as_pkg = any(m.startswith(f"{modname}::") for m in self._modules)
+            if (
+                not as_pkg
+                and self._schema_part is reflection.SchemaPart.STD
+                and "::" not in modname
+            ):
+                as_pkg = True
+            module = GeneratedSchemaModule(modname, self._types, as_pkg)
             module.process(content)
 
-            with self.open_module(modname) as f:
+            with self.open_module(modname, as_pkg) as f:
                 module.output(f)
 
     def get_comment_preamble(self) -> str:
@@ -148,12 +154,12 @@ class SchemaGenerator:
         module = GeneratedGlobalModule(mod, self._types, False)
         module.process(self._named_tuples)
 
-        with self.open_module(mod) as f:
+        with self.open_module(mod, False) as f:
             module.output(f)
 
     @contextmanager
-    def open_module(self, mod: str) -> Generator[io.TextIOWrapper, None, None]:
-        if any(m.startswith(f"{mod}::") for m in self._modules):
+    def open_module(self, mod: str, as_pkg: bool) -> Generator[io.TextIOWrapper, None, None]:
+        if as_pkg:
             # This is a prefix in another module, thus it is part of a nested
             # module structure.
             dirpath = mod.split("::")
@@ -331,9 +337,8 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         for type_name, type in scalar_types.items():
             if type.enum_values:
                 self.import_("gel.polyfills", "StrEnum")
-                self.import_("gel.models", gexpr="expr")
                 self.write(
-                    f"class {type_name}(gexpr.Expression[StrEnum], StrEnum):")
+                    f"class {type_name}(StrEnum):")
                 with self.indented():
                     self.write_description(type)
                     for value in type.enum_values:
@@ -431,7 +436,7 @@ class GeneratedGlobalModule(BaseGeneratedModule):
 
         for tid in graphlib.TopologicalSorter(graph).static_order():
             t = self._types[tid]
-            assert t.kind == reflection.TypeKind.NamedTuple.value
+            assert reflection.is_named_tuple_type(t)
             self.write_named_tuple_type(t)
 
     def write_named_tuple_type(

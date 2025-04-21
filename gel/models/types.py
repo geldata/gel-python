@@ -18,4 +18,8 @@ class ObjectType(Type):
     pass
 
 
-AnyType = Union[ScalarType, ObjectType]
+class EnumType(Type):
+    pass
+
+
+AnyType = Union[ScalarType, ObjectType, EnumType]
