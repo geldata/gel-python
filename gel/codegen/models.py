@@ -299,14 +299,14 @@ class BaseGeneratedModule(base.GeneratedModule):
             module = "." * relative_depth + ".".join(import_tail[:-1])
             imported_name = import_tail[-1]
             if import_name:
-                self.import_type_names(module, imported_name)
+                self.import_(module, imported_name)
                 return imported_name
             else:
                 alias = "_".join(type_path.parts[:-1])
                 if module == ".":
-                    self.import_type_names("..", **{alias: type_path.parts[-2]})
+                    self.import_("..", **{alias: type_path.parts[-2]})
                 else:
-                    self.import_type_names(module, **{alias: "."})
+                    self.import_(module, **{alias: "."})
                 return f"{alias}.{imported_name}"
 
 
@@ -352,18 +352,30 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         if not object_types:
             return
 
+        graph: DefaultDict[uuid.UUID, Set[uuid.UUID]] = defaultdict(set)
+
+        for t in object_types.values():
+            t_mod, _ = reflection.parse_name(t.name)
+
+            for base_ref in t.bases:
+                base = self._types[base_ref.id]
+                base_mod, base_name = reflection.parse_name(base.name)
+                if t_mod == base_mod:
+                    graph[t.id].add(base.id)
+
         self.import_("typing")
         self.import_("typing_extensions", "TypeAliasType")
 
         self.import_("gel.models", gm="pydantic")
         self.import_("gel.models", gexpr="expr")
 
-        for name, type in sorted(object_types.items(), key=lambda kv: kv[0]):
-            self.write_object_type(name, type)
+        for tid in graphlib.TopologicalSorter(graph).static_order():
+            objtype = self._types[tid]
+            assert reflection.is_object_type(objtype)
+            self.write_object_type(objtype)
 
     def write_object_type(
         self,
-        name: str,
         objtype: reflection.ObjectType,
     ) -> None:
         self.write()
@@ -372,9 +384,22 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         self.write(f"# type {objtype.name}")
         self.write("#")
 
+        _, name = reflection.parse_name(objtype.name)
+
+        base_types = [self.get_type(self._types[base.id]) for base in objtype.bases]
+        if not base_types:
+            bases = ["gm.GelModel"]
+        else:
+            bases = base_types
+        bases_string = ", ".join(bases)
+        class_string = f"class {name}({bases_string}):"
+        if len(class_string) > 79:
+            bases_string = ",\n    ".join(bases)
+            class_string = f"class {name}(\n    {bases_string}\n):"
+
         self.write()
         self.write(f"{name}_T = typing.TypeVar('{name}_T', bound='{name}')")
-        self.write(f"class {name}(gm.GelModel):")
+        self.write(class_string)
         with self.indented():
             self.write(
                 f"__gel_metadata__ = "
@@ -392,7 +417,8 @@ class GeneratedSchemaModule(BaseGeneratedModule):
 
             if len(objtype.pointers) > 0:
                 self.write()
-                self.write("class __typeof__:")
+                bases_string = ",\n    ".join(f"{b}.__typeof__" for b in bases)
+                self.write(f"class __typeof__(\n    {bases_string}\n):")
                 with self.indented():
                     for ptr in objtype.pointers:
                         ptr_type = self.get_ptr_type(ptr)

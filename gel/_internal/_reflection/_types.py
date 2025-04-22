@@ -22,6 +22,11 @@ from . import _query
 
 
 @dataclasses.dataclass(frozen=True, kw_only=True)
+class TypeRef:
+    id: uuid.UUID
+
+
+@dataclasses.dataclass(frozen=True, kw_only=True)
 class Type:
     id: uuid.UUID
     kind: enums.TypeKind
@@ -33,7 +38,7 @@ class Type:
 
 @dataclasses.dataclass(frozen=True, kw_only=True)
 class InheritingType(Type):
-    bases: list[uuid.UUID]
+    bases: list[TypeRef]
 
 
 @dataclasses.dataclass(frozen=True)
@@ -53,8 +58,8 @@ class ScalarType(InheritingType):
 @dataclasses.dataclass(frozen=True)
 class ObjectType(InheritingType):
     kind: Literal[enums.TypeKind.Object]
-    union_of: list[dict[str, uuid.UUID]]
-    intersection_of: list[uuid.UUID]
+    union_of: list[TypeRef]
+    intersection_of: list[TypeRef]
     pointers: list[Pointer]
     backlinks: list[Backlink]
     exclusives: list[dict[str, Pointer]]
