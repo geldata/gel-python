@@ -68,22 +68,6 @@ COMMENT = """\
 """
 
 
-class SchemaPath(pathlib.PurePosixPath):
-    @classmethod
-    def from_schema_name(cls, name: str) -> SchemaPath:
-        return SchemaPath(*name.split("::"))
-
-    def common_parts(self, other: SchemaPath) -> list[str]:
-        prefix = []
-        for a, b in zip(self.parts, other.parts):
-            if a == b:
-                prefix.append(a)
-            else:
-                break
-
-        return prefix
-
-
 class IntrospectedModule(TypedDict):
     imports: dict[str, str]
     object_types: dict[str, reflection.ObjectType]
@@ -117,13 +101,13 @@ class SchemaGenerator:
         self._schema_part = schema_part
         self._basemodule = "models"
         self._outdir = pathlib.Path("models")
-        self._modules: dict[str, IntrospectedModule] = {}
+        self._modules: dict[reflection.SchemaPath, IntrospectedModule] = {}
         self._types: Mapping[uuid.UUID, reflection.AnyType] = {}
         self._named_tuples: dict[uuid.UUID, reflection.NamedTupleType] = {}
         self._wrapped_types: set[str] = set()
 
     def run(self) -> None:
-        self.get_schema()
+        self.introspect_schema()
 
         self._generate_common_types()
         for modname, content in self._modules.items():
@@ -131,11 +115,11 @@ class SchemaGenerator:
                 # skip apparently empty modules
                 continue
 
-            as_pkg = any(m.startswith(f"{modname}::") for m in self._modules)
+            as_pkg = self.has_submodules(modname)
             if (
                 not as_pkg
                 and self._schema_part is reflection.SchemaPart.STD
-                and "::" not in modname
+                and len(modname.parts) == 1
             ):
                 as_pkg = True
             module = GeneratedSchemaModule(modname, self._types, as_pkg)
@@ -144,48 +128,12 @@ class SchemaGenerator:
             with self.open_module(modname, as_pkg) as f:
                 module.output(f)
 
-    def get_comment_preamble(self) -> str:
-        return COMMENT
+    def has_submodules(self, mod: reflection.SchemaPath) -> bool:
+        return any(m.parent.has_prefix(mod) for m in self._modules)
 
-    def _generate_common_types(self) -> None:
-        mod = "__types__"
-        if self._schema_part is reflection.SchemaPart.STD:
-            mod = f"std::{mod}"
-        module = GeneratedGlobalModule(mod, self._types, False)
-        module.process(self._named_tuples)
-
-        with self.open_module(mod, False) as f:
-            module.output(f)
-
-    @contextmanager
-    def open_module(self, mod: str, as_pkg: bool) -> Generator[io.TextIOWrapper, None, None]:
-        if as_pkg:
-            # This is a prefix in another module, thus it is part of a nested
-            # module structure.
-            dirpath = mod.split("::")
-            filename = "__init__.py"
-        else:
-            # This is a leaf module, so we just need to create a corresponding
-            # <mod>.py file.
-            *dirpath, filename = mod.split("::")
-            filename = f"{filename}.py"
-
-        # Along the dirpath we need to ensure that all packages are created
-        path = self._outdir
-        self.init_dir(path)
-        for el in dirpath:
-            path = path / el
-            self.init_dir(path)
-
-        with open(path / filename, "wt") as f:
-            try:
-                yield f
-            finally:
-                pass
-
-    def get_schema(self) -> None:
+    def introspect_schema(self) -> None:
         for mod in reflection.fetch_modules(self._client, self._schema_part):
-            self._modules[mod] = {
+            self._modules[reflection.parse_name(mod)] = {
                 "scalar_types": {},
                 "object_types": {},
                 "imports": {},
@@ -201,13 +149,56 @@ class SchemaGenerator:
 
         for t in refl_types.values():
             if reflection.is_object_type(t):
-                mod, name = reflection.parse_name(t.name)
-                self._modules[mod]["object_types"][name] = t
+                name = reflection.parse_name(t.name)
+                self._modules[name.parent]["object_types"][name.name] = t
             elif reflection.is_scalar_type(t):
-                mod, name = reflection.parse_name(t.name)
-                self._modules[mod]["scalar_types"][name] = t
+                name = reflection.parse_name(t.name)
+                self._modules[name.parent]["scalar_types"][name.name] = t
             elif reflection.is_named_tuple_type(t):
                 self._named_tuples[t.id] = t
+
+    def get_comment_preamble(self) -> str:
+        return COMMENT
+
+    def _generate_common_types(self) -> None:
+        mod = reflection.SchemaPath("__types__")
+        if self._schema_part is reflection.SchemaPart.STD:
+            mod = reflection.SchemaPath("std") / mod
+        module = GeneratedGlobalModule(mod, self._types, False)
+        module.process(self._named_tuples)
+
+        with self.open_module(mod, False) as f:
+            module.output(f)
+
+    @contextmanager
+    def open_module(
+        self,
+        mod: reflection.SchemaPath,
+        as_pkg: bool,
+    ) -> Generator[io.TextIOWrapper, None, None]:
+        if as_pkg:
+            # This is a prefix in another module, thus it is part of a nested
+            # module structure.
+            dirpath = mod
+            filename = "__init__.py"
+        else:
+            # This is a leaf module, so we just need to create a corresponding
+            # <mod>.py file.
+            dirpath = mod.parent
+            filename = f"{mod.name}.py"
+
+        # Along the dirpath we need to ensure that all packages are created
+        path = self._outdir
+        self.init_dir(path)
+        for el in dirpath.parts:
+            path = path / el
+            self.init_dir(path)
+
+        with open(path / filename, "wt") as f:
+            try:
+                yield f
+            finally:
+                pass
 
     def init_dir(self, dirpath: pathlib.Path) -> None:
         if not dirpath:
@@ -231,13 +222,12 @@ class SchemaGenerator:
 class BaseGeneratedModule(base.GeneratedModule):
     def __init__(
         self,
-        modname: str,
+        modname: reflection.SchemaPath,
         all_types: Mapping[uuid.UUID, reflection.AnyType],
         is_package: bool,
     ) -> None:
         super().__init__()
-        self._modname = modname
-        self._modpath = SchemaPath.from_schema_name(modname)
+        self._modpath = modname
         self._types = all_types
         self._is_package = is_package
 
@@ -287,7 +277,7 @@ class BaseGeneratedModule(base.GeneratedModule):
             type_name = type.name
             import_name = False
 
-        type_path = SchemaPath.from_schema_name(type_name)
+        type_path = reflection.parse_name(type_name)
         mod_path = self._modpath
         if type_path.parent == mod_path:
             return type_path.name
@@ -360,12 +350,12 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         graph: dict[uuid.UUID, Set[uuid.UUID]] = {}
         for t in object_types.values():
             graph[t.id] = set()
-            t_mod, _ = reflection.parse_name(t.name)
+            t_name = reflection.parse_name(t.name)
 
             for base_ref in t.bases:
                 base = self._types[base_ref.id]
-                base_mod, base_name = reflection.parse_name(base.name)
-                if t_mod == base_mod:
+                base_name = reflection.parse_name(base.name)
+                if t_name.parent == base_name.parent:
                     graph[t.id].add(base.id)
 
         self.import_("typing")
@@ -389,7 +379,8 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         self.write(f"# type {objtype.name}")
         self.write("#")
 
-        _, name = reflection.parse_name(objtype.name)
+        type_name = reflection.parse_name(objtype.name)
+        name = type_name.name
 
         base_types = [
             self.get_type(self._types[base.id], for_runtime=True)

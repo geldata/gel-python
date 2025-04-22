@@ -2,7 +2,10 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright Gel Data Inc. and the contributors.
 
+from __future__ import annotations
 from typing import NamedTuple
+
+import pathlib
 
 
 class QualName(NamedTuple):
@@ -10,12 +13,24 @@ class QualName(NamedTuple):
     name: str
 
 
-def parse_name(name: str) -> QualName:
-    # Assume the names are already validated to be properly formed
-    # alphanumeric identifiers that may be prefixed by a module. If the module
-    # is present assume it is safe to drop it (currently only defualt module
-    # is allowed).
+class SchemaPath(pathlib.PurePosixPath):
+    @classmethod
+    def from_schema_name(cls, name: str) -> SchemaPath:
+        return SchemaPath(*name.split("::"))
 
-    # Split on module separator. Potentially if we ever handle more unusual
-    # names, there may be more processing done.
-    return QualName(*name.rsplit('::', 1))
+    def common_parts(self, other: SchemaPath) -> list[str]:
+        prefix = []
+        for a, b in zip(self.parts, other.parts):
+            if a == b:
+                prefix.append(a)
+            else:
+                break
+
+        return prefix
+
+    def has_prefix(self, other: SchemaPath) -> bool:
+        return self.parts[:len(other.parts)] == other.parts
+
+
+def parse_name(name: str) -> SchemaPath:
+    return SchemaPath.from_schema_name(name)

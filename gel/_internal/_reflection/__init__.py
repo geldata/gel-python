@@ -10,6 +10,7 @@ from ._enums import (
 
 from ._support import (
     parse_name,
+    SchemaPath,
 )
 
 from ._types import (
@@ -44,6 +45,7 @@ __all__ = (
     "PointerKind",
     "ScalarType",
     "SchemaPart",
+    "SchemaPath",
     "TupleType",
     "TypeKind",
     "TypeKind",
