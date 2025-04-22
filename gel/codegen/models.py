@@ -115,21 +115,29 @@ class SchemaGenerator:
                 # skip apparently empty modules
                 continue
 
-            as_pkg = self.has_submodules(modname)
-            if (
-                not as_pkg
-                and self._schema_part is reflection.SchemaPart.STD
-                and len(modname.parts) == 1
-            ):
-                as_pkg = True
-            module = GeneratedSchemaModule(modname, self._types, as_pkg)
-            module.process(content)
+            as_pkg = self.generate_as_pkg(modname)
 
-            with self.open_module(modname, as_pkg) as f:
-                module.output(f)
+            variants = reflection.SchemaPath("__variants__") / modname
+
+            nice_module = GeneratedSchemaModule(modname, self._types, as_pkg)
+            nice_module.process(content)
+
+            with self.open_module(nice_module) as f:
+                nice_module.output(f)
 
     def has_submodules(self, mod: reflection.SchemaPath) -> bool:
         return any(m.parent.has_prefix(mod) for m in self._modules)
+
+    def generate_as_pkg(self, mod: reflection.SchemaPath) -> bool:
+        as_pkg = self.has_submodules(mod)
+        if (
+            not as_pkg
+            and self._schema_part is reflection.SchemaPart.STD
+            and len(mod.parts) == 1
+        ):
+            as_pkg = True
+
+        return as_pkg
 
     def introspect_schema(self) -> None:
         for mod in reflection.fetch_modules(self._client, self._schema_part):
@@ -167,25 +175,24 @@ class SchemaGenerator:
         module = GeneratedGlobalModule(mod, self._types, False)
         module.process(self._named_tuples)
 
-        with self.open_module(mod, False) as f:
+        with self.open_module(module) as f:
             module.output(f)
 
     @contextmanager
     def open_module(
         self,
-        mod: reflection.SchemaPath,
-        as_pkg: bool,
+        mod: BaseGeneratedModule,
     ) -> Generator[io.TextIOWrapper, None, None]:
-        if as_pkg:
+        if mod.is_package:
             # This is a prefix in another module, thus it is part of a nested
             # module structure.
-            dirpath = mod
+            dirpath = mod.modpath
             filename = "__init__.py"
         else:
             # This is a leaf module, so we just need to create a corresponding
             # <mod>.py file.
-            dirpath = mod.parent
-            filename = f"{mod.name}.py"
+            dirpath = mod.modpath.parent
+            filename = f"{mod.modpath.name}.py"
 
         # Along the dirpath we need to ensure that all packages are created
         path = self._outdir
@@ -230,6 +237,14 @@ class BaseGeneratedModule(base.GeneratedModule):
         self._modpath = modname
         self._types = all_types
         self._is_package = is_package
+
+    @property
+    def modpath(self) -> reflection.SchemaPath:
+        return self._modpath
+
+    @property
+    def is_package(self) -> bool:
+        return self._is_package
 
     def get_comment_preamble(self) -> str:
         return COMMENT
