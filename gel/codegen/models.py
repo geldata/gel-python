@@ -308,8 +308,8 @@ class BaseGeneratedModule(base.GeneratedModule):
                 return imported_name
             else:
                 alias = "_".join(type_path.parts[:-1])
-                if module == ".":
-                    do_import("..", **{alias: type_path.parts[-2]})
+                if all(c == "." for c in module):
+                    do_import(f".{module}", **{alias: type_path.parts[-2]})
                 else:
                     do_import(module, **{alias: "."})
                 return f"{alias}.{imported_name}"
@@ -423,16 +423,25 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                         f"gm.GelMetadata(schema_name={objtype.name!r})",
                     )
 
-            all_pointers = self._all_pointers(objtype)
+            all_pointers = self._get_pointer_origins(objtype)
             if all_pointers:
                 self.write()
-                self.write(f"class __typeof__:")
+                if base_types:
+                    bases_string = ",\n    ".join(
+                        f"{b}.__typeof__" for b in base_types)
+                    self.write(f"class __typeof__(\n    {bases_string}\n):")
+                else:
+                    self.write(f"class __typeof__:")
                 with self.indented():
-                    for ptr in all_pointers:
-                        ptr_type = self.get_ptr_type(ptr)
-                        self.write(
-                            f"{ptr.name} = TypeAliasType('{ptr.name}', '{ptr_type}')"
-                        )
+                    for ptr, origin in all_pointers:
+                        if origin is objtype:
+                            ptr_t = self.get_ptr_type(ptr)
+                        else:
+                            origin_t = self.get_type(origin)
+                            ptr_t = f"{origin_t}.__typeof__.{ptr.name}"
+
+                        defn = f"TypeAliasType('{ptr.name}', '{ptr_t}')"
+                        self.write(f"{ptr.name} = {defn}")
 
                 self.write()
                 for ptr in objtype.pointers:
@@ -442,16 +451,19 @@ class GeneratedSchemaModule(BaseGeneratedModule):
 
         self.write()
 
-    def _all_pointers(
+    def _get_pointer_origins(
         self,
         objtype: reflection.ObjectType,
-    ) -> list[reflection.Pointer]:
-        pointers: dict[str, reflection.Pointer] = {}
+    ) -> list[tuple[reflection.Pointer, reflection.ObjectType]]:
+        pointers: dict[str, tuple[reflection.Pointer, reflection.ObjectType]] = {}
         for ancestor_ref in reversed(objtype.ancestors):
             ancestor = self._types[ancestor_ref.id]
             assert reflection.is_object_type(ancestor)
             for ptr in ancestor.pointers:
-                pointers[ptr.name] = ptr
+                pointers[ptr.name] = (ptr, ancestor)
+
+        for ptr in objtype.pointers:
+            pointers[ptr.name] = (ptr, objtype)
 
         return list(pointers.values())
 
