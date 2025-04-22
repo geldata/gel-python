@@ -200,13 +200,13 @@ class SchemaGenerator:
             self._types = refl_types
 
         for t in refl_types.values():
-            if t.kind == reflection.TypeKind.Object.value:
+            if reflection.is_object_type(t):
                 mod, name = reflection.parse_name(t.name)
                 self._modules[mod]["object_types"][name] = t
-            elif t.kind == reflection.TypeKind.Scalar.value:
+            elif reflection.is_scalar_type(t):
                 mod, name = reflection.parse_name(t.name)
                 self._modules[mod]["scalar_types"][name] = t
-            elif t.kind == reflection.TypeKind.NamedTuple.value:
+            elif reflection.is_named_tuple_type(t):
                 self._named_tuples[t.id] = t
 
     def init_dir(self, dirpath: pathlib.Path) -> None:
@@ -252,7 +252,11 @@ class BaseGeneratedModule(base.GeneratedModule):
         hash = base64.b64encode(t.id.bytes[:4], altchars=b"__").decode()
         return "".join(names) + "_Tuple_" + hash.rstrip("=")
 
-    def get_type(self, type: reflection.AnyType) -> str:
+    def get_type(
+        self,
+        type: reflection.AnyType,
+        for_runtime: bool = False,
+    ) -> str:
         base_type = base.TYPE_MAPPING.get(type.name)
         if base_type is not None:
             base_import = base.TYPE_IMPORTS.get(type.name)
@@ -298,15 +302,16 @@ class BaseGeneratedModule(base.GeneratedModule):
 
             module = "." * relative_depth + ".".join(import_tail[:-1])
             imported_name = import_tail[-1]
+            do_import = self.import_ if for_runtime else self.import_type_names
             if import_name:
-                self.import_(module, imported_name)
+                do_import(module, imported_name)
                 return imported_name
             else:
                 alias = "_".join(type_path.parts[:-1])
                 if module == ".":
-                    self.import_("..", **{alias: type_path.parts[-2]})
+                    do_import("..", **{alias: type_path.parts[-2]})
                 else:
-                    self.import_(module, **{alias: "."})
+                    do_import(module, **{alias: "."})
                 return f"{alias}.{imported_name}"
 
 
@@ -352,9 +357,9 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         if not object_types:
             return
 
-        graph: DefaultDict[uuid.UUID, Set[uuid.UUID]] = defaultdict(set)
-
+        graph: dict[uuid.UUID, Set[uuid.UUID]] = {}
         for t in object_types.values():
+            graph[t.id] = set()
             t_mod, _ = reflection.parse_name(t.name)
 
             for base_ref in t.bases:
@@ -386,7 +391,10 @@ class GeneratedSchemaModule(BaseGeneratedModule):
 
         _, name = reflection.parse_name(objtype.name)
 
-        base_types = [self.get_type(self._types[base.id]) for base in objtype.bases]
+        base_types = [
+            self.get_type(self._types[base.id], for_runtime=True)
+            for base in objtype.bases
+        ]
         if not base_types:
             bases = ["gm.GelModel"]
         else:
@@ -415,12 +423,12 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                         f"gm.GelMetadata(schema_name={objtype.name!r})",
                     )
 
-            if len(objtype.pointers) > 0:
+            all_pointers = self._all_pointers(objtype)
+            if all_pointers:
                 self.write()
-                bases_string = ",\n    ".join(f"{b}.__typeof__" for b in bases)
-                self.write(f"class __typeof__(\n    {bases_string}\n):")
+                self.write(f"class __typeof__:")
                 with self.indented():
-                    for ptr in objtype.pointers:
+                    for ptr in all_pointers:
                         ptr_type = self.get_ptr_type(ptr)
                         self.write(
                             f"{ptr.name} = TypeAliasType('{ptr.name}', '{ptr_type}')"
@@ -433,6 +441,19 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                     self.write(f'"""{objtype.name}.{ptr.name}"""')
 
         self.write()
+
+    def _all_pointers(
+        self,
+        objtype: reflection.ObjectType,
+    ) -> list[reflection.Pointer]:
+        pointers: dict[str, reflection.Pointer] = {}
+        for ancestor_ref in reversed(objtype.ancestors):
+            ancestor = self._types[ancestor_ref.id]
+            assert reflection.is_object_type(ancestor)
+            for ptr in ancestor.pointers:
+                pointers[ptr.name] = ptr
+
+        return list(pointers.values())
 
     def get_ptr_type(self, prop: reflection.Pointer) -> str:
         return self.get_type(self._types[prop.target_id])

@@ -39,6 +39,7 @@ class Type:
 @dataclasses.dataclass(frozen=True, kw_only=True)
 class InheritingType(Type):
     bases: list[TypeRef]
+    ancestors: list[TypeRef]
 
 
 @dataclasses.dataclass(frozen=True)
