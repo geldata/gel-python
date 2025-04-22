@@ -409,6 +409,13 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         self.write(f"{name}_T = typing.TypeVar('{name}_T', bound='{name}')")
         self.write(class_string)
         with self.indented():
+            if objtype.pointers:
+                self.write()
+                for ptr in objtype.pointers:
+                    ptr_type = self.get_ptr_type(ptr)
+                    self.write(f"{ptr.name}: {ptr_type}")
+                    self.write(f'"""{objtype.name}.{ptr.name}"""')
+
             self.write(
                 f"__gel_metadata__ = "
                 f"gm.GelMetadata(schema_name={objtype.name!r})",
@@ -442,12 +449,6 @@ class GeneratedSchemaModule(BaseGeneratedModule):
 
                         defn = f"TypeAliasType('{ptr.name}', '{ptr_t}')"
                         self.write(f"{ptr.name} = {defn}")
-
-                self.write()
-                for ptr in objtype.pointers:
-                    ptr_type = self.get_ptr_type(ptr)
-                    self.write(f"{ptr.name}: {ptr_type}")
-                    self.write(f'"""{objtype.name}.{ptr.name}"""')
 
         self.write()
 
