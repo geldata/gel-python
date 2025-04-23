@@ -53,6 +53,7 @@ from contextlib import contextmanager
 import gel
 from gel import abstract
 from gel import describe
+from gel._internal._reflection._types import is_scalar_type
 from gel.con_utils import find_gel_project_dir
 from gel.color import get_color
 
@@ -357,7 +358,13 @@ class BaseGeneratedModule:
             return base_type
 
         if reflection.is_array_type(type):
-            elem_type = self.get_type(self._types[type.array_element_id])
+            elem_type = self.get_type(
+                self._types[type.array_element_id],
+                for_runtime=for_runtime,
+                variants=variants,
+                from_variants=from_variants,
+                import_alias=import_alias,
+            )
             return f"list[{elem_type}]"
 
         if reflection.is_pseudo_type(type):
@@ -369,6 +376,9 @@ class BaseGeneratedModule:
             else:
                 raise AssertionError(f"unsupported pseudo-type: {type.name}")
 
+        if from_variants is None:
+            from_variants = variants
+
         if reflection.is_named_tuple_type(type):
             mod = "__types__"
             if type.builtin:
@@ -379,8 +389,10 @@ class BaseGeneratedModule:
             type_name = type.name
             import_name = False
 
-        if from_variants is None:
-            from_variants = variants
+        if reflection.is_scalar_type(type):
+            variants = True
+        elif reflection.is_named_tuple_type(type):
+            variants = False
 
         cache_key = (
             type_name,
@@ -390,7 +402,7 @@ class BaseGeneratedModule:
             import_alias,
         )
         result = self._type_import_cache.get(cache_key)
-        if result is not None:
+        if result is not None and "NameExpr" in result:
             return result
 
         type_path = reflection.parse_name(type_name)
@@ -485,16 +497,17 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         self,
         scalar_types: dict[str, reflection.ScalarType],
     ) -> None:
-        for type_name, type in scalar_types.items():
-            if type.enum_values:
-                self.import_names("gel.polyfills", "StrEnum")
-                self.write(
-                    f"class {type_name}(StrEnum):")
-                with self.indented():
-                    self.write_description(type)
-                    for value in type.enum_values:
-                        self.write(f"{value} = {value!r}")
-                self.write_section_break()
+        with self.another_py_file("variants"):
+            for type_name, type in scalar_types.items():
+                if type.enum_values:
+                    self.import_names("gel.polyfills", "StrEnum")
+                    self.write(
+                        f"class {type_name}(StrEnum):")
+                    with self.indented():
+                        self.write_description(type)
+                        for value in type.enum_values:
+                            self.write(f"{value} = {value!r}")
+                    self.write_section_break()
 
     def write_object_types(
         self,
