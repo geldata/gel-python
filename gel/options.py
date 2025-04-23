@@ -115,9 +115,9 @@ class TransactionOptions:
 
     def __init__(
         self,
-        isolation: IsolationLevel=IsolationLevel.Serializable,
-        readonly: bool = False,
-        deferrable: bool = False,
+        isolation: typing.Optional[IsolationLevel] = None,
+        readonly: typing.Optional[bool] = None,
+        deferrable: typing.Optional[bool] = None,
     ):
         self._isolation = isolation
         self._readonly = readonly
@@ -128,18 +128,27 @@ class TransactionOptions:
         return cls()
 
     def start_transaction_query(self):
-        isolation = IsolationLevel._to_start_tx_str(self._isolation)
-        if self._readonly:
-            mode = 'READ ONLY'
-        else:
-            mode = 'READ WRITE'
+        options = []
+        if self._isolation is not None:
+            level = IsolationLevel._to_start_tx_str(self._isolation)
+            options.append(f'ISOLATION {level}')
 
-        if self._deferrable:
-            defer = 'DEFERRABLE'
-        else:
-            defer = 'NOT DEFERRABLE'
+        if self._readonly is not None:
+            if self._readonly:
+                mode = 'READ ONLY'
+            else:
+                mode = 'READ WRITE'
+            options.append(mode)
 
-        return f'START TRANSACTION ISOLATION {isolation}, {mode}, {defer};'
+        if self._deferrable is not None:
+            if self._deferrable:
+                defer = 'DEFERRABLE'
+            else:
+                defer = 'NOT DEFERRABLE'
+            options.append(defer)
+
+        opt_str = ', '.join(options)
+        return f'START TRANSACTION {opt_str};'
 
     def __repr__(self):
         return (
