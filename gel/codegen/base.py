@@ -197,10 +197,14 @@ _Imports: TypeAlias = defaultdict[_ImportKey, defaultdict[str, set[str]]]
 class GeneratedModule:
     INDENT = " " * 4
 
-    def __init__(self) -> None:
+    def __init__(self, preamble: str) -> None:
+        self._comment_preamble = preamble
         self._indent_level = 0
         self._chunks: list[str] = []
         self._imports: _Imports = defaultdict(lambda: defaultdict(set))
+
+    def has_content(self) -> bool:
+        return len(self._chunks) > 0
 
     def indent(self, levels: int = 1) -> None:
         self._indent_level += levels
@@ -257,7 +261,7 @@ class GeneratedModule:
             import_time=import_time,
         )
 
-    def import_(self, module: str, *names: str, **aliases: str) -> None:
+    def import_names(self, module: str, *names: str, **aliases: str) -> None:
         self._import_names(
             module, names, aliases, import_time=_ImportTime.runtime)
 
@@ -267,7 +271,7 @@ class GeneratedModule:
         *names: str,
         **aliases: str,
     ) -> None:
-        self.import_("typing")
+        self.import_names("typing")
         self._import_names(
             module, names, aliases, import_time=_ImportTime.typecheck)
 
@@ -290,7 +294,7 @@ class GeneratedModule:
         self._chunks.extend([""] * size)
 
     def get_comment_preamble(self) -> str:
-        raise NotImplementedError
+        return self._comment_preamble
 
     def render_imports(self) -> str:
         sections = ["from __future__ import annotations"]

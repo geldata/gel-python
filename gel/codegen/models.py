@@ -20,6 +20,7 @@ from __future__ import annotations
 from typing import (
     DefaultDict,
     Generator,
+    Iterator,
     Mapping,
     NamedTuple,
     Set,
@@ -117,13 +118,9 @@ class SchemaGenerator:
 
             as_pkg = self.generate_as_pkg(modname)
 
-            variants = reflection.SchemaPath("__variants__") / modname
-
-            nice_module = GeneratedSchemaModule(modname, self._types, as_pkg)
-            nice_module.process(content)
-
-            with self.open_module(nice_module) as f:
-                nice_module.output(f)
+            module = GeneratedSchemaModule(modname, self._types, as_pkg)
+            module.process(content)
+            module.write_files(self._outdir)
 
     def has_submodules(self, mod: reflection.SchemaPath) -> bool:
         return any(m.parent.has_prefix(mod) for m in self._modules)
@@ -174,32 +171,76 @@ class SchemaGenerator:
             mod = reflection.SchemaPath("std") / mod
         module = GeneratedGlobalModule(mod, self._types, False)
         module.process(self._named_tuples)
+        module.write_files(self._outdir)
 
-        with self.open_module(module) as f:
-            module.output(f)
+
+class BaseGeneratedModule:
+    def __init__(
+        self,
+        modname: reflection.SchemaPath,
+        all_types: Mapping[uuid.UUID, reflection.AnyType],
+        is_package: bool,
+    ) -> None:
+        super().__init__()
+        self._modpath = modname
+        self._types = all_types
+        self._is_package = is_package
+        self._py_files = {
+            "main":  base.GeneratedModule(COMMENT),
+            "variants": base.GeneratedModule(COMMENT),
+        }
+        self._current_py_file = self._py_files["main"]
+
+    @property
+    def py_file(self) -> base.GeneratedModule:
+        return self._current_py_file
+
+    @property
+    def py_files(self) -> Mapping[str, base.GeneratedModule]:
+        return self._py_files
 
     @contextmanager
-    def open_module(
+    def another_py_file(self, pyfile: str) -> Iterator[None]:
+        prev_py_file = self._current_py_file
+
+        try:
+            self._current_py_file = self._py_files[pyfile]
+            yield
+        finally:
+            self._current_py_file = prev_py_file
+
+    @property
+    def modpath(self) -> reflection.SchemaPath:
+        return self._modpath
+
+    @property
+    def is_package(self) -> bool:
+        return self._is_package
+
+    @contextmanager
+    def _open_py_file(
         self,
-        mod: BaseGeneratedModule,
+        dir: pathlib.Path,
+        modpath: reflection.SchemaPath,
+        as_pkg: bool,
     ) -> Generator[io.TextIOWrapper, None, None]:
-        if mod.is_package:
+        if as_pkg:
             # This is a prefix in another module, thus it is part of a nested
             # module structure.
-            dirpath = mod.modpath
+            dirpath = modpath
             filename = "__init__.py"
         else:
             # This is a leaf module, so we just need to create a corresponding
             # <mod>.py file.
-            dirpath = mod.modpath.parent
-            filename = f"{mod.modpath.name}.py"
+            dirpath = modpath.parent
+            filename = f"{modpath.name}.py"
 
         # Along the dirpath we need to ensure that all packages are created
-        path = self._outdir
-        self.init_dir(path)
+        path = dir
+        self._init_dir(path)
         for el in dirpath.parts:
             path = path / el
-            self.init_dir(path)
+            self._init_dir(path)
 
         with open(path / filename, "wt") as f:
             try:
@@ -207,7 +248,7 @@ class SchemaGenerator:
             finally:
                 pass
 
-    def init_dir(self, dirpath: pathlib.Path) -> None:
+    def _init_dir(self, dirpath: pathlib.Path) -> None:
         if not dirpath:
             # nothing to initialize
             return
@@ -225,29 +266,47 @@ class SchemaGenerator:
         # ensure `path` directory contains `__init__.py`
         (path / "__init__.py").touch()
 
+    def write_files(self, dir: pathlib.Path) -> None:
+        main = self._py_files["main"]
+        with self._open_py_file(dir, self.modpath, self.is_package) as f:
+            main.output(f)
 
-class BaseGeneratedModule(base.GeneratedModule):
-    def __init__(
+        variants = self._py_files["variants"]
+        if not variants.has_content():
+            return
+
+        if self.is_package:
+            modpath = self.modpath / "__variants__"
+        else:
+            modpath = self.modpath.parent / "__variants__" / self.modpath.name
+
+        with self._open_py_file(dir, modpath, self.is_package) as f:
+            variants.output(f)
+
+    def import_names(self, module: str, *names: str, **aliases: str) -> None:
+        self.py_file.import_names(module, *names, **aliases)
+
+    def import_type_names(
         self,
-        modname: reflection.SchemaPath,
-        all_types: Mapping[uuid.UUID, reflection.AnyType],
-        is_package: bool,
+        module: str,
+        *names: str,
+        **aliases: str,
     ) -> None:
-        super().__init__()
-        self._modpath = modname
-        self._types = all_types
-        self._is_package = is_package
+        self.py_file.import_type_names(module, *names, **aliases)
 
-    @property
-    def modpath(self) -> reflection.SchemaPath:
-        return self._modpath
+    @contextmanager
+    def indented(self) -> Iterator[None]:
+        with self.py_file.indented():
+            yield
 
-    @property
-    def is_package(self) -> bool:
-        return self._is_package
+    def reset_indent(self) -> None:
+        self.py_file.reset_indent()
 
-    def get_comment_preamble(self) -> str:
-        return COMMENT
+    def write(self, text: str = "") -> None:
+        self.py_file.write(text)
+
+    def write_section_break(self, size: int = 2) -> None:
+        self.py_file.write_section_break(size)
 
     def get_tuple_name(
         self,
@@ -266,7 +325,7 @@ class BaseGeneratedModule(base.GeneratedModule):
         if base_type is not None:
             base_import = base.TYPE_IMPORTS.get(type.name)
             if base_import is not None:
-                self.import_(base_import)
+                self.import_names(base_import)
             return base_type
 
         if reflection.is_array_type(type):
@@ -275,7 +334,7 @@ class BaseGeneratedModule(base.GeneratedModule):
 
         if reflection.is_pseudo_type(type):
             if type.name == "anyobject":
-                self.import_("gel.models", gm="pydantic")
+                self.import_names("gel.models", gm="pydantic")
                 return "gm.GelModel"
             elif type.name == "anytuple":
                 return "tuple[typing.Any, ...]"
@@ -307,7 +366,10 @@ class BaseGeneratedModule(base.GeneratedModule):
 
             module = "." * relative_depth + ".".join(import_tail[:-1])
             imported_name = import_tail[-1]
-            do_import = self.import_ if for_runtime else self.import_type_names
+            if for_runtime:
+                do_import = self.import_names
+            else:
+                do_import = self.import_type_names
             if import_name:
                 do_import(module, imported_name)
                 return imported_name
@@ -346,7 +408,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
     ) -> None:
         for type_name, type in scalar_types.items():
             if type.enum_values:
-                self.import_("gel.polyfills", "StrEnum")
+                self.import_names("gel.polyfills", "StrEnum")
                 self.write(
                     f"class {type_name}(StrEnum):")
                 with self.indented():
@@ -373,11 +435,11 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                 if t_name.parent == base_name.parent:
                     graph[t.id].add(base.id)
 
-        self.import_("typing")
-        self.import_("typing_extensions", "TypeAliasType")
+        self.import_names("typing")
+        self.import_names("typing_extensions", "TypeAliasType")
 
-        self.import_("gel.models", gm="pydantic")
-        self.import_("gel.models", gexpr="expr")
+        self.import_names("gel.models", gm="pydantic")
+        self.import_names("gel.models", gexpr="expr")
 
         for tid in graphlib.TopologicalSorter(graph).static_order():
             objtype = self._types[tid]
@@ -509,7 +571,7 @@ class GeneratedGlobalModule(BaseGeneratedModule):
         self,
         t: reflection.NamedTupleType,
     ) -> None:
-        self.import_("typing", "NamedTuple")
+        self.import_names("typing", "NamedTuple")
 
         self.write("#")
         self.write(f"# tuple type {t.name}")
