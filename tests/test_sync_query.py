@@ -894,7 +894,71 @@ class TestSyncQuery(tb.SyncQueryTestCase):
                     INSERT test::Tmp { id := <uuid>$0, tmp := '' }
                 ''', uuid.uuid4())
 
-    def test_sync_prefer_rr(self):
+    def test_sync_default_isolation_01(self):
+        version = self.client.query_required_single('''
+            select sys::get_version()
+        ''')
+        if (version.major, version.minor) < (6, 0):
+            self.skipTest("RepeatableRead not supported yet")
+
+        # Test the bug fixed in geldata/gel#8623
+        with self.client.with_config(
+            default_transaction_isolation=edgedb.IsolationLevel.RepeatableRead
+        ) as db2:
+            res = db2.query('''
+                select 1; select 2;
+            ''')
+
+    def test_sync_default_isolation_02(self):
+        version = self.client.query_required_single('''
+            select sys::get_version()
+        ''')
+
+        if (version.major, version.minor) < (6, 0):
+            self.skipTest("RepeatableRead not supported yet")
+
+        with self.client.with_transaction_options(
+            edgedb.TransactionOptions(
+                isolation=edgedb.IsolationLevel.RepeatableRead
+            )
+        ) as db2:
+            res = db2.query_single('''
+                select sys::get_transaction_isolation()
+            ''')
+            self.assertEqual(str(res), 'RepeatableRead')
+
+        with self.client.with_transaction_options(
+            edgedb.TransactionOptions(
+                isolation=edgedb.IsolationLevel.PreferRepeatableRead
+            )
+        ) as db2:
+            res = db2.query_single('''
+                select sys::get_transaction_isolation()
+            ''')
+            self.assertEqual(str(res), 'RepeatableRead')
+
+        # transaction_options takes precedence over config
+        with self.client.with_config(
+            default_transaction_isolation=edgedb.IsolationLevel.RepeatableRead
+        ) as db1, db1.with_transaction_options(
+            edgedb.TransactionOptions(
+                isolation=edgedb.IsolationLevel.Serializable,
+            )
+        ) as db2:
+            res = db2.query_single('''
+                select sys::get_transaction_isolation()
+            ''')
+            self.assertEqual(str(res), 'Serializable')
+
+        with self.client.with_transaction_options(
+            edgedb.TransactionOptions(readonly=True)
+        ) as db2:
+            with self.assertRaises(edgedb.errors.TransactionError):
+                res = db2.execute('''
+                    insert test::Tmp { tmp := "test" }
+                ''')
+
+    def test_sync_prefer_rr_01(self):
         version = self.client.query_required_single('''
             select sys::get_version()
         ''')
@@ -926,3 +990,15 @@ class TestSyncQuery(tb.SyncQueryTestCase):
                 }
             ''')
             self.assertEqual(str(res.level), 'Serializable')
+
+        with self.client.with_transaction_options(
+            edgedb.TransactionOptions(
+                isolation=edgedb.IsolationLevel.PreferRepeatableRead
+            )
+        ) as db2:
+            res = db2.query_single('''
+                select {
+                    level := sys::get_transaction_isolation(),
+                }
+            ''')
+            self.assertEqual(str(res.level), 'RepeatableRead')

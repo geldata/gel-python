@@ -185,6 +185,14 @@ class BaseTransaction:
         return self._client._get_query_cache()
 
     def _get_retry_options(self) -> typing.Optional[options.RetryOptions]:
+        # Return None, to prevent retrying *inside* a transaction.
+        return None
+
+    def _get_active_tx_options(self) -> typing.Optional[
+        options.TransactionOptions
+    ]:
+        # Return None, since the tx options are applied at the *start*
+        # of transactions, not inside them.
         return None
 
     def _get_state(self) -> options.State:
