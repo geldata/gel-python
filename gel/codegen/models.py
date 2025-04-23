@@ -23,7 +23,6 @@ from typing import (
     Iterator,
     Mapping,
     NamedTuple,
-    Set,
     TypedDict,
     Union,
 )
@@ -44,6 +43,10 @@ import typing
 import uuid
 
 from collections import defaultdict
+from collections.abc import (
+    Collection,
+    Set,
+)
 from contextlib import contextmanager
 
 import gel
@@ -116,25 +119,10 @@ class SchemaGenerator:
                 # skip apparently empty modules
                 continue
 
-            as_pkg = self.generate_as_pkg(modname)
-
-            module = GeneratedSchemaModule(modname, self._types, as_pkg)
+            module = GeneratedSchemaModule(
+                modname, self._types, self._modules, self._schema_part)
             module.process(content)
             module.write_files(self._outdir)
-
-    def has_submodules(self, mod: reflection.SchemaPath) -> bool:
-        return any(m.parent.has_prefix(mod) for m in self._modules)
-
-    def generate_as_pkg(self, mod: reflection.SchemaPath) -> bool:
-        as_pkg = self.has_submodules(mod)
-        if (
-            not as_pkg
-            and self._schema_part is reflection.SchemaPart.STD
-            and len(mod.parts) == 1
-        ):
-            as_pkg = True
-
-        return as_pkg
 
     def introspect_schema(self) -> None:
         for mod in reflection.fetch_modules(self._client, self._schema_part):
@@ -169,7 +157,8 @@ class SchemaGenerator:
         mod = reflection.SchemaPath("__types__")
         if self._schema_part is reflection.SchemaPart.STD:
             mod = reflection.SchemaPath("std") / mod
-        module = GeneratedGlobalModule(mod, self._types, False)
+        module = GeneratedGlobalModule(
+            mod, self._types, self._modules, self._schema_part)
         module.process(self._named_tuples)
         module.write_files(self._outdir)
 
@@ -179,17 +168,47 @@ class BaseGeneratedModule:
         self,
         modname: reflection.SchemaPath,
         all_types: Mapping[uuid.UUID, reflection.AnyType],
-        is_package: bool,
+        modules: Collection[reflection.SchemaPath],
+        schema_part: reflection.SchemaPart,
     ) -> None:
         super().__init__()
         self._modpath = modname
         self._types = all_types
-        self._is_package = is_package
+        self._modules = frozenset(modules)
+        self._schema_part = schema_part
+        self._is_package = self.mod_is_package(modname, schema_part)
         self._py_files = {
             "main":  base.GeneratedModule(COMMENT),
             "variants": base.GeneratedModule(COMMENT),
         }
         self._current_py_file = self._py_files["main"]
+        self._type_import_cache: dict[
+            tuple[str, bool, bool, bool, str | None], str] = {}
+
+    def get_mod_schema_part(
+        self,
+        mod: reflection.SchemaPath,
+    ) -> reflection.SchemaPart:
+        if self._schema_part is reflection.SchemaPart.STD:
+            return reflection.SchemaPart.STD
+        elif mod not in self._modules:
+            return reflection.SchemaPart.STD
+        else:
+            return reflection.SchemaPart.USER
+
+    @classmethod
+    def mod_is_package(
+        cls,
+        mod: reflection.SchemaPath,
+        schema_part: reflection.SchemaPart,
+    ) -> bool:
+        return (
+            bool(mod.parent.parts)
+            or (
+                schema_part is reflection.SchemaPart.STD
+                and len(mod.parts) == 1
+            )
+        )
 
     @property
     def py_file(self) -> base.GeneratedModule:
@@ -212,6 +231,15 @@ class BaseGeneratedModule:
     @property
     def modpath(self) -> reflection.SchemaPath:
         return self._modpath
+
+    @property
+    def variants_modpath(self) -> reflection.SchemaPath:
+        if self.is_package:
+            modpath = self.modpath / "__variants__"
+        else:
+            modpath = self.modpath.parent / "__variants__" / self.modpath.name
+
+        return modpath
 
     @property
     def is_package(self) -> bool:
@@ -275,12 +303,7 @@ class BaseGeneratedModule:
         if not variants.has_content():
             return
 
-        if self.is_package:
-            modpath = self.modpath / "__variants__"
-        else:
-            modpath = self.modpath.parent / "__variants__" / self.modpath.name
-
-        with self._open_py_file(dir, modpath, self.is_package) as f:
+        with self._open_py_file(dir, self.variants_modpath, self.is_package) as f:
             variants.output(f)
 
     def import_names(self, module: str, *names: str, **aliases: str) -> None:
@@ -319,7 +342,11 @@ class BaseGeneratedModule:
     def get_type(
         self,
         type: reflection.AnyType,
+        *,
         for_runtime: bool = False,
+        variants: bool = False,
+        from_variants: bool | None = None,
+        import_alias: str | None = None,
     ) -> str:
         base_type = base.TYPE_MAPPING.get(type.name)
         if base_type is not None:
@@ -351,10 +378,38 @@ class BaseGeneratedModule:
             type_name = type.name
             import_name = False
 
+        if from_variants is None:
+            from_variants = variants
+
+        cache_key = (
+            type_name,
+            variants,
+            from_variants,
+            import_name,
+            import_alias,
+        )
+        result = self._type_import_cache.get(cache_key)
+        if result is not None:
+            return result
+
         type_path = reflection.parse_name(type_name)
-        mod_path = self._modpath
+        if variants:
+            type_mod = type_path.parent
+            type_mod_is_pkg = self.mod_is_package(
+                type_mod,
+                self.get_mod_schema_part(type_mod),
+            )
+            if type_mod_is_pkg:
+                type_path = type_mod / "__variants__" / type_path.name
+            else:
+                type_path = (
+                    type_mod.parent / "__variants__" / type_mod.name
+                    / type_path.name
+                )
+
+        mod_path = self.variants_modpath if from_variants else self.modpath
         if type_path.parent == mod_path:
-            return type_path.name
+            result = type_path.name
         else:
             common_parts = type_path.common_parts(mod_path)
             if common_parts:
@@ -372,14 +427,31 @@ class BaseGeneratedModule:
                 do_import = self.import_type_names
             if import_name:
                 do_import(module, imported_name)
-                return imported_name
+                result = imported_name
             else:
-                alias = "_".join(type_path.parts[:-1])
+                if import_alias is not None:
+                    alias = import_alias
+                else:
+                    alias = "_".join(type_path.parts[:-1])
                 if all(c == "." for c in module):
                     do_import(f".{module}", **{alias: type_path.parts[-2]})
                 else:
                     do_import(module, **{alias: "."})
-                return f"{alias}.{imported_name}"
+                result = f"{alias}.{imported_name}"
+
+        self._type_import_cache[cache_key] = result
+        return result
+
+    def format_list(self, tpl: str, values: list[str]) -> str:
+        list_string = ", ".join(values)
+        output_string = tpl.format(list=list_string)
+
+        if len(output_string) > 79:
+            list_string = ",\n    ".join(values)
+            list_string = f"\n    {list_string}\n"
+            output_string = tpl.format(list=list_string)
+
+        return output_string
 
 
 class GeneratedSchemaModule(BaseGeneratedModule):
@@ -424,7 +496,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         if not object_types:
             return
 
-        graph: dict[uuid.UUID, Set[uuid.UUID]] = {}
+        graph: dict[uuid.UUID, set[uuid.UUID]] = {}
         for t in object_types.values():
             graph[t.id] = set()
             t_name = reflection.parse_name(t.name)
@@ -435,18 +507,31 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                 if t_name.parent == base_name.parent:
                     graph[t.id].add(base.id)
 
+        objtypes = []
+        for tid in graphlib.TopologicalSorter(graph).static_order():
+            objtype = self._types[tid]
+            assert reflection.is_object_type(objtype)
+            objtypes.append(objtype)
+
         self.import_names("typing")
-        self.import_names("typing_extensions", "TypeAliasType")
 
         self.import_names("gel.models", gm="pydantic")
         self.import_names("gel.models", gexpr="expr")
 
-        for tid in graphlib.TopologicalSorter(graph).static_order():
-            objtype = self._types[tid]
-            assert reflection.is_object_type(objtype)
+        for objtype in objtypes:
             self.write_object_type(objtype)
 
-    def write_object_type(
+        with self.another_py_file("variants"):
+            self.import_names("typing")
+            self.import_names("typing_extensions", "TypeAliasType")
+
+            self.import_names("gel.models", gm="pydantic")
+            self.import_names("gel.models", gexpr="expr")
+
+            for objtype in objtypes:
+                self.write_object_type_variants(objtype)
+
+    def write_object_type_variants(
         self,
         objtype: reflection.ObjectType,
     ) -> None:
@@ -460,65 +545,74 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         name = type_name.name
 
         base_types = [
+            self.get_type(self._types[base.id], for_runtime=True, variants=True)
+            for base in objtype.bases
+        ]
+        self.write(f"class {name}:")
+        with self.indented():
+            if not base_types:
+                bases = ["gm.GelModel"]
+            else:
+                bases = [f"{b}.Root" for b in base_types]
+
+            class_string = self.format_list("class Root({list}):", bases)
+            self.write(class_string)
+
+            all_pointers = self._get_pointer_origins(objtype)
+            if all_pointers:
+                with self.indented():
+                    if base_types:
+                        bases = [f"{b}.Root.__typeof__" for b in base_types]
+                        class_line = self.format_list(
+                            "class __typeof__({list}):", bases)
+                    else:
+                        class_line = "class __typeof__:"
+                    self.write(class_line)
+                    with self.indented():
+                        for ptr, origin in all_pointers:
+                            if origin is objtype:
+                                ptr_t = self.get_ptr_type(ptr, variants=True)
+                            else:
+                                origin_t = self.get_type(origin, variants=True)
+                                ptr_t = f"{origin_t}.Root.__typeof__.{ptr.name}"
+
+                            defn = f"TypeAliasType('{ptr.name}', '{ptr_t}')"
+                            self.write(f"{ptr.name} = {defn}")
+
+        self.write()
+
+    def write_object_type(
+        self,
+        objtype: reflection.ObjectType,
+    ) -> None:
+        self.write()
+        self.write("#")
+        self.write(f"# type {objtype.name}")
+        self.write("#")
+
+        type_name = reflection.parse_name(objtype.name)
+        name = type_name.name
+
+        base_types = [
             self.get_type(self._types[base.id], for_runtime=True)
             for base in objtype.bases
         ]
-        if not base_types:
-            bases = ["gm.GelModel"]
-        else:
-            bases = base_types
-        bases_string = ", ".join(bases)
-        class_string = f"class {name}({bases_string}):"
-        if len(class_string) > 79:
-            bases_string = ",\n    ".join(bases)
-            class_string = f"class {name}(\n    {bases_string}\n):"
-
-        self.write()
+        variants = self.get_type(objtype, for_runtime=True, variants=True, from_variants=False, import_alias="__variants__")
+        root = f"{variants}.Root"
+        base_types.append(root)
+        class_string = self.format_list(f"class {name}({{list}}):", base_types)
         self.write(f"{name}_T = typing.TypeVar('{name}_T', bound='{name}')")
         self.write(class_string)
         with self.indented():
             if objtype.pointers:
-                self.write()
                 for ptr in objtype.pointers:
                     ptr_type = self.get_ptr_type(ptr)
                     self.write(f"{ptr.name}: {ptr_type}")
                     self.write(f'"""{objtype.name}.{ptr.name}"""')
-
-            self.write(
-                f"__gel_metadata__ = "
-                f"gm.GelMetadata(schema_name={objtype.name!r})",
-            )
-
-            self.write("class __gel_for__:")
-            with self.indented():
-                self.write("class Select(gm.GelModel):")
-                with self.indented():
-                    self.write(
-                        f"__gel_metadata__ = "
-                        f"gm.GelMetadata(schema_name={objtype.name!r})",
-                    )
-
-            all_pointers = self._get_pointer_origins(objtype)
-            if all_pointers:
+                    self.write()
+            else:
+                self.write("pass")
                 self.write()
-                if base_types:
-                    bases_string = ",\n    ".join(
-                        f"{b}.__typeof__" for b in base_types)
-                    self.write(f"class __typeof__(\n    {bases_string}\n):")
-                else:
-                    self.write(f"class __typeof__:")
-                with self.indented():
-                    for ptr, origin in all_pointers:
-                        if origin is objtype:
-                            ptr_t = self.get_ptr_type(ptr)
-                        else:
-                            origin_t = self.get_type(origin)
-                            ptr_t = f"{origin_t}.__typeof__.{ptr.name}"
-
-                        defn = f"TypeAliasType('{ptr.name}', '{ptr_t}')"
-                        self.write(f"{ptr.name} = {defn}")
-
-        self.write()
 
     def _get_pointer_origins(
         self,
@@ -536,13 +630,24 @@ class GeneratedSchemaModule(BaseGeneratedModule):
 
         return list(pointers.values())
 
-    def get_ptr_type(self, prop: reflection.Pointer) -> str:
-        return self.get_type(self._types[prop.target_id])
+    def get_ptr_type(
+        self,
+        prop: reflection.Pointer,
+        variants: bool = False,
+    ) -> str:
+        ptr_type = self.get_type(self._types[prop.target_id], variants=variants)
+        if prop.card in {
+            reflection.Cardinality.AtLeastOne._value_,
+            reflection.Cardinality.Many._value_,
+        }:
+            return f"list[{ptr_type}]"
+        else:
+            return ptr_type
 
 
 class GeneratedGlobalModule(BaseGeneratedModule):
     def process(self, types: Mapping[uuid.UUID, reflection.AnyType]) -> None:
-        graph: DefaultDict[uuid.UUID, Set[uuid.UUID]] = defaultdict(set)
+        graph: DefaultDict[uuid.UUID, set[uuid.UUID]] = defaultdict(set)
 
         @functools.singledispatch
         def type_dispatch(t: reflection.AnyType, ref_t: uuid.UUID) -> None:

@@ -33,6 +33,7 @@ import getpass
 import io
 import os
 import pathlib
+import re
 import sys
 import textwrap
 from collections import defaultdict
@@ -327,9 +328,13 @@ class GeneratedModule:
         for modname, aliases in mods:
             for alias in aliases:
                 if modname.startswith("."):
-                    relative, _, modname = modname.rpartition(".")
-                    import_line = f"from .{relative} import {modname}"
-                    if alias:
+                    match = re.match(r"^(\.+)(.*)", modname)
+                    assert match
+                    relative = match.group(1)
+                    rest = match.group(2)
+                    pkg, _, name = rest.rpartition(".")
+                    import_line = f"from {relative}{pkg} import {name}"
+                    if alias and alias != name:
                         import_line += f" as {alias}"
                 else:
                     if alias:

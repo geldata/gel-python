@@ -3,6 +3,7 @@
 # SPDX-FileCopyrightText: Copyright Gel Data Inc. and the contributors.
 
 from ._enums import (
+    Cardinality,
     PointerKind,
     TypeKind,
     SchemaPart,
@@ -39,6 +40,7 @@ from ._modules import (
 __all__ = (
     "AnyType",
     "ArrayType",
+    "Cardinality",
     "NamedTupleType",
     "ObjectType",
     "Pointer",
