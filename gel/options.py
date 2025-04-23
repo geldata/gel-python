@@ -54,6 +54,7 @@ class IsolationLevel:
     """Isolation level for transaction"""
     Serializable = "Serializable"
     RepeatableRead = "RepeatableRead"
+    PreferRepeatableRead = "PreferRepeatableRead"
 
     @staticmethod
     def _to_start_tx_str(v):

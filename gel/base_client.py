@@ -701,7 +701,17 @@ class BaseClient(abstract.BaseReadOnlyExecutor, _options._OptionsMixin):
         )
 
     def _get_retry_options(self) -> typing.Optional[_options.RetryOptions]:
+        # This is overloaded in transaction.py to return None, to prevent
+        # retrying *inside* a transaction.
         return self._options.retry_options
+
+    def _get_active_tx_options(self) -> typing.Optional[
+        _options.TransactionOptions
+    ]:
+        # This is overloaded in transaction.py to return None, since
+        # the tx options are applied at the *start* of transactions,
+        # not inside them.
+        return self._options.transaction_options
 
     def _get_state(self) -> _options.State:
         return self._options.state
