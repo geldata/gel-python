@@ -217,6 +217,7 @@ class BaseTransaction:
             query=abstract.QueryWithArgs(query, (), {}),
             cache=self._get_query_cache(),
             state=self._get_state(),
+            transaction_options=self._get_active_tx_options(),
             retry_options=self._get_retry_options(),
             warning_handler=self._get_warning_handler(),
             annotations=self._get_annotations(),

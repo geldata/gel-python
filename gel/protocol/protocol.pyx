@@ -110,6 +110,7 @@ cdef class ExecuteContext:
         allow_capabilities: enums.Capability = enums.Capability.ALL,
         state: typing.Optional[dict] = None,
         annotations: typing.Optional[dict[str, str]] = None,
+        transaction_options: typing.Optional[object] = None,
     ):
         self.query = query
         self.args = args
@@ -125,6 +126,7 @@ cdef class ExecuteContext:
         self.inline_typeids = bool(inline_typeids)
         self.allow_capabilities = allow_capabilities
         self.state = state
+        self.tx_options = transaction_options
 
         self.cardinality = None
         self.in_dc = self.out_dc = None
@@ -177,13 +179,14 @@ cdef class ExecuteContext:
             self.unsafe_isolation_dangers,
         )
 
-    cdef prefers_repeatable_read(self):
-        return (
-            self.state
-            and (config := self.state.get('config'))
-            and config.get('default_transaction_isolation')
-            == 'PreferRepeatableRead'
-        )
+
+cdef prefers_repeatable_read(state):
+    return (
+        state
+        and (config := state.get('config'))
+        and config.get('default_transaction_isolation')
+        == 'PreferRepeatableRead'
+    )
 
 
 cdef class SansIOProtocol:
@@ -322,13 +325,39 @@ cdef class SansIOProtocol:
     def _get_active_state(self, ctx: ExecuteContext, *, bint is_execute):
         '''Make any adjustments to state before encoding it.
 
-        Currently this just consists of modifying config to implement
-        PrefersRepeatableRead.
+        Currently this consists of copying TransactionOptions into
+        config and implementing PrefersRepeatableRead.
         '''
+        tx_options = ctx.tx_options
         state = ctx.state
-        if ctx.prefers_repeatable_read():
+        copied = False
+
+        if (
+            tx_options
+            and (
+                tx_options._isolation is not None
+                or tx_options._readonly is not None
+            )
+            # 6.0 or later
+            and self.protocol_version >= (3, 0)
+        ):
             state = state.copy()
-            state['config'] = state['config'].copy()
+            config = state['config'] = (
+                state['config'].copy() if 'config' in state else {}
+            )
+            copied = True
+
+            if tx_options._isolation is not None:
+                config['default_transaction_isolation'] = tx_options._isolation
+            if tx_options._readonly is not None:
+                config['default_transaction_access_mode'] = (
+                    'ReadOnly' if tx_options._readonly else 'ReadWrite'
+                )
+
+        if prefers_repeatable_read(state):
+            if not copied:
+                state = state.copy()
+                state['config'] = state['config'].copy()
 
             # If we are actually doing an execute, and parse didn't
             # report any isolation dangers with the query, then adjust
@@ -543,7 +572,7 @@ cdef class SansIOProtocol:
             not ctx.args
             and not ctx.kwargs
             and not ctx.required_one
-            and not ctx.prefers_repeatable_read()
+            and not prefers_repeatable_read(ctx.state)
         ):
             # We don't have knowledge about the in/out desc of the command, but
             # the caller didn't provide any arguments, so let's try using NULL

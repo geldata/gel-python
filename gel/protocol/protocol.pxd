@@ -90,6 +90,7 @@ cdef class ExecuteContext:
         uint64_t allow_capabilities
         object state
         object annotations
+        object tx_options
 
         # Contextual variables
         readonly bytes cardinality
@@ -102,7 +103,6 @@ cdef class ExecuteContext:
     cdef inline bint has_na_cardinality(self)
     cdef bint load_from_cache(self)
     cdef inline store_to_cache(self)
-    cdef prefers_repeatable_read(self)
 
 
 cdef class SansIOProtocol:

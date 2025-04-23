@@ -316,22 +316,6 @@ class State:
             rv["globals"] = self._globals
         return rv
 
-    def adjust_state(self, tx_options: TransactionOptions | None):
-        # TODO: cache this?
-        if tx_options and (
-            tx_options._isolation is not None
-            or tx_options._readonly is not None
-        ):
-            args = {}
-            if tx_options._isolation is not None:
-                args['default_transaction_isolation'] = tx_options._isolation
-            if tx_options._readonly is not None:
-                args['default_transaction_access_mode'] = (
-                    'ReadOnly' if tx_options._readonly else 'ReadWrite'
-                )
-            return self.with_config(args)
-        return self
-
 
 class _OptionsMixin:
     def __init__(self, *args, **kwargs):

@@ -714,7 +714,7 @@ class BaseClient(abstract.BaseReadOnlyExecutor, _options._OptionsMixin):
         return self._options.transaction_options
 
     def _get_state(self) -> _options.State:
-        return self._options.state.adjust_state(self._get_active_tx_options())
+        return self._options.state
 
     def _get_warning_handler(self) -> _options.WarningHandler:
         return self._options.warning_handler
