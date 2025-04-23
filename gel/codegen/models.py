@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 from typing import (
+    Callable,
     DefaultDict,
     Generator,
     Iterator,
@@ -416,8 +417,14 @@ class BaseGeneratedModule:
                 relative_depth = len(mod_path.parts) - len(common_parts)
                 import_tail = type_path.parts[len(common_parts) :]
             else:
-                relative_depth = len(mod_path.parts) + int(self._is_package)
+                relative_depth = len(mod_path.parts)
                 import_tail = type_path.parts
+
+            if self._is_package:
+                relative_depth += 1
+
+            if str(mod_path) == "std" and "__variants__" in str(type_path):
+                print(type_path, common_parts, relative_depth, import_tail)
 
             module = "." * relative_depth + ".".join(import_tail[:-1])
             imported_name = import_tail[-1]
@@ -531,6 +538,42 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             for objtype in objtypes:
                 self.write_object_type_variants(objtype)
 
+    def _format_class_line(
+        self,
+        class_name: str,
+        base_types: list[str],
+        *,
+        fixed_bases: list[str] | None = None,
+        transform: None | Callable[[str], str] = None,
+    ) -> str:
+        if transform is not None:
+            bases = []
+            for b in base_types:
+                mod, _, name = b.rpartition(".")
+                name = transform(name)
+                bases.append(f"{mod}.{name}" if mod else name)
+        else:
+            bases = base_types
+
+        all_bases = fixed_bases + bases if fixed_bases is not None else bases
+        return self.format_list(f"class {class_name}({{list}}):", all_bases)
+
+    def _write_class_line(
+        self,
+        class_name: str,
+        base_types: list[str],
+        *,
+        fixed_bases: list[str] | None = None,
+        transform: None | Callable[[str], str] = None,
+    ) -> None:
+        class_line = self._format_class_line(
+            class_name,
+            base_types,
+            fixed_bases=fixed_bases,
+            transform=transform,
+        )
+        self.write(class_line)
+
     def write_object_type_variants(
         self,
         objtype: reflection.ObjectType,
@@ -544,40 +587,63 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         type_name = reflection.parse_name(objtype.name)
         name = type_name.name
 
+        def _mangle_typeof(name: str) -> str:
+            return f"__{name}_typeof__"
+
         base_types = [
             self.get_type(self._types[base.id], for_runtime=True, variants=True)
             for base in objtype.bases
         ]
-        self.write(f"class {name}:")
+        typeof_class = _mangle_typeof(name)
+        self._write_class_line(
+            typeof_class,
+            base_types,
+            transform=_mangle_typeof,
+        )
+        all_pointers = self._get_pointer_origins(objtype)
         with self.indented():
-            if not base_types:
-                bases = ["gm.GelModel"]
+            if not all_pointers:
+                self.write("pass")
             else:
-                bases = [f"{b}.Root" for b in base_types]
-
-            class_string = self.format_list("class Root({list}):", bases)
-            self.write(class_string)
-
-            all_pointers = self._get_pointer_origins(objtype)
-            if all_pointers:
-                with self.indented():
-                    if base_types:
-                        bases = [f"{b}.Root.__typeof__" for b in base_types]
-                        class_line = self.format_list(
-                            "class __typeof__({list}):", bases)
+                for ptr, origin in all_pointers:
+                    if origin is objtype:
+                        ptr_t = self.get_ptr_type(ptr, variants=True)
                     else:
-                        class_line = "class __typeof__:"
-                    self.write(class_line)
-                    with self.indented():
-                        for ptr, origin in all_pointers:
-                            if origin is objtype:
-                                ptr_t = self.get_ptr_type(ptr, variants=True)
-                            else:
-                                origin_t = self.get_type(origin, variants=True)
-                                ptr_t = f"{origin_t}.Root.__typeof__.{ptr.name}"
+                        origin_t = self.get_type(origin, variants=True)
+                        ptr_t = f"{origin_t}.__typeof__.{ptr.name}"
 
-                            defn = f"TypeAliasType('{ptr.name}', '{ptr_t}')"
-                            self.write(f"{ptr.name} = {defn}")
+                    defn = f"TypeAliasType('{ptr.name}', '{ptr_t}')"
+                    self.write(f"{ptr.name} = {defn}")
+
+        self.write()
+        self.write()
+        self._write_class_line(
+            name,
+            base_types,
+        )
+        with self.indented():
+            self._write_class_line(
+                "__typeof__",
+                base_types,
+                fixed_bases=[typeof_class],
+                transform=lambda s: f"{s}.__typeof__",
+            )
+            with self.indented():
+                self.write("pass")
+
+            self._write_class_line(
+                "__variants__",
+                base_types,
+                transform=lambda s: f"{s}.__variants__",
+            )
+            with self.indented():
+                self._write_class_line(
+                    "Empty",
+                    base_types,
+                    transform=lambda s: f"{s}.__variants__.Empty",
+                )
+                with self.indented():
+                    self.write("pass")
 
         self.write()
 
@@ -593,13 +659,12 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         type_name = reflection.parse_name(objtype.name)
         name = type_name.name
 
-        base_types = [
+        base = self.get_type(objtype, for_runtime=True, variants=True, from_variants=False, import_alias="__")
+        base_types = [base]
+        base_types.extend([
             self.get_type(self._types[base.id], for_runtime=True)
             for base in objtype.bases
-        ]
-        variants = self.get_type(objtype, for_runtime=True, variants=True, from_variants=False, import_alias="__variants__")
-        root = f"{variants}.Root"
-        base_types.append(root)
+        ])
         class_string = self.format_list(f"class {name}({{list}}):", base_types)
         self.write(f"{name}_T = typing.TypeVar('{name}_T', bound='{name}')")
         self.write(class_string)
