@@ -171,6 +171,12 @@ class ModuleAspect(enum.Enum):
     LATE = enum.auto()
 
 
+class Import(NamedTuple):
+    module: str
+    name: str
+    alias: str | None
+
+
 @functools.cache
 def get_modpath(
     modpath: reflection.SchemaPath,
@@ -370,11 +376,14 @@ class BaseGeneratedModule:
         hash = base64.b64encode(t.id.bytes[:4], altchars=b"__").decode()
         return "".join(names) + "_Tuple_" + hash.rstrip("=")
 
-    def _resolve_relative_import(
+    def _resolve_rel_import(
         self,
-        imp_mod: reflection.SchemaPath,
+        imp_path: reflection.SchemaPath,
         aspect: ModuleAspect,
-    ) -> str | None:
+        import_name: bool,
+    ) -> Import | None:
+        imp_mod = imp_path.parent
+        imp_name = imp_path.name
         cur_mod = self.modpath(self.current_aspect)
         if aspect is not ModuleAspect.MAIN:
             imp_mod_is_pkg = self.mod_is_package(
@@ -399,7 +408,33 @@ class BaseGeneratedModule:
             if self._is_package:
                 relative_depth += 1
 
-            return "." * relative_depth + ".".join(import_tail)
+            py_mod = "." * relative_depth + ".".join(import_tail)
+            if import_name:
+                result = Import(
+                    module=py_mod,
+                    name=imp_name,
+                    alias=None,
+                )
+            else:
+                cur_mod_canon = self.main_modpath
+                if imp_mod == cur_mod_canon:
+                    alias = "__"
+                else:
+                    alias = "_".join(imp_path.parts[:-1])
+                if all(c == "." for c in py_mod):
+                    result = Import(
+                        module=f".{py_mod}",
+                        name=imp_path.parts[-2],
+                        alias=alias,
+                    )
+                else:
+                    result = Import(
+                        module=py_mod,
+                        name=".",
+                        alias=alias,
+                    )
+
+        return result
 
     def get_type(
         self,
@@ -455,29 +490,24 @@ class BaseGeneratedModule:
         type_path = reflection.parse_name(type_name)
         type_name = type_path.name
 
-        py_mod = self._resolve_relative_import(type_path.parent, aspect)
-        if py_mod is None:
+        rel_import = self._resolve_rel_import(type_path, aspect, import_name)
+        if rel_import is None:
             result = type_name
         else:
             if for_runtime:
                 do_import = self.import_names
             else:
                 do_import = self.import_type_names
-            if import_name:
-                do_import(py_mod, type_name)
-                result = type_name
+
+            if rel_import.alias is not None:
+                do_import(
+                    rel_import.module,
+                    **{rel_import.alias: rel_import.name},
+                )
+                result = f"{rel_import.alias}.{type_name}"
             else:
-                cur_mod_canon = self.main_modpath
-                type_mod_canon = type_path.parent
-                if type_mod_canon == cur_mod_canon:
-                    alias = "__"
-                else:
-                    alias = "_".join(type_path.parts[:-1])
-                if all(c == "." for c in py_mod):
-                    do_import(f".{py_mod}", **{alias: type_path.parts[-2]})
-                else:
-                    do_import(py_mod, **{alias: "."})
-                result = f"{alias}.{type_name}"
+                do_import(rel_import.module, rel_import.name)
+                result = rel_import.name
 
         self._type_import_cache[cache_key] = result
         return result
