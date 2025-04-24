@@ -58,7 +58,13 @@ class IsolationLevel:
 
     @staticmethod
     def _to_start_tx_str(v):
-        if v == IsolationLevel.Serializable:
+        if (
+            v == IsolationLevel.Serializable
+            # We may *prefer* repeatable read, but we have not yet
+            # implemented it for explicit transactions. (Which will
+            # require some gnarly retry-and-caching logic.)
+            or v == IsolationLevel.PreferRepeatableRead
+        ):
             return 'SERIALIZABLE'
         elif v == IsolationLevel.RepeatableRead:
             return 'REPEATABLE READ'
