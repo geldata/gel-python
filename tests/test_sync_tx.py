@@ -31,10 +31,17 @@ class TestSyncTx(tb.SyncQueryTestCase):
         CREATE TYPE test::TransactionTest EXTENDING std::Object {
             CREATE PROPERTY name -> std::str;
         };
-    '''
 
-    TEARDOWN = '''
-        DROP TYPE test::TransactionTest;
+        CREATE TYPE test::Tmp {
+            CREATE REQUIRED PROPERTY tmp -> std::str;
+        };
+        CREATE TYPE test::TmpConflict {
+            CREATE REQUIRED PROPERTY tmp -> std::str {
+                CREATE CONSTRAINT exclusive;
+            }
+        };
+
+        CREATE TYPE test::TmpConflictChild extending test::TmpConflict;
     '''
 
     def test_sync_transaction_regular_01(self):
@@ -100,6 +107,51 @@ class TestSyncTx(tb.SyncQueryTestCase):
             for tx in client.transaction():
                 with tx:
                     pass
+
+    def test_sync_transaction_prefer_rr(self):
+        if (
+            str(self.server_version.stage) != 'dev'
+            and (self.server_version.major, self.server_version.minor) < (6, 5)
+        ):
+            self.skipTest("DML in RepeatableRead not supported yet")
+        con = self.client.with_transaction_options(
+            edgedb.TransactionOptions(
+                isolation=edgedb.IsolationLevel.PreferRepeatableRead
+            )
+        )
+        # A transaction that needs to be serializable
+        for tx in con.transaction():
+            with tx:
+                res1 = tx.query_single('''
+                    select {
+                        ins := (insert test::TmpConflict { tmp := "test1" }),
+                        level := sys::get_transaction_isolation(),
+                    }
+                ''')
+
+                res2 = tx.query_single('''
+                    select {
+                        ins := (insert test::TmpConflict { tmp := "test2" }),
+                        level := sys::get_transaction_isolation(),
+                    }
+                ''')
+
+                # N.B: res1 will be RepeatableRead on the first
+                # iteration, maybe, but contingent on the second query
+                # succeeding it will be Serializable!
+                self.assertEqual(str(res1.level), 'Serializable')
+                self.assertEqual(str(res2.level), 'Serializable')
+
+        # And one that doesn't
+        for tx in con.transaction():
+            with tx:
+                res = tx.query_single('''
+                    select {
+                        ins := (insert test::Tmp { tmp := "test" }),
+                        level := sys::get_transaction_isolation(),
+                    }
+                ''')
+            self.assertEqual(str(res.level), 'RepeatableRead')
 
     def test_sync_transaction_commit_failure(self):
         with self.assertRaises(edgedb.errors.QueryError):
