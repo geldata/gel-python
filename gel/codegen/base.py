@@ -183,6 +183,7 @@ class _ImportSection(enum.Enum):
 
 class _ImportTime(enum.Enum):
     runtime = enum.auto()
+    late_runtime = enum.auto()
     typecheck = enum.auto()
 
 
@@ -266,6 +267,15 @@ class GeneratedModule:
         self._import_names(
             module, names, aliases, import_time=_ImportTime.runtime)
 
+    def import_names_late(
+        self,
+        module: str,
+        *names: str,
+        **aliases: str,
+    ) -> None:
+        self._import_names(
+            module, names, aliases, import_time=_ImportTime.late_runtime)
+
     def import_type_names(
         self,
         module: str,
@@ -312,6 +322,14 @@ class GeneratedModule:
         if any(typecheck_sections):
             sections.append("if typing.TYPE_CHECKING:")
             sections.extend(typecheck_sections)
+
+        return "\n\n".join(filter(None, sections))
+
+    def render_late_imports(self) -> str:
+        sections = []
+        for section_key in _ImportSection.__members__.values():
+            key = (section_key, _ImportTime.late_runtime)
+            sections.append(self._render_imports(*key))
 
         return "\n\n".join(filter(None, sections))
 
@@ -369,3 +387,4 @@ class GeneratedModule:
         out.write("\n\n\n")
         out.write("\n".join(self._chunks))
         out.write("\n")
+        out.write(self.render_late_imports())

@@ -370,6 +370,37 @@ class BaseGeneratedModule:
         hash = base64.b64encode(t.id.bytes[:4], altchars=b"__").decode()
         return "".join(names) + "_Tuple_" + hash.rstrip("=")
 
+    def _resolve_relative_import(
+        self,
+        imp_mod: reflection.SchemaPath,
+        aspect: ModuleAspect,
+    ) -> str | None:
+        cur_mod = self.modpath(self.current_aspect)
+        if aspect is not ModuleAspect.MAIN:
+            imp_mod_is_pkg = self.mod_is_package(
+                imp_mod,
+                self.get_mod_schema_part(imp_mod),
+            )
+
+            imp_mod = get_modpath(imp_mod, aspect, imp_mod_is_pkg)
+
+        if imp_mod == cur_mod and aspect is self.current_aspect:
+            # It's this module, no need to import
+            return None
+        else:
+            common_parts = imp_mod.common_parts(cur_mod)
+            if common_parts:
+                relative_depth = len(cur_mod.parts) - len(common_parts)
+                import_tail = imp_mod.parts[len(common_parts) :]
+            else:
+                relative_depth = len(cur_mod.parts)
+                import_tail = imp_mod.parts
+
+            if self._is_package:
+                relative_depth += 1
+
+            return "." * relative_depth + ".".join(import_tail)
+
     def get_type(
         self,
         type: reflection.AnyType,
@@ -421,58 +452,32 @@ class BaseGeneratedModule:
         if result is not None:
             return result
 
-        mod_path = self.modpath(self.current_aspect)
         type_path = reflection.parse_name(type_name)
-        type_mod = type_path.parent
-        import_alias = None
-        if aspect is not ModuleAspect.MAIN:
-            if type_mod == mod_path:
-                import_alias = "__"
+        type_name = type_path.name
 
-            type_mod_is_pkg = self.mod_is_package(
-                type_mod,
-                self.get_mod_schema_part(type_mod),
-            )
-
-            type_mod = get_modpath(type_mod, aspect, type_mod_is_pkg)
-            type_path = type_mod / type_path.name
-
-        if self.current_aspect is ModuleAspect.LATE and aspect is ModuleAspect.VARIANTS:
-            print(mod_path, type_path)
-
-        if type_path.parent == mod_path and aspect is self.current_aspect:
-            result = type_path.name
+        py_mod = self._resolve_relative_import(type_path.parent, aspect)
+        if py_mod is None:
+            result = type_name
         else:
-            common_parts = type_path.common_parts(mod_path)
-            if common_parts:
-                relative_depth = len(mod_path.parts) - len(common_parts)
-                import_tail = type_path.parts[len(common_parts) :]
-            else:
-                relative_depth = len(mod_path.parts)
-                import_tail = type_path.parts
-
-            if self._is_package:
-                relative_depth += 1
-
-            module = "." * relative_depth + ".".join(import_tail[:-1])
-            imported_name = import_tail[-1]
             if for_runtime:
                 do_import = self.import_names
             else:
                 do_import = self.import_type_names
             if import_name:
-                do_import(module, imported_name)
-                result = imported_name
+                do_import(py_mod, type_name)
+                result = type_name
             else:
-                if import_alias is not None:
-                    alias = import_alias
+                cur_mod_canon = self.main_modpath
+                type_mod_canon = type_path.parent
+                if type_mod_canon == cur_mod_canon:
+                    alias = "__"
                 else:
                     alias = "_".join(type_path.parts[:-1])
-                if all(c == "." for c in module):
-                    do_import(f".{module}", **{alias: type_path.parts[-2]})
+                if all(c == "." for c in py_mod):
+                    do_import(f".{py_mod}", **{alias: type_path.parts[-2]})
                 else:
-                    do_import(module, **{alias: "."})
-                result = f"{alias}.{imported_name}"
+                    do_import(py_mod, **{alias: "."})
+                result = f"{alias}.{type_name}"
 
         self._type_import_cache[cache_key] = result
         return result
