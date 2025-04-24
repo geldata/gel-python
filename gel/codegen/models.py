@@ -220,7 +220,7 @@ class BaseGeneratedModule:
         }
         self._current_py_file = self._py_files[ModuleAspect.MAIN]
         self._current_aspect = ModuleAspect.MAIN
-        self._type_import_cache: dict[tuple[str, ModuleAspect, ModuleAspect, bool], str] = {}
+        self._type_import_cache: dict[tuple[str, ModuleAspect, ModuleAspect, bool, str | None], str] = {}
 
     def get_mod_schema_part(
         self,
@@ -453,6 +453,7 @@ class BaseGeneratedModule:
         *,
         for_runtime: bool = False,
         aspect: ModuleAspect = ModuleAspect.MAIN,
+        rename_as: str | None = None,
     ) -> str:
         base_type = base.TYPE_MAPPING.get(type.name)
         if base_type is not None:
@@ -493,17 +494,24 @@ class BaseGeneratedModule:
         elif reflection.is_named_tuple_type(type):
             aspect = ModuleAspect.MAIN
 
-        cache_key = (type_name, aspect, self.current_aspect, import_name)
+        cur_aspect = self.current_aspect
+        cache_key = (type_name, aspect, cur_aspect, import_name, rename_as)
         result = self._type_import_cache.get(cache_key)
         if result is not None:
             return result
 
         type_path = reflection.parse_name(type_name)
         type_name = type_path.name
+        if rename_as is not None:
+            imported_name = rename_as
+            imp_path = type_path.parent / imported_name
+        else:
+            imported_name = type_name
+            imp_path = type_path
 
-        rel_import = self._resolve_rel_import(type_path, aspect, import_name)
+        rel_import = self._resolve_rel_import(imp_path, aspect, import_name)
         if rel_import is None:
-            result = type_name
+            result = imported_name
         else:
             if for_runtime:
                 do_import = self.import_names
@@ -515,7 +523,7 @@ class BaseGeneratedModule:
                     rel_import.module,
                     **{rel_import.alias: rel_import.name},
                 )
-                result = f"{rel_import.alias}.{type_name}"
+                result = f"{rel_import.alias}.{imported_name}"
             else:
                 do_import(rel_import.module, rel_import.name)
                 result = rel_import.name
@@ -724,7 +732,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                     self.write("pass")
                 else:
                     for ptr in pointers:
-                        ptr_t = self.get_ptr_type(ptr, aspect=ModuleAspect.VARIANTS)
+                        ptr_t = self.get_ptr_type(objtype, ptr)
                         defn = f"TypeAliasType('{ptr.name}', '{ptr_t}')"
                         self.write(f"{ptr.name} = {defn}")
 
@@ -740,7 +748,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                 for ptr in objtype.pointers:
                     if ptr.name not in {"id", "__type__"}:
                         continue
-                    ptr_type = self.get_ptr_type(ptr, aspect=ModuleAspect.VARIANTS)
+                    ptr_type = self.get_ptr_type(objtype, ptr)
                     self.write(f"{ptr.name}: {ptr_type}")
                     self.write(f'"""{objtype.name}.{ptr.name}"""')
                     self.write()
@@ -762,7 +770,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                         for ptr in objtype.pointers:
                             if ptr.name not in {"id", "__type__"}:
                                 continue
-                            ptr_type = self.get_ptr_type(ptr, aspect=ModuleAspect.VARIANTS)
+                            ptr_type = self.get_ptr_type(objtype, ptr)
                             self.write(f"{ptr.name}: {ptr_type}")
                             self.write(f'"""{objtype.name}.{ptr.name}"""')
                             self.write()
@@ -805,11 +813,10 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                 for ptr in all_ptr_origins[ptr.name]
             ]
 
-            target = self.get_ptr_type(
-                ptr,
-                aspect=ModuleAspect.VARIANTS,
-                respect_cardinality=False,
+            target = self.get_type(
+                self._types[ptr.target_id],
                 for_runtime=True,
+                aspect=ModuleAspect.VARIANTS,
             )
 
             self._write_class_line(
@@ -848,10 +855,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         with self.indented():
             if objtype.pointers:
                 for ptr in objtype.pointers:
-                    ptr_type = self.get_ptr_type(
-                        ptr,
-                        aspect=ModuleAspect.VARIANTS,
-                    )
+                    ptr_type = self.get_ptr_type(objtype, ptr)
                     self.write(f"{ptr.name}: {ptr_type}")
                     self.write(f'"""{objtype.name}.{ptr.name}"""')
                     self.write()
@@ -890,16 +894,30 @@ class GeneratedSchemaModule(BaseGeneratedModule):
 
     def get_ptr_type(
         self,
+        objtype: reflection.ObjectType,
         prop: reflection.Pointer,
         *,
-        aspect: ModuleAspect = ModuleAspect.MAIN,
         respect_cardinality: bool = True,
         for_runtime: bool = False,
     ) -> str:
+        aspect = ModuleAspect.VARIANTS
+
+        if (
+            reflection.is_link(prop)
+            and prop.pointers
+        ):
+            if self.current_aspect is ModuleAspect.VARIANTS:
+                aspect = ModuleAspect.LATE
+            objtype_name = reflection.parse_name(objtype.name)
+            rename_as = f"{objtype_name.name}__{prop.name}"
+        else:
+            rename_as = None
+
         ptr_type = self.get_type(
             self._types[prop.target_id],
             aspect=aspect,
             for_runtime=for_runtime,
+            rename_as=rename_as,
         )
         if respect_cardinality and reflection.Cardinality(prop.card).is_multi():
             return f"list[{ptr_type}]"
