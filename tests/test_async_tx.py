@@ -32,10 +32,18 @@ class TestAsyncTx(tb.AsyncQueryTestCase):
         CREATE TYPE test::TransactionTest EXTENDING std::Object {
             CREATE PROPERTY name -> std::str;
         };
-    '''
 
-    TEARDOWN = '''
-        DROP TYPE test::TransactionTest;
+
+        CREATE TYPE test::Tmp {
+            CREATE REQUIRED PROPERTY tmp -> std::str;
+        };
+        CREATE TYPE test::TmpConflict {
+            CREATE REQUIRED PROPERTY tmp -> std::str {
+                CREATE CONSTRAINT exclusive;
+            }
+        };
+
+        CREATE TYPE test::TmpConflictChild extending test::TmpConflict;
     '''
 
     async def test_async_transaction_regular_01(self):
@@ -104,3 +112,61 @@ class TestAsyncTx(tb.AsyncQueryTestCase):
                 ):
                     await asyncio.wait_for(f1, timeout=5)
                     await asyncio.wait_for(f2, timeout=5)
+
+
+    async def _try_bogus_rr_tx(self, con, first_try):
+        # A transaction that needs to be serializable
+        async for tx in con.transaction():
+            async with tx:
+                res1 = await tx.query_single('''
+                    select {
+                        ins := (insert test::Tmp { tmp := "test1" }),
+                        level := sys::get_transaction_isolation(),
+                    }
+                ''')
+                # If this is the second time we've tried to run this
+                # transaction, then the cache should ensure we *only*
+                # try Serializable.
+                if not first_try:
+                    self.assertEqual(res1.level, 'Serializable')
+
+                res2 = await tx.query_single('''
+                    select {
+                        ins := (insert test::TmpConflict {
+                            tmp := <str>random()
+                        }),
+                        level := sys::get_transaction_isolation(),
+                    }
+                ''')
+
+                # N.B: res1 will be RepeatableRead on the first
+                # iteration, maybe, but contingent on the second query
+                # succeeding it will be Serializable!
+                self.assertEqual(res1.level, 'Serializable')
+                self.assertEqual(res2.level, 'Serializable')
+
+    async def test_async_transaction_prefer_rr(self):
+        if (
+            str(self.server_version.stage) != 'dev'
+            and (self.server_version.major, self.server_version.minor) < (6, 5)
+        ):
+            self.skipTest("DML in RepeatableRead not supported yet")
+        con = self.client.with_transaction_options(
+            edgedb.TransactionOptions(
+                isolation=edgedb.IsolationLevel.PreferRepeatableRead
+            )
+        )
+        # A transaction that needs to be serializable
+        await self._try_bogus_rr_tx(con, first_try=True)
+        await self._try_bogus_rr_tx(con, first_try=False)
+
+        # And one that doesn't
+        async for tx in con.transaction():
+            async with tx:
+                res = await tx.query_single('''
+                    select {
+                        ins := (insert test::Tmp { tmp := "test" }),
+                        level := sys::get_transaction_isolation(),
+                    }
+                ''')
+            self.assertEqual(str(res.level), 'RepeatableRead')

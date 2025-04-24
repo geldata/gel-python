@@ -108,6 +108,37 @@ class TestSyncTx(tb.SyncQueryTestCase):
                 with tx:
                     pass
 
+    def _try_bogus_rr_tx(self, con, first_try):
+        # A transaction that needs to be serializable
+        for tx in con.transaction():
+            with tx:
+                res1 = tx.query_single('''
+                    select {
+                        ins := (insert test::Tmp { tmp := "test1" }),
+                        level := sys::get_transaction_isolation(),
+                    }
+                ''')
+                # If this is the second time we've tried to run this
+                # transaction, then the cache should ensure we *only*
+                # try Serializable.
+                if not first_try:
+                    self.assertEqual(res1.level, 'Serializable')
+
+                res2 = tx.query_single('''
+                    select {
+                        ins := (insert test::TmpConflict {
+                            tmp := <str>random()
+                        }),
+                        level := sys::get_transaction_isolation(),
+                    }
+                ''')
+
+                # N.B: res1 will be RepeatableRead on the first
+                # iteration, maybe, but contingent on the second query
+                # succeeding it will be Serializable!
+                self.assertEqual(res1.level, 'Serializable')
+                self.assertEqual(res2.level, 'Serializable')
+
     def test_sync_transaction_prefer_rr(self):
         if (
             str(self.server_version.stage) != 'dev'
@@ -120,27 +151,8 @@ class TestSyncTx(tb.SyncQueryTestCase):
             )
         )
         # A transaction that needs to be serializable
-        for tx in con.transaction():
-            with tx:
-                res1 = tx.query_single('''
-                    select {
-                        ins := (insert test::TmpConflict { tmp := "test1" }),
-                        level := sys::get_transaction_isolation(),
-                    }
-                ''')
-
-                res2 = tx.query_single('''
-                    select {
-                        ins := (insert test::TmpConflict { tmp := "test2" }),
-                        level := sys::get_transaction_isolation(),
-                    }
-                ''')
-
-                # N.B: res1 will be RepeatableRead on the first
-                # iteration, maybe, but contingent on the second query
-                # succeeding it will be Serializable!
-                self.assertEqual(str(res1.level), 'Serializable')
-                self.assertEqual(str(res2.level), 'Serializable')
+        self._try_bogus_rr_tx(con, first_try=True)
+        self._try_bogus_rr_tx(con, first_try=False)
 
         # And one that doesn't
         for tx in con.transaction():

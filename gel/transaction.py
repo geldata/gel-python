@@ -20,6 +20,7 @@
 import typing
 
 import enum
+import sys
 
 from . import abstract
 from . import errors
@@ -242,12 +243,24 @@ class BaseRetry:
         self._done = False
         self._next_backoff = 0
         self._options = owner._options
+        self._key = None
 
         prefer_rr = (
             self._options.transaction_options._isolation
             == options.IsolationLevel.PreferRepeatableRead
         )
+        if prefer_rr:
+            owner = self._owner
+            frame = sys._getframe(owner._TRANSACTION_FRAME_OFFSET)
+            self._key = key = (frame.f_code.co_filename, frame.f_lineno)
+
+            # If we have seen this cache key before and it needed
+            # Serializable, then do serializable.
+            if owner._impl._tx_needs_serializable_cache.get(key, False):
+                prefer_rr = False
+
         self._optimistic_rr = prefer_rr
+
 
     def _retry(self, exc):
         self._last_exception = exc
@@ -262,6 +275,9 @@ class BaseRetry:
         # Retry a failure due to REPEATABLE READ not working
         if not self._optimistic_rr:
             return False
+        if self._key:
+            self._owner._impl._tx_needs_serializable_cache[self._key] = True
+
         self._optimistic_rr = False
         # Decrement _iteration count, since this one doesn't really count.
         self._iteration -= 1
