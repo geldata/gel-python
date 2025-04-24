@@ -33,30 +33,32 @@ class EnumValue(enum.Enum):
             return value
         elif isinstance(value, enum.Enum):
             return cls(value.value)
+        elif isinstance(value, str):
+            return cls(value)
         else:
-            raise TypeError
+            return None
 
     def __lt__(self, other):
         other = self._try_from(other)
-        if self.__tid__ != other.__tid__:
+        if not other or self.__tid__ != other.__tid__:
             return NotImplemented
         return self._index_ < other._index_
 
     def __gt__(self, other):
         other = self._try_from(other)
-        if self.__tid__ != other.__tid__:
+        if not other or self.__tid__ != other.__tid__:
             return NotImplemented
         return self._index_ > other._index_
 
     def __le__(self, other):
         other = self._try_from(other)
-        if self.__tid__ != other.__tid__:
+        if not other or self.__tid__ != other.__tid__:
             return NotImplemented
         return self._index_ <= other._index_
 
     def __ge__(self, other):
         other = self._try_from(other)
-        if self.__tid__ != other.__tid__:
+        if not other or self.__tid__ != other.__tid__:
             return NotImplemented
         return self._index_ >= other._index_
 

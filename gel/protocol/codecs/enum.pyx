@@ -27,6 +27,8 @@ cdef class EnumCodec(BaseCodec):
             try:
                 obj = self.cls._try_from(obj)
             except (TypeError, ValueError):
+                obj = None
+            if obj is None:
                 raise TypeError(
                     f'a str or gel.EnumValue(__tid__={self.cls.__tid__}) '
                     f'is expected as a valid enum argument, '

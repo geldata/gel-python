@@ -970,7 +970,7 @@ class TestSyncQuery(tb.SyncQueryTestCase):
                     level := sys::get_transaction_isolation(),
                 }
             ''')
-            self.assertEqual(str(res.level), 'RepeatableRead')
+            self.assertEqual(res.level, 'RepeatableRead')
 
             # This one can't
             res = db2.query_single('''
