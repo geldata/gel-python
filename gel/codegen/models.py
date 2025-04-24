@@ -182,6 +182,7 @@ class BaseGeneratedModule:
         self._py_files = {
             "main":  base.GeneratedModule(COMMENT),
             "variants": base.GeneratedModule(COMMENT),
+            "late": base.GeneratedModule(COMMENT),
         }
         self._current_py_file = self._py_files["main"]
         self._type_import_cache: dict[tuple[str, bool, bool, bool], str] = {}
@@ -239,6 +240,15 @@ class BaseGeneratedModule:
             modpath = self.modpath / "__variants__"
         else:
             modpath = self.modpath.parent / "__variants__" / self.modpath.name
+
+        return modpath
+
+    @property
+    def late_modpath(self) -> reflection.SchemaPath:
+        if self.is_package:
+            modpath = self.modpath / "__late__"
+        else:
+            modpath = self.modpath.parent / "__late__" / self.modpath.name
 
         return modpath
 
@@ -306,6 +316,13 @@ class BaseGeneratedModule:
 
         with self._open_py_file(dir, self.variants_modpath, self.is_package) as f:
             variants.output(f)
+
+        late = self._py_files["late"]
+        if not late.has_content():
+            return
+
+        with self._open_py_file(dir, self.late_modpath, self.is_package) as f:
+            late.output(f)
 
     def import_names(self, module: str, *names: str, **aliases: str) -> None:
         self.py_file.import_names(module, *names, **aliases)
@@ -545,6 +562,16 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             for objtype in objtypes:
                 self.write_object_type_variants(objtype)
 
+        with self.another_py_file("late"):
+            self.import_names("typing")
+            self.import_names("typing_extensions", "TypeAliasType")
+
+            self.import_names("gel.models", gm="pydantic")
+            self.import_names("gel.models", gexpr="expr")
+
+            for objtype in objtypes:
+                self.write_object_type_late_variants(objtype)
+
     def _format_class_line(
         self,
         class_name: str,
@@ -678,29 +705,42 @@ class GeneratedSchemaModule(BaseGeneratedModule):
 
         self.write()
 
-        # all_ptr_origins = self._get_all_pointer_origins(objtype)
-        # for ptr, _ in all_pointers:
-        #     if not reflection.is_link(ptr):
-        #         continue
-        #     if not ptr.pointers:
-        #         continue
+    def write_object_type_late_variants(
+        self,
+        objtype: reflection.ObjectType,
+    ) -> None:
+        self.write()
+        self.write()
+        self.write("#")
+        self.write(f"# type {objtype.name}")
+        self.write("#")
 
-        #     ptr_origins = [
-        #         self.get_type(ptr, variants=True)
-        #         for ptr in all_ptr_origins[ptr.name][1:]
-        #     ]
+        type_name = reflection.parse_name(objtype.name)
+        name = type_name.name
 
-        #     target = self.get_ptr_type(ptr, variants=True)
+        all_ptr_origins = self._get_all_pointer_origins(objtype)
+        for ptr in objtype.pointers:
+            if not reflection.is_link(ptr):
+                continue
+            if not ptr.pointers:
+                continue
 
-        #     self._write_class_line(
-        #         f"{name}__{ptr.name}",
-        #         ptr_origins,
-        #         fixed_bases=[target],
-        #         transform=lambda s: f"{s}__{ptr.name}",
-        #     )
+            ptr_origins = [
+                self.get_type(ptr, variants=True)
+                for ptr in all_ptr_origins[ptr.name][1:]
+            ]
 
-        #     with self.indented():
-        #         self.write("pass")
+            target = self.get_ptr_type(ptr, variants=True)
+
+            self._write_class_line(
+                f"{name}__{ptr.name}",
+                ptr_origins,
+                fixed_bases=[target],
+                transform=lambda s: f"{s}__{ptr.name}",
+            )
+
+            with self.indented():
+                self.write("pass")
 
     def write_object_type(
         self,
