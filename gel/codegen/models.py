@@ -275,6 +275,10 @@ class BaseGeneratedModule:
     def main_modpath(self) -> reflection.SchemaPath:
         return self._modpath
 
+    @property
+    def current_modpath(self) -> reflection.SchemaPath:
+        return self.modpath(self._current_aspect)
+
     def modpath(self, aspect: ModuleAspect) -> reflection.SchemaPath:
         return get_modpath(self._modpath, aspect, self.is_package)
 
@@ -346,6 +350,14 @@ class BaseGeneratedModule:
     def import_names(self, module: str, *names: str, **aliases: str) -> None:
         self.py_file.import_names(module, *names, **aliases)
 
+    def import_names_late(
+        self,
+        module: str,
+        *names: str,
+        **aliases: str,
+    ) -> None:
+        self.py_file.import_names_late(module, *names, **aliases)
+
     def import_type_names(
         self,
         module: str,
@@ -380,11 +392,11 @@ class BaseGeneratedModule:
         self,
         imp_path: reflection.SchemaPath,
         aspect: ModuleAspect,
-        import_name: bool,
+        import_name: bool = False,
     ) -> Import | None:
         imp_mod = imp_path.parent
         imp_name = imp_path.name
-        cur_mod = self.modpath(self.current_aspect)
+        cur_mod = self.current_modpath
         if aspect is not ModuleAspect.MAIN:
             imp_mod_is_pkg = self.mod_is_package(
                 imp_mod,
@@ -592,6 +604,16 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         for objtype in objtypes:
             self.write_object_type(objtype)
 
+        with self.aspect(ModuleAspect.LATE):
+            self.import_names("typing")
+            self.import_names("typing_extensions", "TypeAliasType")
+
+            self.import_names("gel.models", gm="pydantic")
+            self.import_names("gel.models", gexpr="expr")
+
+            for objtype in objtypes:
+                self.write_object_type_late_variants(objtype)
+
         with self.aspect(ModuleAspect.VARIANTS):
             self.import_names("typing")
             self.import_names("typing_extensions", "TypeAliasType")
@@ -602,15 +624,22 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             for objtype in objtypes:
                 self.write_object_type_variants(objtype)
 
-        with self.aspect(ModuleAspect.LATE):
-            self.import_names("typing")
-            self.import_names("typing_extensions", "TypeAliasType")
-
-            self.import_names("gel.models", gm="pydantic")
-            self.import_names("gel.models", gexpr="expr")
-
-            for objtype in objtypes:
-                self.write_object_type_late_variants(objtype)
+            rel_import = self._resolve_rel_import(
+                self.main_modpath / "*",
+                ModuleAspect.LATE,
+                import_name=True,
+            )
+            assert rel_import is not None
+            if rel_import.alias is not None:
+                self.import_names_late(
+                    rel_import.module,
+                    **{rel_import.alias: rel_import.name},
+                )
+            else:
+                self.import_names_late(
+                    rel_import.module,
+                    rel_import.name,
+                )
 
     def _format_class_line(
         self,

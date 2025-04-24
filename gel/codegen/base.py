@@ -329,7 +329,7 @@ class GeneratedModule:
         sections = []
         for section_key in _ImportSection.__members__.values():
             key = (section_key, _ImportTime.late_runtime)
-            sections.append(self._render_imports(*key))
+            sections.append(self._render_imports(*key, noqa=["E402", "F403"]))
 
         return "\n\n".join(filter(None, sections))
 
@@ -339,6 +339,7 @@ class GeneratedModule:
         import_time: _ImportTime,
         *,
         indent: str = "",
+        noqa: list[str] | None = None,
     ) -> str:
         output = []
         imports = self._imports[section, import_time, _ImportKind.self]
@@ -359,6 +360,8 @@ class GeneratedModule:
                         import_line = f"import {modname} as {alias}"
                     else:
                         import_line = f"import {modname}"
+                if noqa:
+                    import_line += f"  # noqa: {' '.join(noqa)}"
                 output.append(import_line)
 
         imports = self._imports[section, import_time, _ImportKind.names]
@@ -373,6 +376,8 @@ class GeneratedModule:
             if len(import_line) + len(names_part) > 79:
                 names_part = "(\n    " + ",\n    ".join(names_list) + "\n)"
             import_line += names_part
+            if noqa:
+                import_line += f"  # noqa: {' '.join(noqa)}"
             output.append(import_line)
 
         result = "\n".join(output)
