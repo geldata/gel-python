@@ -33,6 +33,8 @@ class EnumValue(enum.Enum):
             return value
         elif isinstance(value, enum.Enum):
             return cls(value.value)
+        elif isinstance(value, str):
+            return cls(value)
         else:
             return None
 
