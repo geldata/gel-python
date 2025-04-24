@@ -65,6 +65,15 @@ class TestSyncTx(tb.SyncQueryTestCase):
             None,
             edgedb.IsolationLevel.Serializable,
         ]
+        if not (
+            str(self.server_version.stage) != 'dev'
+            and (self.server_version.major, self.server_version.minor) < (6, 5)
+        ):
+            isolations += [
+                edgedb.IsolationLevel.PreferRepeatableRead,
+                edgedb.IsolationLevel.RepeatableRead,
+            ]
+
         booleans = [None, True, False]
         all = itertools.product(isolations, booleans, booleans)
         for isolation, readonly, deferrable in all:
