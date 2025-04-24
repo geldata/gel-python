@@ -43,10 +43,8 @@ class TestEnum(tb.AsyncQueryTestCase):
         self.assertEqual(repr(ct_red), "<gel.EnumValue 'red'>")
 
         self.assertEqual(str(ct_red), 'red')
-        with self.assertRaises(TypeError):
-            _ = ct_red != 'red'
-        with self.assertRaises(TypeError):
-            _ = ct_red == 'red'
+        self.assertEqual(ct_red, 'red')
+        self.assertFalse(ct_red, 'red')
         self.assertFalse(ct_red == c_red)
 
         self.assertEqual(ct_red, ct_red)
