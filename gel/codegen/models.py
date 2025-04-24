@@ -563,7 +563,10 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             bases = base_types
 
         all_bases = fixed_bases + bases if fixed_bases is not None else bases
-        return self.format_list(f"class {class_name}({{list}}):", all_bases)
+        if all_bases:
+            return self.format_list(f"class {class_name}({{list}}):", all_bases)
+        else:
+            return f"class {class_name}:"
 
     def _write_class_line(
         self,
@@ -636,6 +639,15 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             fixed_bases=[typeof_class],
         )
         with self.indented():
+            if objtype.name == "std::BaseObject":
+                for ptr in objtype.pointers:
+                    if ptr.name not in {"id", "__type__"}:
+                        continue
+                    ptr_type = self.get_ptr_type(ptr, variants=True)
+                    self.write(f"{ptr.name}: {ptr_type}")
+                    self.write(f'"""{objtype.name}.{ptr.name}"""')
+                    self.write()
+
             self._write_class_line(
                 "__variants__",
                 base_types,
@@ -649,7 +661,16 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                     transform=lambda s: f"{s}.__variants__.Empty",
                 )
                 with self.indented():
-                    self.write("pass")
+                    if objtype.name == "std::BaseObject":
+                        for ptr in objtype.pointers:
+                            if ptr.name not in {"id", "__type__"}:
+                                continue
+                            ptr_type = self.get_ptr_type(ptr, variants=True)
+                            self.write(f"{ptr.name}: {ptr_type}")
+                            self.write(f'"""{objtype.name}.{ptr.name}"""')
+                            self.write()
+                    else:
+                        self.write("pass")
 
                 self.write()
                 self.write(
@@ -681,9 +702,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             self.get_type(self._types[base.id], for_runtime=True)
             for base in objtype.bases
         ])
-        class_string = self.format_list(f"class {name}({{list}}):", base_types)
-        self.write(f"{name}_T = typing.TypeVar('{name}_T', bound='{name}')")
-        self.write(class_string)
+        self._write_class_line(name, base_types)
         with self.indented():
             if objtype.pointers:
                 for ptr in objtype.pointers:
