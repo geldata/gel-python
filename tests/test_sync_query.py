@@ -955,7 +955,7 @@ class TestSyncQuery(tb.SyncQueryTestCase):
     def test_sync_prefer_rr_01(self):
         if (
             str(self.server_version.stage) != 'dev'
-            or (cls.server_version.major, cls.version.minor) < (6, 5)
+            and (self.server_version.major, self.server_version.minor) < (6, 5)
         ):
             self.skipTest("DML in RepeatableRead not supported yet")
 
