@@ -22,6 +22,12 @@ class Cardinality(StrEnum):
     AtLeastOne = "AtLeastOne"
     Empty = "Empty"
 
+    def is_multi(self) -> bool:
+        return self in {
+            Cardinality.AtLeastOne._value_,
+            Cardinality.Many._value_,
+        }
+
 
 class TypeKind(StrEnum):
     Array = "Array"

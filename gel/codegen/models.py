@@ -165,6 +165,34 @@ class SchemaGenerator:
         module.write_files(self._outdir)
 
 
+class ModuleAspect(enum.Enum):
+    MAIN = enum.auto()
+    VARIANTS = enum.auto()
+    LATE = enum.auto()
+
+
+@functools.cache
+def get_modpath(
+    modpath: reflection.SchemaPath,
+    aspect: ModuleAspect,
+    mod_is_package: bool,
+) -> reflection.SchemaPath:
+    if aspect is ModuleAspect.MAIN:
+        pass
+    elif aspect is ModuleAspect.VARIANTS:
+        if mod_is_package:
+            modpath = modpath / "__variants__"
+        else:
+            modpath = modpath.parent / "__variants__" / modpath.name
+    elif aspect is ModuleAspect.LATE:
+        if mod_is_package:
+            modpath = modpath / "__late__"
+        else:
+            modpath = modpath.parent / "__late__" / modpath.name
+
+    return modpath
+
+
 class BaseGeneratedModule:
     def __init__(
         self,
@@ -180,12 +208,13 @@ class BaseGeneratedModule:
         self._schema_part = schema_part
         self._is_package = self.mod_is_package(modname, schema_part)
         self._py_files = {
-            "main":  base.GeneratedModule(COMMENT),
-            "variants": base.GeneratedModule(COMMENT),
-            "late": base.GeneratedModule(COMMENT),
+            ModuleAspect.MAIN:  base.GeneratedModule(COMMENT),
+            ModuleAspect.VARIANTS: base.GeneratedModule(COMMENT),
+            ModuleAspect.LATE: base.GeneratedModule(COMMENT),
         }
-        self._current_py_file = self._py_files["main"]
-        self._type_import_cache: dict[tuple[str, bool, bool, bool], str] = {}
+        self._current_py_file = self._py_files[ModuleAspect.MAIN]
+        self._current_aspect = ModuleAspect.MAIN
+        self._type_import_cache: dict[tuple[str, ModuleAspect, ModuleAspect, bool], str] = {}
 
     def get_mod_schema_part(
         self,
@@ -217,40 +246,31 @@ class BaseGeneratedModule:
         return self._current_py_file
 
     @property
-    def py_files(self) -> Mapping[str, base.GeneratedModule]:
+    def py_files(self) -> Mapping[ModuleAspect, base.GeneratedModule]:
         return self._py_files
 
+    @property
+    def current_aspect(self) -> ModuleAspect:
+        return self._current_aspect
+
     @contextmanager
-    def another_py_file(self, pyfile: str) -> Iterator[None]:
-        prev_py_file = self._current_py_file
+    def aspect(self, aspect: ModuleAspect) -> Iterator[None]:
+        prev_aspect = self._current_aspect
 
         try:
-            self._current_py_file = self._py_files[pyfile]
+            self._current_py_file = self._py_files[aspect]
+            self._current_aspect = aspect
             yield
         finally:
-            self._current_py_file = prev_py_file
+            self._current_py_file = self._py_files[prev_aspect]
+            self._current_aspect = prev_aspect
 
     @property
-    def modpath(self) -> reflection.SchemaPath:
+    def main_modpath(self) -> reflection.SchemaPath:
         return self._modpath
 
-    @property
-    def variants_modpath(self) -> reflection.SchemaPath:
-        if self.is_package:
-            modpath = self.modpath / "__variants__"
-        else:
-            modpath = self.modpath.parent / "__variants__" / self.modpath.name
-
-        return modpath
-
-    @property
-    def late_modpath(self) -> reflection.SchemaPath:
-        if self.is_package:
-            modpath = self.modpath / "__late__"
-        else:
-            modpath = self.modpath.parent / "__late__" / self.modpath.name
-
-        return modpath
+    def modpath(self, aspect: ModuleAspect) -> reflection.SchemaPath:
+        return get_modpath(self._modpath, aspect, self.is_package)
 
     @property
     def is_package(self) -> bool:
@@ -306,23 +326,16 @@ class BaseGeneratedModule:
         (path / "__init__.py").touch()
 
     def write_files(self, dir: pathlib.Path) -> None:
-        main = self._py_files["main"]
-        with self._open_py_file(dir, self.modpath, self.is_package) as f:
-            main.output(f)
+        for aspect, py_file in self.py_files.items():
+            if not py_file.has_content():
+                continue
 
-        variants = self._py_files["variants"]
-        if not variants.has_content():
-            return
-
-        with self._open_py_file(dir, self.variants_modpath, self.is_package) as f:
-            variants.output(f)
-
-        late = self._py_files["late"]
-        if not late.has_content():
-            return
-
-        with self._open_py_file(dir, self.late_modpath, self.is_package) as f:
-            late.output(f)
+            with self._open_py_file(
+                dir,
+                self.modpath(aspect),
+                self.is_package,
+            ) as f:
+                py_file.output(f)
 
     def import_names(self, module: str, *names: str, **aliases: str) -> None:
         self.py_file.import_names(module, *names, **aliases)
@@ -362,8 +375,7 @@ class BaseGeneratedModule:
         type: reflection.AnyType,
         *,
         for_runtime: bool = False,
-        variants: bool = False,
-        from_variants: bool | None = None,
+        aspect: ModuleAspect = ModuleAspect.MAIN,
     ) -> str:
         base_type = base.TYPE_MAPPING.get(type.name)
         if base_type is not None:
@@ -376,8 +388,7 @@ class BaseGeneratedModule:
             elem_type = self.get_type(
                 self._types[type.array_element_id],
                 for_runtime=for_runtime,
-                variants=variants,
-                from_variants=from_variants,
+                aspect=aspect,
             )
             return f"list[{elem_type}]"
 
@@ -390,9 +401,6 @@ class BaseGeneratedModule:
             else:
                 raise AssertionError(f"unsupported pseudo-type: {type.name}")
 
-        if from_variants is None:
-            from_variants = variants
-
         if reflection.is_named_tuple_type(type):
             mod = "__types__"
             if type.builtin:
@@ -404,35 +412,35 @@ class BaseGeneratedModule:
             import_name = False
 
         if reflection.is_scalar_type(type):
-            variants = True
+            aspect = ModuleAspect.VARIANTS
         elif reflection.is_named_tuple_type(type):
-            variants = False
+            aspect = ModuleAspect.MAIN
 
-        cache_key = (type_name, variants, from_variants, import_name)
+        cache_key = (type_name, aspect, self.current_aspect, import_name)
         result = self._type_import_cache.get(cache_key)
-        if result is not None and "NameExpr" in result:
+        if result is not None:
             return result
 
-        mod_path = self.variants_modpath if from_variants else self.modpath
+        mod_path = self.modpath(self.current_aspect)
         type_path = reflection.parse_name(type_name)
         type_mod = type_path.parent
         import_alias = None
-        if variants:
+        if aspect is not ModuleAspect.MAIN:
             if type_mod == mod_path:
                 import_alias = "__"
+
             type_mod_is_pkg = self.mod_is_package(
                 type_mod,
                 self.get_mod_schema_part(type_mod),
             )
-            if type_mod_is_pkg:
-                type_path = type_mod / "__variants__" / type_path.name
-            else:
-                type_path = (
-                    type_mod.parent / "__variants__" / type_mod.name
-                    / type_path.name
-                )
 
-        if type_path.parent == mod_path:
+            type_mod = get_modpath(type_mod, aspect, type_mod_is_pkg)
+            type_path = type_mod / type_path.name
+
+        if self.current_aspect is ModuleAspect.LATE and aspect is ModuleAspect.VARIANTS:
+            print(mod_path, type_path)
+
+        if type_path.parent == mod_path and aspect is self.current_aspect:
             result = type_path.name
         else:
             common_parts = type_path.common_parts(mod_path)
@@ -445,9 +453,6 @@ class BaseGeneratedModule:
 
             if self._is_package:
                 relative_depth += 1
-
-            if str(mod_path) == "std" and "__variants__" in str(type_path):
-                print(type_path, common_parts, relative_depth, import_tail)
 
             module = "." * relative_depth + ".".join(import_tail[:-1])
             imported_name = import_tail[-1]
@@ -508,7 +513,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         self,
         scalar_types: dict[str, reflection.ScalarType],
     ) -> None:
-        with self.another_py_file("variants"):
+        with self.aspect(ModuleAspect.VARIANTS):
             for type_name, type in scalar_types.items():
                 if type.enum_values:
                     self.import_names("gel.polyfills", "StrEnum")
@@ -552,7 +557,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         for objtype in objtypes:
             self.write_object_type(objtype)
 
-        with self.another_py_file("variants"):
+        with self.aspect(ModuleAspect.VARIANTS):
             self.import_names("typing")
             self.import_names("typing_extensions", "TypeAliasType")
 
@@ -562,7 +567,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             for objtype in objtypes:
                 self.write_object_type_variants(objtype)
 
-        with self.another_py_file("late"):
+        with self.aspect(ModuleAspect.LATE):
             self.import_names("typing")
             self.import_names("typing_extensions", "TypeAliasType")
 
@@ -628,7 +633,11 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             return f"__{name}_typeof__"
 
         base_types = [
-            self.get_type(self._types[base.id], for_runtime=True, variants=True)
+            self.get_type(
+                self._types[base.id],
+                for_runtime=True,
+                aspect=ModuleAspect.VARIANTS,
+            )
             for base in objtype.bases
         ]
         typeof_class = _mangle_typeof(name)
@@ -649,7 +658,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                     self.write("pass")
                 else:
                     for ptr in pointers:
-                        ptr_t = self.get_ptr_type(ptr, variants=True)
+                        ptr_t = self.get_ptr_type(ptr, aspect=ModuleAspect.VARIANTS)
                         defn = f"TypeAliasType('{ptr.name}', '{ptr_t}')"
                         self.write(f"{ptr.name} = {defn}")
 
@@ -665,7 +674,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                 for ptr in objtype.pointers:
                     if ptr.name not in {"id", "__type__"}:
                         continue
-                    ptr_type = self.get_ptr_type(ptr, variants=True)
+                    ptr_type = self.get_ptr_type(ptr, aspect=ModuleAspect.VARIANTS)
                     self.write(f"{ptr.name}: {ptr_type}")
                     self.write(f'"""{objtype.name}.{ptr.name}"""')
                     self.write()
@@ -687,7 +696,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                         for ptr in objtype.pointers:
                             if ptr.name not in {"id", "__type__"}:
                                 continue
-                            ptr_type = self.get_ptr_type(ptr, variants=True)
+                            ptr_type = self.get_ptr_type(ptr, aspect=ModuleAspect.VARIANTS)
                             self.write(f"{ptr.name}: {ptr_type}")
                             self.write(f'"""{objtype.name}.{ptr.name}"""')
                             self.write()
@@ -726,11 +735,15 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                 continue
 
             ptr_origins = [
-                self.get_type(ptr, variants=True)
+                self.get_type(ptr, aspect=ModuleAspect.VARIANTS)
                 for ptr in all_ptr_origins[ptr.name][1:]
             ]
 
-            target = self.get_ptr_type(ptr, variants=True)
+            target = self.get_ptr_type(
+                ptr,
+                aspect=ModuleAspect.VARIANTS,
+                respect_cardinality=False,
+            )
 
             self._write_class_line(
                 f"{name}__{ptr.name}",
@@ -755,7 +768,10 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         name = type_name.name
 
         base = self.get_type(
-            objtype, for_runtime=True, variants=True, from_variants=False)
+            objtype,
+            for_runtime=True,
+            aspect=ModuleAspect.VARIANTS,
+        )
         base_types = [base]
         base_types.extend([
             self.get_type(self._types[base.id], for_runtime=True)
@@ -766,7 +782,9 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             if objtype.pointers:
                 for ptr in objtype.pointers:
                     ptr_type = self.get_ptr_type(
-                        ptr, variants=True, from_variants=False)
+                        ptr,
+                        aspect=ModuleAspect.VARIANTS,
+                    )
                     self.write(f"{ptr.name}: {ptr_type}")
                     self.write(f'"""{objtype.name}.{ptr.name}"""')
                     self.write()
@@ -809,18 +827,15 @@ class GeneratedSchemaModule(BaseGeneratedModule):
     def get_ptr_type(
         self,
         prop: reflection.Pointer,
-        variants: bool = False,
-        from_variants: bool | None = None,
+        *,
+        aspect: ModuleAspect = ModuleAspect.MAIN,
+        respect_cardinality: bool = False,
     ) -> str:
         ptr_type = self.get_type(
             self._types[prop.target_id],
-            variants=variants,
-            from_variants=from_variants,
+            aspect=aspect,
         )
-        if prop.card in {
-            reflection.Cardinality.AtLeastOne._value_,
-            reflection.Cardinality.Many._value_,
-        }:
+        if respect_cardinality and prop.card.is_multi():
             return f"list[{ptr_type}]"
         else:
             return ptr_type
