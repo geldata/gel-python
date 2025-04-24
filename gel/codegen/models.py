@@ -609,35 +609,33 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         )
         all_pointers = self._get_pointer_origins(objtype)
         with self.indented():
-            if not all_pointers:
-                self.write("pass")
-            else:
-                for ptr, origin in all_pointers:
-                    if origin is objtype:
-                        ptr_t = self.get_ptr_type(ptr, variants=True)
-                    else:
-                        origin_t = self.get_type(origin, variants=True)
-                        ptr_t = f"{origin_t}.__typeof__.{ptr.name}"
+            self._write_class_line(
+                "__typeof__",
+                base_types,
+                transform=lambda s: f"{_mangle_typeof(s)}.__typeof__",
+            )
+            with self.indented():
+                if not all_pointers:
+                    self.write("pass")
+                else:
+                    for ptr, origin in all_pointers:
+                        if origin is objtype:
+                            ptr_t = self.get_ptr_type(ptr, variants=True)
+                        else:
+                            origin_t = self.get_type(origin, variants=True)
+                            ptr_t = f"{origin_t}.__typeof__.{ptr.name}"
 
-                    defn = f"TypeAliasType('{ptr.name}', '{ptr_t}')"
-                    self.write(f"{ptr.name} = {defn}")
+                        defn = f"TypeAliasType('{ptr.name}', '{ptr_t}')"
+                        self.write(f"{ptr.name} = {defn}")
 
         self.write()
         self.write()
         self._write_class_line(
             name,
             base_types,
+            fixed_bases=[typeof_class],
         )
         with self.indented():
-            self._write_class_line(
-                "__typeof__",
-                base_types,
-                fixed_bases=[typeof_class],
-                transform=lambda s: f"{s}.__typeof__",
-            )
-            with self.indented():
-                self.write("pass")
-
             self._write_class_line(
                 "__variants__",
                 base_types,
@@ -647,10 +645,20 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                 self._write_class_line(
                     "Empty",
                     base_types,
+                    fixed_bases=[typeof_class],
                     transform=lambda s: f"{s}.__variants__.Empty",
                 )
                 with self.indented():
                     self.write("pass")
+
+                self.write()
+                self.write(
+                    f'Any = typing.TypeVar("Any", bound="{name} | Empty")')
+
+        self.write()
+        self.write("if not typing.TYPE_CHECKING:")
+        with self.indented():
+            self.write(f"{name}.__variants__.Empty = {name}")
 
         self.write()
 
