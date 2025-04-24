@@ -44,11 +44,7 @@ class TestCodegen(tb.AsyncQueryTestCase):
     def setUpClass(cls):
         super().setUpClass()
 
-        version = cls.loop.run_until_complete(
-            cls.client.query_required_single('''
-                select sys::get_version().major
-            ''')
-        )
+        version = cls.server_version.major
 
         if version >= 6:
             suffix = ''

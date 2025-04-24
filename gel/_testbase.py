@@ -534,6 +534,11 @@ class DatabaseTestCase(ClusterTestCase, ConnectedTestCaseMixin):
             cls.adapt_call(cls.admin_client.execute(script))
 
         cls.client = cls.make_test_client(database=dbname)
+        cls.server_version = cls.adapt_call(
+            cls.client.query_required_single('''
+                select sys::get_version()
+            ''')
+        )
 
         if not class_set_up:
             script = cls.get_setup_script()

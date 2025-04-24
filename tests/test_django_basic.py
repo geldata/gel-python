@@ -62,9 +62,7 @@ class TestDjangoBasic(tb.DjangoTestCase):
     def setUp(self):
         super().setUp()
 
-        if self.client.query_required_single('''
-            select sys::get_version().major < 6
-        '''):
+        if self.server_version.major < 6:
             self.skipTest("Test needs SQL DML queries")
 
         transaction.savepoint()

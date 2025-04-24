@@ -896,10 +896,7 @@ class TestSyncQuery(tb.SyncQueryTestCase):
                 ''', uuid.uuid4())
 
     def test_sync_default_isolation_01(self):
-        version = self.client.query_required_single('''
-            select sys::get_version()
-        ''')
-        if (version.major, version.minor) < (6, 0):
+        if (self.server_version.major, self.server_version.minor) < (6, 0):
             self.skipTest("RepeatableRead not supported yet")
 
         # Test the bug fixed in geldata/gel#8623
@@ -911,11 +908,7 @@ class TestSyncQuery(tb.SyncQueryTestCase):
             ''')
 
     def test_sync_default_isolation_02(self):
-        version = self.client.query_required_single('''
-            select sys::get_version()
-        ''')
-
-        if (version.major, version.minor) < (6, 0):
+        if (self.server_version.major, self.server_version.minor) < (6, 0):
             self.skipTest("RepeatableRead not supported yet")
 
         with self.client.with_transaction_options(
@@ -960,13 +953,9 @@ class TestSyncQuery(tb.SyncQueryTestCase):
                 ''')
 
     def test_sync_prefer_rr_01(self):
-        version = self.client.query_required_single('''
-            select sys::get_version()
-        ''')
-
         if (
-            str(version.stage) != 'dev'
-            or (version.major, version.minor) < (6, 5)
+            str(self.server_version.stage) != 'dev'
+            and (self.server_version.major, self.server_version.minor) < (6, 5)
         ):
             self.skipTest("DML in RepeatableRead not supported yet")
 
