@@ -184,8 +184,7 @@ class BaseGeneratedModule:
             "variants": base.GeneratedModule(COMMENT),
         }
         self._current_py_file = self._py_files["main"]
-        self._type_import_cache: dict[
-            tuple[str, bool, bool, bool, str | None], str] = {}
+        self._type_import_cache: dict[tuple[str, bool, bool, bool], str] = {}
 
     def get_mod_schema_part(
         self,
@@ -348,7 +347,6 @@ class BaseGeneratedModule:
         for_runtime: bool = False,
         variants: bool = False,
         from_variants: bool | None = None,
-        import_alias: str | None = None,
     ) -> str:
         base_type = base.TYPE_MAPPING.get(type.name)
         if base_type is not None:
@@ -363,7 +361,6 @@ class BaseGeneratedModule:
                 for_runtime=for_runtime,
                 variants=variants,
                 from_variants=from_variants,
-                import_alias=import_alias,
             )
             return f"list[{elem_type}]"
 
@@ -394,20 +391,18 @@ class BaseGeneratedModule:
         elif reflection.is_named_tuple_type(type):
             variants = False
 
-        cache_key = (
-            type_name,
-            variants,
-            from_variants,
-            import_name,
-            import_alias,
-        )
+        cache_key = (type_name, variants, from_variants, import_name)
         result = self._type_import_cache.get(cache_key)
         if result is not None and "NameExpr" in result:
             return result
 
+        mod_path = self.variants_modpath if from_variants else self.modpath
         type_path = reflection.parse_name(type_name)
+        type_mod = type_path.parent
+        import_alias = None
         if variants:
-            type_mod = type_path.parent
+            if type_mod == mod_path:
+                import_alias = "__"
             type_mod_is_pkg = self.mod_is_package(
                 type_mod,
                 self.get_mod_schema_part(type_mod),
@@ -420,7 +415,6 @@ class BaseGeneratedModule:
                     / type_path.name
                 )
 
-        mod_path = self.variants_modpath if from_variants else self.modpath
         if type_path.parent == mod_path:
             result = type_path.name
         else:
@@ -672,7 +666,8 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         type_name = reflection.parse_name(objtype.name)
         name = type_name.name
 
-        base = self.get_type(objtype, for_runtime=True, variants=True, from_variants=False, import_alias="__")
+        base = self.get_type(
+            objtype, for_runtime=True, variants=True, from_variants=False)
         base_types = [base]
         base_types.extend([
             self.get_type(self._types[base.id], for_runtime=True)
@@ -684,7 +679,8 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         with self.indented():
             if objtype.pointers:
                 for ptr in objtype.pointers:
-                    ptr_type = self.get_ptr_type(ptr)
+                    ptr_type = self.get_ptr_type(
+                        ptr, variants=True, from_variants=False)
                     self.write(f"{ptr.name}: {ptr_type}")
                     self.write(f'"""{objtype.name}.{ptr.name}"""')
                     self.write()
@@ -712,8 +708,13 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         self,
         prop: reflection.Pointer,
         variants: bool = False,
+        from_variants: bool | None = None,
     ) -> str:
-        ptr_type = self.get_type(self._types[prop.target_id], variants=variants)
+        ptr_type = self.get_type(
+            self._types[prop.target_id],
+            variants=variants,
+            from_variants=from_variants,
+        )
         if prop.card in {
             reflection.Cardinality.AtLeastOne._value_,
             reflection.Cardinality.Many._value_,
