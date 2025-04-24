@@ -740,7 +740,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         self.write()
         self._write_class_line(
             name,
-            base_types,
+            base_types or ["gm.GelModel"],
             prepend_bases=[typeof_class],
         )
         with self.indented():
@@ -757,12 +757,21 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                 transform=lambda s: f"{s}.__variants__",
             )
             with self.indented():
-                self._write_class_line(
-                    "Empty",
-                    base_types,
-                    prepend_bases=[typeof_class],
-                    transform=lambda s: f"{s}.__variants__.Empty",
-                )
+                if base_types:
+                    self._write_class_line(
+                        "Empty",
+                        base_types,
+                        prepend_bases=[typeof_class],
+                        transform=lambda s: f"{s}.__variants__.Empty",
+                    )
+                else:
+                    self._write_class_line(
+                        "Empty",
+                        [],
+                        prepend_bases=[typeof_class, "gm.GelModel"],
+                        transform=lambda s: f"{s}.__variants__.Empty",
+                    )
+
                 with self.indented():
                     if objtype.name == "std::BaseObject":
                         for ptr in objtype.pointers:
@@ -857,8 +866,12 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         ])
         self._write_class_line(name, base_types)
         with self.indented():
-            if objtype.pointers:
-                for ptr in objtype.pointers:
+            pointers = [
+                ptr for ptr in objtype.pointers
+                if ptr.name not in {"id", "__type__"}
+            ]
+            if pointers:
+                for ptr in pointers:
                     ptr_type = self.get_ptr_type(objtype, ptr)
                     self.write(f"{ptr.name}: {ptr_type}")
             else:
