@@ -24,8 +24,8 @@ class Cardinality(StrEnum):
 
     def is_multi(self) -> bool:
         return self in {
-            Cardinality.AtLeastOne._value_,
-            Cardinality.Many._value_,
+            Cardinality.AtLeastOne,
+            Cardinality.Many,
         }
 
 

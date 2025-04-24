@@ -394,7 +394,7 @@ class BaseGeneratedModule:
         aspect: ModuleAspect,
         import_name: bool = False,
     ) -> Import | None:
-        imp_mod = imp_path.parent
+        imp_mod_canon = imp_mod = imp_path.parent
         imp_name = imp_path.name
         cur_mod = self.current_modpath
         if aspect is not ModuleAspect.MAIN:
@@ -428,8 +428,7 @@ class BaseGeneratedModule:
                     alias=None,
                 )
             else:
-                cur_mod_canon = self.main_modpath
-                if imp_mod == cur_mod_canon:
+                if imp_mod_canon == self.main_modpath:
                     alias = "__"
                 else:
                     alias = "_".join(imp_path.parts[:-1])
@@ -646,7 +645,8 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         class_name: str,
         base_types: list[str],
         *,
-        fixed_bases: list[str] | None = None,
+        prepend_bases: list[str] | None = None,
+        append_bases: list[str] | None = None,
         transform: None | Callable[[str], str] = None,
     ) -> str:
         if transform is not None:
@@ -658,7 +658,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         else:
             bases = base_types
 
-        all_bases = fixed_bases + bases if fixed_bases is not None else bases
+        all_bases = (prepend_bases or []) + bases + (append_bases or [])
         if all_bases:
             return self.format_list(f"class {class_name}({{list}}):", all_bases)
         else:
@@ -669,13 +669,15 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         class_name: str,
         base_types: list[str],
         *,
-        fixed_bases: list[str] | None = None,
+        prepend_bases: list[str] | None = None,
+        append_bases: list[str] | None = None,
         transform: None | Callable[[str], str] = None,
     ) -> None:
         class_line = self._format_class_line(
             class_name,
             base_types,
-            fixed_bases=fixed_bases,
+            prepend_bases=prepend_bases,
+            append_bases=append_bases,
             transform=transform,
         )
         self.write(class_line)
@@ -731,7 +733,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         self._write_class_line(
             name,
             base_types,
-            fixed_bases=[typeof_class],
+            prepend_bases=[typeof_class],
         )
         with self.indented():
             if objtype.name == "std::BaseObject":
@@ -752,7 +754,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                 self._write_class_line(
                     "Empty",
                     base_types,
-                    fixed_bases=[typeof_class],
+                    prepend_bases=[typeof_class],
                     transform=lambda s: f"{s}.__variants__.Empty",
                 )
                 with self.indented():
@@ -800,19 +802,20 @@ class GeneratedSchemaModule(BaseGeneratedModule):
 
             ptr_origins = [
                 self.get_type(ptr, aspect=ModuleAspect.VARIANTS)
-                for ptr in all_ptr_origins[ptr.name][1:]
+                for ptr in all_ptr_origins[ptr.name]
             ]
 
             target = self.get_ptr_type(
                 ptr,
                 aspect=ModuleAspect.VARIANTS,
                 respect_cardinality=False,
+                for_runtime=True,
             )
 
             self._write_class_line(
                 f"{name}__{ptr.name}",
                 ptr_origins,
-                fixed_bases=[target],
+                append_bases=[target],
                 transform=lambda s: f"{s}__{ptr.name}",
             )
 
@@ -883,9 +886,6 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             for ptr in ancestor.pointers:
                 pointers[ptr.name].append(ancestor)
 
-        for ptr in objtype.pointers:
-            pointers[ptr.name].append(objtype)
-
         return pointers
 
     def get_ptr_type(
@@ -893,13 +893,15 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         prop: reflection.Pointer,
         *,
         aspect: ModuleAspect = ModuleAspect.MAIN,
-        respect_cardinality: bool = False,
+        respect_cardinality: bool = True,
+        for_runtime: bool = False,
     ) -> str:
         ptr_type = self.get_type(
             self._types[prop.target_id],
             aspect=aspect,
+            for_runtime=for_runtime,
         )
-        if respect_cardinality and prop.card.is_multi():
+        if respect_cardinality and reflection.Cardinality(prop.card).is_multi():
             return f"list[{ptr_type}]"
         else:
             return ptr_type
