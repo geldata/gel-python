@@ -98,12 +98,12 @@ SELECT Type {
             card := ("One" IF .required ELSE "AtMostOne")
                     IF <str>.cardinality = "One"
                     ELSE ("AtLeastOne" IF .required ELSE "Many"),
-            name := '@' ++ .name,
+            name,
             target_id := .target.id,
             kind := 'Property',
             is_computed := len(.computed_fields) != 0,
             is_readonly := .readonly
-        } FILTER .name != '@source' AND .name != '@target',
+        } FILTER .name != 'source' AND .name != 'target'
     } FILTER any(@is_owned),
     exclusives := assert_distinct((
         [IS schema::ObjectType].constraints

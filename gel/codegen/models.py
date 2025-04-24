@@ -750,8 +750,6 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                         continue
                     ptr_type = self.get_ptr_type(objtype, ptr)
                     self.write(f"{ptr.name}: {ptr_type}")
-                    self.write(f'"""{objtype.name}.{ptr.name}"""')
-                    self.write()
 
             self._write_class_line(
                 "__variants__",
@@ -772,8 +770,6 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                                 continue
                             ptr_type = self.get_ptr_type(objtype, ptr)
                             self.write(f"{ptr.name}: {ptr_type}")
-                            self.write(f'"""{objtype.name}.{ptr.name}"""')
-                            self.write()
                     else:
                         self.write("pass")
 
@@ -794,9 +790,6 @@ class GeneratedSchemaModule(BaseGeneratedModule):
     ) -> None:
         self.write()
         self.write()
-        self.write("#")
-        self.write(f"# type {objtype.name}")
-        self.write("#")
 
         type_name = reflection.parse_name(objtype.name)
         name = type_name.name
@@ -827,7 +820,18 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             )
 
             with self.indented():
-                self.write("pass")
+                self._write_class_line(
+                    "__lprops__",
+                    ptr_origins,
+                    transform=lambda s: f"{s}__{ptr.name}.__lprops__",
+                )
+                with self.indented():
+                    assert ptr.pointers
+                    for lprop in ptr.pointers:
+                        if lprop.name in {"source", "target"}:
+                            continue
+                        ptr_type = self.get_type(self._types[lprop.target_id])
+                        self.write(f"{lprop.name}: {ptr_type}")
 
     def write_object_type(
         self,
@@ -857,8 +861,6 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                 for ptr in objtype.pointers:
                     ptr_type = self.get_ptr_type(objtype, ptr)
                     self.write(f"{ptr.name}: {ptr_type}")
-                    self.write(f'"""{objtype.name}.{ptr.name}"""')
-                    self.write()
             else:
                 self.write("pass")
                 self.write()
