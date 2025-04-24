@@ -610,7 +610,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             base_types,
             transform=_mangle_typeof,
         )
-        all_pointers = self._get_pointer_origins(objtype)
+        pointers = objtype.pointers
         with self.indented():
             self._write_class_line(
                 "__typeof__",
@@ -618,16 +618,11 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                 transform=lambda s: f"{_mangle_typeof(s)}.__typeof__",
             )
             with self.indented():
-                if not all_pointers:
+                if not pointers:
                     self.write("pass")
                 else:
-                    for ptr, origin in all_pointers:
-                        if origin is objtype:
-                            ptr_t = self.get_ptr_type(ptr, variants=True)
-                        else:
-                            origin_t = self.get_type(origin, variants=True)
-                            ptr_t = f"{origin_t}.__typeof__.{ptr.name}"
-
+                    for ptr in pointers:
+                        ptr_t = self.get_ptr_type(ptr, variants=True)
                         defn = f"TypeAliasType('{ptr.name}', '{ptr_t}')"
                         self.write(f"{ptr.name} = {defn}")
 
@@ -683,6 +678,30 @@ class GeneratedSchemaModule(BaseGeneratedModule):
 
         self.write()
 
+        # all_ptr_origins = self._get_all_pointer_origins(objtype)
+        # for ptr, _ in all_pointers:
+        #     if not reflection.is_link(ptr):
+        #         continue
+        #     if not ptr.pointers:
+        #         continue
+
+        #     ptr_origins = [
+        #         self.get_type(ptr, variants=True)
+        #         for ptr in all_ptr_origins[ptr.name][1:]
+        #     ]
+
+        #     target = self.get_ptr_type(ptr, variants=True)
+
+        #     self._write_class_line(
+        #         f"{name}__{ptr.name}",
+        #         ptr_origins,
+        #         fixed_bases=[target],
+        #         transform=lambda s: f"{s}__{ptr.name}",
+        #     )
+
+        #     with self.indented():
+        #         self.write("pass")
+
     def write_object_type(
         self,
         objtype: reflection.ObjectType,
@@ -730,6 +749,22 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             pointers[ptr.name] = (ptr, objtype)
 
         return list(pointers.values())
+
+    def _get_all_pointer_origins(
+        self,
+        objtype: reflection.ObjectType,
+    ) -> dict[str, list[reflection.ObjectType]]:
+        pointers: dict[str, list[reflection.ObjectType]] = defaultdict(list)
+        for ancestor_ref in reversed(objtype.ancestors):
+            ancestor = self._types[ancestor_ref.id]
+            assert reflection.is_object_type(ancestor)
+            for ptr in ancestor.pointers:
+                pointers[ptr.name].append(ancestor)
+
+        for ptr in objtype.pointers:
+            pointers[ptr.name].append(objtype)
+
+        return pointers
 
     def get_ptr_type(
         self,

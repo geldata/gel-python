@@ -85,7 +85,7 @@ SELECT Type {
                 ELSE ("AtLeastOne" IF .required ELSE "Many"),
         name,
         target_id := .target.id,
-        kind := 'link' IF .__type__.name = 'schema::Link' ELSE 'property',
+        kind := 'Link' IF .__type__.name = 'schema::Link' ELSE 'Property',
         is_exclusive := EXISTS (SELECT .constraints
                                 FILTER .name = 'std::exclusive'),
         is_computed := len(.computed_fields) != 0,
@@ -100,7 +100,7 @@ SELECT Type {
                     ELSE ("AtLeastOne" IF .required ELSE "Many"),
             name := '@' ++ .name,
             target_id := .target.id,
-            kind := 'link' IF .__type__.name = 'schema::Link' ELSE 'property',
+            kind := 'Property',
             is_computed := len(.computed_fields) != 0,
             is_readonly := .readonly
         } FILTER .name != '@source' AND .name != '@target',

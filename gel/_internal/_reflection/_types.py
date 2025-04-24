@@ -172,6 +172,14 @@ class Backlink(Pointer):
     stub = None
 
 
+def is_link(p: Pointer) -> bool:
+    return p.kind == enums.PointerKind.Link
+
+
+def is_property(p: Pointer) -> bool:
+    return p.kind == enums.PointerKind.Property
+
+
 def fetch_types(
     db: abstract.ReadOnlyExecutor,
     schema_part: enums.SchemaPart,

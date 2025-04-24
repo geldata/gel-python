@@ -31,6 +31,8 @@ from ._types import (
     is_range_type,
     is_scalar_type,
     is_tuple_type,
+    is_link,
+    is_property,
 )
 
 from ._modules import (
@@ -62,4 +64,6 @@ __all__ = (
     "is_range_type",
     "is_scalar_type",
     "is_tuple_type",
+    "is_link",
+    "is_property",
 )
