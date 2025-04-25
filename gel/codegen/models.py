@@ -62,7 +62,7 @@ from gel.orm.introspection import FilePrinter, get_mod_and_name
 from gel._internal import _reflection as reflection
 
 from . import base
-from .base import C, GeneratedModule
+from .base import C, GeneratedModule, ImportTime
 
 
 COMMENT = """\
@@ -220,7 +220,10 @@ class BaseGeneratedModule:
         }
         self._current_py_file = self._py_files[ModuleAspect.MAIN]
         self._current_aspect = ModuleAspect.MAIN
-        self._type_import_cache: dict[tuple[str, ModuleAspect, ModuleAspect, bool, str | None], str] = {}
+        self._type_import_cache: dict[
+            tuple[str, ModuleAspect, ModuleAspect, bool, str | None, ImportTime],
+            str,
+        ] = {}
 
     def get_mod_schema_part(
         self,
@@ -428,7 +431,10 @@ class BaseGeneratedModule:
                     alias=None,
                 )
             else:
-                if imp_mod_canon == self.main_modpath:
+                if (
+                    imp_mod_canon == self.main_modpath
+                    and self.current_aspect is ModuleAspect.MAIN
+                ):
                     alias = "__"
                 else:
                     alias = "_".join(imp_path.parts[:-1])
@@ -451,7 +457,7 @@ class BaseGeneratedModule:
         self,
         type: reflection.AnyType,
         *,
-        for_runtime: bool = False,
+        import_time: ImportTime = ImportTime.runtime,
         aspect: ModuleAspect = ModuleAspect.MAIN,
         rename_as: str | None = None,
     ) -> str:
@@ -465,7 +471,7 @@ class BaseGeneratedModule:
         if reflection.is_array_type(type):
             elem_type = self.get_type(
                 self._types[type.array_element_id],
-                for_runtime=for_runtime,
+                import_time=import_time,
                 aspect=aspect,
             )
             return f"list[{elem_type}]"
@@ -495,7 +501,14 @@ class BaseGeneratedModule:
             aspect = ModuleAspect.MAIN
 
         cur_aspect = self.current_aspect
-        cache_key = (type_name, aspect, cur_aspect, import_name, rename_as)
+        cache_key = (
+            type_name,
+            aspect,
+            cur_aspect,
+            import_name,
+            rename_as,
+            import_time,
+        )
         result = self._type_import_cache.get(cache_key)
         if result is not None:
             return result
@@ -513,7 +526,9 @@ class BaseGeneratedModule:
         if rel_import is None:
             result = imported_name
         else:
-            if for_runtime:
+            if import_time is ImportTime.late_runtime:
+                do_import = self.import_names_late
+            elif import_time is ImportTime.runtime:
                 do_import = self.import_names
             else:
                 do_import = self.import_type_names
@@ -709,7 +724,6 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         base_types = [
             self.get_type(
                 self._types[base.id],
-                for_runtime=True,
                 aspect=ModuleAspect.VARIANTS,
             )
             for base in objtype.bases
@@ -749,7 +763,13 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                     if ptr.name not in {"id", "__type__"}:
                         continue
                     ptr_type = self.get_ptr_type(objtype, ptr)
-                    self.write(f"{ptr.name}: {ptr_type}")
+                    self.write(f"_p__{ptr.name}: {ptr_type} = gm.PrivateAttr()")
+
+                    self.write("@gm.computed_field  # type: ignore[misc]")
+                    self.write("@property")
+                    self.write(f"def {ptr.name}(self) -> {ptr_type}:")
+                    with self.indented():
+                        self.write(f"return self._p__{ptr.name}")
 
             self._write_class_line(
                 "__variants__",
@@ -778,7 +798,13 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                             if ptr.name not in {"id", "__type__"}:
                                 continue
                             ptr_type = self.get_ptr_type(objtype, ptr)
-                            self.write(f"{ptr.name}: {ptr_type}")
+                            self.write(f"_p__{ptr.name}: {ptr_type} = gm.PrivateAttr()")
+
+                            self.write("@gm.computed_field")
+                            self.write("@property")
+                            self.write(f"def {ptr.name}(self) -> {ptr_type}:")
+                            with self.indented():
+                                self.write(f"return self._p__{ptr.name}")
                     else:
                         self.write("pass")
 
@@ -811,13 +837,16 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                 continue
 
             ptr_origins = [
-                self.get_type(ptr, aspect=ModuleAspect.VARIANTS)
+                self.get_type(
+                    ptr,
+                    import_time=ImportTime.typecheck,
+                    aspect=ModuleAspect.VARIANTS,
+                )
                 for ptr in all_ptr_origins[ptr.name]
             ]
 
             target = self.get_type(
                 self._types[ptr.target_id],
-                for_runtime=True,
                 aspect=ModuleAspect.VARIANTS,
             )
 
@@ -839,7 +868,10 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                     for lprop in ptr.pointers:
                         if lprop.name in {"source", "target"}:
                             continue
-                        ptr_type = self.get_type(self._types[lprop.target_id])
+                        ptr_type = self.get_type(
+                            self._types[lprop.target_id],
+                            import_time=ImportTime.typecheck,
+                        )
                         self.write(f"{lprop.name}: {ptr_type}")
 
     def write_object_type(
@@ -856,12 +888,11 @@ class GeneratedSchemaModule(BaseGeneratedModule):
 
         base = self.get_type(
             objtype,
-            for_runtime=True,
             aspect=ModuleAspect.VARIANTS,
         )
         base_types = [base]
         base_types.extend([
-            self.get_type(self._types[base.id], for_runtime=True)
+            self.get_type(self._types[base.id])
             for base in objtype.bases
         ])
         self._write_class_line(name, base_types)
@@ -913,7 +944,6 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         prop: reflection.Pointer,
         *,
         respect_cardinality: bool = True,
-        for_runtime: bool = False,
     ) -> str:
         aspect = ModuleAspect.VARIANTS
 
@@ -928,11 +958,12 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         else:
             rename_as = None
 
+        target_type = self._types[prop.target_id]
         ptr_type = self.get_type(
-            self._types[prop.target_id],
+            target_type,
             aspect=aspect,
-            for_runtime=for_runtime,
             rename_as=rename_as,
+            import_time=ImportTime.late_runtime,
         )
         if respect_cardinality and reflection.Cardinality(prop.card).is_multi():
             return f"list[{ptr_type}]"
@@ -978,6 +1009,9 @@ class GeneratedGlobalModule(BaseGeneratedModule):
         self.write("#")
         self.write(f"class {self.get_tuple_name(t)}(NamedTuple):")
         for elem in t.tuple_elements:
-            elem_type = self.get_type(self._types[elem.type_id])
+            elem_type = self.get_type(
+                self._types[elem.type_id],
+                import_time=ImportTime.typecheck,
+            )
             self.write(f"    {elem.name}: {elem_type}")
         self.write()

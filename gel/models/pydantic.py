@@ -17,10 +17,13 @@ import pydantic.fields
 from pydantic._internal import _model_construction
 import pydantic_core
 
+from pydantic import PrivateAttr as PrivateAttr
+from pydantic import computed_field as computed_field
 from gel._internal import _typing_parametric as parametric
 
 
 T = TypeVar("T")
+
 
 
 class ValidatedType(parametric.SingleParametricType[T]):

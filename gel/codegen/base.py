@@ -181,7 +181,7 @@ class _ImportSection(enum.Enum):
     std = enum.auto()
 
 
-class _ImportTime(enum.Enum):
+class ImportTime(enum.Enum):
     runtime = enum.auto()
     late_runtime = enum.auto()
     typecheck = enum.auto()
@@ -192,7 +192,7 @@ class _ImportKind(enum.Enum):
     self = enum.auto()
 
 
-_ImportKey: TypeAlias = tuple[_ImportSection, _ImportTime, _ImportKind]
+_ImportKey: TypeAlias = tuple[_ImportSection, ImportTime, _ImportKind]
 _Imports: TypeAlias = defaultdict[_ImportKey, defaultdict[str, set[str]]]
 
 
@@ -219,7 +219,7 @@ class GeneratedModule:
         self,
         module: str,
         imports: dict[_ImportKind, list[str]],
-        import_time: _ImportTime,
+        import_time: ImportTime,
     ) -> None:
         if module == "gel" or module.startswith("gel."):
             section = _ImportSection.lib
@@ -238,7 +238,7 @@ class GeneratedModule:
         names: tuple[str, ...],
         aliases: dict[str, str],
         *,
-        import_time: _ImportTime,
+        import_time: ImportTime,
     ) -> None:
         all_names: list[str] = []
         all_self_aliases: list[str] = []
@@ -265,7 +265,7 @@ class GeneratedModule:
 
     def import_names(self, module: str, *names: str, **aliases: str) -> None:
         self._import_names(
-            module, names, aliases, import_time=_ImportTime.runtime)
+            module, names, aliases, import_time=ImportTime.runtime)
 
     def import_names_late(
         self,
@@ -274,7 +274,7 @@ class GeneratedModule:
         **aliases: str,
     ) -> None:
         self._import_names(
-            module, names, aliases, import_time=_ImportTime.late_runtime)
+            module, names, aliases, import_time=ImportTime.late_runtime)
 
     def import_type_names(
         self,
@@ -284,7 +284,7 @@ class GeneratedModule:
     ) -> None:
         self.import_names("typing")
         self._import_names(
-            module, names, aliases, import_time=_ImportTime.typecheck)
+            module, names, aliases, import_time=ImportTime.typecheck)
 
     @contextlib.contextmanager
     def indented(self) -> Iterator[None]:
@@ -310,12 +310,12 @@ class GeneratedModule:
     def render_imports(self) -> str:
         sections = ["from __future__ import annotations"]
         for section_key in _ImportSection.__members__.values():
-            key = (section_key, _ImportTime.runtime)
+            key = (section_key, ImportTime.runtime)
             sections.append(self._render_imports(*key))
 
         typecheck_sections = []
         for section_key in _ImportSection.__members__.values():
-            key = (section_key, _ImportTime.typecheck)
+            key = (section_key, ImportTime.typecheck)
             typecheck_sections.append(
                 self._render_imports(*key, indent="    "))
 
@@ -328,7 +328,7 @@ class GeneratedModule:
     def render_late_imports(self) -> str:
         sections = []
         for section_key in _ImportSection.__members__.values():
-            key = (section_key, _ImportTime.late_runtime)
+            key = (section_key, ImportTime.late_runtime)
             sections.append(self._render_imports(*key, noqa=["E402", "F403"]))
 
         return "\n\n".join(filter(None, sections))
@@ -336,7 +336,7 @@ class GeneratedModule:
     def _render_imports(
         self,
         section: _ImportSection,
-        import_time: _ImportTime,
+        import_time: ImportTime,
         *,
         indent: str = "",
         noqa: list[str] | None = None,
