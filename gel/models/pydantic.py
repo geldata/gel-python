@@ -40,16 +40,16 @@ class GelMetadata(NamedTuple):
     schema_name: str
 
 
-class GelPointer:
+class GelPointer(pydantic.fields.FieldInfo):
+    __slots__ = tuple(pydantic.fields.FieldInfo.__slots__) + ("_gel_name",)
+
     def __init__(
         self,
-        *,
-        name: str,
+        _gel_name: str,
+        **kwargs: Any,
     ) -> None:
-        self._name = name
-
-    def __repr__(self) -> str:
-        return self._name
+        super().__init__(**kwargs)
+        self._gel_name = _gel_name
 
 
 class Exclusive:
@@ -61,7 +61,8 @@ def _get_pointer_from_field(
     field: pydantic.fields.FieldInfo,
 ) -> GelPointer:
     return GelPointer(
-        name=name,
+        _gel_name=name,
+        **field._attributes_set,
     )
 
 
@@ -70,17 +71,18 @@ class GelModelMeta(_model_construction.ModelMetaclass):
         cls,
         name: str,
         bases: tuple[type[Any], ...],
-        class_dict: dict[str, Any],
+        namespace: dict[str, Any],
         **kwargs: Any,
     ) -> GelModelMeta:
         new_cls = cast(
             type[pydantic.BaseModel],
-            super().__new__(cls, name, bases, class_dict, **kwargs),
+            super().__new__(cls, name, bases, namespace, **kwargs),
         )
 
         for name, field in new_cls.__pydantic_fields__.items():
+            print(new_cls, name)
             col = _get_pointer_from_field(name, field)
-            setattr(new_cls, name, col)
+            setattr(cls, name, col)
 
         return new_cls  # type: ignore
 
