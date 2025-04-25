@@ -83,9 +83,8 @@ class GelModelMeta(_model_construction.ModelMetaclass):
         )
 
         for name, field in new_cls.__pydantic_fields__.items():
-            print(new_cls, name)
             col = _get_pointer_from_field(name, field)
-            setattr(cls, name, col)
+            setattr(new_cls, name, col)
 
         return new_cls  # type: ignore
 

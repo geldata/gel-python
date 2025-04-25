@@ -186,15 +186,9 @@ def get_modpath(
     if aspect is ModuleAspect.MAIN:
         pass
     elif aspect is ModuleAspect.VARIANTS:
-        if mod_is_package:
-            modpath = modpath / "__variants__"
-        else:
-            modpath = modpath.parent / "__variants__" / modpath.name
+        modpath = reflection.SchemaPath("__variants__") / modpath
     elif aspect is ModuleAspect.LATE:
-        if mod_is_package:
-            modpath = modpath / "__late__"
-        else:
-            modpath = modpath.parent / "__late__" / modpath.name
+        modpath = reflection.SchemaPath("__variants__") / "__late__" / modpath
 
     return modpath
 
@@ -275,7 +269,7 @@ class BaseGeneratedModule:
             self._current_aspect = prev_aspect
 
     @property
-    def main_modpath(self) -> reflection.SchemaPath:
+    def canonical_modpath(self) -> reflection.SchemaPath:
         return self._modpath
 
     @property
@@ -432,7 +426,7 @@ class BaseGeneratedModule:
                 )
             else:
                 if (
-                    imp_mod_canon == self.main_modpath
+                    imp_mod_canon == self.canonical_modpath
                     and self.current_aspect is ModuleAspect.MAIN
                 ):
                     alias = "__"
@@ -634,7 +628,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             self.import_names("gel.models", gexpr="expr")
 
             for objtype in objtypes:
-                self.write_object_type_late_variants(objtype)
+                self.write_object_type_link_variants(objtype, local=False)
 
         with self.aspect(ModuleAspect.VARIANTS):
             self.import_names("typing")
@@ -646,22 +640,26 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             for objtype in objtypes:
                 self.write_object_type_variants(objtype)
 
-            rel_import = self._resolve_rel_import(
-                self.main_modpath / "*",
-                ModuleAspect.LATE,
-                import_name=True,
-            )
-            assert rel_import is not None
-            if rel_import.alias is not None:
-                self.import_names_late(
-                    rel_import.module,
-                    **{rel_import.alias: rel_import.name},
+            for objtype in objtypes:
+                self.write_object_type_link_variants(objtype, local=True)
+
+            if self.py_files[ModuleAspect.LATE].has_content():
+                rel_import = self._resolve_rel_import(
+                    self.canonical_modpath / "*",
+                    ModuleAspect.LATE,
+                    import_name=True,
                 )
-            else:
-                self.import_names_late(
-                    rel_import.module,
-                    rel_import.name,
-                )
+                assert rel_import is not None
+                if rel_import.alias is not None:
+                    self.import_names_late(
+                        rel_import.module,
+                        **{rel_import.alias: rel_import.name},
+                    )
+                else:
+                    self.import_names_late(
+                        rel_import.module,
+                        rel_import.name,
+                    )
 
     def _format_class_line(
         self,
@@ -819,13 +817,11 @@ class GeneratedSchemaModule(BaseGeneratedModule):
 
         self.write()
 
-    def write_object_type_late_variants(
+    def write_object_type_link_variants(
         self,
         objtype: reflection.ObjectType,
+        local: bool = False,
     ) -> None:
-        self.write()
-        self.write()
-
         type_name = reflection.parse_name(objtype.name)
         name = type_name.name
 
@@ -834,6 +830,12 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             if not reflection.is_link(ptr):
                 continue
             if not ptr.pointers:
+                continue
+
+            target_type = self._types[ptr.target_id]
+            target_type_name = reflection.parse_name(target_type.name)
+
+            if local != (target_type_name.parent == type_name.parent):
                 continue
 
             ptr_origins = [
@@ -846,7 +848,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             ]
 
             target = self.get_type(
-                self._types[ptr.target_id],
+                target_type,
                 aspect=ModuleAspect.VARIANTS,
             )
 
@@ -951,9 +953,12 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             reflection.is_link(prop)
             and prop.pointers
         ):
-            if self.current_aspect is ModuleAspect.VARIANTS:
-                aspect = ModuleAspect.LATE
             objtype_name = reflection.parse_name(objtype.name)
+            if self.current_aspect is ModuleAspect.VARIANTS:
+                target_type = self._types[prop.target_id]
+                target_name = reflection.parse_name(target_type.name)
+                if target_name.parent != objtype_name.parent:
+                    aspect = ModuleAspect.LATE
             rename_as = f"{objtype_name.name}__{prop.name}"
         else:
             rename_as = None
