@@ -472,10 +472,11 @@ class BaseGeneratedModule:
 
         if reflection.is_pseudo_type(type):
             if type.name == "anyobject":
-                self.import_names("gel.models", gm="pydantic")
-                return "gm.GelModel"
+                self.import_names("gel.models", __i_gm__="pydantic")
+                return "__i_gm__.GelModel"
             elif type.name == "anytuple":
-                return "tuple[typing.Any, ...]"
+                self.import_names("typing", __t__=".")
+                return "tuple[__t__.Any, ...]"
             else:
                 raise AssertionError(f"unsupported pseudo-type: {type.name}")
 
@@ -612,30 +613,16 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             assert reflection.is_object_type(objtype)
             objtypes.append(objtype)
 
-        self.import_names("typing")
-
-        self.import_names("gel.models", gm="pydantic")
-        self.import_names("gel.models", gexpr="expr")
-
         for objtype in objtypes:
             self.write_object_type(objtype)
 
         with self.aspect(ModuleAspect.LATE):
-            self.import_names("typing")
-            self.import_names("typing_extensions", "TypeAliasType")
-
-            self.import_names("gel.models", gm="pydantic")
-            self.import_names("gel.models", gexpr="expr")
-
             for objtype in objtypes:
                 self.write_object_type_link_variants(objtype, local=False)
 
         with self.aspect(ModuleAspect.VARIANTS):
-            self.import_names("typing")
-            self.import_names("typing_extensions", "TypeAliasType")
-
-            self.import_names("gel.models", gm="pydantic")
-            self.import_names("gel.models", gexpr="expr")
+            if objtypes:
+                self.import_names("typing", __t__=".")
 
             for objtype in objtypes:
                 self.write_object_type_variants(objtype)
@@ -743,16 +730,19 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                 if not pointers:
                     self.write("pass")
                 else:
+                    self.import_names("typing_extensions", __i_tx__=".")
                     for ptr in pointers:
                         ptr_t = self.get_ptr_type(objtype, ptr)
-                        defn = f"TypeAliasType('{ptr.name}', '{ptr_t}')"
+                        defn = f"__i_tx__.TypeAliasType('{ptr.name}', '{ptr_t}')"
                         self.write(f"{ptr.name} = {defn}")
 
         self.write()
         self.write()
+        if not base_types:
+            self.import_names("gel.models", __i_gm__="pydantic")
         self._write_class_line(
             name,
-            base_types or ["gm.GelModel"],
+            base_types or ["__i_gm__.GelModel"],
             prepend_bases=[typeof_class],
         )
         with self.indented():
@@ -761,9 +751,9 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                     if ptr.name not in {"id", "__type__"}:
                         continue
                     ptr_type = self.get_ptr_type(objtype, ptr)
-                    self.write(f"_p__{ptr.name}: {ptr_type} = gm.PrivateAttr()")
+                    self.write(f"_p__{ptr.name}: {ptr_type} = __i_gm__.PrivateAttr()")
 
-                    self.write("@gm.computed_field  # type: ignore[misc]")
+                    self.write("@__i_gm__.computed_field  # type: ignore[prop-decorator]")
                     self.write("@property")
                     self.write(f"def {ptr.name}(self) -> {ptr_type}:")
                     with self.indented():
@@ -786,7 +776,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                     self._write_class_line(
                         "Empty",
                         [],
-                        prepend_bases=[typeof_class, "gm.GelModel"],
+                        prepend_bases=[typeof_class, "__i_gm__.GelModel"],
                         transform=lambda s: f"{s}.__variants__.Empty",
                     )
 
@@ -796,9 +786,9 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                             if ptr.name not in {"id", "__type__"}:
                                 continue
                             ptr_type = self.get_ptr_type(objtype, ptr)
-                            self.write(f"_p__{ptr.name}: {ptr_type} = gm.PrivateAttr()")
+                            self.write(f"_p__{ptr.name}: {ptr_type} = __i_gm__.PrivateAttr()")
 
-                            self.write("@gm.computed_field")
+                            self.write("@__i_gm__.computed_field  # type: ignore[prop-decorator]")
                             self.write("@property")
                             self.write(f"def {ptr.name}(self) -> {ptr_type}:")
                             with self.indented():
@@ -808,10 +798,10 @@ class GeneratedSchemaModule(BaseGeneratedModule):
 
                 self.write()
                 self.write(
-                    f'Any = typing.TypeVar("Any", bound="{name} | Empty")')
+                    f'Any = __t__.TypeVar("Any", bound="{name} | Empty")')
 
         self.write()
-        self.write("if not typing.TYPE_CHECKING:")
+        self.write("if not __t__.TYPE_CHECKING:")
         with self.indented():
             self.write(f"{name}.__variants__.Empty = {name}")
 
@@ -944,8 +934,6 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         self,
         objtype: reflection.ObjectType,
         prop: reflection.Pointer,
-        *,
-        respect_cardinality: bool = True,
     ) -> str:
         aspect = ModuleAspect.VARIANTS
 
@@ -970,7 +958,16 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             rename_as=rename_as,
             import_time=ImportTime.late_runtime,
         )
-        if respect_cardinality and reflection.Cardinality(prop.card).is_multi():
+        card = reflection.Cardinality(prop.card)
+        if card.is_optional():
+            self.import_names("gel.models", __i_gm__="pydantic")
+            self.import_names("typing", __t__=".")
+
+            if card.is_multi():
+                return f"__t__.Annotated[list[{ptr_type}], __i_gm__.Field(default_factory=list)]"
+            else:
+                return f"__t__.Annotated[{ptr_type}, __i_gm__.Field(default=None)]"
+        elif card.is_multi():
             return f"list[{ptr_type}]"
         else:
             return ptr_type

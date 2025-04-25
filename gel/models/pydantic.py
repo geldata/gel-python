@@ -17,6 +17,7 @@ import pydantic.fields
 from pydantic._internal import _model_construction
 import pydantic_core
 
+from pydantic import Field as Field
 from pydantic import PrivateAttr as PrivateAttr
 from pydantic import computed_field as computed_field
 from gel._internal import _typing_parametric as parametric

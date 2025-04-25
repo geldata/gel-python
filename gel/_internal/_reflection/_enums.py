@@ -28,6 +28,13 @@ class Cardinality(StrEnum):
             Cardinality.Many,
         }
 
+    def is_optional(self) -> bool:
+        return self in {
+            Cardinality.AtMostOne,
+            Cardinality.Many,
+            Cardinality.Empty,
+        }
+
 
 class TypeKind(StrEnum):
     Array = "Array"
