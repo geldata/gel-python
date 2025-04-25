@@ -746,18 +746,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             prepend_bases=[typeof_class],
         )
         with self.indented():
-            if objtype.name == "std::BaseObject":
-                for ptr in objtype.pointers:
-                    if ptr.name not in {"id", "__type__"}:
-                        continue
-                    ptr_type = self.get_ptr_type(objtype, ptr)
-                    self.write(f"_p__{ptr.name}: {ptr_type} = __i_gm__.PrivateAttr()")
-
-                    self.write("@__i_gm__.computed_field  # type: ignore[prop-decorator]")
-                    self.write("@property")
-                    self.write(f"def {ptr.name}(self) -> {ptr_type}:")
-                    with self.indented():
-                        self.write(f"return self._p__{ptr.name}")
+            self._write_base_object_type_body(objtype)
 
             self._write_class_line(
                 "__variants__",
@@ -781,20 +770,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                     )
 
                 with self.indented():
-                    if objtype.name == "std::BaseObject":
-                        for ptr in objtype.pointers:
-                            if ptr.name not in {"id", "__type__"}:
-                                continue
-                            ptr_type = self.get_ptr_type(objtype, ptr)
-                            self.write(f"_p__{ptr.name}: {ptr_type} = __i_gm__.PrivateAttr()")
-
-                            self.write("@__i_gm__.computed_field  # type: ignore[prop-decorator]")
-                            self.write("@property")
-                            self.write(f"def {ptr.name}(self) -> {ptr_type}:")
-                            with self.indented():
-                                self.write(f"return self._p__{ptr.name}")
-                    else:
-                        self.write("pass")
+                    self._write_base_object_type_body(objtype)
 
                 self.write()
                 self.write(
@@ -806,6 +782,26 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             self.write(f"{name}.__variants__.Empty = {name}")
 
         self.write()
+
+    def _write_base_object_type_body(
+        self,
+        objtype: reflection.ObjectType,
+    ) -> None:
+        if objtype.name == "std::BaseObject":
+            for ptr in objtype.pointers:
+                if ptr.name not in {"id", "__type__"}:
+                    continue
+                ptr_type = self.get_ptr_type(objtype, ptr)
+                self.write(
+                    f"_p__{ptr.name}: {ptr_type} = __i_gm__.PrivateAttr()")
+                self.write(
+                    "@__i_gm__.computed_field  # type: ignore[prop-decorator]")
+                self.write("@property")
+                self.write(f"def {ptr.name}(self) -> {ptr_type}:")
+                with self.indented():
+                    self.write(f"return self._p__{ptr.name}")
+        else:
+            self.write("pass")
 
     def write_object_type_link_variants(
         self,
