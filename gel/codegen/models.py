@@ -734,11 +734,15 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             for base in objtype.bases
         ]
         typeof_class = _mangle_typeof(name)
-        self._write_class_line(
-            typeof_class,
-            base_types,
-            transform=_mangle_typeof,
-        )
+        if base_types:
+            self._write_class_line(
+                typeof_class,
+                base_types,
+                transform=_mangle_typeof,
+            )
+        else:
+            gmm = self.import_name("gel.models.pydantic", "GelModelMetadata")
+            self._write_class_line(typeof_class, [gmm])
         pointers = objtype.pointers
         otr = self.import_name("gel.models.pydantic", "ObjectTypeReflection")
         uuid = self.import_name("uuid", "UUID")
@@ -800,6 +804,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                     refl_t = self.get_type(
                         self._types[ptr.target_id],
                         import_time=base.ImportTime.typecheck,
+                        aspect=ModuleAspect.MAIN,
                     )
                     break
             with self.indented():
@@ -876,7 +881,8 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             for ptr in objtype.pointers:
                 if ptr.name not in {"id", "__type__"}:
                     continue
-                ptr_type = self.get_ptr_type(objtype, ptr)
+                aspect = ModuleAspect.MAIN if ptr.name == "__type__" else None
+                ptr_type = self.get_ptr_type(objtype, ptr, aspect=aspect)
                 self.write(f"_p__{ptr.name}: {ptr_type} = {priv_attr}()")
                 self.write(f"@{comp_f}  # type: ignore[prop-decorator]")
                 self.write("@property")
@@ -1052,8 +1058,10 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         style: Literal[
             "annotation", "property", "typeddict", "arg"] = "annotation",
         prefer_broad_target_type: bool = False,
+        aspect: ModuleAspect | None = None,
     ) -> str:
-        aspect = ModuleAspect.VARIANTS
+        if aspect is None:
+            aspect = ModuleAspect.VARIANTS
 
         if (
             reflection.is_link(prop)

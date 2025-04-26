@@ -167,9 +167,11 @@ class GelModelMeta(_model_construction.ModelMetaclass):
         return new_cls  # type: ignore
 
 
-class GelModel(pydantic.BaseModel, metaclass=GelModelMeta):
+class GelModelMetadata:
     __gel_type_reflection__: ClassVar[ObjectTypeReflection]
 
+
+class GelModel(pydantic.BaseModel, GelModelMetadata, metaclass=GelModelMeta):
     def __init__(self, /, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self._p__id: uuid.UUID | None = None
