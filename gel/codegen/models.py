@@ -843,35 +843,31 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         args = ["self"]
         if reg_pointers:
             args.extend(["/", "*"])
-        forward = ["self"]
         for ptr, org_objtype in reg_pointers:
             init_ptr_t = self.get_ptr_type(
                 org_objtype,
                 ptr,
                 style="property",
+                prefer_broad_target_type=True,
             )
             args.append(f'{ptr.name}: {init_ptr_t}')
-            forward.append(f"{ptr.name}={ptr.name}")
 
-        init = self.format_list("def __init__({list}) -> None:", args)
-        self.write(init)
+        self.write("if __t__.TYPE_CHECKING:")
         with self.indented():
-            self.write(
-                f'"""Create a new {objtype.name} instance '
-                'from keyword arguments.'
-            )
-            self.write()
-            self.write(
-                'Call db.save() on the returned object to persist it '
-                'in the database.'
-            )
-            self.write('"""')
-            self.write(
-                self.format_list(
-                    "__i_gm__.GelModel.__init__({list})",
-                    forward,
+            init = self.format_list("def __init__({list}) -> None:", args)
+            self.write(init)
+            with self.indented():
+                self.write(
+                    f'"""Create a new {objtype.name} instance '
+                    'from keyword arguments.'
                 )
-            )
+                self.write()
+                self.write(
+                    'Call db.save() on the returned object to persist it '
+                    'in the database.'
+                )
+                self.write('"""')
+                self.write("...")
 
     def write_object_type_link_variants(
         self,
@@ -1002,12 +998,14 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         prop: reflection.Pointer,
         *,
         style: Literal["annotation", "property", "typeddict"] = "annotation",
+        prefer_broad_target_type: bool = False,
     ) -> str:
         aspect = ModuleAspect.VARIANTS
 
         if (
             reflection.is_link(prop)
             and prop.pointers
+            and not prefer_broad_target_type
         ):
             objtype_name = reflection.parse_name(objtype.name)
             if self.current_aspect is ModuleAspect.VARIANTS:
@@ -1050,7 +1048,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                     return f"__i_tx__.NotRequired[{ptr_type}]"
             elif style == "property":
                 if card.is_multi():
-                    return f"__t__.Optional[list[{ptr_type}]] = None"
+                    return f"list[{ptr_type}] = []"
                 else:
                     return f"__t__.Optional[{ptr_type}] = None"
             else:
