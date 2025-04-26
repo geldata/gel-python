@@ -22,6 +22,7 @@ from typing import (
     DefaultDict,
     Generator,
     Iterator,
+    Literal,
     Mapping,
     NamedTuple,
     TypedDict,
@@ -648,6 +649,18 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                         rel_import.name,
                     )
 
+    def _transform_classnames(
+        self,
+        classnames: list[str],
+        transform: Callable[[str], str],
+    ) -> list[str]:
+        result = []
+        for classname in classnames:
+            mod, _, name = classname.rpartition(".")
+            name = transform(name)
+            result.append(f"{mod}.{name}" if mod else name)
+        return result
+
     def _format_class_line(
         self,
         class_name: str,
@@ -658,11 +671,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         transform: None | Callable[[str], str] = None,
     ) -> str:
         if transform is not None:
-            bases = []
-            for b in base_types:
-                mod, _, name = b.rpartition(".")
-                name = transform(name)
-                bases.append(f"{mod}.{name}" if mod else name)
+            bases = self._transform_classnames(base_types, transform)
         else:
             bases = base_types
 
@@ -736,6 +745,26 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                         defn = f"__i_tx__.TypeAliasType('{ptr.name}', '{ptr_t}')"
                         self.write(f"{ptr.name} = {defn}")
 
+                reg_pointers = [
+                    (p, org) for p, org in self._get_pointer_origins(objtype)
+                    if p.name not in {"id", "__type__"}
+                ]
+                self.import_names("typing", __t__=".")
+                self.write("__init_kwargs__ = __t__.TypedDict(")
+                with self.indented():
+                    self.write('"__init_kwargs__",')
+                    self.write("{")
+                    with self.indented():
+                        for ptr, org_objtype in reg_pointers:
+                            init_ptr_t = self.get_ptr_type(
+                                org_objtype,
+                                ptr,
+                                style="typeddict",
+                            )
+                            self.write(f'"{ptr.name}": {init_ptr_t!r},')
+                    self.write("}")
+                self.write(")")
+
         self.write()
         self.write()
         if not base_types:
@@ -800,8 +829,11 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                 self.write(f"def {ptr.name}(self) -> {ptr_type}:")
                 with self.indented():
                     self.write(f"return self._p__{ptr.name}")
-        else:
-            self.write("pass")
+            self.write()
+
+        self.write("def __init__(self, /) -> None:")
+        with self.indented():
+            self.write("super().__init__()")
 
     def write_object_type_link_variants(
         self,
@@ -893,6 +925,13 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                 for ptr in pointers:
                     ptr_type = self.get_ptr_type(objtype, ptr)
                     self.write(f"{ptr.name}: {ptr_type}")
+
+                self.import_names("gel.models", __i_gm__="pydantic")
+                self.import_names("typing_extensions", __i_tx__=".")
+                kw = f"__i_tx__.Unpack[{base}.__typeof__.__init_kwargs__]"
+                self.write(f"def __init__(self, /, **kwargs: {kw}) -> None:")
+                with self.indented():
+                    self.write("__i_gm__.GelModel.__init__(self, **kwargs)")
             else:
                 self.write("pass")
                 self.write()
@@ -930,6 +969,8 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         self,
         objtype: reflection.ObjectType,
         prop: reflection.Pointer,
+        *,
+        style: Literal["annotation", "property", "typeddict"] = "annotation",
     ) -> str:
         aspect = ModuleAspect.VARIANTS
 
@@ -959,10 +1000,32 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             self.import_names("gel.models", __i_gm__="pydantic")
             self.import_names("typing", __t__=".")
 
-            if card.is_multi():
-                return f"__t__.Annotated[list[{ptr_type}], __i_gm__.Field(default_factory=list)]"
+            if style == "annotation":
+                if card.is_multi():
+                    return (
+                        f"__t__.Annotated[list[{ptr_type}], "
+                        f"__i_gm__.Field(default_factory=list)]"
+                    )
+                else:
+                    return (
+                        f"__t__.Annotated[{ptr_type}, "
+                        f"__i_gm__.Field(default=None)]"
+                    )
+            elif style == "typeddict":
+                self.import_names("typing_extensions", __i_tx__=".")
+                if card.is_multi():
+                    return f"__i_tx__.NotRequired[list[{ptr_type}]]"
+                else:
+                    return f"__i_tx__.NotRequired[{ptr_type}]"
+            elif style == "property":
+                if card.is_multi():
+                    return f"__t__.Optional[list[{ptr_type}]] = None"
+                else:
+                    return f"__t__.Optional[{ptr_type}] = None"
             else:
-                return f"__t__.Annotated[{ptr_type}, __i_gm__.Field(default=None)]"
+                raise AssertionError(
+                    f"unexpected type rendering style: {style!r}")
+
         elif card.is_multi():
             return f"list[{ptr_type}]"
         else:
