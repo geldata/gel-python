@@ -548,7 +548,7 @@ class BaseGeneratedModule:
 
         if len(output_string) > 79:
             list_string = ",\n    ".join(values)
-            list_string = f"\n    {list_string}\n"
+            list_string = f"\n    {list_string},\n"
             output_string = tpl.format(list=list_string)
 
         return output_string
@@ -775,7 +775,8 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             prepend_bases=[typeof_class],
         )
         with self.indented():
-            self._write_base_object_type_body(objtype)
+            self._write_base_object_type_body(objtype, typeof_class)
+            self.write()
 
             self._write_class_line(
                 "__variants__",
@@ -799,7 +800,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                     )
 
                 with self.indented():
-                    self._write_base_object_type_body(objtype)
+                    self._write_base_object_type_body(objtype, typeof_class)
 
                 self.write()
                 self.write(
@@ -815,6 +816,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
     def _write_base_object_type_body(
         self,
         objtype: reflection.ObjectType,
+        typeof_class: str,
     ) -> None:
         if objtype.name == "std::BaseObject":
             for ptr in objtype.pointers:
@@ -831,9 +833,45 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                     self.write(f"return self._p__{ptr.name}")
             self.write()
 
-        self.write("def __init__(self, /) -> None:")
+        reg_pointers = [
+            (p, org) for p, org in self._get_pointer_origins(objtype)
+            if p.name not in {"id", "__type__"}
+        ]
+        self.import_names("gel.models", __i_gm__="pydantic")
+        self.import_names("typing_extensions", __i_tx__=".")
+        self.import_names("typing", __t__=".")
+        args = ["self"]
+        if reg_pointers:
+            args.extend(["/", "*"])
+        forward = ["self"]
+        for ptr, org_objtype in reg_pointers:
+            init_ptr_t = self.get_ptr_type(
+                org_objtype,
+                ptr,
+                style="property",
+            )
+            args.append(f'{ptr.name}: {init_ptr_t}')
+            forward.append(f"{ptr.name}={ptr.name}")
+
+        init = self.format_list("def __init__({list}) -> None:", args)
+        self.write(init)
         with self.indented():
-            self.write("super().__init__()")
+            self.write(
+                f'"""Create a new {objtype.name} instance '
+                'from keyword arguments.'
+            )
+            self.write()
+            self.write(
+                'Call db.save() on the returned object to persist it '
+                'in the database.'
+            )
+            self.write('"""')
+            self.write(
+                self.format_list(
+                    "__i_gm__.GelModel.__init__({list})",
+                    forward,
+                )
+            )
 
     def write_object_type_link_variants(
         self,
@@ -925,13 +963,6 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                 for ptr in pointers:
                     ptr_type = self.get_ptr_type(objtype, ptr)
                     self.write(f"{ptr.name}: {ptr_type}")
-
-                self.import_names("gel.models", __i_gm__="pydantic")
-                self.import_names("typing_extensions", __i_tx__=".")
-                kw = f"__i_tx__.Unpack[{base}.__typeof__.__init_kwargs__]"
-                self.write(f"def __init__(self, /, **kwargs: {kw}) -> None:")
-                with self.indented():
-                    self.write("__i_gm__.GelModel.__init__(self, **kwargs)")
             else:
                 self.write("pass")
                 self.write()
