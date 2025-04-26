@@ -32,12 +32,14 @@ class Type:
     kind: enums.TypeKind
     name: str
     description: Optional[str]
-    is_abstract: bool
     builtin: bool
+    internal: bool
 
 
 @dataclasses.dataclass(frozen=True, kw_only=True)
 class InheritingType(Type):
+    abstract: bool
+    final: bool
     bases: list[TypeRef]
     ancestors: list[TypeRef]
 
@@ -61,6 +63,7 @@ class ObjectType(InheritingType):
     kind: Literal[enums.TypeKind.Object]
     union_of: list[TypeRef]
     intersection_of: list[TypeRef]
+    compound_type: bool
     pointers: list[Pointer]
     backlinks: list[Backlink]
     exclusives: list[dict[str, Pointer]]

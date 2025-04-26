@@ -27,24 +27,6 @@ WITH
     )
 
 SELECT Type {
-    id,
-    name := (
-        array_join(array_agg([IS ObjectType].union_of.name), ' | ')
-        IF EXISTS [IS ObjectType].union_of
-        ELSE .name
-    ),
-    description := assert_single((
-        WITH
-            tid := .id,
-        SELECT (ScalarType UNION ObjectType) {
-            description := (SELECT .annotations {
-                value := materialized(@value)
-            } FILTER .name = "std::description"),
-        } FILTER .id = tid
-    ).description.value),
-    is_abstract := .abstract,
-    builtin := .builtin,
-
     kind := assert_exists(
         'Object' IF Type IS ObjectType ELSE
         'Scalar' IF Type IS ScalarType ELSE
@@ -57,6 +39,32 @@ SELECT Type {
         <str>{},
         message := "unexpected type",
     ),
+
+    id,
+    builtin,
+    internal,
+
+    name := (
+        array_join(array_agg([IS ObjectType].union_of.name), ' | ')
+        IF EXISTS [IS ObjectType].union_of
+        ELSE .name
+    ),
+
+    description := assert_single((
+        WITH
+            tid := .id,
+        SELECT (ScalarType UNION ObjectType) {
+            description := (SELECT .annotations {
+                value := materialized(@value)
+            } FILTER .name = "std::description"),
+        } FILTER .id = tid
+    ).description.value),
+
+    [IS SubclassableObject].abstract,
+    [IS SubclassableObject].final,
+
+    expr,
+    from_alias,
 
     [IS ScalarType].enum_values,
     is_seq := 'std::sequence' in [IS ScalarType].ancestors.name,
@@ -77,6 +85,7 @@ SELECT Type {
         id
     } ORDER BY @index ASC,
 
+    [IS ObjectType].compound_type,
     [IS ObjectType].union_of,
     [IS ObjectType].intersection_of,
     [IS ObjectType].pointers: {
@@ -142,7 +151,7 @@ SELECT Type {
 }
 FILTER
     .builtin = <bool>$builtin
-    AND NOT .is_from_alias
+    AND NOT .from_alias
 ORDER BY
     .name;
 """

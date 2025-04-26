@@ -736,6 +736,11 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             self.write(f"{refl_t}(")
             with self.indented():
                 self.write(f"name={objtype.name!r},")
+                self.write(f"builtin={objtype.builtin!r},")
+                self.write(f"internal={objtype.internal!r},")
+                self.write(f"abstract={objtype.abstract!r},")
+                self.write(f"final={objtype.final!r},")
+                self.write(f"compound_type={objtype.compound_type!r},")
             self.write("),")
         self.write(")")
 
@@ -933,6 +938,12 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         if reg_pointers:
             args.extend(["/", "*"])
         for ptr, org_objtype in reg_pointers:
+            if (
+                org_objtype.name.startswith("schema::")
+                and ptr.name.startswith("is_")
+                and ptr.is_computed
+            ):
+                continue
             init_ptr_t = self.get_ptr_type(
                 org_objtype,
                 ptr,
@@ -1046,6 +1057,12 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                 ptr for ptr in objtype.pointers
                 if ptr.name not in {"id", "__type__"}
             ]
+            if objtype.name.startswith("schema::"):
+                pointers = [
+                    ptr for ptr in objtype.pointers
+                    if not ptr.name.startswith("is_") or not ptr.is_computed
+                ]
+
             if pointers:
                 for ptr in pointers:
                     ptr_type = self.get_ptr_type(
