@@ -895,6 +895,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         type_name = reflection.parse_name(objtype.name)
         name = type_name.name
 
+        ProxyModel = self.import_name("gel.models.pydantic", "ProxyModel")
         all_ptr_origins = self._get_all_pointer_origins(objtype)
         for ptr in objtype.pointers:
             if not reflection.is_link(ptr):
@@ -925,7 +926,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             self._write_class_line(
                 f"{name}__{ptr.name}",
                 ptr_origins,
-                append_bases=[target],
+                append_bases=[target, f"{ProxyModel}[{target}]"],
                 transform=lambda s: f"{s}__{ptr.name}",
             )
 

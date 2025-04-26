@@ -8,40 +8,93 @@ from typing import (
     Annotated,
     Any,
     ClassVar,
+    Generic,
+    Iterable,
     NamedTuple,
     TypeVar,
     cast,
 )
 
-import typing_extensions
+from typing_extensions import (
+    Self,
+    TypeAliasType,
+)
+
+from collections.abc import (
+    Hashable,
+    Sequence,
+)
+
+import uuid
 
 import pydantic
 import pydantic.fields
 from pydantic._internal import _model_construction
 import pydantic_core
+from pydantic_core import core_schema as pydantic_schema
 
 from pydantic import Field as Field
 from pydantic import PrivateAttr as PrivateAttr
 from pydantic import computed_field as computed_field
 from gel._internal import _typing_parametric as parametric
 
+from . import lists
+
+
+class _DistinctList(lists.DistinctList[lists.T], Generic[lists.T]):
+    @classmethod
+    def __get_pydantic_core_schema__(
+        cls,
+        _source_type: Any,
+        handler: pydantic.GetCoreSchemaHandler,
+    ) -> pydantic_core.CoreSchema:
+        return pydantic_schema.no_info_before_validator_function(
+            cls._validate,
+            pydantic_schema.list_schema(
+                items_schema=pydantic_schema.any_schema(),
+            ),
+        )
+
+    @classmethod
+    def _validate(cls, value: Any) -> Self:
+        if isinstance(value, cls):
+            return value
+        if isinstance(value, list):
+            return cls(value)
+        raise TypeError(f'could not convert {type(value)} to {cls.__name__}')
+
+    @classmethod
+    def _check_value(cls, value: Any) -> lists.T:
+        t = cls.type
+        if isinstance(value, t):
+            return value
+        elif (
+            issubclass(t, ProxyModel)
+            and isinstance(value, t.__bases__[0])
+        ):
+            return t.__from_object__(value)  # type: ignore [return-value]
+
+        raise ValueError(
+            f"{cls!r} accepts only values of type {cls.type!r}, "
+            f"got {type(value)!r}"
+        )
+
+
+DistinctList = TypeAliasType(
+    "DistinctList",
+    "Annotated[_DistinctList[lists.T], Field(default_factory=_DistinctList)]",
+    type_params=(lists.T,)
+)
+
+RequiredDistinctList = TypeAliasType(
+    "RequiredDistinctList",
+    "list[lists.T]",
+    type_params=(lists.T,)
+)
 
 T = TypeVar("T")
 
-
-DistinctList = typing_extensions.TypeAliasType(
-    "DistinctList",
-    "Annotated[list[T], Field(default_factory=list)]",
-    type_params=(T,)
-)
-
-RequiredDistinctList = typing_extensions.TypeAliasType(
-    "RequiredDistinctList",
-    "list[T]",
-    type_params=(T,)
-)
-
-OptionalWithDefault = typing_extensions.TypeAliasType(
+OptionalWithDefault = TypeAliasType(
     "OptionalWithDefault",
     "Annotated[T, Field(default=None)]",
     type_params=(T,)
@@ -113,3 +166,30 @@ class GelModelMeta(_model_construction.ModelMetaclass):
 
 class GelModel(pydantic.BaseModel, metaclass=GelModelMeta):
     __gel_metadata__: ClassVar[GelMetadata]
+
+    def __init__(self, /, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self._p__id: uuid.UUID | None = None
+        self._p____type__ = None
+
+    def __eq__(self, other: Any) -> bool:
+        if not isinstance(other, GelModel):
+            return NotImplemented
+
+        if self._p__id is None or other._p__id is None:
+            return False
+        else:
+            return self._p__id == other._p__id
+
+    def __hash__(self) -> int:
+        if self._p__id is None:
+            raise TypeError(
+                "Model instances without id value are unhashable")
+
+        return hash(self._p__id)
+
+
+class ProxyModel(Generic[T]):
+    @classmethod
+    def __from_object__(cls, obj: T) -> ProxyModel[T]:
+        return cls()

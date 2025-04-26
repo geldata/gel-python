@@ -105,6 +105,7 @@ local_partial_types = true
 module = [
     "gel.codegen.*",
     "gel.integration.*",
+    "gel.models.*",
 ]
 strict = true
 ignore_errors = false
