@@ -65,7 +65,7 @@ from gel.orm.introspection import FilePrinter, get_mod_and_name
 from gel._internal import _reflection as reflection
 
 from . import base
-from .base import C, GeneratedModule, ImportTime
+from .base import C, GeneratedModule, ImportTime, CodeSection
 
 
 COMMENT = """\
@@ -207,6 +207,14 @@ class BaseGeneratedModule:
         super().__init__()
         self._modpath = modname
         self._types = all_types
+        for t in all_types.values():
+            if t.name == "schema::ObjectType":
+                assert reflection.is_object_type(t)
+                self._schema_object_type = t
+                break
+        else:
+            raise RuntimeError(
+                "schema::ObjectType type not found in schema reflection")
         self._modules = frozenset(modules)
         self._schema_part = schema_part
         self._is_package = self.mod_is_package(modname, schema_part)
@@ -365,6 +373,11 @@ class BaseGeneratedModule:
     @contextmanager
     def indented(self) -> Iterator[None]:
         with self.py_file.indented():
+            yield
+
+    @contextmanager
+    def code_section(self, section: CodeSection) -> Iterator[None]:
+        with self.py_file.code_section(section):
             yield
 
     def reset_indent(self) -> None:
@@ -646,8 +659,9 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                     import_time=ImportTime.late_runtime,
                 )
 
-            for objtype in objtypes:
-                self.write_object_type_reflection(objtype)
+            with self.code_section(CodeSection.after_late_import):
+                for objtype in objtypes:
+                    self.write_object_type_reflection(objtype)
 
     def _transform_classnames(
         self,
@@ -708,7 +722,22 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         self,
         objtype: reflection.ObjectType,
     ) -> None:
-        pass
+        if objtype.name == "std::FreeObject":
+            return
+        type_name = reflection.parse_name(objtype.name)
+        name = type_name.name
+        refl_t = self.get_type(
+            self._schema_object_type,
+            import_time=base.ImportTime.late_runtime,
+            aspect=ModuleAspect.MAIN,
+        )
+        self.write(f"type({name}).__gel_type_reflection_register__(")
+        with self.indented():
+            self.write(f"{refl_t}(")
+            with self.indented():
+                self.write(f"name={objtype.name!r},")
+            self.write("),")
+        self.write(")")
 
     def write_object_type_variants(
         self,
@@ -798,21 +827,26 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             uuid = self.import_name("uuid", "UUID")
             classvar = self.import_name("typing", "ClassVar")
             self._write_class_line("_BaseObjectMeta", [gel_meta])
-            refl_t = None
-            for ptr in objtype.pointers:
-                if ptr.name == "__type__":
-                    refl_t = self.get_type(
-                        self._types[ptr.target_id],
-                        import_time=base.ImportTime.typecheck,
-                        aspect=ModuleAspect.MAIN,
-                    )
-                    break
+            refl_t = self.get_type(
+                self._schema_object_type,
+                import_time=base.ImportTime.typecheck,
+                aspect=ModuleAspect.MAIN,
+            )
             with self.indented():
                 assert refl_t is not None
+                registry = "__gel_type_reflection_registry__"
                 self.write(
-                    f"__gel_type_reflection_registry__: "
+                    f"{registry}: "
                     f"{classvar}[dict[{uuid}, {refl_t}]] = {{}}"
                 )
+                self.write()
+                self.write("@classmethod")
+                self.write(
+                    f"def __gel_type_reflection_register__("
+                    f"cls, rtype: {refl_t}) -> None:")
+                with self.indented():
+                    self.write(f"cls.{registry}[rtype.id] = rtype")
+
             class_kwargs["metaclass"] = "_BaseObjectMeta"
             self.write()
             self.write()

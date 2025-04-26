@@ -177,6 +177,11 @@ class _ImportKind(enum.Enum):
     self = enum.auto()
 
 
+class CodeSection(enum.Enum):
+    main = enum.auto()
+    after_late_import = enum.auto()
+
+
 _ImportKey: TypeAlias = tuple[_ImportSection, ImportTime, _ImportKind]
 _Imports: TypeAlias = defaultdict[_ImportKey, defaultdict[str, set[str]]]
 
@@ -187,13 +192,21 @@ class GeneratedModule:
     def __init__(self, preamble: str) -> None:
         self._comment_preamble = preamble
         self._indent_level = 0
-        self._chunks: list[str] = []
+        self._content: defaultdict[CodeSection, list[str]] = defaultdict(list)
+        self._code_section = CodeSection.main
+        self._code = self._content[self._code_section]
         self._imports: _Imports = defaultdict(lambda: defaultdict(set))
         self._globals: set[str] = set()
         self._imported_names: dict[tuple[str, str, str | None, ImportTime], str] = {}
 
     def has_content(self) -> bool:
-        return len(self._chunks) > 0
+        return any(
+            self.section_has_content(section)
+            for section in self._content
+        )
+
+    def section_has_content(self, section: CodeSection) -> bool:
+        return bool(self._content[section])
 
     def indent(self, levels: int = 1) -> None:
         self._indent_level += levels
@@ -350,15 +363,26 @@ class GeneratedModule:
         finally:
             self._indent_level -= 1
 
+    @contextlib.contextmanager
+    def code_section(self, section: CodeSection) -> Iterator[None]:
+        orig_section = self._code_section
+        self._code_section = section
+        self._code = self._content[self._code_section]
+        try:
+            yield
+        finally:
+            self._code_section = orig_section
+            self._code = self._content[self._code_section]
+
     def reset_indent(self) -> None:
         self._indent_level = 0
 
     def write(self, text: str = "") -> None:
         chunk = textwrap.indent(text, prefix=self.INDENT * self._indent_level)
-        self._chunks.append(chunk)
+        self._code.append(chunk)
 
     def write_section_break(self, size: int = 2) -> None:
-        self._chunks.extend([""] * size)
+        self._code.extend([""] * size)
 
     def get_comment_preamble(self) -> str:
         return self._comment_preamble
@@ -451,6 +475,14 @@ class GeneratedModule:
         out.write("\n\n")
         out.write(self.render_imports())
         out.write("\n\n\n")
-        out.write("\n".join(self._chunks))
-        out.write("\n")
+        main_code = self._content[CodeSection.main]
+        if main_code:
+            out.write("\n".join(main_code))
+            out.write("\n")
         out.write(self.render_late_imports())
+        late_code = self._content[CodeSection.after_late_import]
+        if late_code:
+            out.write("\n")
+            out.write("\n")
+            out.write("\n".join(late_code))
+            out.write("\n")
