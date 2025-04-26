@@ -659,9 +659,10 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                     import_time=ImportTime.late_runtime,
                 )
 
-            with self.code_section(CodeSection.after_late_import):
-                for objtype in objtypes:
-                    self.write_object_type_reflection(objtype)
+            if self._schema_part is not reflection.SchemaPart.STD:
+                with self.code_section(CodeSection.after_late_import):
+                    for objtype in objtypes:
+                        self.write_object_type_reflection(objtype)
 
     def _transform_classnames(
         self,
@@ -731,10 +732,12 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             import_time=base.ImportTime.late_runtime,
             aspect=ModuleAspect.MAIN,
         )
+        uuid_t = self.import_name("uuid", "UUID")
         self.write(f"type({name}).__gel_type_reflection_register__(")
         with self.indented():
             self.write(f"{refl_t}(")
             with self.indented():
+                self.write(f"id={uuid_t}({str(objtype.id)!r}),")
                 self.write(f"name={objtype.name!r},")
                 self.write(f"builtin={objtype.builtin!r},")
                 self.write(f"internal={objtype.internal!r},")
@@ -852,6 +855,16 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                 with self.indented():
                     self.write(f"cls.{registry}[rtype.id] = rtype")
 
+                self.write()
+                self.write("@classmethod")
+                self.write(
+                    f"def get_type_reflection("
+                    f"cls, tid: {uuid}) -> {refl_t}:")
+                with self.indented():
+                    self.write(f"return cls.{registry}[tid]")
+
+                self.write()
+
             class_kwargs["metaclass"] = "_BaseObjectMeta"
             self.write()
             self.write()
@@ -918,32 +931,55 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             priv_attr = self.import_name("gel.models.pydantic", "PrivateAttr")
             comp_f = self.import_name("gel.models.pydantic", "computed_field")
             for ptr in objtype.pointers:
-                if ptr.name not in {"id", "__type__"}:
-                    continue
-                aspect = ModuleAspect.MAIN if ptr.name == "__type__" else None
-                ptr_type = self.get_ptr_type(objtype, ptr, aspect=aspect)
-                self.write(f"_p__{ptr.name}: {ptr_type} = {priv_attr}()")
-                self.write(f"@{comp_f}  # type: ignore[prop-decorator]")
-                self.write("@property")
-                self.write(f"def {ptr.name}(self) -> {ptr_type}:")
-                with self.indented():
-                    self.write(f"return self._p__{ptr.name}")
+                if ptr.name == "__type__":
+                    ptr_type = self.get_ptr_type(
+                        objtype,
+                        ptr,
+                        aspect=ModuleAspect.MAIN,
+                    )
+                    self.write(
+                        f"@{comp_f}(repr=False)  "
+                        f"# type: ignore[prop-decorator]"
+                    )
+                    self.write("@property")
+                    self.write(f"def {ptr.name}(self) -> {ptr_type}:")
+                    with self.indented():
+                        self.write("cls = type(self)")
+                        self.write("tid = cls.__gel_type_reflection__.id")
+                        self.write(f"return type(cls).get_type_reflection(tid)")
+                elif ptr.name == "id":
+                    ptr_type = self.get_ptr_type(objtype, ptr)
+                    self.write(f"_p__{ptr.name}: {ptr_type} = {priv_attr}()")
+                    self.write(f"@{comp_f}  # type: ignore[prop-decorator]")
+                    self.write("@property")
+                    self.write(f"def {ptr.name}(self) -> {ptr_type}:")
+                    with self.indented():
+                        self.write(f"return self._p__{ptr.name}")
             self.write()
 
-        reg_pointers = [
-            (p, org) for p, org in self._get_pointer_origins(objtype)
-            if p.name not in {"id", "__type__"}
-        ]
+        def _filter(
+            v: tuple[reflection.Pointer, reflection.ObjectType],
+        ) -> bool:
+            ptr, owning_objtype = v
+            if ptr.name == "__type__":
+                return False
+            if not objtype.name.startswith("schema::") and ptr.name == "id":
+                return False
+            if (
+                owning_objtype.name.startswith("schema::")
+                and ptr.name.startswith("is_")
+                and ptr.is_computed
+            ):
+                # Skip deprecated schema props (is_-prefixed).
+                return False
+            return True
+
+        reg_pointers = list(
+            filter(_filter, self._get_pointer_origins(objtype)))
         args = ["self"]
         if reg_pointers:
             args.extend(["/", "*"])
         for ptr, org_objtype in reg_pointers:
-            if (
-                org_objtype.name.startswith("schema::")
-                and ptr.name.startswith("is_")
-                and ptr.is_computed
-            ):
-                continue
             init_ptr_t = self.get_ptr_type(
                 org_objtype,
                 ptr,
@@ -969,6 +1005,16 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                 )
                 self.write('"""')
                 self.write("...")
+                self.write()
+        if objtype.name.startswith("schema::"):
+            self.write(f"if not {type_checking}:")
+            with self.indented():
+                self.write("def __init__(self, /, **kwargs: Any) -> None:")
+                with self.indented():
+                    self.write('_id = kwargs.pop("id", None)')
+                    self.write("super().__init__(**kwargs)")
+                    self.write("self._p__id = _id")
+            self.write()
 
     def write_object_type_link_variants(
         self,
