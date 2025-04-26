@@ -25,6 +25,7 @@ from collections.abc import (
     Sequence,
 )
 
+import dataclasses
 import uuid
 
 import pydantic
@@ -114,10 +115,6 @@ class ValidatedType(parametric.SingleParametricType[T]):
         )
 
 
-class GelMetadata(NamedTuple):
-    schema_name: str
-
-
 class GelPointer(pydantic.fields.FieldInfo):
     __slots__ = tuple(pydantic.fields.FieldInfo.__slots__) + ("_gel_name",)
 
@@ -132,6 +129,12 @@ class GelPointer(pydantic.fields.FieldInfo):
 
 class Exclusive:
     pass
+
+
+@dataclasses.dataclass(kw_only=True, frozen=True)
+class ObjectTypeReflection:
+    id: uuid.UUID
+    name: str
 
 
 def _get_pointer_from_field(
@@ -165,7 +168,7 @@ class GelModelMeta(_model_construction.ModelMetaclass):
 
 
 class GelModel(pydantic.BaseModel, metaclass=GelModelMeta):
-    __gel_metadata__: ClassVar[GelMetadata]
+    __gel_type_reflection__: ClassVar[ObjectTypeReflection]
 
     def __init__(self, /, **kwargs: Any) -> None:
         super().__init__(**kwargs)

@@ -352,28 +352,15 @@ class BaseGeneratedModule:
         module: str,
         name: str,
         *,
+        alias: str | None = None,
         import_time: ImportTime = ImportTime.runtime,
     ) -> str:
-        return self.py_file.import_name(module, name, import_time=import_time)
-
-    def import_names(self, module: str, *names: str, **aliases: str) -> None:
-        self.py_file.import_names(module, *names, **aliases)
-
-    def import_names_late(
-        self,
-        module: str,
-        *names: str,
-        **aliases: str,
-    ) -> None:
-        self.py_file.import_names_late(module, *names, **aliases)
-
-    def import_type_names(
-        self,
-        module: str,
-        *names: str,
-        **aliases: str,
-    ) -> None:
-        self.py_file.import_type_names(module, *names, **aliases)
+        return self.py_file.import_name(
+            module,
+            name,
+            alias=alias,
+            import_time=import_time,
+        )
 
     @contextmanager
     def indented(self) -> Iterator[None]:
@@ -469,10 +456,18 @@ class BaseGeneratedModule:
     ) -> str:
         base_type = base.TYPE_MAPPING.get(type.name)
         if base_type is not None:
-            base_import = base.TYPE_IMPORTS.get(type.name)
-            if base_import is not None:
-                self.import_names(base_import)
-            return base_type
+            if isinstance(base_type, str):
+                if self.py_file.has_global(base_type):
+                    # Schema shadows a builtin, disambiguate.
+                    base_type = ("builtins", base_type)
+                else:
+                    # Unshadowed Python builtin.
+                    return base_type
+
+            return self.import_name(
+                *base_type,
+                import_time=import_time,
+            )
 
         if reflection.is_array_type(type):
             elem_type = self.get_type(
@@ -532,22 +527,15 @@ class BaseGeneratedModule:
         if rel_import is None:
             result = imported_name
         else:
-            if import_time is ImportTime.late_runtime:
-                do_import = self.import_names_late
-            elif import_time is ImportTime.runtime:
-                do_import = self.import_names
-            else:
-                do_import = self.import_type_names
+            result = self.import_name(
+                rel_import.module,
+                rel_import.name,
+                alias=rel_import.alias,
+                import_time=import_time,
+            )
 
             if rel_import.alias is not None:
-                do_import(
-                    rel_import.module,
-                    **{rel_import.alias: rel_import.name},
-                )
-                result = f"{rel_import.alias}.{imported_name}"
-            else:
-                do_import(rel_import.module, rel_import.name)
-                result = rel_import.name
+                result = f"{result}.{imported_name}"
 
         self._type_import_cache[cache_key] = result
         return result
@@ -591,9 +579,9 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         with self.aspect(ModuleAspect.VARIANTS):
             for type_name, type in scalar_types.items():
                 if type.enum_values:
-                    self.import_names("gel.polyfills", "StrEnum")
+                    strenum = self.import_name("gel.polyfills", "StrEnum")
                     self.write(
-                        f"class {type_name}(StrEnum):")
+                        f"class {type_name}({strenum}):")
                     with self.indented():
                         self.write_description(type)
                         for value in type.enum_values:
@@ -651,16 +639,15 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                     import_name=True,
                 )
                 assert rel_import is not None
-                if rel_import.alias is not None:
-                    self.import_names_late(
-                        rel_import.module,
-                        **{rel_import.alias: rel_import.name},
-                    )
-                else:
-                    self.import_names_late(
-                        rel_import.module,
-                        rel_import.name,
-                    )
+                self.import_name(
+                    rel_import.module,
+                    rel_import.name,
+                    alias=rel_import.alias,
+                    import_time=ImportTime.late_runtime,
+                )
+
+            for objtype in objtypes:
+                self.write_object_type_reflection(objtype)
 
     def _transform_classnames(
         self,
@@ -681,6 +668,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         *,
         prepend_bases: list[str] | None = None,
         append_bases: list[str] | None = None,
+        class_kwargs: dict[str, str] | None = None,
         transform: None | Callable[[str], str] = None,
     ) -> str:
         if transform is not None:
@@ -688,9 +676,11 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         else:
             bases = base_types
 
-        all_bases = (prepend_bases or []) + bases + (append_bases or [])
-        if all_bases:
-            return self.format_list(f"class {class_name}({{list}}):", all_bases)
+        args = (prepend_bases or []) + bases + (append_bases or [])
+        if class_kwargs:
+            args.extend(f"{k}={v}" for k, v in class_kwargs.items())
+        if args:
+            return self.format_list(f"class {class_name}({{list}}):", args)
         else:
             return f"class {class_name}:"
 
@@ -701,16 +691,24 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         *,
         prepend_bases: list[str] | None = None,
         append_bases: list[str] | None = None,
-        transform: None | Callable[[str], str] = None,
+        class_kwargs: dict[str, str] | None = None,
+        transform: Callable[[str], str] | None = None,
     ) -> None:
         class_line = self._format_class_line(
             class_name,
             base_types,
             prepend_bases=prepend_bases,
             append_bases=append_bases,
+            class_kwargs=class_kwargs,
             transform=transform,
         )
         self.write(class_line)
+
+    def write_object_type_reflection(
+        self,
+        objtype: reflection.ObjectType,
+    ) -> None:
+        pass
 
     def write_object_type_variants(
         self,
@@ -742,7 +740,16 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             transform=_mangle_typeof,
         )
         pointers = objtype.pointers
+        otr = self.import_name("gel.models.pydantic", "ObjectTypeReflection")
+        uuid = self.import_name("uuid", "UUID")
         with self.indented():
+            self.write(f"__gel_type_reflection__ = {otr}(")
+            with self.indented():
+                self.write(f"id={uuid}({str(objtype.id)!r}),")
+                self.write(f"name={objtype.name!r},")
+            self.write(")")
+            self.write()
+
             self._write_class_line(
                 "__typeof__",
                 base_types,
@@ -781,6 +788,30 @@ class GeneratedSchemaModule(BaseGeneratedModule):
 
         self.write()
         self.write()
+        class_kwargs = {}
+        if objtype.name == "std::BaseObject":
+            gel_meta = self.import_name("gel.models.pydantic", "GelModelMeta")
+            uuid = self.import_name("uuid", "UUID")
+            classvar = self.import_name("typing", "ClassVar")
+            self._write_class_line("_BaseObjectMeta", [gel_meta])
+            refl_t = None
+            for ptr in objtype.pointers:
+                if ptr.name == "__type__":
+                    refl_t = self.get_type(
+                        self._types[ptr.target_id],
+                        import_time=base.ImportTime.typecheck,
+                    )
+                    break
+            with self.indented():
+                assert refl_t is not None
+                self.write(
+                    f"__gel_type_reflection_registry__: "
+                    f"{classvar}[dict[{uuid}, {refl_t}]] = {{}}"
+                )
+            class_kwargs["metaclass"] = "_BaseObjectMeta"
+            self.write()
+            self.write()
+
         if not base_types:
             gel_model = self.import_name("gel.models.pydantic", "GelModel")
             vbase_types = [gel_model]
@@ -790,6 +821,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             name,
             vbase_types,
             prepend_bases=[typeof_class],
+            class_kwargs=class_kwargs,
         )
         with self.indented():
             self._write_base_object_type_body(objtype, typeof_class)
@@ -1121,12 +1153,12 @@ class GeneratedGlobalModule(BaseGeneratedModule):
         self,
         t: reflection.NamedTupleType,
     ) -> None:
-        self.import_names("typing", "NamedTuple")
+        namedtuple = self.import_name("typing", "NamedTuple")
 
         self.write("#")
         self.write(f"# tuple type {t.name}")
         self.write("#")
-        self.write(f"class {self.get_tuple_name(t)}(NamedTuple):")
+        self.write(f"class {self.get_tuple_name(t)}({namedtuple}):")
         for elem in t.tuple_elements:
             elem_type = self.get_type(
                 self._types[elem.type_id],

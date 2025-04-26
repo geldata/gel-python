@@ -15,6 +15,7 @@ from ._support import (
 )
 
 from ._types import (
+    Type,
     AnyType,
     ArrayType,
     NamedTupleType,
@@ -40,6 +41,7 @@ from ._modules import (
 )
 
 __all__ = (
+    "Type",
     "AnyType",
     "ArrayType",
     "Cardinality",

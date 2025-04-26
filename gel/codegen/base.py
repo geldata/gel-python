@@ -55,7 +55,7 @@ if pyver_env := os.environ.get("GEL_PYTHON_CODEGEN_PY_VER"):
 else:
     SYS_VERSION_INFO = sys.version_info[:2]
 
-TYPE_MAPPING = {
+TYPE_MAPPING: dict[str, str | tuple[str, str]] = {
     "std::str": "str",
     "std::float32": "float",
     "std::float64": "float",
@@ -64,43 +64,27 @@ TYPE_MAPPING = {
     "std::int64": "int",
     "std::bigint": "int",
     "std::bool": "bool",
-    "std::uuid": "uuid.UUID",
+    "std::uuid": ("uuid", "UUID"),
     "std::bytes": "bytes",
-    "std::decimal": "decimal.Decimal",
-    "std::datetime": "datetime.datetime",
-    "std::duration": "datetime.timedelta",
+    "std::decimal": ("decimal", "Decimal"),
+    "std::datetime": ("datetime", "datetime"),
+    "std::duration": ("datetime", "timedelta"),
     "std::json": "str",
-    "cal::local_date": "datetime.date",
-    "cal::local_time": "datetime.time",
-    "cal::local_datetime": "datetime.datetime",
-    "cal::relative_duration": "gel.RelativeDuration",
-    "cal::date_duration": "gel.DateDuration",
-    "cfg::memory": "gel.ConfigMemory",
-    "ext::pgvector::vector": "array.array",
+    "cal::local_date": ("datetime", "date"),
+    "cal::local_time": ("datetime", "time"),
+    "cal::local_datetime": ("datetime", "datetime"),
+    "cal::relative_duration": ("gel", "RelativeDuration"),
+    "cal::date_duration": ("gel", "DateDuration"),
+    "cfg::memory": ("gel", "ConfigMemory"),
+    "ext::pgvector::vector": ("array", "array"),
 }
 
-TYPE_IMPORTS = {
-    "std::uuid": "uuid",
-    "std::decimal": "decimal",
-    "std::datetime": "datetime",
-    "std::duration": "datetime",
-    "cal::local_date": "datetime",
-    "cal::local_time": "datetime",
-    "cal::local_datetime": "datetime",
-    "ext::pgvector::vector": "array",
-}
-
-INPUT_TYPE_MAPPING = TYPE_MAPPING.copy()
+INPUT_TYPE_MAPPING: dict[
+    str, str | tuple[str, str] | tuple[str, str, str]
+] = TYPE_MAPPING.copy()
 INPUT_TYPE_MAPPING.update(
     {
-        "ext::pgvector::vector": "typing.Sequence[float]",
-    }
-)
-
-INPUT_TYPE_IMPORTS = TYPE_IMPORTS.copy()
-INPUT_TYPE_IMPORTS.update(
-    {
-        "ext::pgvector::vector": "typing",
+        "ext::pgvector::vector": ("typing", "Sequence", "[float]"),
     }
 )
 
@@ -206,7 +190,7 @@ class GeneratedModule:
         self._chunks: list[str] = []
         self._imports: _Imports = defaultdict(lambda: defaultdict(set))
         self._globals: set[str] = set()
-        self._imported_names: dict[tuple[str, str, ImportTime], str] = {}
+        self._imported_names: dict[tuple[str, str, str | None, ImportTime], str] = {}
 
     def has_content(self) -> bool:
         return len(self._chunks) > 0
@@ -217,6 +201,9 @@ class GeneratedModule:
     def dedent(self, levels: int = 1) -> None:
         if self._indent_level > 0:
             self._indent_level -= levels
+
+    def has_global(self, name: str) -> bool:
+        return name in self._globals
 
     def add_global(self, name: str) -> None:
         self._globals.add(name)
@@ -272,72 +259,88 @@ class GeneratedModule:
             import_time=import_time,
         )
 
+    def _disambiguate_import_name(self, name: str) -> str:
+        if name not in self._globals:
+            return name
+
+        ctr = 0
+
+        def _mangle(name: str) -> str:
+            nonlocal ctr
+            if ctr == 0:
+                return f"__{name}__"
+            else:
+                return f"__{name}_{ctr}__"
+
+        mangled = _mangle(name)
+        while mangled in self._globals:
+            ctr += 1
+            mangled = _mangle(name)
+
+        return mangled
+
     def import_name(
         self,
         module: str,
         name: str,
         *,
+        alias: str | None = None,
         import_time: ImportTime = ImportTime.runtime,
     ) -> str:
-        key = (module, name, import_time)
+        key = (module, name, alias, import_time)
         imported = self._imported_names.get(key)
         if imported is not None:
             return imported
 
-        if name not in self._globals:
+        if import_time is ImportTime.late_runtime:
+            # See if there was a previous eager import for same name
+            early_key = (module, name, alias, ImportTime.runtime)
+            imported = self._imported_names.get(early_key)
+            if imported is not None:
+                self._imported_names[key] = imported
+                return imported
+
+        if alias is not None:
+            imported = self._disambiguate_import_name(alias)
+            self._import_names(
+                module,
+                (),
+                {imported: name},
+                import_time=import_time,
+            )
+            self._globals.add(imported)
+        elif name != "." and name not in self._globals:
             self._import_names(module, (name,), {}, import_time=import_time)
             self._globals.add(name)
             imported = name
-        elif module not in self._globals:
-            self._import_names(module, (), {}, import_time=import_time)
-            self._globals.add(module)
-            imported = f"{module}.{name}"
         else:
-            ctr = 0
+            parent_module, _, tail_module = module.rpartition(".")
+            if parent_module:
+                imported_as = self._disambiguate_import_name(tail_module)
+                self._import_names(
+                    parent_module,
+                    (),
+                    {imported_as: tail_module},
+                    import_time=import_time,
+                )
 
-            def _mangle(name: str) -> str:
-                nonlocal ctr
-                if ctr == 0:
-                    return f"__{name}__"
-                else:
-                    return f"__{name}_{ctr}__"
+            else:
+                imported_as = self._disambiguate_import_name(module)
+                self._import_names(
+                    module,
+                    (),
+                    {imported_as: "."},
+                    import_time=import_time,
+                )
 
-            mangled = _mangle(name)
-            while mangled in self._globals:
-                ctr += 1
-                mangled = _mangle(name)
-
-            self._import_names(
-                module, (), {mangled: "."}, import_time=import_time)
-            self._globals.add(mangled)
-            imported = f"{mangled}.{name}"
+            self._globals.add(imported_as)
+            if name == ".":
+                imported = imported_as
+            else:
+                imported = f"{imported_as}.{name}"
 
         self._imported_names[key] = imported
-
         return imported
-
-    def import_names(self, module: str, *names: str, **aliases: str) -> None:
-        self._import_names(
-            module, names, aliases, import_time=ImportTime.runtime)
-
-    def import_names_late(
-        self,
-        module: str,
-        *names: str,
-        **aliases: str,
-    ) -> None:
-        self._import_names(
-            module, names, aliases, import_time=ImportTime.late_runtime)
-
-    def import_type_names(
-        self,
-        module: str,
-        *names: str,
-        **aliases: str,
-    ) -> None:
-        self.import_names("typing")
-        self._import_names(
-            module, names, aliases, import_time=ImportTime.typecheck)
 
     @contextlib.contextmanager
     def indented(self) -> Iterator[None]:
@@ -361,19 +364,24 @@ class GeneratedModule:
         return self._comment_preamble
 
     def render_imports(self) -> str:
-        sections = ["from __future__ import annotations"]
-        for section_key in _ImportSection.__members__.values():
-            key = (section_key, ImportTime.runtime)
-            sections.append(self._render_imports(*key))
-
         typecheck_sections = []
         for section_key in _ImportSection.__members__.values():
             key = (section_key, ImportTime.typecheck)
             typecheck_sections.append(
                 self._render_imports(*key, indent="    "))
 
+        tc = None
         if any(typecheck_sections):
-            sections.append("if typing.TYPE_CHECKING:")
+            tc = self.import_name("typing", "TYPE_CHECKING")
+
+        sections = ["from __future__ import annotations"]
+        for section_key in _ImportSection.__members__.values():
+            key = (section_key, ImportTime.runtime)
+            sections.append(self._render_imports(*key))
+
+        if any(typecheck_sections):
+            assert tc
+            sections.append(f"if {tc}:")
             sections.extend(typecheck_sections)
 
         return "\n\n".join(filter(None, sections))
