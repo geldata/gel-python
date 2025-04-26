@@ -27,6 +27,7 @@ from typing import (
 
 import argparse
 import collections
+import collections.abc
 import contextlib
 import enum
 import getpass
@@ -204,6 +205,8 @@ class GeneratedModule:
         self._indent_level = 0
         self._chunks: list[str] = []
         self._imports: _Imports = defaultdict(lambda: defaultdict(set))
+        self._globals: set[str] = set()
+        self._imported_names: dict[tuple[str, str, ImportTime], str] = {}
 
     def has_content(self) -> bool:
         return len(self._chunks) > 0
@@ -214,6 +217,12 @@ class GeneratedModule:
     def dedent(self, levels: int = 1) -> None:
         if self._indent_level > 0:
             self._indent_level -= levels
+
+    def add_global(self, name: str) -> None:
+        self._globals.add(name)
+
+    def udpate_globals(self, names: collections.abc.Iterable[str]) -> None:
+        self._globals.update(names)
 
     def _import_module(
         self,
@@ -262,6 +271,50 @@ class GeneratedModule:
             {_ImportKind.names: all_names, _ImportKind.self: all_self_aliases},
             import_time=import_time,
         )
+
+    def import_name(
+        self,
+        module: str,
+        name: str,
+        *,
+        import_time: ImportTime = ImportTime.runtime,
+    ) -> str:
+        key = (module, name, import_time)
+        imported = self._imported_names.get(key)
+        if imported is not None:
+            return imported
+
+        if name not in self._globals:
+            self._import_names(module, (name,), {}, import_time=import_time)
+            self._globals.add(name)
+            imported = name
+        elif module not in self._globals:
+            self._import_names(module, (), {}, import_time=import_time)
+            self._globals.add(module)
+            imported = f"{module}.{name}"
+        else:
+            ctr = 0
+
+            def _mangle(name: str) -> str:
+                nonlocal ctr
+                if ctr == 0:
+                    return f"__{name}__"
+                else:
+                    return f"__{name}_{ctr}__"
+
+            mangled = _mangle(name)
+            while mangled in self._globals:
+                ctr += 1
+                mangled = _mangle(name)
+
+            self._import_names(
+                module, (), {mangled: "."}, import_time=import_time)
+            self._globals.add(mangled)
+            imported = f"{mangled}.{name}"
+
+        self._imported_names[key] = imported
+
+        return imported
 
     def import_names(self, module: str, *names: str, **aliases: str) -> None:
         self._import_names(

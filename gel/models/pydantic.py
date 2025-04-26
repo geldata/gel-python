@@ -5,12 +5,15 @@
 from __future__ import annotations
 
 from typing import (
+    Annotated,
     Any,
     ClassVar,
     NamedTuple,
     TypeVar,
     cast,
 )
+
+import typing_extensions
 
 import pydantic
 import pydantic.fields
@@ -25,6 +28,24 @@ from gel._internal import _typing_parametric as parametric
 
 T = TypeVar("T")
 
+
+DistinctList = typing_extensions.TypeAliasType(
+    "DistinctList",
+    "Annotated[list[T], Field(default_factory=list)]",
+    type_params=(T,)
+)
+
+RequiredDistinctList = typing_extensions.TypeAliasType(
+    "RequiredDistinctList",
+    "list[T]",
+    type_params=(T,)
+)
+
+OptionalWithDefault = typing_extensions.TypeAliasType(
+    "OptionalWithDefault",
+    "Annotated[T, Field(default=None)]",
+    type_params=(T,)
+)
 
 
 class ValidatedType(parametric.SingleParametricType[T]):
