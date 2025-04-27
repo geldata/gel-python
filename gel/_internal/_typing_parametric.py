@@ -15,11 +15,16 @@ from typing import (
     Dict,
     get_type_hints,
 )
+from typing_extensions import (
+    TypeAliasType,
+)
 
-import functools
+import contextvars
 import types
 import sys
 import typing
+import weakref
+from types import GenericAlias
 
 from . import _typing_inspect
 
@@ -30,10 +35,41 @@ __all__ = [
 ]
 
 
+ParametricTypesCacheKey = tuple[Any, Any, tuple[Any, ...]]
+ParametricTypesCache = weakref.WeakValueDictionary[
+    ParametricTypesCacheKey,
+    'type[ParametricType]',
+]
+
+_PARAMETRIC_TYPES_CACHE: contextvars.ContextVar[ParametricTypesCache | None] = (
+    contextvars.ContextVar('_GEL_PARAMETRIC_TYPES_CACHE', default=None)
+)
+
+
+def _get_cached_parametric_type(
+    parent: type[ParametricType],
+    typevars: Any,
+) -> type[ParametricType] | None:
+    parametric_types_cache = _PARAMETRIC_TYPES_CACHE.get()
+    if parametric_types_cache is None:
+        parametric_types_cache = ParametricTypesCache()
+        _PARAMETRIC_TYPES_CACHE.set(parametric_types_cache)
+    return parametric_types_cache.get(typevars)
+
+
+def _set_cached_parametric_type(
+    parent: type[ParametricType],
+    typevars: Any,
+    type_: type[ParametricType],
+) -> None:
+    parametric_types_cache = _PARAMETRIC_TYPES_CACHE.get()
+    if parametric_types_cache is None:
+        parametric_types_cache = ParametricTypesCache()
+        _PARAMETRIC_TYPES_CACHE.set(parametric_types_cache)
+    parametric_types_cache[typevars] = type_
+
+
 T = TypeVar("T", covariant=True)
-
-
-from types import GenericAlias
 
 
 class ParametricType:
@@ -186,11 +222,10 @@ class ParametricType:
 
         super().__init__()
 
-    @classmethod
-    @functools.lru_cache()
     def __class_getitem__(
-        cls, params: Union[Union[type, str], Tuple[Union[type, str], ...]]
-    ) -> Type[ParametricType]:
+        cls,
+        params: type[Any] | tuple[type[Any], ...],
+    ) -> type[ParametricType]:
         """Return a dynamic subclass parametrized with `params`.
 
         We cannot use `_GenericAlias` provided by `Generic[T]` because the
@@ -202,6 +237,10 @@ class ParametricType:
         """
         if cls.types is not None:
             raise TypeError(f"{cls!r} is already parametrized")
+
+        result = _get_cached_parametric_type(cls, params)
+        if result is not None:
+            return result
 
         if not isinstance(params, tuple):
             params = (params,)
@@ -264,6 +303,9 @@ class ParametricType:
         result = type(name, bases, type_dict)
         assert issubclass(result, ParametricType)
         result._forward_refs = forward_refs
+
+        _set_cached_parametric_type(cls, params, result)
+
         return result
 
     @classmethod

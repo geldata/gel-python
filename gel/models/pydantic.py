@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import typing
 from typing import (
     Annotated,
     Any,
@@ -27,6 +28,7 @@ from collections.abc import (
 
 import dataclasses
 import uuid
+import warnings
 
 import pydantic
 import pydantic.fields
@@ -40,58 +42,7 @@ from pydantic import computed_field as computed_field
 from gel._internal import _typing_parametric as parametric
 
 from . import lists
-
-
-class _DistinctList(lists.DistinctList[lists.T], Generic[lists.T]):
-    @classmethod
-    def __get_pydantic_core_schema__(
-        cls,
-        _source_type: Any,
-        handler: pydantic.GetCoreSchemaHandler,
-    ) -> pydantic_core.CoreSchema:
-        return pydantic_schema.no_info_before_validator_function(
-            cls._validate,
-            pydantic_schema.list_schema(
-                items_schema=pydantic_schema.any_schema(),
-            ),
-        )
-
-    @classmethod
-    def _validate(cls, value: Any) -> Self:
-        if isinstance(value, cls):
-            return value
-        if isinstance(value, list):
-            return cls(value)
-        raise TypeError(f'could not convert {type(value)} to {cls.__name__}')
-
-    @classmethod
-    def _check_value(cls, value: Any) -> lists.T:
-        t = cls.type
-        if isinstance(value, t):
-            return value
-        elif (
-            issubclass(t, ProxyModel)
-            and isinstance(value, t.__bases__[0])
-        ):
-            return t.__from_object__(value)  # type: ignore [return-value]
-
-        raise ValueError(
-            f"{cls!r} accepts only values of type {cls.type!r}, "
-            f"got {type(value)!r}"
-        )
-
-
-DistinctList = TypeAliasType(
-    "DistinctList",
-    "Annotated[_DistinctList[lists.T], Field(default_factory=_DistinctList)]",
-    type_params=(lists.T,)
-)
-
-RequiredDistinctList = TypeAliasType(
-    "RequiredDistinctList",
-    "list[lists.T]",
-    type_params=(lists.T,)
-)
+from . import unsetid
 
 T = TypeVar("T")
 
@@ -155,10 +106,16 @@ class GelModelMeta(_model_construction.ModelMetaclass):
         namespace: dict[str, Any],
         **kwargs: Any,
     ) -> GelModelMeta:
-        new_cls = cast(
-            type[pydantic.BaseModel],
-            super().__new__(cls, name, bases, namespace, **kwargs),
-        )
+        with warnings.catch_warnings():
+            # Make pydantic shut up about attribute redefinition.
+            warnings.filterwarnings(
+                'ignore',
+                message=r'.*shadows an attribute in parent.*'
+            )
+            new_cls = cast(
+                type[pydantic.BaseModel],
+                super().__new__(cls, name, bases, namespace, **kwargs),
+            )
 
         for name, field in new_cls.__pydantic_fields__.items():
             col = _get_pointer_from_field(name, field)
@@ -174,7 +131,7 @@ class GelModelMetadata:
 class GelModel(pydantic.BaseModel, GelModelMetadata, metaclass=GelModelMeta):
     def __init__(self, /, **kwargs: Any) -> None:
         super().__init__(**kwargs)
-        self._p__id: uuid.UUID | None = None
+        self._p__id: uuid.UUID = unsetid.UNSET_UUID
         self._p____type__ = None
 
     def __eq__(self, other: Any) -> bool:
@@ -187,14 +144,86 @@ class GelModel(pydantic.BaseModel, GelModelMetadata, metaclass=GelModelMeta):
             return self._p__id == other._p__id
 
     def __hash__(self) -> int:
-        if self._p__id is None:
+        if self._p__id is unsetid.UNSET_UUID:
             raise TypeError(
                 "Model instances without id value are unhashable")
 
         return hash(self._p__id)
 
 
-class ProxyModel(Generic[T]):
+MT = TypeVar("MT", bound=GelModel)
+
+
+class ProxyModel(GelModel, Generic[MT]):
+    __proxy_of__: ClassVar[type[MT]]  # type: ignore
+
     @classmethod
-    def __from_object__(cls, obj: T) -> ProxyModel[T]:
+    def __from_object__(cls, obj: MT) -> ProxyModel[MT]:
         return cls()
+
+    @classmethod
+    def __pydantic_init_subclass__(cls, **kwargs: Any) -> None:
+        super().__pydantic_init_subclass__(**kwargs)
+        generic_meta = cls.__pydantic_generic_metadata__
+        if generic_meta["origin"] is ProxyModel and generic_meta["args"]:
+            cls.__proxy_of__ = generic_meta["args"][0]
+
+
+DT = TypeVar("DT", bound=GelModel | ProxyModel[GelModel])
+
+
+class _DistinctList(lists.DistinctList[DT], Generic[DT]):
+    @classmethod
+    def __get_pydantic_core_schema__(
+        cls,
+        source_type: Any,
+        handler: pydantic.GetCoreSchemaHandler,
+    ) -> pydantic_core.CoreSchema:
+        item_type = cls.type
+        if issubclass(item_type, ProxyModel):
+            item_type = item_type.__proxy_of__
+        items_schema = item_type.__pydantic_core_schema__
+        return pydantic_schema.no_info_before_validator_function(
+            cls._validate,
+            schema=pydantic_schema.list_schema(items_schema=items_schema),
+            serialization=pydantic_schema.plain_serializer_function_ser_schema(
+                lambda v: list(v),
+            ),
+        )
+
+    @classmethod
+    def _validate(cls, value: Any) -> Self:
+        if isinstance(value, cls):
+            return value
+        if isinstance(value, list):
+            return cls(value)
+        raise TypeError(f'could not convert {type(value)} to {cls.__name__}')
+
+    @classmethod
+    def _check_value(cls, value: Any) -> DT:
+        t = cls.type
+        if isinstance(value, t):
+            return value
+        elif (
+            issubclass(t, ProxyModel)
+            and isinstance(value, t.__bases__[0])
+        ):
+            return t.__from_object__(value)  # type: ignore [return-value]
+
+        raise ValueError(
+            f"{cls!r} accepts only values of type {cls.type!r}, "
+            f"got {type(value)!r}"
+        )
+
+
+DistinctList = TypeAliasType(
+    "DistinctList",
+    "Annotated[_DistinctList[DT], Field(default_factory=_DistinctList)]",
+    type_params=(DT,)
+)
+
+RequiredDistinctList = TypeAliasType(
+    "RequiredDistinctList",
+    "list[DT]",
+    type_params=(DT,)
+)

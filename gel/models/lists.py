@@ -205,7 +205,7 @@ class DistinctList(
             return NotImplemented
 
     def __repr__(self) -> str:
-        return f"{type(self).__name__}({self._items!r})"
+        return repr(self._items)
 
     def __add__(self, other: Iterable[T]) -> Self:
         new = type(self)(self._items)

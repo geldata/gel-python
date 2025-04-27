@@ -1147,6 +1147,17 @@ class GeneratedSchemaModule(BaseGeneratedModule):
 
         return pointers
 
+    def _py_container_for_multiprop(
+        self,
+        prop: reflection.Pointer,
+    ) -> str:
+        if reflection.is_link(prop):
+            pytype = self.import_name("gel.models.pydantic", "DistinctList")
+        else:
+            pytype = "list"
+
+        return pytype
+
     def get_ptr_type(
         self,
         objtype: reflection.ObjectType,
@@ -1186,9 +1197,8 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         if card.is_optional():
             if style == "annotation":
                 if card.is_multi():
-                    deflist = self.import_name(
-                        "gel.models.pydantic", "DistinctList")
-                    return f"{deflist}[{ptr_type}]"
+                    pytype = self._py_container_for_multiprop(prop)
+                    return f"{pytype}[{ptr_type}]"
                 else:
                     optdef = self.import_name(
                         "gel.models.pydantic", "OptionalWithDefault")
@@ -1197,7 +1207,8 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                 not_required = self.import_name(
                     "typing_extensions", "NotRequired")
                 if card.is_multi():
-                    return f"{not_required}[list[{ptr_type}]]"
+                    pytype = self._py_container_for_multiprop(prop)
+                    return f"{not_required}[{pytype}[{ptr_type}]]"
                 else:
                     return f"{not_required}[{ptr_type}]"
             elif style == "arg":
@@ -1209,9 +1220,8 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                     return f"{opt}[{ptr_type}] = None"
             elif style == "property":
                 if card.is_multi():
-                    deflist = self.import_name(
-                        "gel.models.pydantic", "DistinctList")
-                    return f"{deflist}[{ptr_type}]"
+                    pytype = self._py_container_for_multiprop(prop)
+                    return f"{pytype}[{ptr_type}]"
                 else:
                     opt = self.import_name("typing", "Optional")
                     return f"{opt}[{ptr_type}] = None"
