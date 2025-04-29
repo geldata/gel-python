@@ -17,6 +17,7 @@
 #
 
 from __future__ import annotations
+from re import L
 from typing import (
     Callable,
     DefaultDict,
@@ -25,6 +26,7 @@ from typing import (
     Literal,
     Mapping,
     NamedTuple,
+    Sequence,
     TypedDict,
     Union,
 )
@@ -383,6 +385,16 @@ class BaseGeneratedModule:
             yield
 
     @contextmanager
+    def type_checking(self) -> Iterator[None]:
+        with self.py_file.type_checking():
+            yield
+
+    @contextmanager
+    def not_type_checking(self) -> Iterator[None]:
+        with self.py_file.not_type_checking():
+            yield
+
+    @contextmanager
     def code_section(self, section: CodeSection) -> Iterator[None]:
         with self.py_file.code_section(section):
             yield
@@ -633,9 +645,6 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         for objtype in objtypes:
             self.write_object_type(objtype)
 
-        for objtype in objtypes:
-            self.write_object_type_link_variants(objtype, local=True)
-
         with self.aspect(ModuleAspect.LATE):
             for objtype in objtypes:
                 self.write_object_type_link_variants(objtype, local=False)
@@ -847,27 +856,6 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                         defn = f"{type_alias}('{ptr.name}', '{ptr_t}')"
                         self.write(f"{ptr.name} = {defn}")
 
-                reg_pointers = [
-                    (p, org)
-                    for p, org in self._get_pointer_origins(objtype)
-                    if p.name not in {"id", "__type__"}
-                ]
-                typed_dict = self.import_name("typing", "TypedDict")
-                self.write(f"__init_kwargs__ = {typed_dict}(")
-                with self.indented():
-                    self.write('"__init_kwargs__",')
-                    self.write("{")
-                    with self.indented():
-                        for ptr, org_objtype in reg_pointers:
-                            init_ptr_t = self.get_ptr_type(
-                                org_objtype,
-                                ptr,
-                                style="typeddict",
-                            )
-                            self.write(f'"{ptr.name}": {init_ptr_t!r},')
-                    self.write("}")
-                self.write(")")
-
         self.write()
         self.write()
         class_kwargs = {}
@@ -955,6 +943,33 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                 self.write()
                 typevar = self.import_name("typing", "TypeVar")
                 self.write(f'Any = {typevar}("Any", bound="{name} | Empty")')
+
+            proplinks = self._get_links_with_props(objtype)
+            if base_types:
+                self._write_class_line(
+                    "__links__",
+                    base_types,
+                    transform=lambda s: f"{s}.__links__",
+                )
+            else:
+                lns = self.import_name(
+                    "gel.models.pydantic", "LinkClassNamespace")
+                self._write_class_line(
+                    "__links__",
+                    [lns],
+                )
+
+            with self.indented():
+                if proplinks:
+                    with self.type_checking():
+                        self.write_object_type_link_variants(
+                            objtype,
+                            target_aspect=ModuleAspect.MAIN,
+                            is_forward_decl=True,
+                            local=None,
+                        )
+                else:
+                    self.write("pass")
 
         self.write()
         type_checking = self.import_name("typing", "TYPE_CHECKING")
@@ -1057,16 +1072,12 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                     self.write("self._p__id = _id")
             self.write()
 
-    def write_object_type_link_variants(
+    def _get_links_with_props(
         self,
         objtype: reflection.ObjectType,
-        local: bool = False,
-    ) -> None:
+        local: bool | None = None,
+    ) -> list[reflection.Pointer]:
         type_name = reflection.parse_name(objtype.name)
-        name = type_name.name
-
-        ProxyModel = self.import_name("gel.models.pydantic", "ProxyModel")
-        all_ptr_origins = self._get_all_pointer_origins(objtype)
 
         def _filter(ptr: reflection.Pointer) -> bool:
             if not reflection.is_link(ptr):
@@ -1077,15 +1088,71 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             target_type = self._types[ptr.target_id]
             target_type_name = reflection.parse_name(target_type.name)
 
-            if local != (target_type_name.parent == type_name.parent):
+            if (
+                local is not None
+                and local != (target_type_name.parent == type_name.parent)
+            ):
                 return False
 
             return True
 
-        pointers = list(filter(_filter, objtype.pointers))
+        return list(filter(_filter, objtype.pointers))
+
+    def write_object_type_link_variants(
+        self,
+        objtype: reflection.ObjectType,
+        local: bool | None = False,
+        target_aspect: ModuleAspect | None = None,
+        is_forward_decl: bool = False,
+    ) -> None:
+        pointers = self._get_links_with_props(objtype, local=local)
         if not pointers:
             return
 
+        if is_forward_decl:
+            self._write_object_type_link_variants(
+                objtype,
+                pointers=pointers,
+                target_aspect=target_aspect,
+                is_forward_decl=is_forward_decl,
+            )
+        else:
+            with self.not_type_checking():
+                type_name = reflection.parse_name(objtype.name)
+                obj_class = type_name.name
+                classes = self._write_object_type_link_variants(
+                    objtype,
+                    pointers=pointers,
+                    target_aspect=target_aspect,
+                    is_forward_decl=is_forward_decl,
+                )
+                for ptrname, classname in classes.items():
+                    self.write(f"{classname}.__name__ = {ptrname!r}")
+                    qualname = f"{obj_class}.{ptrname}"
+                    self.write(f"{classname}.__qualname__ = {qualname!r}")
+                    self.write(
+                        f"{obj_class}.__links__.{ptrname} = {classname}")
+                    self.write(f"del {classname}")
+
+    def _write_object_type_link_variants(
+        self,
+        objtype: reflection.ObjectType,
+        pointers: Sequence[reflection.Pointer],
+        local: bool | None = False,
+        target_aspect: ModuleAspect | None = None,
+        is_forward_decl: bool = False,
+    ) -> Mapping[str, str]:
+        type_name = reflection.parse_name(objtype.name)
+        name = type_name.name
+
+        self_t = self.import_name("typing", "Self")
+        ProxyModel = self.import_name("gel.models.pydantic", "ProxyModel")
+        all_ptr_origins = self._get_all_pointer_origins(objtype)
+
+        if target_aspect is None:
+            target_aspect = self.current_aspect
+
+        classnames = {}
         for ptr in pointers:
             ptr_origins = [
                 self.get_type(
@@ -1099,27 +1166,30 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             target_type = self._types[ptr.target_id]
             target = self.get_type(
                 target_type,
-                aspect=self.current_aspect,
+                aspect=target_aspect,
             )
 
-            self.write()
-            self.write()
-            self.write("#")
-            self.write(f"# link {objtype.name}.{ptr.name}")
-            self.write("#")
-            classname = f"{name}__{ptr.name}"
+            if is_forward_decl:
+                classname = ptr.name
+            else:
+                classname = f"{name}__{ptr.name}"
+            classnames[ptr.name] = classname
             self._write_class_line(
                 classname,
                 ptr_origins,
                 append_bases=[target, f"{ProxyModel}[{target}]"],
-                transform=lambda s: f"{s}__{ptr.name}",
+                transform=lambda s: f"{s}.__links__.{ptr.name}",
             )
 
             with self.indented():
+                self.write(
+                    f'"""link {objtype.name}.{ptr.name}: {target_type.name}"""'
+                )
+
                 self._write_class_line(
                     "__lprops__",
                     ptr_origins,
-                    transform=lambda s: f"{s}__{ptr.name}.__lprops__",
+                    transform=lambda s: f"{s}.__links__.{ptr.name}.__lprops__",
                 )
                 with self.indented():
                     assert ptr.pointers
@@ -1148,25 +1218,15 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                 self.write("@classmethod")
                 args = ["cls", f"obj: {target}", "/", "*"] + lprops
                 self.write(self.format_list(
-                    f"def link({{list}}) -> {classname}:", args))
+                    f"def link({{list}}) -> {self_t}:", args))
                 construct = ["obj"] + [f"{n}={n}" for n in lprop_names]
                 with self.indented():
                     self.write(
                         self.format_list("return cls({list})", construct))
 
                 self.write()
-                tc = self.import_name("typing", "TYPE_CHECKING")
-                any = self.import_name("typing", "Any")
-                self.write(f"if {tc}:")
-                with self.indented():
-                    ut = f"{target} | {classname}"
-                    if reflection.Cardinality(ptr.card).is_optional():
-                        ut = f"{ut} | None"
 
-                    self.write(
-                        f"def __set__(self, obj: {any}, value: {ut}) -> None:")
-                    with self.indented():
-                        self.write("...")
+        return classnames
 
     def write_object_type(
         self,
@@ -1271,6 +1331,13 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         if aspect is None:
             aspect = ModuleAspect.VARIANTS
 
+        target_type = self._types[prop.target_id]
+        bare_ptr_type = ptr_type = self.get_type(
+            target_type,
+            aspect=aspect,
+            import_time=ImportTime.late_runtime,
+        )
+
         if (
             reflection.is_link(prop)
             and prop.pointers
@@ -1282,19 +1349,11 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                 target_name = reflection.parse_name(target_type.name)
                 if target_name.parent != objtype_name.parent:
                     aspect = ModuleAspect.LATE
-            rename_as = f"{objtype_name.name}__{prop.name}"
+            ptr_type = f"{objtype_name.name}.__links__.{prop.name}"
             link_type = True
         else:
-            rename_as = None
             link_type = False
 
-        target_type = self._types[prop.target_id]
-        ptr_type = self.get_type(
-            target_type,
-            aspect=aspect,
-            rename_as=rename_as,
-            import_time=ImportTime.late_runtime,
-        )
         card = reflection.Cardinality(prop.card)
         if card.is_optional():
             if style == "annotation":
@@ -1327,9 +1386,8 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                     pytype = self._py_container_for_multiprop(prop)
                     return f"{pytype}[{ptr_type}]"
                 elif link_type:
-                    anno = self.import_name("typing", "Annotated")
-                    field = self.import_name("gel.models.pydantic", "Field")
-                    return f"{anno}[{ptr_type}, {field}(default=None)]"
+                    link = self.import_name("gel.models.pydantic", "OptionalLink")
+                    return f"{link}[{ptr_type}, {bare_ptr_type}] = {link}(default=None)"
                 else:
                     opt = self.import_name("typing", "Optional")
                     return f"{opt}[{ptr_type}] = None"

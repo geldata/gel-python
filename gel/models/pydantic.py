@@ -14,6 +14,8 @@ from typing import (
     NamedTuple,
     TypeVar,
     cast,
+    final,
+    overload,
 )
 
 from typing_extensions import (
@@ -42,6 +44,7 @@ from pydantic import PrivateAttr as PrivateAttr
 from pydantic import computed_field as computed_field
 from pydantic import field_serializer as field_serializer
 from gel._internal import _typing_parametric as parametric
+from gel._internal import _typing_inspect
 
 from . import lists
 from . import unsetid
@@ -53,6 +56,14 @@ OptionalWithDefault = TypeAliasType(
     "Annotated[T, Field(default=None)]",
     type_params=(T,)
 )
+
+
+@final
+class UndefinedType:
+    """A type used as a sentinel for undefined values."""
+
+
+Undefined = UndefinedType()
 
 
 class ValidatedType(parametric.SingleParametricType[T]):
@@ -71,13 +82,8 @@ class ValidatedType(parametric.SingleParametricType[T]):
 class GelPointer(pydantic.fields.FieldInfo):
     __slots__ = tuple(pydantic.fields.FieldInfo.__slots__) + ("_gel_name",)
 
-    def __init__(
-        self,
-        _gel_name: str,
-        **kwargs: Any,
-    ) -> None:
-        super().__init__(**kwargs)
-        self._gel_name = _gel_name
+    def __set_name__(self, owner: Any, name: str) -> None:
+        self._gel_name = name
 
 
 class Exclusive:
@@ -94,10 +100,15 @@ def _get_pointer_from_field(
     name: str,
     field: pydantic.fields.FieldInfo,
 ) -> GelPointer:
-    return GelPointer(
-        _gel_name=name,
-        **field._attributes_set,
-    )
+    kwargs = dict(field._attributes_set)
+    if _typing_inspect.is_generic_alias(field.annotation):
+        if typing.get_origin(field.annotation) is OptionalLink:
+            if "default" not in kwargs:
+                kwargs["default"] = None
+
+    ptr = GelPointer(**kwargs)  # type: ignore
+    ptr.__set_name__(None, name)
+    return ptr
 
 
 class GelModelMeta(_model_construction.ModelMetaclass):
@@ -159,7 +170,7 @@ class GelModel(pydantic.BaseModel, GelModelMetadata, metaclass=GelModelMeta):
         return hash(self._p__id)
 
 
-MT = TypeVar("MT", bound=GelModel)
+MT = TypeVar("MT", bound=GelModel, covariant=True)
 
 
 class ProxyModel(GelModel, Generic[MT]):
@@ -193,7 +204,57 @@ class ProxyModel(GelModel, Generic[MT]):
             )
 
 
-DT = TypeVar("DT", bound=GelModel | ProxyModel[GelModel])
+#
+# Metaclass for type __links__ namespaces.  Facilitates
+# proper forward type resolution by raising a NameError
+# instead of AttributeError when resolving names in its
+# namespace, thus not confusing users of typing._eval_type
+#
+class LinkClassNamespaceMeta(type):
+    def __getattr__(cls, name: str) -> Any:
+        if name == "__isabstractmethod__":
+            return False
+
+        raise NameError(name)
+
+
+class LinkClassNamespace(metaclass=LinkClassNamespaceMeta):
+    pass
+
+
+PT = TypeVar("PT", bound=ProxyModel[GelModel], covariant=True)
+
+
+class OptionalLink(GelPointer, Generic[PT, MT]):
+    if TYPE_CHECKING:
+        @overload
+        def __get__(self, obj: None, objtype: type[Any]) -> type[PT]:
+            ...
+
+        @overload
+        def __get__(self, obj: object, objtype: Any = None) -> PT | None:
+            ...
+
+        def __get__(self, obj: Any, objtype: Any = None) -> type[PT] | PT | None:
+            ...
+
+        def __set__(self, obj: Any, value: MT | None) -> None:
+            ...
+
+    @classmethod
+    def __get_pydantic_core_schema__(
+        cls,
+        source_type: Any,
+        handler: pydantic.GetCoreSchemaHandler,
+    ) -> pydantic_core.CoreSchema:
+        if _typing_inspect.is_generic_alias(source_type):
+            args = typing.get_args(source_type)
+            return handler.generate_schema(args[0])
+        else:
+            return handler.generate_schema(source_type)
+
+
+DT = TypeVar("DT", bound=GelModel | ProxyModel[GelModel], covariant=True)
 
 
 class _DistinctList(lists.DistinctList[DT], Generic[DT]):

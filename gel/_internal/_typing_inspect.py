@@ -9,8 +9,8 @@ from types import GenericAlias
 
 
 def is_classvar(t: Any) -> bool:
-    return t is ClassVar or (_is_genericalias(t) and get_origin(t) is ClassVar)
+    return t is ClassVar or (is_generic_alias(t) and get_origin(t) is ClassVar)
 
 
-def _is_genericalias(t: Any) -> bool:
+def is_generic_alias(t: Any) -> bool:
     return isinstance(t, (GenericAlias, _GenericAlias))

@@ -23,7 +23,12 @@ from typing_extensions import (
     Self,
 )
 
-from collections.abc import Hashable, MutableSequence
+from collections.abc import (
+    Hashable,
+    MutableSequence,
+    Sequence,
+)
+
 import functools
 
 import pydantic
@@ -37,13 +42,13 @@ from pydantic import computed_field as computed_field
 from gel._internal import _typing_parametric as parametric
 
 
-T = TypeVar("T", bound=Hashable)
+T = TypeVar("T", bound=Hashable, covariant=True)
 
 
 @functools.total_ordering
 class DistinctList(
     parametric.SingleParametricType[T],
-    MutableSequence[T],
+    Sequence[T],
     Generic[T],
 ):
     """A mutable, ordered set-like list that enforces element-type invariance
@@ -138,7 +143,7 @@ class DistinctList(
             item = self._items.pop(index)
             self._set.remove(item)
 
-    def insert(self, index: SupportsIndex, value: T) -> None:
+    def insert(self, index: SupportsIndex, value: T) -> None:  # type: ignore [misc]
         """Insert item at index if not already present."""
         self._check_value(value)
         if value in self._set:
@@ -152,13 +157,19 @@ class DistinctList(
         self._items.insert(index, value)
         self._set.add(value)
 
-    def append(self, value: T) -> None:
+    def extend(self, values: Iterable[T]) -> None:
+        if values is self:
+            values = list(values)
+        for v in values:
+            self.append(v)
+
+    def append(self, value: T) -> None:  # type: ignore [misc]
         self._check_value(value)
         if value not in self._set:
             self._items.append(value)
             self._set.add(value)
 
-    def remove(self, value: T) -> None:
+    def remove(self, value: T) -> None:  # type: ignore [misc]
         """Remove item; raise ValueError if missing."""
         try:
             self._set.remove(value)
@@ -186,7 +197,7 @@ class DistinctList(
 
     def index(
         self,
-        value: T,
+        value: T,  # type: ignore [misc]
         start: SupportsIndex = 0,
         stop: SupportsIndex | None = None,
     ) -> int:
@@ -197,7 +208,7 @@ class DistinctList(
             len(self._items) if stop is None else stop,
         )
 
-    def count(self, value: T) -> int:
+    def count(self, value: T) -> int:  # type: ignore [misc]
         """Return 1 if item is present, else 0."""
         return 1 if value in self._set else 0
 
@@ -240,3 +251,6 @@ class DistinctList(
 
         def __set__(self, obj: Any, val: Any) -> None:
             ...
+
+
+MutableSequence.register(DistinctList)  # pyright: ignore [reportAttributeAccessIssue]

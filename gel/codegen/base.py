@@ -427,6 +427,20 @@ class GeneratedModule:
             self._indent_level -= 1
 
     @contextlib.contextmanager
+    def type_checking(self) -> Iterator[None]:
+        tc = self.import_name("typing", "TYPE_CHECKING")
+        self.write(f"if {tc}:")
+        with self.indented():
+            yield
+
+    @contextlib.contextmanager
+    def not_type_checking(self) -> Iterator[None]:
+        tc = self.import_name("typing", "TYPE_CHECKING")
+        self.write(f"if not {tc}:")
+        with self.indented():
+            yield
+
+    @contextlib.contextmanager
     def code_section(self, section: CodeSection) -> Iterator[None]:
         orig_section = self._code_section
         self._code_section = section
