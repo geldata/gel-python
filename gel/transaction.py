@@ -20,6 +20,7 @@
 import typing
 
 import enum
+import sys
 
 from . import abstract
 from . import errors
@@ -86,7 +87,9 @@ class BaseTransaction:
             raise errors.InterfaceError(
                 'cannot start; the transaction is already started')
 
-        return self._options.start_transaction_query()
+        return self._options.start_transaction_query(
+            optimistic_isolation=self.__retry._optimistic_rr
+        )
 
     def _make_commit_query(self):
         self.__check_state('commit')
@@ -175,9 +178,17 @@ class BaseTransaction:
             await self._client._impl.release(self._connection)
 
         if (
-            extype is not None and
-            issubclass(extype, errors.EdgeDBError) and
-            ex.has_tag(errors.SHOULD_RETRY)
+            extype is not None
+            and issubclass(extype, errors.CapabilityError)
+            # XXX: This is not the best way to check this
+            and 'REPEATABLE READ' in str(ex)
+        ):
+            return self.__retry._retry_rr_failure(ex)
+
+        if (
+            extype is not None
+            and issubclass(extype, errors.EdgeDBError)
+            and ex.has_tag(errors.SHOULD_RETRY)
         ):
             return self.__retry._retry(ex)
 
@@ -232,6 +243,24 @@ class BaseRetry:
         self._done = False
         self._next_backoff = 0
         self._options = owner._options
+        self._key = None
+
+        prefer_rr = (
+            self._options.transaction_options._isolation
+            == options.IsolationLevel.PreferRepeatableRead
+        )
+        if prefer_rr:
+            owner = self._owner
+            frame = sys._getframe(owner._TRANSACTION_FRAME_OFFSET)
+            self._key = key = (frame.f_code.co_filename, frame.f_lineno)
+
+            # If we have seen this cache key before and it needed
+            # Serializable, then do serializable.
+            if owner._impl._tx_needs_serializable_cache.get(key, False):
+                prefer_rr = False
+
+        self._optimistic_rr = prefer_rr
+
 
     def _retry(self, exc):
         self._last_exception = exc
@@ -240,4 +269,17 @@ class BaseRetry:
             return False
         self._done = False
         self._next_backoff = rule.backoff(self._iteration)
+        return True
+
+    def _retry_rr_failure(self, exc):
+        # Retry a failure due to REPEATABLE READ not working
+        if not self._optimistic_rr:
+            return False
+        if self._key:
+            self._owner._impl._tx_needs_serializable_cache[self._key] = True
+
+        self._optimistic_rr = False
+        # Decrement _iteration count, since this one doesn't really count.
+        self._iteration -= 1
+        self._done = False
         return True

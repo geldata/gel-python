@@ -57,17 +57,18 @@ class IsolationLevel:
     PreferRepeatableRead = "PreferRepeatableRead"
 
     @staticmethod
-    def _to_start_tx_str(v):
+    def _to_start_tx_str(v, optimistic_isolation):
         if (
             v == IsolationLevel.Serializable
-            # We may *prefer* repeatable read, but we have not yet
-            # implemented it for explicit transactions. (Which will
-            # require some gnarly retry-and-caching logic.)
-            or v == IsolationLevel.PreferRepeatableRead
         ):
             return 'SERIALIZABLE'
         elif v == IsolationLevel.RepeatableRead:
             return 'REPEATABLE READ'
+        elif v == IsolationLevel.PreferRepeatableRead:
+            if optimistic_isolation:
+                return 'REPEATABLE READ'
+            else:
+                return 'SERIALIZABLE'
         else:
             raise ValueError(
                 f"Invalid isolation_level value for transaction(): {self}"
@@ -134,10 +135,11 @@ class TransactionOptions:
     def defaults(cls):
         return cls()
 
-    def start_transaction_query(self):
+    def start_transaction_query(self, optimistic_isolation: bool):
         options = []
         if self._isolation is not None:
-            level = IsolationLevel._to_start_tx_str(self._isolation)
+            level = IsolationLevel._to_start_tx_str(
+                self._isolation, optimistic_isolation)
             options.append(f'ISOLATION {level}')
 
         if self._readonly is not None:

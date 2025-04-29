@@ -415,6 +415,7 @@ class BasePoolImpl(abc.ABC):
         "_connect_args",
         "_codecs_registry",
         "_query_cache",
+        "_tx_needs_serializable_cache",
         "_connection_factory",
         "_queue",
         "_user_max_concurrency",
@@ -444,6 +445,11 @@ class BasePoolImpl(abc.ABC):
         self._connect_args = connect_args
         self._codecs_registry = protocol.CodecsRegistry()
         self._query_cache = protocol.LRUMapping(maxsize=QUERY_CACHE_SIZE)
+        # Whether a transaction() call from a particular source location
+        # needs to use Serializable. See transaction.BaseRetry for details.
+        self._tx_needs_serializable_cache = (
+            protocol.LRUMapping(maxsize=QUERY_CACHE_SIZE)
+        )
 
         if max_concurrency is not None and max_concurrency <= 0:
             raise ValueError(
@@ -638,6 +644,13 @@ class BasePoolImpl(abc.ABC):
 class BaseClient(abstract.BaseReadOnlyExecutor, _options._OptionsMixin):
     __slots__ = ("_impl", "_options")
     _impl_class = NotImplemented
+
+    # Number of stack frames that the Retry objects used by
+    # transaction() need to look up to find their caller from for
+    # caching purposes.  We define this in a variable on BaseClient
+    # basically to make it possible for a user to hackily override it
+    # if they always have some wrapper they need to skip past...
+    _TRANSACTION_FRAME_OFFSET = 2
 
     def __init__(
         self,
