@@ -107,14 +107,14 @@ class TestCodegen(tb.AsyncQueryTestCase):
 
         cmd = env.get("EDGEDB_PYTHON_TEST_CODEGEN_CMD", "gel-py")
         await run(
-            cmd, extra_env={"EDGEDB_PYTHON_CODEGEN_PY_VER": "3.8.5"}
+            cmd, extra_env={"GEL_PYTHON_CODEGEN_PY_VER": "3.8.5"}
         )
         await run(
             cmd,
             "--target",
             "blocking",
             "--no-skip-pydantic-validation",
-            extra_env={"EDGEDB_PYTHON_CODEGEN_PY_VER": "3.9.2"},
+            extra_env={"GEL_PYTHON_CODEGEN_PY_VER": "3.9.2"},
         )
         await run(
             cmd,
@@ -122,7 +122,7 @@ class TestCodegen(tb.AsyncQueryTestCase):
             "async",
             "--file",
             "--no-skip-pydantic-validation",
-            extra_env={"EDGEDB_PYTHON_CODEGEN_PY_VER": "3.10.3"},
+            extra_env={"GEL_PYTHON_CODEGEN_PY_VER": "3.10.3"},
         )
 
         for f in cwd.rglob("*.py"):

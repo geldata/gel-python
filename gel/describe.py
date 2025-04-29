@@ -55,7 +55,7 @@ class ObjectType(AnyType):
 
 @dataclasses.dataclass(frozen=True)
 class BaseScalarType(AnyType):
-    pass
+    name: str
 
 
 @dataclasses.dataclass(frozen=True)
