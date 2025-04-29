@@ -39,7 +39,7 @@ class TestArrayOfArray(tb.SyncQueryTestCase):
             self.client.query_single(
                 'select <array<array<int64>>>[]'
             ),
-            [[]],
+            [],
         )
         self.assertEqual(
             self.client.query_single(
