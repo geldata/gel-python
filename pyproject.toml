@@ -5,7 +5,7 @@ authors = [
     { name = "Gel Data Inc.", email = "hello@geldata.com" },
     { name = "Gel Contributors" },
 ]
-requires-python = ">=3.9.0"
+requires-python = ">=3.10.0"
 readme = "README.rst"
 license = { text = "Apache License, Version 2.0" }
 dynamic = ["version"]
@@ -58,8 +58,12 @@ issues = "https://github.com/geldata/gel-python/issues"
 [project.scripts]
 edgedb-py = "gel.codegen.cli:main"
 gel-py = "gel.codegen.cli:main"
+gel-generate = "gel.codegen.cli:generate"
 gel-orm = "gel.orm.cli:main"
 gel = "gel.cli:main"
+
+[project.entry-points."fastapi.cli.lifespan"]
+gel_watch = "gel.integration.fastapi.cli_lifespan:fastapi_cli_lifespan_hook"
 
 [build-system]
 requires = ["Cython(>=3.0.11,<3.1.0)", "setuptools >= 67", "wheel"]
@@ -87,8 +91,9 @@ exclude = [
     "^target",
 ]
 files = ["edgedb", "gel", "tests"]
-python_version = "3.9"
+python_version = "3.10"
 follow_imports = "normal"
+ignore_errors = true
 ignore_missing_imports = true
 warn_redundant_casts = true
 warn_unused_configs = true
@@ -96,22 +101,31 @@ show_column_numbers = true
 show_error_codes = true
 local_partial_types = true
 
+[[tool.mypy.overrides]]
+module = [
+    "gel.codegen.*",
+    "gel.integration.*",
+    "gel.models.*",
+    "gel._internal.*",
+]
+strict = true
+ignore_errors = false
 
 # ========================
 #          BLACK
 # ========================
 [tool.black]
 line-length = 79
-target-version = ["py39"]
+target-version = ["py310"]
 
 # ========================
 #           RUFF
 # ========================
 
 [tool.ruff]
-line-length = 80
+line-length = 79
 indent-width = 4
-target-version = "py39"
+target-version = "py310"
 exclude = [
     ".github",
     ".git",
