@@ -1107,8 +1107,9 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             self.write("#")
             self.write(f"# link {objtype.name}.{ptr.name}")
             self.write("#")
+            classname = f"{name}__{ptr.name}"
             self._write_class_line(
-                f"{name}__{ptr.name}",
+                classname,
                 ptr_origins,
                 append_bases=[target, f"{ProxyModel}[{target}]"],
                 transform=lambda s: f"{s}__{ptr.name}",
@@ -1123,6 +1124,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                 with self.indented():
                     assert ptr.pointers
                     lprops = []
+                    lprop_names = []
                     for lprop in ptr.pointers:
                         if lprop.name in {"source", "target"}:
                             continue
@@ -1130,6 +1132,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                             self._types[lprop.target_id],
                             import_time=ImportTime.typecheck,
                         )
+                        lprop_names.append(lprop.name)
                         lprop_line = f"{lprop.name}: {ptr_type}"
                         self.write(lprop_line)
                         lprops.append(f"{lprop_line} | None = None")
@@ -1140,6 +1143,30 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                 self.write(init)
                 with self.indented():
                     self.write("pass")
+
+                self.write()
+                self.write("@classmethod")
+                args = ["cls", f"obj: {target}", "/", "*"] + lprops
+                self.write(self.format_list(
+                    f"def link({{list}}) -> {classname}:", args))
+                construct = ["obj"] + [f"{n}={n}" for n in lprop_names]
+                with self.indented():
+                    self.write(
+                        self.format_list("return cls({list})", construct))
+
+                self.write()
+                tc = self.import_name("typing", "TYPE_CHECKING")
+                any = self.import_name("typing", "Any")
+                self.write(f"if {tc}:")
+                with self.indented():
+                    ut = f"{target} | {classname}"
+                    if reflection.Cardinality(ptr.card).is_optional():
+                        ut = f"{ut} | None"
+
+                    self.write(
+                        f"def __set__(self, obj: {any}, value: {ut}) -> None:")
+                    with self.indented():
+                        self.write("...")
 
     def write_object_type(
         self,
@@ -1256,8 +1283,10 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                 if target_name.parent != objtype_name.parent:
                     aspect = ModuleAspect.LATE
             rename_as = f"{objtype_name.name}__{prop.name}"
+            link_type = True
         else:
             rename_as = None
+            link_type = False
 
         target_type = self._types[prop.target_id]
         ptr_type = self.get_type(
@@ -1297,6 +1326,10 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                 if card.is_multi():
                     pytype = self._py_container_for_multiprop(prop)
                     return f"{pytype}[{ptr_type}]"
+                elif link_type:
+                    anno = self.import_name("typing", "Annotated")
+                    field = self.import_name("gel.models.pydantic", "Field")
+                    return f"{anno}[{ptr_type}, {field}(default=None)]"
                 else:
                     opt = self.import_name("typing", "Optional")
                     return f"{opt}[{ptr_type}] = None"

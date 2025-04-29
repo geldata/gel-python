@@ -175,6 +175,23 @@ class ProxyModel(GelModel, Generic[MT]):
         if generic_meta["origin"] is ProxyModel and generic_meta["args"]:
             cls.__proxy_of__ = generic_meta["args"][0]
 
+    @classmethod
+    def __get_pydantic_core_schema__(
+        cls,
+        source_type: Any,
+        handler: pydantic.GetCoreSchemaHandler,
+    ) -> pydantic_core.CoreSchema:
+        if (
+            cls.__name__ == "ProxyModel"
+            or cls.__name__.startswith("ProxyModel[")
+        ):
+            return handler(source_type)
+        else:
+            return pydantic_schema.no_info_before_validator_function(
+                cls,
+                schema=handler.generate_schema(cls.__proxy_of__),
+            )
+
 
 DT = TypeVar("DT", bound=GelModel | ProxyModel[GelModel])
 
