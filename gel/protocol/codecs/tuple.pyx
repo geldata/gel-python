@@ -20,7 +20,7 @@
 @cython.final
 cdef class TupleCodec(BaseRecordCodec):
 
-    cdef decode(self, FRBuffer *buf):
+    cdef decode(self, object return_type, FRBuffer *buf):
         cdef:
             object result
             Py_ssize_t elem_count
@@ -48,7 +48,9 @@ cdef class TupleCodec(BaseRecordCodec):
             else:
                 elem_codec = <BaseCodec>fields_codecs[i]
                 elem = elem_codec.decode(
-                    frb_slice_from(&elem_buf, buf, elem_len))
+                    None, # XXX
+                    frb_slice_from(&elem_buf, buf, elem_len)
+                )
                 if frb_get_len(&elem_buf):
                     raise RuntimeError(
                         f'unexpected trailing data in buffer after '

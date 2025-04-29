@@ -80,7 +80,7 @@ cdef class SansIOProtocolBackwardsCompatible(SansIOProtocol):
                     attrs = self.legacy_parse_headers()
                     cardinality = self.buffer.read_byte()
                     if self.protocol_version >= (0, 14):
-                        in_dc, out_dc = self.parse_type_data(reg)
+                        in_dc, out_dc = self._legacy_parse_type_data(reg)
                     else:
                         in_type_id = self.buffer.read_bytes(16)
                         out_type_id = self.buffer.read_bytes(16)
@@ -187,7 +187,7 @@ cdef class SansIOProtocolBackwardsCompatible(SansIOProtocol):
                 if mtype == DATA_MSG:
                     if exc is None:
                         try:
-                            self.parse_data_messages(out_dc, result)
+                            self._legacy_parse_data_messages(out_dc, result)
                         except Exception as ex:
                             # An error during data decoding.  We need to
                             # handle this as gracefully as possible:
@@ -296,7 +296,7 @@ cdef class SansIOProtocolBackwardsCompatible(SansIOProtocol):
                     assert not re_exec
                     if exc is None:
                         try:
-                            self.parse_data_messages(out_dc, result)
+                            self._legacy_parse_data_messages(out_dc, result)
                         except Exception as ex:
                             # An error during data decoding.  We need to
                             # handle this as gracefully as possible:
@@ -494,11 +494,93 @@ cdef class SansIOProtocolBackwardsCompatible(SansIOProtocol):
         try:
             cardinality = self.buffer.read_byte()
 
-            in_dc, out_dc = self.parse_type_data(reg)
+            in_dc, out_dc = self._legacy_parse_type_data(reg)
         finally:
             self.buffer.finish_message()
 
         return cardinality, in_dc, out_dc, headers
+
+    cdef _legacy_parse_type_data(self, CodecsRegistry reg):
+        cdef:
+            bytes type_id
+            BaseCodec in_dc, out_dc
+
+        type_id = self.buffer.read_bytes(16)
+        type_data = self.buffer.read_len_prefixed_bytes()
+
+        if reg.has_codec(type_id):
+            in_dc = reg.get_codec(type_id)
+        else:
+            in_dc = reg.build_codec(type_data, self.protocol_version)
+
+        type_id = self.buffer.read_bytes(16)
+        type_data = self.buffer.read_len_prefixed_bytes()
+
+        if reg.has_codec(type_id):
+            out_dc = reg.get_codec(type_id)
+        else:
+            out_dc = reg.build_codec(type_data, self.protocol_version)
+
+        return in_dc, out_dc
+
+    cdef _legacy_parse_data_messages(self, BaseCodec out_dc, result):
+        cdef:
+            ReadBuffer buf = self.buffer
+
+            decode_row_method decoder = <decode_row_method>out_dc.decode
+            pgproto.try_consume_message_method try_consume_message = \
+                <pgproto.try_consume_message_method>buf.try_consume_message
+            pgproto.take_message_type_method take_message_type = \
+                <pgproto.take_message_type_method>buf.take_message_type
+
+            const char* cbuf
+            ssize_t cbuf_len
+            object row
+
+            FRBuffer _rbuf
+            FRBuffer *rbuf = &_rbuf
+
+        if PG_DEBUG:
+            if buf.get_message_type() != DATA_MSG:
+                raise RuntimeError('first message is not "DataMsg"')
+
+            if not isinstance(result, list):
+                raise RuntimeError(
+                    f'result is not a list, but {result!r}')
+
+        while take_message_type(buf, DATA_MSG):
+            cbuf = try_consume_message(buf, &cbuf_len)
+            if cbuf == NULL:
+                mem = buf.consume_message()
+                cbuf = cpython.PyBytes_AS_STRING(mem)
+                cbuf_len = cpython.PyBytes_GET_SIZE(mem)
+
+            if PG_DEBUG:
+                frb_init(rbuf, cbuf, cbuf_len)
+
+                flen = hton.unpack_int16(frb_read(rbuf, 2))
+                if flen != 1:
+                    raise RuntimeError(
+                        f'invalid number of columns: expected 1 got {flen}')
+
+                buflen = hton.unpack_int32(frb_read(rbuf, 4))
+                if frb_get_len(rbuf) != buflen:
+                    raise RuntimeError('invalid buffer length')
+            else:
+                # EdgeDB returns rows with one column; Postgres' rows
+                # are encoded as follows:
+                #   2 bytes - int16 - number of columns
+                #   4 bytes - int32 - every column is prefixed with its length
+                # so we want to skip first 6 bytes:
+                frb_init(rbuf, cbuf + 6, cbuf_len - 6)
+
+            row = decoder(out_dc, None, rbuf)
+            result.append(row)
+
+            if frb_get_len(rbuf):
+                raise RuntimeError(
+                    f'unexpected trailing data in buffer after '
+                    f'data message decoding: {frb_get_len(rbuf)}')
 
     cdef parse_legacy_command_complete_message(self):
         assert self.buffer.get_message_type() == COMMAND_COMPLETE_MSG

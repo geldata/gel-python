@@ -23,8 +23,8 @@ from libc.stdint cimport int64_t, int32_t
 DEF MONTHS_PER_YEAR         = 12
 
 
-@cython.final
-cdef class DateDuration:
+cdef class DateDuration(CustomType):
+    __gel_type_name__: typing.ClassVar[str] = "std::cal::date_duration"
 
     def __init__(self, *, int32_t days=0, int32_t months=0):
         self.days = days
