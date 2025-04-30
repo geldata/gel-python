@@ -949,6 +949,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                         base_types,
                         prepend_bases=[typeof_class],
                         transform=lambda s: f"{s}.__variants__.Empty",
+                        class_kwargs=class_kwargs,
                     )
                 else:
                     gel_model = self.import_name(
@@ -959,6 +960,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                         [],
                         prepend_bases=[typeof_class, gel_model],
                         transform=lambda s: f"{s}.__variants__.Empty",
+                        class_kwargs=class_kwargs,
                     )
 
                 with self.indented():
