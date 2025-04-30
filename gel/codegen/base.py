@@ -418,6 +418,9 @@ class GeneratedModule:
 
         return imported, import_code
 
+    def current_indentation(self) -> str:
+        return self.INDENT * self._indent_level
+
     @contextlib.contextmanager
     def indented(self) -> Iterator[None]:
         self._indent_level += 1

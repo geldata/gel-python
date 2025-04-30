@@ -379,6 +379,9 @@ class BaseGeneratedModule:
             import_time=import_time,
         )
 
+    def current_indentation(self) -> str:
+        return self.py_file.current_indentation()
+
     @contextmanager
     def indented(self) -> Iterator[None]:
         with self.py_file.indented():
@@ -573,7 +576,7 @@ class BaseGeneratedModule:
         list_string = ", ".join(values)
         output_string = tpl.format(list=list_string)
 
-        if len(output_string) > 79:
+        if len(output_string) + len(self.current_indentation()) > 79:
             list_string = ",\n    ".join(values)
             list_string = f"\n    {list_string},\n"
             output_string = tpl.format(list=list_string)
@@ -774,6 +777,27 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             transform=transform,
         )
         self.write(class_line)
+
+    @contextmanager
+    def _func_def(
+        self,
+        func_name: str,
+        params: list[str],
+        return_type: str,
+        *,
+        as_classmethod: bool = False,
+    ) -> Iterator[None]:
+        if as_classmethod:
+            self.write("@classmethod")
+        if as_classmethod:
+            params = ["cls"] + params
+        def_line = self.format_list(
+            f"def {func_name}({{list}}) -> {return_type}:",
+            params,
+        )
+        self.write(def_line)
+        with self.indented():
+            yield
 
     def write_object_type_reflection(
         self, objtype: reflection.ObjectType, classname: str, refl_t: str
@@ -1186,15 +1210,22 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                     f'"""link {objtype.name}.{ptr.name}: {target_type.name}"""'
                 )
 
-                self._write_class_line(
-                    "__lprops__",
-                    ptr_origins,
-                    transform=lambda s: f"{s}.__links__.{ptr.name}.__lprops__",
-                )
+                if ptr_origins:
+                    self._write_class_line(
+                        "__lprops__",
+                        ptr_origins,
+                        transform=(
+                            lambda s: f"{s}.__links__.{ptr.name}.__lprops__"),
+                    )
+                else:
+                    b = self.import_name("gel.models.pydantic", "GelLinkModel")
+                    self._write_class_line("__lprops__", [b])
+
+                opt = self.import_name("typing", "Optional")
                 with self.indented():
                     assert ptr.pointers
                     lprops = []
-                    lprop_names = []
+                    lprop_assign = []
                     for lprop in ptr.pointers:
                         if lprop.name in {"source", "target"}:
                             continue
@@ -1202,27 +1233,44 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                             self._types[lprop.target_id],
                             import_time=ImportTime.typecheck,
                         )
-                        lprop_names.append(lprop.name)
-                        lprop_line = f"{lprop.name}: {ptr_type}"
+                        lprop_assign.append(f"{lprop.name}={lprop.name}")
+                        lprop_line = f"{lprop.name}: {opt}[{ptr_type}]"
                         self.write(lprop_line)
-                        lprops.append(f"{lprop_line} | None = None")
+                        lprops.append(f"{lprop_line} = None")
 
                 self.write()
+                priv_attr = self.import_name(
+                    "gel.models.pydantic", "PrivateAttr")
+
+                self.write(f"_p__obj__: {target} = {priv_attr}()")
+                self.write(f"_p__lprops__: __lprops__ = {priv_attr}()")
+                self.write()
+
                 args = ["self", f"obj: {target}", "/", "*"] + lprops
                 init = self.format_list("def __init__({list}) -> None:", args)
                 self.write(init)
                 with self.indented():
-                    self.write("pass")
+                    if is_forward_decl:
+                        self.write("...")
+                    else:
+                        self.write("self._p__obj__ = obj")
+                        self.write(self.format_list(
+                            "self._p__lprops__ = self.__lprops__({list})",
+                            lprop_assign,
+                        ))
 
                 self.write()
-                self.write("@classmethod")
-                args = ["cls", f"obj: {target}", "/", "*"] + lprops
-                self.write(self.format_list(
-                    f"def link({{list}}) -> {self_t}:", args))
-                construct = ["obj"] + [f"{n}={n}" for n in lprop_names]
-                with self.indented():
-                    self.write(
-                        self.format_list("return cls({list})", construct))
+                args = [f"obj: {target}", "/", "*"] + lprops
+                with self._func_def("link", args, self_t, as_classmethod=True):
+                    if is_forward_decl:
+                        self.write("...")
+                    else:
+                        self.write(
+                            self.format_list(
+                                "return cls({list})",
+                                ["obj"] + lprop_assign,
+                            ),
+                        )
 
                 self.write()
 

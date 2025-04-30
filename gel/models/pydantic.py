@@ -101,11 +101,6 @@ def _get_pointer_from_field(
     field: pydantic.fields.FieldInfo,
 ) -> GelPointer:
     kwargs = dict(field._attributes_set)
-    if _typing_inspect.is_generic_alias(field.annotation):
-        if typing.get_origin(field.annotation) is OptionalLink:
-            if "default" not in kwargs:
-                kwargs["default"] = None
-
     ptr = GelPointer(**kwargs)  # type: ignore
     ptr.__set_name__(None, name)
     return ptr
@@ -168,6 +163,10 @@ class GelModel(pydantic.BaseModel, GelModelMetadata, metaclass=GelModelMeta):
                 "Model instances without id value are unhashable")
 
         return hash(self._p__id)
+
+
+class GelLinkModel(pydantic.BaseModel, metaclass=GelModelMeta):
+    pass
 
 
 MT = TypeVar("MT", bound=GelModel, covariant=True)
