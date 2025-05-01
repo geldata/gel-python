@@ -19,11 +19,8 @@
 from typing import (
     Any,
     Iterator,
-    Literal,
     Mapping,
-    Optional,
     TypeAlias,
-    Union,
 )
 
 import argparse

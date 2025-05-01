@@ -17,7 +17,6 @@
 #
 
 from __future__ import annotations
-from re import L
 from typing import (
     Callable,
     DefaultDict,
@@ -36,39 +35,24 @@ import argparse
 import base64
 import collections
 import enum
-import getpass
 import graphlib
 import functools
 import io
-import os
 import pathlib
 import sys
 import textwrap
-import typing
 import uuid
 
 from collections import defaultdict
-from collections.abc import (
-    Collection,
-    Set,
-)
+from collections.abc import Collection
 from contextlib import contextmanager
-
-from pydantic.main import _private_setattr_handler
 
 import gel
 from gel import abstract
-from gel import describe
-from gel._internal._reflection._types import is_scalar_type
-from gel.con_utils import find_gel_project_dir
-from gel.color import get_color
-
-from gel.orm import introspection
-from gel.orm.introspection import FilePrinter, get_mod_and_name
 from gel._internal import _reflection as reflection
 
 from . import base
-from .base import C, GeneratedModule, ImportTime, CodeSection
+from .base import C, ImportTime, CodeSection
 
 
 COMMENT = """\
@@ -1444,8 +1428,12 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                     pytype = self._py_container_for_multiprop(prop)
                     return f"{pytype}[{ptr_type}]"
                 elif link_type:
-                    link = self.import_name("gel.models.pydantic", "OptionalLink")
-                    return f"{link}[{ptr_type}, {bare_ptr_type}] = {link}(default=None)"
+                    link = self.import_name(
+                        "gel.models.pydantic", "OptionalLink")
+                    return (
+                        f"{link}[{ptr_type}, {bare_ptr_type}] "
+                        f"= {link}(default=None)"
+                    )
                 else:
                     opt = self.import_name("typing", "Optional")
                     return f"{opt}[{ptr_type}] = None"

@@ -20,7 +20,7 @@ class SchemaPath(pathlib.PurePosixPath):
 
     def common_parts(self, other: SchemaPath) -> list[str]:
         prefix = []
-        for a, b in zip(self.parts, other.parts):
+        for a, b in zip(self.parts, other.parts, strict=False):
             if a == b:
                 prefix.append(a)
             else:

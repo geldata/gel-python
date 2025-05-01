@@ -3,7 +3,7 @@
 # SPDX-FileCopyrightText: Copyright Gel Data Inc. and the contributors.
 
 
-from typing import TypeVar, Union
+from typing import Union
 
 
 class Type:

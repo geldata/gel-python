@@ -10,8 +10,6 @@ from typing import (
     Any,
     ClassVar,
     Generic,
-    Iterable,
-    NamedTuple,
     TypeVar,
     cast,
     final,
@@ -24,10 +22,6 @@ from typing_extensions import (
     TypeAliasType,
 )
 
-from collections.abc import (
-    Hashable,
-    Sequence,
-)
 
 import dataclasses
 import uuid
@@ -54,7 +48,7 @@ T = TypeVar("T")
 OptionalWithDefault = TypeAliasType(
     "OptionalWithDefault",
     "Annotated[T, Field(default=None)]",
-    type_params=(T,)
+    type_params=(T,),
 )
 
 
@@ -117,8 +111,7 @@ class GelModelMeta(_model_construction.ModelMetaclass):
         with warnings.catch_warnings():
             # Make pydantic shut up about attribute redefinition.
             warnings.filterwarnings(
-                'ignore',
-                message=r'.*shadows an attribute in parent.*'
+                "ignore", message=r".*shadows an attribute in parent.*"
             )
             new_cls = cast(
                 type[pydantic.BaseModel],
@@ -138,9 +131,7 @@ class GelModelMetadata:
 
 class GelModel(pydantic.BaseModel, GelModelMetadata, metaclass=GelModelMeta):
     model_config = pydantic.ConfigDict(
-        json_encoders={
-            uuid.UUID: lambda v: str(v)
-        }
+        json_encoders={uuid.UUID: lambda v: str(v)}
     )
 
     def __init__(self, /, **kwargs: Any) -> None:
@@ -159,8 +150,7 @@ class GelModel(pydantic.BaseModel, GelModelMetadata, metaclass=GelModelMeta):
 
     def __hash__(self) -> int:
         if self._p__id is unsetid.UNSET_UUID:
-            raise TypeError(
-                "Model instances without id value are unhashable")
+            raise TypeError("Model instances without id value are unhashable")
 
         return hash(self._p__id)
 
@@ -191,9 +181,8 @@ class ProxyModel(GelModel, Generic[MT]):
         source_type: Any,
         handler: pydantic.GetCoreSchemaHandler,
     ) -> pydantic_core.CoreSchema:
-        if (
-            cls.__name__ == "ProxyModel"
-            or cls.__name__.startswith("ProxyModel[")
+        if cls.__name__ == "ProxyModel" or cls.__name__.startswith(
+            "ProxyModel["
         ):
             return handler(source_type)
         else:
@@ -226,19 +215,18 @@ PT = TypeVar("PT", bound=ProxyModel[GelModel], covariant=True)
 
 class OptionalLink(GelPointer, Generic[PT, MT]):
     if TYPE_CHECKING:
-        @overload
-        def __get__(self, obj: None, objtype: type[Any]) -> type[PT]:
-            ...
 
         @overload
-        def __get__(self, obj: object, objtype: Any = None) -> PT | None:
-            ...
+        def __get__(self, obj: None, objtype: type[Any]) -> type[PT]: ...
 
-        def __get__(self, obj: Any, objtype: Any = None) -> type[PT] | PT | None:
-            ...
+        @overload
+        def __get__(self, obj: object, objtype: Any = None) -> PT | None: ...
 
-        def __set__(self, obj: Any, value: MT | None) -> None:
-            ...
+        def __get__(
+            self, obj: Any, objtype: Any = None
+        ) -> type[PT] | PT | None: ...
+
+        def __set__(self, obj: Any, value: MT | None) -> None: ...
 
     @classmethod
     def __get_pydantic_core_schema__(
@@ -283,17 +271,14 @@ class _DistinctList(lists.DistinctList[DT], Generic[DT]):
             return value
         if isinstance(value, list):
             return cls(value)
-        raise TypeError(f'could not convert {type(value)} to {cls.__name__}')
+        raise TypeError(f"could not convert {type(value)} to {cls.__name__}")
 
     @classmethod
     def _check_value(cls, value: Any) -> DT:
         t = cls.type
         if isinstance(value, t):
             return value
-        elif (
-            issubclass(t, ProxyModel)
-            and isinstance(value, t.__proxy_of__)
-        ):
+        elif issubclass(t, ProxyModel) and isinstance(value, t.__proxy_of__):
             return t(value)  # type: ignore [return-value]
 
         raise ValueError(
@@ -305,11 +290,9 @@ class _DistinctList(lists.DistinctList[DT], Generic[DT]):
 DistinctList = TypeAliasType(
     "DistinctList",
     "Annotated[_DistinctList[DT], Field(default_factory=_DistinctList)]",
-    type_params=(DT,)
+    type_params=(DT,),
 )
 
 RequiredDistinctList = TypeAliasType(
-    "RequiredDistinctList",
-    "list[DT]",
-    type_params=(DT,)
+    "RequiredDistinctList", "list[DT]", type_params=(DT,)
 )

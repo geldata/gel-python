@@ -11,12 +11,8 @@ from typing import (
     Tuple,
     Type,
     TypeVar,
-    Union,
     Dict,
     get_type_hints,
-)
-from typing_extensions import (
-    TypeAliasType,
 )
 
 import contextvars

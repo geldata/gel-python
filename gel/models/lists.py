@@ -6,16 +6,12 @@ from __future__ import annotations
 
 from typing import (
     TYPE_CHECKING,
-    Annotated,
     Any,
-    ClassVar,
     Generic,
     Iterable,
     Iterator,
-    NamedTuple,
     SupportsIndex,
     TypeVar,
-    cast,
     overload,
 )
 
@@ -31,10 +27,6 @@ from collections.abc import (
 
 import functools
 
-import pydantic
-import pydantic.fields
-from pydantic._internal import _model_construction
-import pydantic_core
 
 from pydantic import Field as Field
 from pydantic import PrivateAttr as PrivateAttr
@@ -55,6 +47,7 @@ class DistinctList(
     at runtime and maintains distinctness of elements in insertion order using
     a list and set.
     """
+
     def __init__(self, iterable: Iterable[T] = ()) -> None:
         self._items: list[T] = []
         self._set: set[T] = set()
@@ -85,12 +78,10 @@ class DistinctList(
         return len(self._items)
 
     @overload
-    def __getitem__(self, index: SupportsIndex) -> T:
-        ...
+    def __getitem__(self, index: SupportsIndex) -> T: ...
 
     @overload
-    def __getitem__(self, index: slice) -> Self:
-        ...
+    def __getitem__(self, index: slice) -> Self: ...
 
     def __getitem__(self, index: SupportsIndex | slice) -> T | Self:
         if isinstance(index, slice):
@@ -107,7 +98,8 @@ class DistinctList(
             start, stop, step = index.indices(len(self._items))
             if step != 1:
                 raise ValueError(
-                    "Slice assignment with step != 1 not supported")
+                    "Slice assignment with step != 1 not supported"
+                )
             prefix = self._items[:start]
             suffix = self._items[stop:]
             new_values = self._check_values(value)  # type: ignore [arg-type]
@@ -241,16 +233,14 @@ class DistinctList(
         return self
 
     if TYPE_CHECKING:
-        @overload
-        def __set__(self, obj: Any, val: list[T]) -> None:
-            ...
 
         @overload
-        def __set__(self, obj: Any, val: DistinctList[T]) -> None:
-            ...
+        def __set__(self, obj: Any, val: list[T]) -> None: ...
 
-        def __set__(self, obj: Any, val: Any) -> None:
-            ...
+        @overload
+        def __set__(self, obj: Any, val: DistinctList[T]) -> None: ...
+
+        def __set__(self, obj: Any, val: Any) -> None: ...
 
 
 MutableSequence.register(DistinctList)  # pyright: ignore [reportAttributeAccessIssue]

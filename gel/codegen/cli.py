@@ -21,8 +21,6 @@ from typing import (
 )
 
 import argparse
-import sys
-from typing_extensions import Required
 
 from . import base
 from . import models
