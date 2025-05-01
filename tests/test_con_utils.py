@@ -30,7 +30,7 @@ from unittest import mock
 
 
 from gel import con_utils
-from edgedb import errors
+from gel import errors
 
 
 class TestConUtils(unittest.TestCase):
@@ -268,12 +268,12 @@ class TestConUtils(unittest.TestCase):
 
         expected_warnings = testcase.get('warnings', [])
         self.assertEqual(len(expected_warnings), len(warning_list))
-        for expected_key, warning in zip(expected_warnings, warning_list):
+        for expected_key, warning in zip(
+            expected_warnings, warning_list, strict=False
+        ):
             expected_warning = self.error_mapping.get(expected_key)
             if not expected_warning:
-                raise RuntimeError(
-                    f"unknown error type: {expected_key}"
-                )
+                raise RuntimeError(f"unknown error type: {expected_key}")
             if not re.match(expected_warning, str(warning.message)):
                 raise AssertionError(
                     f'Warning "{warning.message}" does not match '
@@ -412,7 +412,7 @@ class TestConUtils(unittest.TestCase):
             os.makedirs(projects)
             os.makedirs(creds)
             os.makedirs(project)
-            with open(project / 'edgedb.toml', 'wt') as f:
+            with open(project / 'gel.toml', 'wt') as f:
                 f.write('')  # app don't read toml file
             with open(creds / 'inst1.json', 'wt') as f:
                 f.write(json.dumps({

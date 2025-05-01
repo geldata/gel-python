@@ -111,6 +111,7 @@ cdef class ExecuteContext:
         state: typing.Optional[dict] = None,
         annotations: typing.Optional[dict[str, str]] = None,
         transaction_options: typing.Optional[object] = None,
+        return_type: typing.Optional[typing.Type],
     ):
         self.query = query
         self.args = args
@@ -134,6 +135,8 @@ cdef class ExecuteContext:
         self.warnings = ()
         self.unsafe_isolation_dangers = ()
         self.annotations = annotations
+
+        self.return_type = return_type
 
     cdef inline bint has_na_cardinality(self):
         return self.cardinality == CARDINALITY_NOT_APPLICABLE
@@ -315,6 +318,10 @@ cdef class SansIOProtocol:
             WriteBuffer buf
 
         compilation_flags = enums.CompilationFlag.INJECT_OUTPUT_OBJECT_IDS
+
+        # XXX
+        compilation_flags |= enums.CompilationFlag.INJECT_OUTPUT_TYPE_IDS
+
         if ctx.inline_typenames:
             compilation_flags |= enums.CompilationFlag.INJECT_OUTPUT_TYPE_NAMES
         if ctx.inline_typeids:
@@ -581,7 +588,7 @@ cdef class SansIOProtocol:
                 elif mtype == DATA_MSG:
                     if exc is None:
                         try:
-                            self.parse_data_messages(ctx.out_dc, result)
+                            self.parse_data_messages(ctx, result)
                         except Exception as ex:
                             # An error during data decoding.  We need to
                             # handle this as gracefully as possible:
@@ -699,7 +706,7 @@ cdef class SansIOProtocol:
                 elif mtype == DATA_MSG:
                     if exc is None:
                         try:
-                            self.parse_data_messages(ctx.out_dc, result)
+                            self.parse_data_messages(ctx, result)
                         except Exception as ex:
                             # An error during data decoding.  We need to
                             # handle this as gracefully as possible:
@@ -1297,7 +1304,7 @@ cdef class SansIOProtocol:
 
         frb_init(rbuf, buf, buf_len)
 
-        return decoder(codec, rbuf)
+        return decoder(codec, None, rbuf)
 
     cdef parse_server_settings(self, str name, bytes val):
         if name == 'suggested_pool_concurrency':
@@ -1402,7 +1409,7 @@ cdef class SansIOProtocol:
 
             ctx.capabilities = self.buffer.read_int64()
             ctx.cardinality = self.buffer.read_byte()
-            ctx.in_dc, ctx.out_dc = self.parse_type_data(ctx.reg)
+            ctx.in_dc, ctx.out_dc = self.parse_type_data(ctx)
         finally:
             self.buffer.finish_message()
 
@@ -1426,10 +1433,11 @@ cdef class SansIOProtocol:
         finally:
             self.buffer.finish_message()
 
-    cdef parse_type_data(self, CodecsRegistry reg):
+    cdef parse_type_data(self, ExecuteContext ctx):
         cdef:
             bytes type_id
             BaseCodec in_dc, out_dc
+            CodecsRegistry reg = ctx.reg
 
         type_id = self.buffer.read_bytes(16)
         type_data = self.buffer.read_len_prefixed_bytes()
@@ -1449,9 +1457,10 @@ cdef class SansIOProtocol:
 
         return in_dc, out_dc
 
-    cdef parse_data_messages(self, BaseCodec out_dc, result):
+    cdef parse_data_messages(self, ExecuteContext ctx, result):
         cdef:
             ReadBuffer buf = self.buffer
+            BaseCodec out_dc = ctx.out_dc
 
             decode_row_method decoder = <decode_row_method>out_dc.decode
             pgproto.try_consume_message_method try_consume_message = \
@@ -1500,7 +1509,7 @@ cdef class SansIOProtocol:
                 # so we want to skip first 6 bytes:
                 frb_init(rbuf, cbuf + 6, cbuf_len - 6)
 
-            row = decoder(out_dc, rbuf)
+            row = decoder(out_dc, ctx.return_type, rbuf)
             result.append(row)
 
             if frb_get_len(rbuf):

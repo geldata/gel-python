@@ -33,16 +33,16 @@ cdef class SetCodec(BaseArrayCodec):
 
         return codec
 
-    cdef decode(self, FRBuffer *buf):
+    cdef decode(self, object return_type, FRBuffer *buf):
         if type(self.sub_codec) is ArrayCodec:
             # This is a set of arrays encoded as an array
             # of single-element records.
-            return self._decode_array_set(buf)
+            return self._decode_array_set(return_type, buf)
         else:
             # Set of non-arrays.
-            return self._decode_array(buf)
+            return self._decode_array(True, return_type, buf)
 
-    cdef inline _decode_array_set(self, FRBuffer *buf):
+    cdef inline _decode_array_set(self, object return_type, FRBuffer *buf):
         cdef:
             object result
             object elem
@@ -85,7 +85,7 @@ cdef class SetCodec(BaseArrayCodec):
                     'unexpected NULL value in array set element ')
 
             frb_slice_from(&elem_buf, buf, elem_len)
-            elem = sub_codec.decode(&elem_buf)
+            elem = sub_codec.decode(return_type, &elem_buf)
             if frb_get_len(&elem_buf):
                 raise RuntimeError(
                     f'unexpected trailing data in buffer after '

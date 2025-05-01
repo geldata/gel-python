@@ -395,7 +395,7 @@ class AsyncIOBatchIteration(transaction.BaseTransaction):
 
     async def send_query(self, query: str, *args, **kwargs) -> None:
         self._batched_ops.append(abstract.QueryContext(
-            query=abstract.QueryWithArgs(query, args, kwargs),
+            query=abstract.QueryWithArgs(query, None, args, kwargs),
             cache=self._client._get_query_cache(),
             query_options=abstract._query_opts,
             retry_options=None,
@@ -407,7 +407,7 @@ class AsyncIOBatchIteration(transaction.BaseTransaction):
 
     async def send_query_single(self, query: str, *args, **kwargs) -> None:
         self._batched_ops.append(abstract.QueryContext(
-            query=abstract.QueryWithArgs(query, args, kwargs),
+            query=abstract.QueryWithArgs(query, None, args, kwargs),
             cache=self._client._get_query_cache(),
             query_options=abstract._query_single_opts,
             retry_options=None,
@@ -421,7 +421,7 @@ class AsyncIOBatchIteration(transaction.BaseTransaction):
         self, query: str, *args, **kwargs
     ) -> None:
         self._batched_ops.append(abstract.QueryContext(
-            query=abstract.QueryWithArgs(query, args, kwargs),
+            query=abstract.QueryWithArgs(query, None, args, kwargs),
             cache=self._client._get_query_cache(),
             query_options=abstract._query_required_single_opts,
             retry_options=None,
@@ -433,7 +433,7 @@ class AsyncIOBatchIteration(transaction.BaseTransaction):
 
     async def send_execute(self, commands: str, *args, **kwargs) -> None:
         self._batched_ops.append(abstract.ExecuteContext(
-            query=abstract.QueryWithArgs(commands, args, kwargs),
+            query=abstract.QueryWithArgs(commands, None, args, kwargs),
             cache=self._client._get_query_cache(),
             retry_options=None,
             state=self._client._get_state(),

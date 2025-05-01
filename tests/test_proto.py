@@ -18,7 +18,7 @@
 
 import unittest
 
-import edgedb
+import gel
 
 from gel import _testbase as tb
 
@@ -39,7 +39,7 @@ class TestProto(tb.SyncQueryTestCase):
     async def test_proto_codec_error_recovery_01(self):
         for _ in range(5):  # execute a few times for OE
             with self.assertRaisesRegex(
-                    edgedb.ClientError,
+                    gel.ClientError,
                     "unable to decode data to Python objects"):
                 # Python dattime.Date object can't represent this date, so
                 # we know that the codec will fail.
@@ -63,7 +63,7 @@ class TestProto(tb.SyncQueryTestCase):
     async def test_proto_codec_error_recovery_02(self):
         for _ in range(5):  # execute a few times for OE
             with self.assertRaisesRegex(
-                    edgedb.ClientError,
+                    gel.ClientError,
                     "unable to decode data to Python objects"):
                 # Python dattime.Date object can't represent this date, so
                 # we know that the codec will fail.

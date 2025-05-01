@@ -17,7 +17,7 @@ with open(version_file, 'r') as f:
             break
     else:
         raise RuntimeError(
-            'unable to read the version from edgedb/_version.py')
+            'unable to read the version from gel/_version.py')
 
 # -- General configuration ------------------------------------------------
 

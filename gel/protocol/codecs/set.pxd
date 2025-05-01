@@ -20,7 +20,7 @@
 @cython.final
 cdef class SetCodec(BaseArrayCodec):
 
-    cdef inline _decode_array_set(self, FRBuffer *buf)
+    cdef inline _decode_array_set(self, object return_type, FRBuffer *buf)
 
     @staticmethod
     cdef BaseCodec new(bytes tid, BaseCodec sub_codec)

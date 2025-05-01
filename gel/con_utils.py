@@ -1131,7 +1131,7 @@ def _resolve_config_options(
         return False
 
 
-def find_gel_project_dir():
+def find_gel_project_dir() -> str:
     dir = os.getcwd()
     dev = os.stat(dir).st_dev
 
@@ -1150,7 +1150,7 @@ def find_gel_project_dir():
                 raise errors.ClientConnectionError(
                     f'no `gel.toml` found and '
                     f'no connection options specified'
-                    f'(stopped searching for `edgedb.toml` at file system'
+                    f'(stopped searching for `gel.toml` at file system'
                     f'boundary {dir!r})'
                 )
             dir = parent

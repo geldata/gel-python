@@ -289,7 +289,7 @@ class BaseConnection(metaclass=abc.ABCMeta):
         rv = await self._protocol.batch_execute(ctxs)
         return [
             op.warning_handler(ctx.warnings, res) if ctx.warnings else res
-            for op, ctx, res in zip(ops, ctxs, rv)
+            for op, ctx, res in zip(ops, ctxs, rv, strict=False)
         ]
 
     async def describe(

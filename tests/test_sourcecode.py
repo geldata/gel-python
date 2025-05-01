@@ -17,13 +17,18 @@
 #
 
 
+import os
 import pathlib
 import subprocess
+import sys
 import unittest
 
 
 def find_project_root() -> pathlib.Path:
-    return pathlib.Path(__file__).parent.parent
+    if gh_checkout := os.environ.get("GITHUB_WORKSPACE"):
+        return pathlib.Path(gh_checkout)
+    else:
+        return pathlib.Path(__file__).parent.parent
 
 
 class TestFlake8(unittest.TestCase):
@@ -48,4 +53,39 @@ class TestFlake8(unittest.TestCase):
                 output = ex.output.decode()
                 raise AssertionError(
                     f"ruff validation failed:\n{output}"
+                ) from None
+
+    def test_cqa_mypy(self):
+        project_root = find_project_root()
+        config_path = project_root / "pyproject.toml"
+        if not os.path.exists(config_path):
+            raise RuntimeError("could not locate pyproject.toml file")
+
+        try:
+            import mypy  # NoQA
+        except ImportError:
+            raise unittest.SkipTest("mypy module is missing")
+
+        for subdir in ["edgedb", "gel", "tests"]:
+            try:
+                subprocess.run(
+                    [
+                        sys.executable,
+                        "-m",
+                        "mypy",
+                        "--config-file",
+                        config_path,
+                        subdir,
+                    ],
+                    check=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    cwd=project_root,
+                )
+            except subprocess.CalledProcessError as ex:
+                output = ex.stdout.decode()
+                if ex.stderr:
+                    output += "\n\n" + ex.stderr.decode()
+                raise AssertionError(
+                    f"mypy validation failed:\n{output}"
                 ) from None

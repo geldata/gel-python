@@ -35,7 +35,7 @@ import time
 import urllib.request
 
 
-PACKAGE_URL_PREFIX = "https://packages.edgedb.com/dist"
+PACKAGE_URL_PREFIX = "https://packages.geldata.com/dist"
 STRONG_CIPHERSUITES = ":".join([
     "TLS_AES_128_GCM_SHA256",
     "TLS_CHACHA20_POLY1305_SHA256",

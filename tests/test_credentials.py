@@ -23,8 +23,8 @@ import os
 import unittest
 from unittest import mock
 
-from edgedb import credentials
-from edgedb import platform
+from gel import credentials
+from gel import platform
 
 
 class _MockExists:

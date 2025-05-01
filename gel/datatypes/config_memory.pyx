@@ -17,8 +17,9 @@
 #
 
 
-from libc.stdint cimport int64_t
+import typing
 
+from libc.stdint cimport int64_t
 
 DEF KiB = 1024;
 DEF MiB = 1024 * KiB;
@@ -27,8 +28,8 @@ DEF TiB = 1024 * GiB;
 DEF PiB = 1024 * TiB;
 
 
-@cython.final
-cdef class ConfigMemory:
+cdef class ConfigMemory(CustomType):
+    __gel_type_name__: typing.ClassVar[str] = "cfg::memory"
 
     def __init__(self, int64_t bytes):
         self._bytes = bytes
