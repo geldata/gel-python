@@ -261,7 +261,6 @@ class BaseRetry:
 
         self._optimistic_rr = prefer_rr
 
-
     def _retry(self, exc):
         self._last_exception = exc
         rule = self._options.retry_options.get_rule_for_exception(exc)

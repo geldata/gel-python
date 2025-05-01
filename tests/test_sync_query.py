@@ -903,7 +903,7 @@ class TestSyncQuery(tb.SyncQueryTestCase):
         with self.client.with_config(
             default_transaction_isolation=edgedb.IsolationLevel.RepeatableRead
         ) as db2:
-            res = db2.query('''
+            db2.query('''
                 select 1; select 2;
             ''')
 
@@ -960,8 +960,7 @@ class TestSyncQuery(tb.SyncQueryTestCase):
             self.skipTest("DML in RepeatableRead not supported yet")
 
         with self.client.with_config(
-            default_transaction_isolation=
-            edgedb.IsolationLevel.PreferRepeatableRead
+            default_transaction_isolation=edgedb.IsolationLevel.PreferRepeatableRead
         ) as db2:
             # This query can run in RepeatableRead mode
             res = db2.query_single('''
