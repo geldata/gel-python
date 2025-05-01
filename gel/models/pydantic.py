@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import typing
 from typing import (
+    TYPE_CHECKING,
     Annotated,
     Any,
     ClassVar,
@@ -17,7 +18,6 @@ from typing import (
 )
 
 from typing_extensions import (
-    TYPE_CHECKING,
     Self,
     TypeAliasType,
 )
@@ -29,11 +29,11 @@ import warnings
 
 import pydantic
 import pydantic.fields
-from pydantic._internal import _model_construction
+from pydantic._internal import _model_construction  # noqa: PLC2701
 import pydantic_core
 from pydantic_core import core_schema as pydantic_schema
 
-from pydantic import Field as Field
+from pydantic import Field
 from pydantic import PrivateAttr as PrivateAttr
 from pydantic import computed_field as computed_field
 from pydantic import field_serializer as field_serializer
@@ -74,7 +74,7 @@ class ValidatedType(parametric.SingleParametricType[T]):
 
 
 class GelPointer(pydantic.fields.FieldInfo):
-    __slots__ = tuple(pydantic.fields.FieldInfo.__slots__) + ("_gel_name",)
+    __slots__ = (*pydantic.fields.FieldInfo.__slots__, "_gel_name")
 
     def __set_name__(self, owner: Any, name: str) -> None:
         self._gel_name = name
@@ -95,12 +95,12 @@ def _get_pointer_from_field(
     field: pydantic.fields.FieldInfo,
 ) -> GelPointer:
     kwargs = dict(field._attributes_set)
-    ptr = GelPointer(**kwargs)  # type: ignore
+    ptr = GelPointer(**kwargs)  # type: ignore [arg-type]
     ptr.__set_name__(None, name)
     return ptr
 
 
-class GelModelMeta(_model_construction.ModelMetaclass):
+class GelModelMeta(_model_construction.ModelMetaclass, type):
     def __new__(
         cls,
         name: str,
@@ -111,18 +111,18 @@ class GelModelMeta(_model_construction.ModelMetaclass):
         with warnings.catch_warnings():
             # Make pydantic shut up about attribute redefinition.
             warnings.filterwarnings(
-                "ignore", message=r".*shadows an attribute in parent.*"
+                "ignore", message=r".*shadows an attribute in parent.*",
             )
             new_cls = cast(
-                type[pydantic.BaseModel],
+                "type[pydantic.BaseModel]",
                 super().__new__(cls, name, bases, namespace, **kwargs),
             )
 
-        for name, field in new_cls.__pydantic_fields__.items():
-            col = _get_pointer_from_field(name, field)
-            setattr(new_cls, name, col)
+        for fname, field in new_cls.__pydantic_fields__.items():
+            col = _get_pointer_from_field(fname, field)
+            setattr(new_cls, fname, col)
 
-        return new_cls  # type: ignore
+        return new_cls  # type: ignore [return-value]
 
 
 class GelModelMetadata:
@@ -131,7 +131,7 @@ class GelModelMetadata:
 
 class GelModel(pydantic.BaseModel, GelModelMetadata, metaclass=GelModelMeta):
     model_config = pydantic.ConfigDict(
-        json_encoders={uuid.UUID: lambda v: str(v)}
+        json_encoders={uuid.UUID: str},
     )
 
     def __init__(self, /, **kwargs: Any) -> None:
@@ -139,7 +139,7 @@ class GelModel(pydantic.BaseModel, GelModelMetadata, metaclass=GelModelMeta):
         self._p__id: uuid.UUID = unsetid.UNSET_UUID
         self._p____type__ = None
 
-    def __eq__(self, other: Any) -> bool:
+    def __eq__(self, other: object) -> bool:
         if not isinstance(other, GelModel):
             return NotImplemented
 
@@ -163,7 +163,7 @@ MT = TypeVar("MT", bound=GelModel, covariant=True)
 
 
 class ProxyModel(GelModel, Generic[MT]):
-    __proxy_of__: ClassVar[type[MT]]  # type: ignore
+    __proxy_of__: ClassVar[type[MT]]  # type: ignore [misc]
 
     def __init__(self, obj: MT, /) -> None:
         pass
@@ -182,7 +182,7 @@ class ProxyModel(GelModel, Generic[MT]):
         handler: pydantic.GetCoreSchemaHandler,
     ) -> pydantic_core.CoreSchema:
         if cls.__name__ == "ProxyModel" or cls.__name__.startswith(
-            "ProxyModel["
+            "ProxyModel[",
         ):
             return handler(source_type)
         else:
@@ -223,7 +223,7 @@ class OptionalLink(GelPointer, Generic[PT, MT]):
         def __get__(self, obj: object, objtype: Any = None) -> PT | None: ...
 
         def __get__(
-            self, obj: Any, objtype: Any = None
+            self, obj: Any, objtype: Any = None,
         ) -> type[PT] | PT | None: ...
 
         def __set__(self, obj: Any, value: MT | None) -> None: ...
@@ -261,7 +261,7 @@ class _DistinctList(lists.DistinctList[DT], Generic[DT]):
                 items_schema=handler.generate_schema(item_type),
             ),
             serialization=pydantic_schema.plain_serializer_function_ser_schema(
-                lambda v: list(v),
+                list,
             ),
         )
 
@@ -283,7 +283,7 @@ class _DistinctList(lists.DistinctList[DT], Generic[DT]):
 
         raise ValueError(
             f"{cls!r} accepts only values of type {cls.type!r}, "
-            f"got {type(value)!r}"
+            f"got {type(value)!r}",
         )
 
 
@@ -294,5 +294,5 @@ DistinctList = TypeAliasType(
 )
 
 RequiredDistinctList = TypeAliasType(
-    "RequiredDistinctList", "list[DT]", type_params=(DT,)
+    "RequiredDistinctList", "list[DT]", type_params=(DT,),
 )

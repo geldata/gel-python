@@ -15,9 +15,9 @@ class _UnsetUUID(uuid.UUID):
     else errors out."""
 
     def __init__(self) -> None:
-        # Create a “zero” UUID under the hood. It doesn’t really matter what it
-        # is, since we won’t let anyone do anything with it except print it.
-        return super().__init__(int=0)
+        # Create a “zero” UUID under the hood. It doesn't really matter what it
+        # is, since we won't let anyone do anything with it except print it.
+        super().__init__(int=0)
 
     def __repr__(self) -> str:
         return "<UUID: UNSET>"

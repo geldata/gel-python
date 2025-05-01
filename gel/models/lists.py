@@ -8,12 +8,11 @@ from typing import (
     TYPE_CHECKING,
     Any,
     Generic,
-    Iterable,
-    Iterator,
     SupportsIndex,
     TypeVar,
     overload,
 )
+from collections.abc import Iterable, Iterator
 
 from typing_extensions import (
     Self,
@@ -63,16 +62,13 @@ class DistinctList(
 
         raise ValueError(
             f"{cls!r} accepts only values of type {cls.type!r}, "
-            f"got {type(value)!r}"
+            f"got {type(value)!r}",
         )
 
     @classmethod
     def _check_values(cls, values: Iterable[Any]) -> list[T]:
         """Ensure `values` is an iterable of type T and return it as a list."""
-        result = []
-        for value in values:
-            result.append(cls._check_value(value))
-        return result
+        return [cls._check_value(value) for value in values]
 
     def __len__(self) -> int:
         return len(self._items)
@@ -98,7 +94,7 @@ class DistinctList(
             start, stop, step = index.indices(len(self._items))
             if step != 1:
                 raise ValueError(
-                    "Slice assignment with step != 1 not supported"
+                    "Slice assignment with step != 1 not supported",
                 )
             prefix = self._items[:start]
             suffix = self._items[stop:]
@@ -144,8 +140,7 @@ class DistinctList(
         index = int(index)
         if index < 0:
             index = max(0, len(self._items) + index + 1)
-        if index > len(self._items):
-            index = len(self._items)
+        index = min(index, len(self._items))
         self._items.insert(index, value)
         self._set.add(value)
 
@@ -166,7 +161,7 @@ class DistinctList(
         try:
             self._set.remove(value)
         except KeyError:
-            raise ValueError(f"DisinctList.remove(x): x not in list")
+            raise ValueError("DisinctList.remove(x): x not in list") from None
         else:
             self._items.remove(value)
 
@@ -204,7 +199,9 @@ class DistinctList(
         """Return 1 if item is present, else 0."""
         return 1 if value in self._set else 0
 
-    def __eq__(self, other: Any) -> bool:
+    __hash__ = None  # type: ignore [assignment]
+
+    def __eq__(self, other: object) -> bool:
         if isinstance(other, DistinctList):
             return self._items == other._items
         elif isinstance(other, list):

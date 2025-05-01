@@ -161,7 +161,7 @@ extend-select = [
     # "UP",     # pyupgrade
     "W", # warning
 ]
-ignore = [
+extend-ignore = [
     "B018", # useless-expression
     "B023", # function-uses-loop-variable
     "B904", # raise-without-from-inside-except
