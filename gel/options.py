@@ -71,8 +71,9 @@ class IsolationLevel:
                 return 'SERIALIZABLE'
         else:
             raise ValueError(
-                f"Invalid isolation_level value for transaction(): {self}"
+                f"Invalid isolation_level value for transaction(): {v}"
             )
+
 
 class RetryOptions:
     """An immutable class that contains rules for `transaction()`"""

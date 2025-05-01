@@ -113,7 +113,6 @@ class TestAsyncTx(tb.AsyncQueryTestCase):
                     await asyncio.wait_for(f1, timeout=5)
                     await asyncio.wait_for(f2, timeout=5)
 
-
     async def _try_bogus_rr_tx(self, con, first_try):
         # A transaction that needs to be serializable
         async for tx in con.transaction():

@@ -18,7 +18,6 @@
 
 
 import argparse
-import sys
 
 from . import generator
 
