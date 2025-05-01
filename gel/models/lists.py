@@ -12,7 +12,6 @@ from typing import (
     TypeVar,
     overload,
 )
-from collections.abc import Iterable, Iterator
 
 from typing_extensions import (
     Self,
@@ -20,16 +19,14 @@ from typing_extensions import (
 
 from collections.abc import (
     Hashable,
+    Iterable,
+    Iterator,
     MutableSequence,
     Sequence,
 )
 
 import functools
 
-
-from pydantic import Field as Field
-from pydantic import PrivateAttr as PrivateAttr
-from pydantic import computed_field as computed_field
 from gel._internal import _typing_parametric as parametric
 
 
@@ -48,8 +45,14 @@ class DistinctList(
     """
 
     def __init__(self, iterable: Iterable[T] = ()) -> None:
+        # Current items in order.
         self._items: list[T] = []
+        # Set of (hashable) items to maintain distinctness.
         self._set: set[T] = set()
+        # Assuming unhashable items compare by object identity,
+        # the dict below is used as an extension for distinctness
+        # checks.
+        self._unhashables: dict[int, T] = {}
         self._type: type | None = None
         for item in iterable:
             self.append(item)
@@ -73,11 +76,13 @@ class DistinctList(
     def __len__(self) -> int:
         return len(self._items)
 
-    @overload
-    def __getitem__(self, index: SupportsIndex) -> T: ...
+    if TYPE_CHECKING:
 
-    @overload
-    def __getitem__(self, index: slice) -> Self: ...
+        @overload
+        def __getitem__(self, index: SupportsIndex) -> T: ...
+
+        @overload
+        def __getitem__(self, index: slice) -> Self: ...
 
     def __getitem__(self, index: SupportsIndex | slice) -> T | Self:
         if isinstance(index, slice):
@@ -99,50 +104,79 @@ class DistinctList(
             prefix = self._items[:start]
             suffix = self._items[stop:]
             new_values = self._check_values(value)  # type: ignore [arg-type]
-            self._items.clear()
-            self._set.clear()
-            for item in prefix + new_values + suffix:
-                if item not in self._set:
-                    self._items.append(item)
-                    self._set.add(item)
+            self.clear()
+            for item in (*prefix, *new_values, *suffix):
+                self._append_no_check(item)
         else:
             new_value = self._check_value(value)
             old = self._items[index]
-            if value is old or value == old:
+            if new_value is old or new_value == old:
                 return
             del self._items[index]
-            self._set.remove(old)
-            if value in self._set:
-                j = self._items.index(new_value)
-                del self._items[j]
-                self._set.remove(new_value)
-                index = int(index)
-                if j < index:
-                    index -= 1
-            self._items.insert(index, new_value)
-            self._set.add(new_value)
+            vid = id(new_value)
+            if self._unhashables.pop(vid, None) is None:
+                self._set.remove(old)
+
+            if new_value not in self:
+                try:
+                    self._set.add(new_value)
+                except TypeError:
+                    self._unhashables[vid] = new_value
+
+                self._items.insert(index, new_value)
 
     def __delitem__(self, index: SupportsIndex | slice) -> None:
         if isinstance(index, slice):
-            to_del = set(self._items[index])
-            self._set -= to_del
-            self._items = [item for item in self._items if item not in to_del]
+            to_remove = type(self)(self._items[index])
+            for item in to_remove:
+                vid = id(item)
+                if self._unhashables.pop(vid, None) is None:
+                    # safe to assume hashable if not in _unhashables
+                    self._set.discard(item)
+            self._items = [it for it in self._items if it not in to_remove]
         else:
             item = self._items.pop(index)
-            self._set.remove(item)
+            vid = id(item)
+            if vid in self._unhashables:
+                del self._unhashables[vid]
+            else:
+                self._set.remove(item)
+
+    def __iter__(self) -> Iterator[T]:
+        return iter(self._items)
+
+    def __contains__(self, item: object) -> bool:
+        if id(item) in self._unhashables:
+            return True
+
+        try:
+            return item in self._set
+        except TypeError:
+            return False
 
     def insert(self, index: SupportsIndex, value: T) -> None:  # type: ignore [misc]
         """Insert item at index if not already present."""
-        self._check_value(value)
-        if value in self._set:
+        if value in self:
             return
+
+        self._check_value(value)
+
         # clamp index
         index = int(index)
         if index < 0:
             index = max(0, len(self._items) + index + 1)
         index = min(index, len(self._items))
-        self._items.insert(index, value)
-        self._set.add(value)
+
+        try:
+            if value not in self._set:
+                self._items.insert(index, value)
+                self._set.add(value)
+        except TypeError:
+            # fallback for unhashables
+            vid = id(value)
+            if vid not in self._unhashables:
+                self._items.insert(index, value)
+                self._unhashables[vid] = value
 
     def extend(self, values: Iterable[T]) -> None:
         if values is self:
@@ -152,35 +186,43 @@ class DistinctList(
 
     def append(self, value: T) -> None:  # type: ignore [misc]
         self._check_value(value)
-        if value not in self._set:
+        self._append_no_check(value)
+
+    def _append_no_check(self, value: T) -> None:  # type: ignore[misc]
+        if value in self:
+            return
+        else:
+            try:
+                self._set.add(value)
+            except TypeError:
+                self._unhashables[id(value)] = value
+
             self._items.append(value)
-            self._set.add(value)
 
     def remove(self, value: T) -> None:  # type: ignore [misc]
         """Remove item; raise ValueError if missing."""
-        try:
-            self._set.remove(value)
-        except KeyError:
-            raise ValueError("DisinctList.remove(x): x not in list") from None
-        else:
-            self._items.remove(value)
+        if self._unhashables.pop(id(value), None) is None:
+            try:
+                self._set.remove(value)
+            except (KeyError, TypeError):
+                raise ValueError(
+                    "DisinctList.remove(x): x not in list",
+                ) from None
+
+        self._items.remove(value)
 
     def pop(self, index: SupportsIndex = -1) -> T:
         """Remove and return item at index (default last)."""
         item = self._items.pop(index)
-        self._set.remove(item)
+        if self._unhashables.pop(id(item), None) is None:
+            self._set.remove(item)
         return item
 
     def clear(self) -> None:
         """Remove all items but keep element-type enforcement."""
         self._items.clear()
         self._set.clear()
-
-    def __iter__(self) -> Iterator[T]:
-        return iter(self._items)
-
-    def __contains__(self, item: object) -> bool:
-        return item in self._set
+        self._unhashables.clear()
 
     def index(
         self,
@@ -197,7 +239,37 @@ class DistinctList(
 
     def count(self, value: T) -> int:  # type: ignore [misc]
         """Return 1 if item is present, else 0."""
-        return 1 if value in self._set else 0
+        if id(value) in self._unhashables:
+            return 1
+        else:
+            try:
+                return 1 if value in self._set else 0
+            except TypeError:
+                return 0
+
+    def promote_unhashables(self, *items: T) -> None:  # type: ignore [misc]
+        """Try hashing each unhashable: if it now hashes, move into `_set`, or
+        if it duplicates an existing, drop it from the list."""
+        if not items:
+            pairs = list(self._unhashables.items())
+        else:
+            pairs = [(id(item), item) for item in items]
+
+        for vid, item in pairs:
+            try:
+                hash(item)
+            except TypeError:
+                continue  # still unhashable
+
+            # now hashable: if duplicate, remove outright; otherwise add to set
+            if item in self._set:
+                # drop from items list to keep distinctness
+                self._items.remove(item)
+            else:
+                self._set.add(item)
+
+            # in either case, no longer “unhashable”
+            del self._unhashables[vid]
 
     __hash__ = None  # type: ignore [assignment]
 
@@ -229,7 +301,7 @@ class DistinctList(
         self.extend(other)
         return self
 
-    if TYPE_CHECKING:
+    if TYPE_CHECKING:  # pragma: no cover
 
         @overload
         def __set__(self, obj: Any, val: list[T]) -> None: ...

@@ -111,7 +111,8 @@ class GelModelMeta(_model_construction.ModelMetaclass, type):
         with warnings.catch_warnings():
             # Make pydantic shut up about attribute redefinition.
             warnings.filterwarnings(
-                "ignore", message=r".*shadows an attribute in parent.*",
+                "ignore",
+                message=r".*shadows an attribute in parent.*",
             )
             new_cls = cast(
                 "type[pydantic.BaseModel]",
@@ -223,7 +224,9 @@ class OptionalLink(GelPointer, Generic[PT, MT]):
         def __get__(self, obj: object, objtype: Any = None) -> PT | None: ...
 
         def __get__(
-            self, obj: Any, objtype: Any = None,
+            self,
+            obj: Any,
+            objtype: Any = None,
         ) -> type[PT] | PT | None: ...
 
         def __set__(self, obj: Any, value: MT | None) -> None: ...
@@ -294,5 +297,7 @@ DistinctList = TypeAliasType(
 )
 
 RequiredDistinctList = TypeAliasType(
-    "RequiredDistinctList", "list[DT]", type_params=(DT,),
+    "RequiredDistinctList",
+    "list[DT]",
+    type_params=(DT,),
 )
