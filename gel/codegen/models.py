@@ -1,50 +1,26 @@
-#
-# This source file is part of the EdgeDB open source project.
-#
-# Copyright 2025-present MagicStack Inc. and the EdgeDB authors.
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-#
+# SPDX-PackageName: gel-python
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright Gel Data Inc. and the contributors.
 
 from __future__ import annotations
 from typing import (
-    Callable,
-    DefaultDict,
-    Generator,
-    Iterable,
-    Iterator,
+    TYPE_CHECKING,
     Literal,
-    Mapping,
     NamedTuple,
-    Sequence,
     TypedDict,
-    Union,
 )
 
-import argparse
 import base64
 import collections
 import enum
 import graphlib
 import functools
-import io
+import logging
 import pathlib
 import sys
 import textwrap
-import uuid
 
 from collections import defaultdict
-from collections.abc import Collection
 from contextlib import contextmanager
 
 import gel
@@ -52,7 +28,22 @@ from gel import abstract
 from gel._internal import _reflection as reflection
 
 from . import base
-from .base import C, ImportTime, CodeSection
+from .base import C, MAX_LINE_LENGTH, ImportTime, CodeSection
+
+if TYPE_CHECKING:
+    import argparse
+    import io
+    import uuid
+
+    from collections.abc import (
+        Callable,
+        Collection,
+        Generator,
+        Iterable,
+        Iterator,
+        Mapping,
+        Sequence,
+    )
 
 
 COMMENT = """\
@@ -62,6 +53,8 @@ COMMENT = """\
 # Do not edit directly as re-generating this file will overwrite any changes.
 #\
 """
+
+logger = logging.getLogger(__name__)
 
 
 class IntrospectedModule(TypedDict):
@@ -77,8 +70,8 @@ class ModelsGenerator(base.Generator):
     def run(self) -> None:
         try:
             self._client.ensure_connected()
-        except gel.EdgeDBError as e:
-            print(f"could not connect to Gel instance: {e}")
+        except gel.EdgeDBError:
+            logger.exception("could not connect to Gel instance")
             sys.exit(61)
 
         with self._client:
@@ -179,7 +172,6 @@ class Import(NamedTuple):
 def get_modpath(
     modpath: reflection.SchemaPath,
     aspect: ModuleAspect,
-    mod_is_package: bool,
 ) -> reflection.SchemaPath:
     if aspect is ModuleAspect.MAIN:
         pass
@@ -201,6 +193,9 @@ def _map_name(
         name = transform(name)
         result.append(f"{mod}.{name}" if mod else name)
     return result
+
+
+BASE_IMPL = "gel.models.pydantic"
 
 
 class BaseGeneratedModule:
@@ -244,9 +239,10 @@ class BaseGeneratedModule:
         self,
         mod: reflection.SchemaPath,
     ) -> reflection.SchemaPart:
-        if self._schema_part is reflection.SchemaPart.STD:
-            return reflection.SchemaPart.STD
-        elif mod not in self._modules:
+        if (
+            self._schema_part is reflection.SchemaPart.STD
+            or mod not in self._modules
+        ):
             return reflection.SchemaPart.STD
         else:
             return reflection.SchemaPart.USER
@@ -294,7 +290,7 @@ class BaseGeneratedModule:
         return self.modpath(self._current_aspect)
 
     def modpath(self, aspect: ModuleAspect) -> reflection.SchemaPath:
-        return get_modpath(self._modpath, aspect, self.is_package)
+        return get_modpath(self._modpath, aspect)
 
     @property
     def is_package(self) -> bool:
@@ -303,8 +299,9 @@ class BaseGeneratedModule:
     @contextmanager
     def _open_py_file(
         self,
-        dir: pathlib.Path,
+        path: pathlib.Path,
         modpath: reflection.SchemaPath,
+        *,
         as_pkg: bool,
     ) -> Generator[io.TextIOWrapper, None, None]:
         if as_pkg:
@@ -319,13 +316,12 @@ class BaseGeneratedModule:
             filename = f"{modpath.name}.py"
 
         # Along the dirpath we need to ensure that all packages are created
-        path = dir
         self._init_dir(path)
         for el in dirpath.parts:
-            path = path / el
+            path /= el
             self._init_dir(path)
 
-        with open(path / filename, "wt") as f:
+        with open(path / filename, "w", encoding="utf8") as f:
             try:
                 yield f
             finally:
@@ -349,15 +345,15 @@ class BaseGeneratedModule:
         # ensure `path` directory contains `__init__.py`
         (path / "__init__.py").touch()
 
-    def write_files(self, dir: pathlib.Path) -> None:
+    def write_files(self, path: pathlib.Path) -> None:
         for aspect, py_file in self.py_files.items():
             if not py_file.has_content():
                 continue
 
             with self._open_py_file(
-                dir,
+                path,
                 self.modpath(aspect),
-                self.is_package,
+                as_pkg=self.is_package,
             ) as f:
                 py_file.output(f)
 
@@ -413,22 +409,21 @@ class BaseGeneratedModule:
         t: reflection.NamedTupleType,
     ) -> str:
         names = [elem.name.capitalize() for elem in t.tuple_elements]
-        hash = base64.b64encode(t.id.bytes[:4], altchars=b"__").decode()
-        return "".join(names) + "_Tuple_" + hash.rstrip("=")
+        digest = base64.b64encode(t.id.bytes[:4], altchars=b"__").decode()
+        return "".join(names) + "_Tuple_" + digest.rstrip("=")
 
     def _resolve_rel_import(
         self,
         imp_path: reflection.SchemaPath,
         aspect: ModuleAspect,
+        *,
         import_name: bool = False,
     ) -> Import | None:
         imp_mod_canon = imp_mod = imp_path.parent
         imp_name = imp_path.name
         cur_mod = self.current_modpath
         if aspect is not ModuleAspect.MAIN:
-            imp_schema_part = self.get_mod_schema_part(imp_mod)
-            imp_mod_is_pkg = self.mod_is_package(imp_mod, imp_schema_part)
-            imp_mod = get_modpath(imp_mod, aspect, imp_mod_is_pkg)
+            imp_mod = get_modpath(imp_mod, aspect)
 
         if imp_mod == cur_mod and aspect is self.current_aspect:
             # It's this module, no need to import
@@ -477,13 +472,13 @@ class BaseGeneratedModule:
 
     def get_type(
         self,
-        type: reflection.AnyType,
+        stype: reflection.AnyType,
         *,
         import_time: ImportTime = ImportTime.runtime,
         aspect: ModuleAspect = ModuleAspect.MAIN,
         rename_as: str | None = None,
     ) -> str:
-        base_type = base.TYPE_MAPPING.get(type.name)
+        base_type = base.TYPE_MAPPING.get(stype.name)
         if base_type is not None:
             if isinstance(base_type, str):
                 if self.py_file.has_global(base_type):
@@ -498,36 +493,35 @@ class BaseGeneratedModule:
                 import_time=import_time,
             )
 
-        if reflection.is_array_type(type):
+        if reflection.is_array_type(stype):
             elem_type = self.get_type(
-                self._types[type.array_element_id],
+                self._types[stype.array_element_id],
                 import_time=import_time,
                 aspect=aspect,
             )
             return f"list[{elem_type}]"
 
-        if reflection.is_pseudo_type(type):
-            if type.name == "anyobject":
-                return self.import_name("gel.models.pydantic", "GelModel")
-            elif type.name == "anytuple":
-                any = self.import_name("typing", "Any")
-                return f"tuple[{any}, ...]"
+        if reflection.is_pseudo_type(stype):
+            if stype.name == "anyobject":
+                return self.import_name(BASE_IMPL, "GelModel")
+            elif stype.name == "anytuple":
+                return f"tuple[{self.import_name('typing', 'Any')}, ...]"
             else:
-                raise AssertionError(f"unsupported pseudo-type: {type.name}")
+                raise AssertionError(f"unsupported pseudo-type: {stype.name}")
 
-        if reflection.is_named_tuple_type(type):
+        if reflection.is_named_tuple_type(stype):
             mod = "__types__"
-            if type.builtin:
+            if stype.builtin:
                 mod = f"std::{mod}"
-            type_name = f"{mod}::{self.get_tuple_name(type)}"
+            type_name = f"{mod}::{self.get_tuple_name(stype)}"
             import_name = True
         else:
-            type_name = type.name
+            type_name = stype.name
             import_name = False
 
-        if reflection.is_scalar_type(type):
+        if reflection.is_scalar_type(stype):
             aspect = ModuleAspect.VARIANTS
-        elif reflection.is_named_tuple_type(type):
+        elif reflection.is_named_tuple_type(stype):
             aspect = ModuleAspect.MAIN
 
         cur_aspect = self.current_aspect
@@ -552,7 +546,9 @@ class BaseGeneratedModule:
             imported_name = type_name
             imp_path = type_path
 
-        rel_import = self._resolve_rel_import(imp_path, aspect, import_name)
+        rel_import = self._resolve_rel_import(
+            imp_path, aspect, import_name=import_name
+        )
         if rel_import is None:
             result = imported_name
         else:
@@ -572,8 +568,8 @@ class BaseGeneratedModule:
     def format_list(self, tpl: str, values: list[str]) -> str:
         list_string = ", ".join(values)
         output_string = tpl.format(list=list_string)
-
-        if len(output_string) + len(self.current_indentation()) > 79:
+        line_length = len(output_string) + len(self.current_indentation())
+        if line_length > MAX_LINE_LENGTH:
             list_string = ",\n    ".join(values)
             list_string = f"\n    {list_string},\n"
             output_string = tpl.format(list=list_string)
@@ -588,13 +584,13 @@ class GeneratedSchemaModule(BaseGeneratedModule):
 
     def write_description(
         self,
-        type: Union[reflection.ScalarType, reflection.ObjectType],
+        stype: reflection.ScalarType | reflection.ObjectType,
     ) -> None:
-        if not type.description:
+        if not stype.description:
             return
 
         desc = textwrap.wrap(
-            textwrap.dedent(type.description).strip(),
+            textwrap.dedent(stype.description).strip(),
             break_long_words=False,
         )
         self.write('"""')
@@ -606,13 +602,13 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         scalar_types: dict[str, reflection.ScalarType],
     ) -> None:
         with self.aspect(ModuleAspect.VARIANTS):
-            for type_name, type in scalar_types.items():
-                if type.enum_values:
+            for type_name, stype in scalar_types.items():
+                if stype.enum_values:
                     strenum = self.import_name("gel.polyfills", "StrEnum")
                     self.write(f"class {type_name}({strenum}):")
                     with self.indented():
-                        self.write_description(type)
-                        for value in type.enum_values:
+                        self.write_description(stype)
+                        for value in stype.enum_values:
                             self.write(f"{value} = {value!r}")
                     self.write_section_break()
 
@@ -765,9 +761,9 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             self.write("@property")
         params = list(params)
         if kind == "classmethod":
-            params = ["cls"] + params
-        elif kind == "method" or kind == "property":
-            params = ["self"] + params
+            params = ["cls", *params]
+        elif kind in {"method", "property"}:
+            params = ["self", *params]
         def_line = self.format_list(
             f"def {func_name}({{list}}) -> {return_type}:",
             params,
@@ -874,10 +870,10 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         if base_types:
             typeof_bases = _map_name(_mangle_typeof, base_types)
         else:
-            gmm = self.import_name("gel.models.pydantic", "GelModelMetadata")
+            gmm = self.import_name(BASE_IMPL, "GelModelMetadata")
             typeof_bases = [gmm]
         pointers = objtype.pointers
-        otr = self.import_name("gel.models.pydantic", "ObjectTypeReflection")
+        otr = self.import_name(BASE_IMPL, "ObjectTypeReflection")
         uuid = self.import_name("uuid", "UUID")
         with self._class_def(typeof_class, typeof_bases):
             self.write(f"__gel_type_reflection__ = {otr}(")
@@ -909,7 +905,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         self.write()
         class_kwargs = {}
         if objtype.name == "std::BaseObject":
-            gel_meta = self.import_name("gel.models.pydantic", "GelModelMeta")
+            gel_meta = self.import_name(BASE_IMPL, "GelModelMeta")
             uuid = self.import_name("uuid", "UUID")
             classvar = self.import_name("typing", "ClassVar")
             refl_t = self.get_type(
@@ -947,13 +943,13 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             self.write()
 
         if not base_types:
-            gel_model = self.import_name("gel.models.pydantic", "GelModel")
+            gel_model = self.import_name(BASE_IMPL, "GelModel")
             vbase_types = [gel_model]
         else:
             vbase_types = base_types
         with self._class_def(
             name,
-            [typeof_class] + vbase_types,
+            [typeof_class, *vbase_types],
             class_kwargs=class_kwargs,
         ):
             self._write_base_object_type_body(objtype, typeof_class)
@@ -972,9 +968,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                         )
                     )
                 else:
-                    gel_model = self.import_name(
-                        "gel.models.pydantic", "GelModel"
-                    )
+                    gel_model = self.import_name(BASE_IMPL, "GelModel")
                     base_bases.append(gel_model)
                 with self._class_def(
                     "Empty",
@@ -991,8 +985,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             if base_types:
                 links_bases = _map_name(lambda s: f"{s}.__links__", base_types)
             else:
-                lns = self.import_name(
-                    "gel.models.pydantic", "LinkClassNamespace")
+                lns = self.import_name(BASE_IMPL, "LinkClassNamespace")
                 links_bases = [lns]
 
             with self._class_def("__links__", links_bases):
@@ -1019,8 +1012,8 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         typeof_class: str,
     ) -> None:
         if objtype.name == "std::BaseObject":
-            priv_attr = self.import_name("gel.models.pydantic", "PrivateAttr")
-            comp_f = self.import_name("gel.models.pydantic", "computed_field")
+            priv_attr = self.import_name(BASE_IMPL, "PrivateAttr")
+            comp_f = self.import_name(BASE_IMPL, "computed_field")
             for ptr in objtype.pointers:
                 if ptr.name == "__type__":
                     ptr_type = self.get_ptr_type(
@@ -1031,9 +1024,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                     with self._property_def(ptr.name, [], ptr_type):
                         self.write("cls = type(self)")
                         self.write("tid = cls.__gel_type_reflection__.id")
-                        self.write(
-                            f"return type(cls).get_type_reflection(tid)"
-                        )
+                        self.write("return type(cls).get_type_reflection(tid)")
                 elif ptr.name == "id":
                     ptr_type = self.get_ptr_type(objtype, ptr)
                     self.write(f"_p__{ptr.name}: {ptr_type} = {priv_attr}()")
@@ -1050,14 +1041,12 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                 return False
             if not objtype.name.startswith("schema::") and ptr.name == "id":
                 return False
-            if (
+            # Skip deprecated schema props (is_-prefixed).
+            return not (
                 owning_objtype.name.startswith("schema::")
                 and ptr.name.startswith("is_")
                 and ptr.is_computed
-            ):
-                # Skip deprecated schema props (is_-prefixed).
-                return False
-            return True
+            )
 
         reg_pointers = list(
             filter(_filter, self._get_pointer_origins(objtype))
@@ -1074,31 +1063,33 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             )
             args.append(f"{ptr.name}: {init_ptr_t}")
 
-        with self.type_checking():
-            with self._method_def("__init__", args):
-                self.write(
-                    f'"""Create a new {objtype.name} instance '
-                    "from keyword arguments."
-                )
-                self.write()
-                self.write(
-                    "Call db.save() on the returned object to persist it "
-                    "in the database."
-                )
-                self.write('"""')
-                self.write("...")
-                self.write()
+        with self.type_checking(), self._method_def("__init__", args):
+            self.write(
+                f'"""Create a new {objtype.name} instance '
+                "from keyword arguments."
+            )
+            self.write()
+            self.write(
+                "Call db.save() on the returned object to persist it "
+                "in the database."
+            )
+            self.write('"""')
+            self.write("...")
+            self.write()
         if objtype.name.startswith("schema::"):
-            with self.not_type_checking():
-                with self._method_def("__init__", ["/", "**kwargs: Any"]):
-                    self.write('_id = kwargs.pop("id", None)')
-                    self.write("super().__init__(**kwargs)")
-                    self.write("self._p__id = _id")
+            with (
+                self.not_type_checking(),
+                self._method_def("__init__", ["/", "**kwargs: Any"]),
+            ):
+                self.write('_id = kwargs.pop("id", None)')
+                self.write("super().__init__(**kwargs)")
+                self.write("self._p__id = _id")
             self.write()
 
     def _get_links_with_props(
         self,
         objtype: reflection.ObjectType,
+        *,
         local: bool | None = None,
     ) -> list[reflection.Pointer]:
         type_name = reflection.parse_name(objtype.name)
@@ -1112,19 +1103,16 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             target_type = self._types[ptr.target_id]
             target_type_name = reflection.parse_name(target_type.name)
 
-            if (
-                local is not None
-                and local != (target_type_name.parent == type_name.parent)
-            ):
-                return False
-
-            return True
+            return local is None or local == (
+                target_type_name.parent == type_name.parent
+            )
 
         return list(filter(_filter, objtype.pointers))
 
     def write_object_type_link_variants(
         self,
         objtype: reflection.ObjectType,
+        *,
         local: bool | None = False,
         target_aspect: ModuleAspect | None = None,
         is_forward_decl: bool = False,
@@ -1155,12 +1143,14 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                     qualname = f"{obj_class}.{ptrname}"
                     self.write(f"{classname}.__qualname__ = {qualname!r}")
                     self.write(
-                        f"{obj_class}.__links__.{ptrname} = {classname}")
+                        f"{obj_class}.__links__.{ptrname} = {classname}"
+                    )
                     self.write(f"del {classname}")
 
     def _write_object_type_link_variants(
         self,
         objtype: reflection.ObjectType,
+        *,
         pointers: Sequence[reflection.Pointer],
         local: bool | None = False,
         target_aspect: ModuleAspect | None = None,
@@ -1170,7 +1160,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         name = type_name.name
 
         self_t = self.import_name("typing", "Self")
-        ProxyModel = self.import_name("gel.models.pydantic", "ProxyModel")
+        proxymodel_t = self.import_name(BASE_IMPL, "ProxyModel")
         all_ptr_origins = self._get_all_pointer_origins(objtype)
 
         if target_aspect is None:
@@ -1178,13 +1168,14 @@ class GeneratedSchemaModule(BaseGeneratedModule):
 
         classnames = {}
         for ptr in pointers:
+            pname = ptr.name
             ptr_origins = [
                 self.get_type(
                     ptr,
                     import_time=ImportTime.typecheck,
                     aspect=self.current_aspect,
                 )
-                for ptr in all_ptr_origins[ptr.name]
+                for ptr in all_ptr_origins[pname]
             ]
 
             target_type = self._types[ptr.target_id]
@@ -1193,29 +1184,29 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                 aspect=target_aspect,
             )
 
-            if is_forward_decl:
-                classname = ptr.name
-            else:
-                classname = f"{name}__{ptr.name}"
-            classnames[ptr.name] = classname
+            classname = pname if is_forward_decl else f"{name}__{pname}"
+            classnames[pname] = classname
             with self._class_def(
                 classname,
                 (
-                    [f"{s}.__links__.{ptr.name}" for s in ptr_origins]
-                    + [target, f"{ProxyModel}[{target}]"]
+                    [f"{s}.__links__.{pname}" for s in ptr_origins]
+                    + [target, f"{proxymodel_t}[{target}]"]
                 ),
             ):
                 self.write(
-                    f'"""link {objtype.name}.{ptr.name}: {target_type.name}"""'
+                    f'"""link {objtype.name}.{pname}: {target_type.name}"""'
                 )
 
                 if ptr_origins:
                     lprops_bases = _map_name(
-                        lambda s: f"{s}.__links__.{ptr.name}.__lprops__",
+                        functools.partial(
+                            lambda s, pn: f"{s}.__links__.{pn}.__lprops__",
+                            pn=pname,
+                        ),
                         ptr_origins,
                     )
                 else:
-                    b = self.import_name("gel.models.pydantic", "GelLinkModel")
+                    b = self.import_name(BASE_IMPL, "GelLinkModel")
                     lprops_bases = [b]
 
                 opt = self.import_name("typing", "Optional")
@@ -1236,26 +1227,27 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                         lprops.append(f"{lprop_line} = None")
 
                 self.write()
-                priv_attr = self.import_name(
-                    "gel.models.pydantic", "PrivateAttr")
+                priv_attr = self.import_name(BASE_IMPL, "PrivateAttr")
 
                 self.write(f"_p__obj__: {target} = {priv_attr}()")
                 self.write(f"_p__lprops__: __lprops__ = {priv_attr}()")
 
                 self.write()
-                args = [f"obj: {target}", "/", "*"] + lprops
+                args = [f"obj: {target}", "/", "*", *lprops]
                 with self._method_def("__init__", args):
                     if is_forward_decl:
                         self.write("...")
                     else:
                         self.write("self._p__obj__ = obj")
-                        self.write(self.format_list(
-                            "self._p__lprops__ = self.__lprops__({list})",
-                            lprop_assign,
-                        ))
+                        self.write(
+                            self.format_list(
+                                "self._p__lprops__ = self.__lprops__({list})",
+                                lprop_assign,
+                            )
+                        )
 
                 self.write()
-                args = [f"obj: {target}", "/", "*"] + lprops
+                args = [f"obj: {target}", "/", "*", *lprops]
                 with self._classmethod_def("link", args, self_t):
                     if is_forward_decl:
                         self.write("...")
@@ -1263,7 +1255,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                         self.write(
                             self.format_list(
                                 "return cls({list})",
-                                ["obj"] + lprop_assign,
+                                ["obj", *lprop_assign],
                             ),
                         )
 
@@ -1353,7 +1345,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         prop: reflection.Pointer,
     ) -> str:
         if reflection.is_link(prop):
-            pytype = self.import_name("gel.models.pydantic", "DistinctList")
+            pytype = self.import_name(BASE_IMPL, "DistinctList")
         else:
             pytype = "list"
 
@@ -1429,7 +1421,8 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                     return f"{pytype}[{ptr_type}]"
                 elif link_type:
                     link = self.import_name(
-                        "gel.models.pydantic", "OptionalLink")
+                        "gel.models.pydantic", "OptionalLink"
+                    )
                     return (
                         f"{link}[{ptr_type}, {bare_ptr_type}] "
                         f"= {link}(default=None)"
@@ -1451,7 +1444,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
 
 class GeneratedGlobalModule(BaseGeneratedModule):
     def process(self, types: Mapping[uuid.UUID, reflection.AnyType]) -> None:
-        graph: DefaultDict[uuid.UUID, set[uuid.UUID]] = defaultdict(set)
+        graph: defaultdict[uuid.UUID, set[uuid.UUID]] = defaultdict(set)
 
         @functools.singledispatch
         def type_dispatch(t: reflection.AnyType, ref_t: uuid.UUID) -> None:

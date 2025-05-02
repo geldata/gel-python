@@ -18,10 +18,9 @@
 
 from typing import (
     Any,
-    Iterator,
-    Mapping,
     TypeAlias,
 )
+from collections.abc import Iterator, Mapping
 
 import argparse
 import collections
@@ -49,7 +48,7 @@ if pyver_env := os.environ.get("GEL_PYTHON_CODEGEN_PY_VER"):
     except ValueError:
         raise ValueError(
             f"invalid version in GEL_PYTHON_CODEGEN_PY_VER: {pyver_env}"
-        )
+        ) from None
 else:
     SYS_VERSION_INFO = sys.version_info[:2]
 
@@ -101,9 +100,11 @@ class NoPydanticValidation:
         return []\
 """
 
+MAX_LINE_LENGTH = 79
+
 
 def print_msg(msg: str) -> None:
-    print(msg, file=sys.stderr)
+    print(msg, file=sys.stderr)  # noqa: T201
 
 
 def print_error(msg: str) -> None:
@@ -146,7 +147,7 @@ class Generator:
         try:
             self._project_dir = pathlib.Path(find_gel_project_dir())
         except gel.ClientConnectionError:
-            print(
+            print_error(
                 "Cannot find gel.toml: "
                 "codegen must be run inside a Gel project directory"
             )
@@ -355,10 +356,7 @@ class GeneratedModule:
                 )
 
             new_global = imported_as
-            if name == ".":
-                imported = imported_as
-            else:
-                imported = f"{imported_as}.{name}"
+            imported = imported_as if name == "." else f"{imported_as}.{name}"
 
         return imported, new_global
 
@@ -536,11 +534,10 @@ class GeneratedModule:
                     import_line = f"from {relative}{pkg} import {name}"
                     if alias and alias != name:
                         import_line += f" as {alias}"
+                elif alias:
+                    import_line = f"import {modname} as {alias}"
                 else:
-                    if alias:
-                        import_line = f"import {modname} as {alias}"
-                    else:
-                        import_line = f"import {modname}"
+                    import_line = f"import {modname}"
                 if noqa:
                     import_line += f"  # noqa: {' '.join(noqa)}"
                 output.append(import_line)
@@ -557,7 +554,7 @@ class GeneratedModule:
             names_list = list(names)
             names_list.sort()
             names_part = ", ".join(names_list)
-            if len(import_line) + len(names_part) > 79:
+            if len(import_line) + len(names_part) > MAX_LINE_LENGTH:
                 names_part = "(\n    " + ",\n    ".join(names_list) + "\n)"
             import_line += names_part
             if noqa:
