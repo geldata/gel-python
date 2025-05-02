@@ -45,6 +45,7 @@ extend-ignore = [
     "PLR0912", # too-many-branches
     "PLR0914", # too-many-local-variables
     "PLR0915", # too-many-statements
+    "PLR1702", # too-many-nested-blocks
     "PLR6301", # no-self-use
     "PLW3201", # bad-dunder-method-name
     "S101",    # assert

@@ -44,6 +44,7 @@ from . import lists
 from . import unsetid
 
 T = TypeVar("T")
+T_co = TypeVar("T_co", covariant=True)
 
 OptionalWithDefault = TypeAliasType(
     "OptionalWithDefault",
@@ -124,6 +125,39 @@ class GelModelMeta(_model_construction.ModelMetaclass, type):
             setattr(new_cls, fname, col)
 
         return new_cls  # type: ignore [return-value]
+
+
+class BaseScalar:
+    pass
+
+
+class PyTypeScalar(parametric.SingleParametricType[T_co]):
+    if TYPE_CHECKING:
+
+        @overload
+        def __get__(self, obj: None, objtype: type[Any]) -> type[Self]: ...
+
+        @overload
+        def __get__(self, obj: object, objtype: Any = None) -> Self: ...
+
+        def __get__(
+            self,
+            obj: Any,
+            objtype: Any = None,
+        ) -> type[Self] | Self: ...
+
+        def __set__(self, obj: Any, value: T_co) -> None: ...  # type: ignore [misc]
+
+    @classmethod
+    def __get_pydantic_core_schema__(
+        cls,
+        source_type: Any,
+        handler: pydantic.GetCoreSchemaHandler,
+    ) -> pydantic_core.CoreSchema:
+        return pydantic_core.core_schema.no_info_after_validator_function(
+            cls.type,
+            handler(cls.type),
+        )
 
 
 class GelModelMetadata:
@@ -211,26 +245,50 @@ class LinkClassNamespace(metaclass=LinkClassNamespaceMeta):
     pass
 
 
-PT = TypeVar("PT", bound=ProxyModel[GelModel], covariant=True)
+BT_co = TypeVar("BT_co", covariant=True)
 
 
-class OptionalLink(GelPointer, Generic[PT, MT]):
+class OptionalPointer(GelPointer, Generic[T_co, BT_co]):
     if TYPE_CHECKING:
 
         @overload
-        def __get__(self, obj: None, objtype: type[Any]) -> type[PT]: ...
+        def __get__(self, obj: None, objtype: type[Any]) -> type[T_co]: ...
 
         @overload
-        def __get__(self, obj: object, objtype: Any = None) -> PT | None: ...
+        def __get__(self, obj: object, objtype: Any = None) -> T_co | None: ...
 
         def __get__(
             self,
             obj: Any,
             objtype: Any = None,
-        ) -> type[PT] | PT | None: ...
+        ) -> type[T_co] | T_co | None: ...
 
-        def __set__(self, obj: Any, value: MT | None) -> None: ...
+        def __set__(self, obj: Any, value: BT_co | None) -> None: ...
 
+
+ST = TypeVar("ST", bound=BaseScalar, covariant=True)
+
+
+class OptionalProperty(OptionalPointer[ST, BT_co]):
+    @classmethod
+    def __get_pydantic_core_schema__(
+        cls,
+        source_type: Any,
+        handler: pydantic.GetCoreSchemaHandler,
+    ) -> pydantic_core.CoreSchema:
+        if _typing_inspect.is_generic_alias(source_type):
+            args = typing.get_args(source_type)
+            return pydantic_schema.nullable_schema(
+                handler.generate_schema(args[0])
+            )
+        else:
+            return handler.generate_schema(source_type)
+
+
+PT = TypeVar("PT", bound=ProxyModel[GelModel], covariant=True)
+
+
+class OptionalLink(OptionalPointer[PT, MT]):
     @classmethod
     def __get_pydantic_core_schema__(
         cls,

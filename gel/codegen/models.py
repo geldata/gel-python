@@ -8,6 +8,7 @@ from typing import (
     Literal,
     NamedTuple,
     TypedDict,
+    TypeVar,
 )
 
 import base64
@@ -478,21 +479,6 @@ class BaseGeneratedModule:
         aspect: ModuleAspect = ModuleAspect.MAIN,
         rename_as: str | None = None,
     ) -> str:
-        base_type = base.TYPE_MAPPING.get(stype.name)
-        if base_type is not None:
-            if isinstance(base_type, str):
-                if self.py_file.has_global(base_type):
-                    # Schema shadows a builtin, disambiguate.
-                    base_type = ("builtins", base_type)
-                else:
-                    # Unshadowed Python builtin.
-                    return base_type
-
-            return self.import_name(
-                *base_type,
-                import_time=import_time,
-            )
-
         if reflection.is_array_type(stype):
             elem_type = self.get_type(
                 self._types[stype.array_element_id],
@@ -577,6 +563,9 @@ class BaseGeneratedModule:
         return output_string
 
 
+InheritingType_T = TypeVar("InheritingType_T", bound=reflection.InheritingType)
+
+
 class GeneratedSchemaModule(BaseGeneratedModule):
     def process(self, mod: IntrospectedModule) -> None:
         self.write_scalar_types(mod["scalar_types"])
@@ -597,30 +586,12 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         self.write("\n".join(desc))
         self.write('"""')
 
-    def write_scalar_types(
+    def _sorted_types(
         self,
-        scalar_types: dict[str, reflection.ScalarType],
-    ) -> None:
-        with self.aspect(ModuleAspect.VARIANTS):
-            for type_name, stype in scalar_types.items():
-                if stype.enum_values:
-                    strenum = self.import_name("gel.polyfills", "StrEnum")
-                    self.write(f"class {type_name}({strenum}):")
-                    with self.indented():
-                        self.write_description(stype)
-                        for value in stype.enum_values:
-                            self.write(f"{value} = {value!r}")
-                    self.write_section_break()
-
-    def write_object_types(
-        self,
-        object_types: dict[str, reflection.ObjectType],
-    ) -> None:
-        if not object_types:
-            return
-
+        types: Iterable[InheritingType_T],
+    ) -> Iterator[InheritingType_T]:
         graph: dict[uuid.UUID, set[uuid.UUID]] = {}
-        for t in object_types.values():
+        for t in types:
             graph[t.id] = set()
             t_name = reflection.parse_name(t.name)
 
@@ -630,10 +601,99 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                 if t_name.parent == base_name.parent:
                     graph[t.id].add(base.id)
 
-        objtypes = []
         for tid in graphlib.TopologicalSorter(graph).static_order():
-            objtype = self._types[tid]
-            assert reflection.is_object_type(objtype)
+            stype = self._types[tid]
+            yield stype  # type: ignore [misc]
+
+    def _get_pybase_for_this_scalar(
+        self,
+        stype: reflection.ScalarType,
+        *,
+        require_subclassable: bool = False,
+    ) -> str | None:
+        base_type = base.TYPE_MAPPING.get(stype.name)
+        if base_type is not None:
+            if isinstance(base_type, str):
+                if require_subclassable and base_type == "bool":
+                    base_type = "int"
+                base_type = ("builtins", base_type)
+
+            parent_mod = self.import_name(base_type[0], ".")
+            return f"{parent_mod}.{base_type[1]}"
+        else:
+            return None
+
+    def _get_pybase_for_scalar(
+        self,
+        stype: reflection.ScalarType,
+    ) -> str:
+        for a_ref in stype.ancestors:
+            ancestor = self._types[a_ref.id]
+            assert reflection.is_scalar_type(ancestor)
+            pybase = self._get_pybase_for_this_scalar(ancestor)
+            if pybase is not None:
+                break
+        else:
+            pybase = self._get_pybase_for_this_scalar(stype)
+            if pybase is None:
+                raise AssertionError(
+                    f"could not find Python base type for "
+                    f"scalar type {stype.name}"
+                )
+
+        return pybase
+
+    def write_scalar_types(
+        self,
+        scalar_types: dict[str, reflection.ScalarType],
+    ) -> None:
+        with self.aspect(ModuleAspect.VARIANTS):
+            scalars = {}
+            for scalar in self._sorted_types(scalar_types.values()):
+                type_name = reflection.parse_name(scalar.name)
+                scalars[type_name.name] = scalar
+                self.py_file.add_global(type_name.name)
+
+            for tname, stype in scalars.items():
+                if stype.enum_values:
+                    strenum = self.import_name("gel.polyfills", "StrEnum")
+                    with self._class_def(tname, [strenum]):
+                        self.write_description(stype)
+                        for value in stype.enum_values:
+                            self.write(f"{value} = {value!r}")
+                else:
+                    pybase = self._get_pybase_for_this_scalar(
+                        stype,
+                        require_subclassable=True,
+                    )
+                    if pybase is not None:
+                        pts = self.import_name(BASE_IMPL, "PyTypeScalar")
+                        parents = [f"{pts}[{pybase}]", pybase]
+                    else:
+                        parents = []
+
+                    parents.extend(
+                        self.get_type(self._types[base.id])
+                        for base in stype.bases
+                    )
+
+                    if not parents:
+                        parents = [self.import_name(BASE_IMPL, "BaseScalar")]
+
+                    with self._class_def(tname, parents):
+                        self.write("pass")
+
+                self.write_section_break()
+
+    def write_object_types(
+        self,
+        object_types: dict[str, reflection.ObjectType],
+    ) -> None:
+        if not object_types:
+            return
+
+        objtypes = []
+        for objtype in self._sorted_types(object_types.values()):
             objtypes.append(objtype)
             type_name = reflection.parse_name(objtype.name)
             self.py_file.add_global(type_name.name)
@@ -1210,6 +1270,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                     lprops_bases = [b]
 
                 opt = self.import_name("typing", "Optional")
+                oprop = self.import_name(BASE_IMPL, "OptionalProperty")
                 with self._class_def("__lprops__", lprops_bases):
                     assert ptr.pointers
                     lprops = []
@@ -1217,14 +1278,19 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                     for lprop in ptr.pointers:
                         if lprop.name in {"source", "target"}:
                             continue
-                        ptr_type = self.get_type(
-                            self._types[lprop.target_id],
-                            import_time=ImportTime.typecheck,
-                        )
                         lprop_assign.append(f"{lprop.name}={lprop.name}")
-                        lprop_line = f"{lprop.name}: {opt}[{ptr_type}]"
+                        ttype = self._types[lprop.target_id]
+                        assert reflection.is_scalar_type(ttype)
+                        ptr_type = self.get_type(ttype)
+                        pytype = self._get_pybase_for_scalar(ttype)
+                        lprop_line = (
+                            f"{lprop.name}: {oprop}[{ptr_type}, {pytype}] "
+                            f"= {oprop}(default=None)"
+                        )
                         self.write(lprop_line)
-                        lprops.append(f"{lprop_line} = None")
+
+                        lprop_line = f"{lprop.name}: {opt}[{pytype}] = None"
+                        lprops.append(lprop_line)
 
                 self.write()
                 priv_attr = self.import_name(BASE_IMPL, "PrivateAttr")
@@ -1373,20 +1439,34 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         )
 
         if (
+            reflection.is_scalar_type(target_type)
+            and not target_type.enum_values
+        ):
+            bare_ptr_type = self._get_pybase_for_scalar(target_type)
+            if prefer_broad_target_type:
+                ptr_type = bare_ptr_type
+
+        link_type = False
+        prop_type = False
+
+        if (
             reflection.is_link(prop)
             and prop.pointers
             and not prefer_broad_target_type
         ):
             objtype_name = reflection.parse_name(objtype.name)
             if self.current_aspect is ModuleAspect.VARIANTS:
-                target_type = self._types[prop.target_id]
                 target_name = reflection.parse_name(target_type.name)
                 if target_name.parent != objtype_name.parent:
                     aspect = ModuleAspect.LATE
             ptr_type = f"{objtype_name.name}.__links__.{prop.name}"
             link_type = True
-        else:
-            link_type = False
+        elif (
+            reflection.is_scalar_type(target_type)
+            and not target_type.enum_values
+            and not prefer_broad_target_type
+        ):
+            prop_type = True
 
         card = reflection.Cardinality(prop.card)
         if card.is_optional():
@@ -1420,12 +1500,16 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                     pytype = self._py_container_for_multiprop(prop)
                     return f"{pytype}[{ptr_type}]"
                 elif link_type:
-                    link = self.import_name(
-                        "gel.models.pydantic", "OptionalLink"
-                    )
+                    link = self.import_name(BASE_IMPL, "OptionalLink")
                     return (
                         f"{link}[{ptr_type}, {bare_ptr_type}] "
                         f"= {link}(default=None)"
+                    )
+                elif prop_type:
+                    oprop = self.import_name(BASE_IMPL, "OptionalProperty")
+                    return (
+                        f"{oprop}[{ptr_type}, {bare_ptr_type}] "
+                        f"= {oprop}(default=None)"
                     )
                 else:
                     opt = self.import_name("typing", "Optional")
