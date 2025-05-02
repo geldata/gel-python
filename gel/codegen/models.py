@@ -210,15 +210,19 @@ class BaseGeneratedModule:
         super().__init__()
         self._modpath = modname
         self._types = all_types
+        self._types_by_name = {}
+        schema_obj_type = None
         for t in all_types.values():
+            self._types_by_name[t.name] = t
             if t.name == "schema::ObjectType":
                 assert reflection.is_object_type(t)
-                self._schema_object_type = t
-                break
-        else:
+                schema_obj_type = t
+
+        if schema_obj_type is None:
             raise RuntimeError(
                 "schema::ObjectType type not found in schema reflection"
             )
+        self._schema_object_type = schema_obj_type
         self._modules = frozenset(modules)
         self._schema_part = schema_part
         self._is_package = self.mod_is_package(modname, schema_part)
@@ -365,12 +369,14 @@ class BaseGeneratedModule:
         *,
         alias: str | None = None,
         import_time: ImportTime = ImportTime.runtime,
+        directly: bool = True,
     ) -> str:
         return self.py_file.import_name(
             module,
             name,
             alias=alias,
             import_time=import_time,
+            directly=directly,
         )
 
     def current_indentation(self) -> str:
@@ -453,7 +459,7 @@ class BaseGeneratedModule:
                     imp_mod_canon == self.canonical_modpath
                     and self.current_aspect is ModuleAspect.MAIN
                 ):
-                    alias = "__"
+                    alias = "base"
                 else:
                     alias = "_".join(imp_path.parts[:-1])
                 if all(c == "." for c in py_mod):
@@ -551,14 +557,25 @@ class BaseGeneratedModule:
         self._type_import_cache[cache_key] = result
         return result
 
-    def format_list(self, tpl: str, values: list[str]) -> str:
+    def format_list(
+        self,
+        tpl: str,
+        values: list[str],
+        *,
+        first_line_comment: str | None = None,
+    ) -> str:
         list_string = ", ".join(values)
         output_string = tpl.format(list=list_string)
         line_length = len(output_string) + len(self.current_indentation())
         if line_length > MAX_LINE_LENGTH:
             list_string = ",\n    ".join(values)
-            list_string = f"\n    {list_string},\n"
+            if first_line_comment:
+                list_string = f"  # {first_line_comment}\n    {list_string},\n"
+            else:
+                list_string = f"\n    {list_string},\n"
             output_string = tpl.format(list=list_string)
+        elif first_line_comment:
+            output_string += f"  # {first_line_comment}"
 
         return output_string
 
@@ -618,8 +635,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                     base_type = "int"
                 base_type = ("builtins", base_type)
 
-            parent_mod = self.import_name(base_type[0], ".")
-            return f"{parent_mod}.{base_type[1]}"
+            return self.import_name(*base_type, directly=False)
         else:
             return None
 
@@ -814,7 +830,12 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         return_type: str = "None",
         *,
         kind: Literal["classmethod", "method", "property", "func"] = "func",
+        overload: bool = False,
+        line_comment: str | None = None,
     ) -> Iterator[None]:
+        if overload:
+            over = self.import_name("typing", "overload")
+            self.write(f"@{over}")
         if kind == "classmethod":
             self.write("@classmethod")
         elif kind == "property":
@@ -827,6 +848,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         def_line = self.format_list(
             f"def {func_name}({{list}}) -> {return_type}:",
             params,
+            first_line_comment=line_comment,
         )
         self.write(def_line)
         with self.indented():
@@ -840,12 +862,16 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         return_type: str = "None",
         *,
         kind: Literal["classmethod", "method", "property", "func"] = "func",
+        overload: bool = False,
+        line_comment: str | None = None,
     ) -> Iterator[None]:
         with self._func_def(
             func_name,
             params,
             return_type,
             kind="classmethod",
+            overload=overload,
+            line_comment=line_comment,
         ):
             yield
 
@@ -1023,7 +1049,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                 if base_types:
                     base_bases.extend(
                         _map_name(
-                            lambda s: f"{s}.__variants__.Empty",
+                            lambda s: f"{s}.__variants__.Base",
                             base_types,
                         )
                     )
@@ -1031,7 +1057,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                     gel_model = self.import_name(BASE_IMPL, "GelModel")
                     base_bases.append(gel_model)
                 with self._class_def(
-                    "Empty",
+                    "Base",
                     base_bases,
                     class_kwargs=class_kwargs,
                 ):
@@ -1039,7 +1065,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
 
                 self.write()
                 typevar = self.import_name("typing", "TypeVar")
-                self.write(f'Any = {typevar}("Any", bound="{name} | Empty")')
+                self.write(f'Any = {typevar}("Any", bound="{name} | Base")')
 
             proplinks = self._get_links_with_props(objtype)
             if base_types:
@@ -1062,7 +1088,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
 
         self.write()
         with self.not_type_checking():
-            self.write(f"{name}.__variants__.Empty = {name}")
+            self.write(f"{name}.__variants__.Base = {name}")
 
         self.write()
 
@@ -1099,8 +1125,6 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             ptr, owning_objtype = v
             if ptr.name == "__type__":
                 return False
-            if not objtype.name.startswith("schema::") and ptr.name == "id":
-                return False
             # Skip deprecated schema props (is_-prefixed).
             return not (
                 owning_objtype.name.startswith("schema::")
@@ -1111,31 +1135,121 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         reg_pointers = list(
             filter(_filter, self._get_pointer_origins(objtype))
         )
+        init_pointers = [
+            (ptr, obj)
+            for ptr, obj in reg_pointers
+            if ptr.name != "id" or objtype.name.startswith("schema::")
+        ]
         args = []
-        if reg_pointers:
+        if init_pointers:
             args.extend(["/", "*"])
-        for ptr, org_objtype in reg_pointers:
-            init_ptr_t = self.get_ptr_type(
+        for ptr, org_objtype in init_pointers:
+            ptr_t = self.get_ptr_type(
                 org_objtype,
                 ptr,
                 style="arg",
                 prefer_broad_target_type=True,
             )
-            args.append(f"{ptr.name}: {init_ptr_t}")
+            args.append(f"{ptr.name}: {ptr_t}")
 
-        with self.type_checking(), self._method_def("__init__", args):
-            self.write(
-                f'"""Create a new {objtype.name} instance '
-                "from keyword arguments."
-            )
-            self.write()
-            self.write(
-                "Call db.save() on the returned object to persist it "
-                "in the database."
-            )
-            self.write('"""')
-            self.write("...")
-            self.write()
+        std_bool = self.get_type(
+            self._types_by_name["std::bool"],
+            import_time=ImportTime.typecheck,
+        )
+        builtin_bool = self.import_name("builtins", "bool", directly=False)
+        filter_args = ["/", f"*exprs: type[{std_bool}]"]
+        select_args = []
+        for ptr, _ in reg_pointers:
+            target_t = self._types[ptr.target_id]
+            if reflection.is_scalar_type(target_t):
+                union = []
+                select_union = [builtin_bool]
+                if not target_t.enum_values:
+                    broad_ptr_t = self._get_pybase_for_scalar(target_t)
+                    union.append(broad_ptr_t)
+
+                narrow_ptr_t = self.get_type(
+                    target_t,
+                    import_time=ImportTime.typecheck,
+                )
+                union.append(f"type[{narrow_ptr_t}]")
+                select_union.append(f"type[{narrow_ptr_t}]")
+                unspec_t = self.import_name(BASE_IMPL, "UnspecifiedType")
+                unspec = self.import_name(BASE_IMPL, "Unspecified")
+                union.append(unspec_t)
+                select_union.append(unspec_t)
+                ptr_t = f"{' | '.join(union)} = {unspec}"
+                filter_args.append(f"{ptr.name}: {ptr_t}")
+                select_ptr_t = f"{' | '.join(select_union)} = {unspec}"
+                select_args.append(f"{ptr.name}: {select_ptr_t}")
+
+        gt = self.import_name(BASE_IMPL, "GelType")
+        select_args = ["/", "*", *select_args] if select_args else ["/"]
+        select_args.append(f"**computed: type[{gt}]")
+
+        with self.type_checking():
+            with self._method_def("__init__", args):
+                self.write(
+                    f'"""Create a new {objtype.name} instance '
+                    "from keyword arguments."
+                )
+                self.write()
+                self.write(
+                    "Call db.save() on the returned object to persist it "
+                    "in the database."
+                )
+                self.write('"""')
+                self.write("...")
+                self.write()
+
+            # with self._classmethod_def(
+            #     "select", [], "type[Self]", overload=True,
+            # ):
+            #     self.write(
+            #         f'"""Fetch {objtype.name} instances '
+            #         "from the database."
+            #     )
+            #     self.write('"""')
+            #     self.write("...")
+            #     self.write()
+
+            self_ = self.import_name("typing_extensions", "Self")
+            with self._classmethod_def(
+                "select",
+                select_args,
+                f"type[{self_}]",
+                # Ignore override errors, because we type select **computed
+                # as type[GelType], which is incompatible with bool and
+                # UnspecifiedType.
+                line_comment="type: ignore [override]",
+            ):
+                self.write(
+                    f'"""Fetch {objtype.name} instances from the database.'
+                )
+                self.write('"""')
+                self.write("...")
+                self.write()
+
+            # any_ = self.import_name("typing", "Any")
+            # with self._classmethod_def(
+            #     "select", ["/", f"**kwargs: {any_}"], "type[Self]"
+            # ):
+            #     self.write(
+            #         f'"""Fetch {objtype.name} instances '
+            #         "from the database."
+            #     )
+            #     self.write('"""')
+            #     self.write("...")
+            #     self.write()
+
+            with self._classmethod_def("filter", filter_args, "type[Self]"):
+                self.write(
+                    f'"""Fetch {objtype.name} instances from the database.'
+                )
+                self.write('"""')
+                self.write("...")
+                self.write()
+
         if objtype.name.startswith("schema::"):
             with (
                 self.not_type_checking(),

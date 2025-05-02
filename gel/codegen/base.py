@@ -360,7 +360,7 @@ class GeneratedModule:
 
         return imported, new_global
 
-    def import_name(
+    def _do_import_name(
         self,
         module: str,
         name: str,
@@ -392,6 +392,25 @@ class GeneratedModule:
         self._imported_names[key] = imported
 
         return imported
+
+    def import_name(
+        self,
+        module: str,
+        name: str,
+        *,
+        alias: str | None = None,
+        import_time: ImportTime = ImportTime.runtime,
+        directly: bool = True,
+    ) -> str:
+        if directly:
+            return self._do_import_name(
+                module, name, alias=alias, import_time=import_time
+            )
+        else:
+            mod = self._do_import_name(
+                module, ".", alias=alias, import_time=import_time
+            )
+            return f"{mod}.{name}"
 
     def render_name_import(
         self,

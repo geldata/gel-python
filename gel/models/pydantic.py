@@ -54,11 +54,11 @@ OptionalWithDefault = TypeAliasType(
 
 
 @final
-class UndefinedType:
-    """A type used as a sentinel for undefined values."""
+class UnspecifiedType:
+    """A type used as a sentinel for unspecified values."""
 
 
-Undefined = UndefinedType()
+Unspecified = UnspecifiedType()
 
 
 class ValidatedType(parametric.SingleParametricType[T]):
@@ -127,7 +127,11 @@ class GelModelMeta(_model_construction.ModelMetaclass, type):
         return new_cls  # type: ignore [return-value]
 
 
-class BaseScalar:
+class GelType:
+    pass
+
+
+class BaseScalar(GelType):
     pass
 
 
@@ -164,7 +168,9 @@ class GelModelMetadata:
     __gel_type_reflection__: ClassVar[ObjectTypeReflection]
 
 
-class GelModel(pydantic.BaseModel, GelModelMetadata, metaclass=GelModelMeta):
+class GelModel(
+    pydantic.BaseModel, GelModelMetadata, GelType, metaclass=GelModelMeta
+):
     model_config = pydantic.ConfigDict(
         json_encoders={uuid.UUID: str},
     )
@@ -188,6 +194,10 @@ class GelModel(pydantic.BaseModel, GelModelMetadata, metaclass=GelModelMeta):
             raise TypeError("Model instances without id value are unhashable")
 
         return hash(self._p__id)
+
+    @classmethod
+    def filter(cls, /, *args: Any, **kwargs: Any) -> type[Self]:
+        return cls
 
 
 class GelLinkModel(pydantic.BaseModel, metaclass=GelModelMeta):
