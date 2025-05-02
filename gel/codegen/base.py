@@ -202,6 +202,7 @@ class GeneratedModule:
             _new_imports_map
         )
         self._globals: set[str] = set()
+        self._exports: set[str] = set()
         self._imported_names: dict[
             tuple[str, str, str | None, ImportTime], str
         ] = {}
@@ -209,7 +210,7 @@ class GeneratedModule:
     def has_content(self) -> bool:
         return any(
             self.section_has_content(section) for section in self._content
-        )
+        ) or bool(self._exports)
 
     def section_has_content(self, section: CodeSection) -> bool:
         return bool(self._content[section])
@@ -432,6 +433,9 @@ class GeneratedModule:
 
         return imported, import_code
 
+    def export(self, *names: str) -> None:
+        self._exports.update(names)
+
     def current_indentation(self) -> str:
         return self.INDENT * self._indent_level
 
@@ -480,6 +484,18 @@ class GeneratedModule:
 
     def get_comment_preamble(self) -> str:
         return self._comment_preamble
+
+    def render_exports(self) -> str:
+        if self._exports:
+            return "\n".join(
+                [
+                    "__all__ = (",
+                    *(f"    {ex!r}," for ex in sorted(self._exports)),
+                    ")",
+                ]
+            )
+        else:
+            return ""
 
     def render_imports(self) -> str:
         typecheck_sections = self._render_imports(
@@ -566,6 +582,9 @@ class GeneratedModule:
             name_imports.items(),
             key=lambda kv: (len(kv[1]) == 0, kv[0]),
         )
+
+        noqa_suf = f"  # noqa: {' '.join(noqa)}" if noqa else ""
+
         for modname, names in mods:
             if not names:
                 continue
@@ -574,10 +593,11 @@ class GeneratedModule:
             names_list.sort()
             names_part = ", ".join(names_list)
             if len(import_line) + len(names_part) > MAX_LINE_LENGTH:
-                names_part = "(\n    " + ",\n    ".join(names_list) + "\n)"
-            import_line += names_part
-            if noqa:
-                import_line += f"  # noqa: {' '.join(noqa)}"
+                import_line += (
+                    f"({noqa_suf}\n    " + ",\n    ".join(names_list) + "\n)"
+                )
+            else:
+                import_line += names_part + noqa_suf
             output.append(import_line)
 
         result = "\n".join(output)
@@ -589,15 +609,20 @@ class GeneratedModule:
         out.write(self.get_comment_preamble())
         out.write("\n\n")
         out.write(self.render_imports())
-        out.write("\n\n\n")
         main_code = self._content[CodeSection.main]
         if main_code:
+            out.write("\n\n\n")
             out.write("\n".join(main_code))
-            out.write("\n")
-        out.write(self.render_late_imports())
+        late_imports = self.render_late_imports()
+        if late_imports:
+            out.write("\n\n\n")
+            out.write(late_imports)
         late_code = self._content[CodeSection.after_late_import]
         if late_code:
-            out.write("\n")
-            out.write("\n")
+            out.write("\n\n\n")
             out.write("\n".join(late_code))
-            out.write("\n")
+        exports = self.render_exports()
+        if exports:
+            out.write("\n\n\n")
+            out.write(exports)
+        out.write("\n")

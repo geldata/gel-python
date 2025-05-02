@@ -10,9 +10,11 @@ from typing import (
     Any,
 )
 
-try:
-    from enum import StrEnum as StrEnum  # type: ignore
-except ImportError:
+import sys
+
+if sys.version_info >= (3, 11):
+    from enum import StrEnum
+else:
     import enum as _enum
 
     class StrEnum(str, _enum.Enum):
@@ -21,3 +23,8 @@ except ImportError:
             name: str, start: int, count: int, last_values: list[Any]
         ) -> str:
             return name.lower()
+
+
+__all__ = (
+    "StrEnum",
+)

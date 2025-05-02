@@ -132,6 +132,10 @@ def is_scalar_type(t: AnyType) -> TypeGuard[ScalarType]:
     return t.kind == enums.TypeKind.Scalar
 
 
+def is_non_enum_scalar_type(t: AnyType) -> TypeGuard[ScalarType]:
+    return t.kind == enums.TypeKind.Scalar and not t.enum_values
+
+
 def is_array_type(t: AnyType) -> TypeGuard[ArrayType]:
     return t.kind == enums.TypeKind.Array
 
@@ -150,6 +154,10 @@ def is_tuple_type(t: AnyType) -> TypeGuard[TupleType]:
 
 def is_named_tuple_type(t: AnyType) -> TypeGuard[NamedTupleType]:
     return t.kind == enums.TypeKind.NamedTuple
+
+
+def is_primitive_type(t: AnyType) -> TypeGuard[PrimitiveType]:
+    return t.kind not in {enums.TypeKind.Object, enums.TypeKind.Pseudo}
 
 
 @dataclasses.dataclass(frozen=True)

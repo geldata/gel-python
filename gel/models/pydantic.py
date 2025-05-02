@@ -22,35 +22,34 @@ from typing_extensions import (
     TypeAliasType,
 )
 
-
 import dataclasses
+import functools
 import uuid
 import warnings
 
 import pydantic
 import pydantic.fields
-from pydantic._internal import _model_construction  # noqa: PLC2701
 import pydantic_core
-from pydantic_core import core_schema as pydantic_schema
-
 from pydantic import Field
 from pydantic import PrivateAttr as PrivateAttr
 from pydantic import computed_field as computed_field
 from pydantic import field_serializer as field_serializer
+from pydantic._internal import _model_construction  # noqa: PLC2701
+from pydantic_core import core_schema as pydantic_schema
+
 from gel._internal import _typing_parametric as parametric
 from gel._internal import _typing_inspect
+from gel._internal import _polyfills
 
 from . import lists
 from . import unsetid
 
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+
 T = TypeVar("T")
 T_co = TypeVar("T_co", covariant=True)
-
-OptionalWithDefault = TypeAliasType(
-    "OptionalWithDefault",
-    "Annotated[T, Field(default=None)]",
-    type_params=(T,),
-)
 
 
 @final
@@ -131,11 +130,7 @@ class GelType:
     pass
 
 
-class BaseScalar(GelType):
-    pass
-
-
-class PyTypeScalar(parametric.SingleParametricType[T_co]):
+class GelPrimitiveType(GelType):
     if TYPE_CHECKING:
 
         @overload
@@ -149,6 +144,46 @@ class PyTypeScalar(parametric.SingleParametricType[T_co]):
             obj: Any,
             objtype: Any = None,
         ) -> type[Self] | Self: ...
+
+
+class BaseScalar(GelPrimitiveType):
+    pass
+
+
+class AnyTuple(GelPrimitiveType):
+    pass
+
+
+class AnyEnum(BaseScalar, _polyfills.StrEnum):
+    pass
+
+
+class Array(list[T], GelPrimitiveType):
+    if TYPE_CHECKING:
+
+        def __set__(self, obj: Any, value: Array[T] | Sequence[T]) -> None: ...
+
+    @classmethod
+    def __get_pydantic_core_schema__(
+        cls,
+        source_type: Any,
+        handler: pydantic.GetCoreSchemaHandler,
+    ) -> pydantic_core.CoreSchema:
+        if _typing_inspect.is_generic_alias(source_type):
+            args = typing.get_args(source_type)
+            item_type = args[0]
+            return pydantic_schema.list_schema(
+                items_schema=handler.generate_schema(item_type),
+                serialization=pydantic_schema.plain_serializer_function_ser_schema(
+                    list,
+                ),
+            )
+        else:
+            return handler.generate_schema(source_type)
+
+
+class PyTypeScalar(parametric.SingleParametricType[T_co]):
+    if TYPE_CHECKING:
 
         def __set__(self, obj: Any, value: T_co) -> None: ...  # type: ignore [misc]
 
@@ -276,10 +311,10 @@ class OptionalPointer(GelPointer, Generic[T_co, BT_co]):
         def __set__(self, obj: Any, value: BT_co | None) -> None: ...
 
 
-ST = TypeVar("ST", bound=BaseScalar, covariant=True)
+ST = TypeVar("ST", bound=GelPrimitiveType, covariant=True)
 
 
-class OptionalProperty(OptionalPointer[ST, BT_co]):
+class _OptionalProperty(OptionalPointer[ST, BT_co]):
     @classmethod
     def __get_pydantic_core_schema__(
         cls,
@@ -295,10 +330,18 @@ class OptionalProperty(OptionalPointer[ST, BT_co]):
             return handler.generate_schema(source_type)
 
 
+OptionalProperty = TypeAliasType(
+    "OptionalProperty",
+    "Annotated[_OptionalProperty[ST, BT_co], Field(default=None)]",
+    type_params=(ST, BT_co),
+)
+
+
+BMT = TypeVar("BMT", bound=GelModel, covariant=True)
 PT = TypeVar("PT", bound=ProxyModel[GelModel], covariant=True)
 
 
-class OptionalLink(OptionalPointer[PT, MT]):
+class _OptionalLink(OptionalPointer[MT, BMT]):
     @classmethod
     def __get_pydantic_core_schema__(
         cls,
@@ -312,40 +355,22 @@ class OptionalLink(OptionalPointer[PT, MT]):
             return handler.generate_schema(source_type)
 
 
-DT = TypeVar("DT", bound=GelModel | ProxyModel[GelModel], covariant=True)
+OptionalLink = TypeAliasType(
+    "OptionalLink",
+    "Annotated[_OptionalLink[MT, MT], Field(default=None)]",
+    type_params=(MT,),
+)
+
+OptionalLinkWithProps = TypeAliasType(
+    "OptionalLinkWithProps",
+    "Annotated[_OptionalLink[PT, MT], Field(default=None)]",
+    type_params=(PT, MT),
+)
 
 
-class _DistinctList(lists.DistinctList[DT], Generic[DT]):
+class _UpcastingDistinctList(lists.DistinctList[MT], Generic[MT, BMT]):
     @classmethod
-    def __get_pydantic_core_schema__(
-        cls,
-        source_type: Any,
-        handler: pydantic.GetCoreSchemaHandler,
-    ) -> pydantic_core.CoreSchema:
-        item_type = cls.type
-        if issubclass(item_type, ProxyModel):
-            item_type = item_type.__proxy_of__
-
-        return pydantic_schema.no_info_before_validator_function(
-            cls._validate,
-            schema=pydantic_schema.list_schema(
-                items_schema=handler.generate_schema(item_type),
-            ),
-            serialization=pydantic_schema.plain_serializer_function_ser_schema(
-                list,
-            ),
-        )
-
-    @classmethod
-    def _validate(cls, value: Any) -> Self:
-        if isinstance(value, cls):
-            return value
-        if isinstance(value, list):
-            return cls(value)
-        raise TypeError(f"could not convert {type(value)} to {cls.__name__}")
-
-    @classmethod
-    def _check_value(cls, value: Any) -> DT:
+    def _check_value(cls, value: Any) -> MT:
         t = cls.type
         if isinstance(value, t):
             return value
@@ -358,14 +383,78 @@ class _DistinctList(lists.DistinctList[DT], Generic[DT]):
         )
 
 
-DistinctList = TypeAliasType(
-    "DistinctList",
-    "Annotated[_DistinctList[DT], Field(default_factory=_DistinctList)]",
-    type_params=(DT,),
+class _MultiLinkMeta(type):
+    _list_type: type[lists.DistinctList[GelModel | ProxyModel[GelModel]]]
+
+
+class _MultiLink(GelPointer, Generic[MT, BMT], metaclass=_MultiLinkMeta):
+    if TYPE_CHECKING:
+
+        @overload
+        def __get__(self, obj: None, objtype: type[Any]) -> type[MT]: ...
+
+        @overload
+        def __get__(
+            self, obj: object, objtype: Any = None
+        ) -> lists.DistinctList[MT]: ...
+
+        def __get__(
+            self,
+            obj: Any,
+            objtype: Any = None,
+        ) -> type[MT] | lists.DistinctList[MT] | None: ...
+
+        def __set__(self, obj: Any, value: Sequence[MT | BMT]) -> None: ...
+
+    @classmethod
+    def __get_pydantic_core_schema__(
+        cls,
+        source_type: Any,
+        handler: pydantic.GetCoreSchemaHandler,
+    ) -> pydantic_core.CoreSchema:
+        if _typing_inspect.is_generic_alias(source_type):
+            args = typing.get_args(source_type)
+            item_type = args[0]
+            return pydantic_schema.no_info_before_validator_function(
+                functools.partial(cls._validate, generic_args=args),
+                schema=pydantic_schema.list_schema(
+                    items_schema=handler.generate_schema(item_type),
+                ),
+                serialization=pydantic_schema.plain_serializer_function_ser_schema(
+                    list,
+                ),
+            )
+        else:
+            return handler.generate_schema(source_type)
+
+    @classmethod
+    def _validate(
+        cls,
+        value: Any,
+        generic_args: tuple[type[Any], type[Any]],
+    ) -> lists.DistinctList[MT]:
+        lt: type[_UpcastingDistinctList[MT, BMT]] = _UpcastingDistinctList[
+            generic_args[0],  # type: ignore [valid-type]
+            generic_args[1]   # type: ignore [valid-type]
+        ]
+        if isinstance(value, lt):
+            return value
+        elif isinstance(value, (list, lists.DistinctList)):
+            return lt(value)
+        else:
+            raise TypeError(
+                f"could not convert {type(value)} to {cls.__name__}"
+            )
+
+
+MultiLink = TypeAliasType(
+    "MultiLink",
+    "Annotated[_MultiLink[MT, MT], Field(default_factory=_MultiLink)]",
+    type_params=(MT,),
 )
 
-RequiredDistinctList = TypeAliasType(
-    "RequiredDistinctList",
-    "list[DT]",
-    type_params=(DT,),
+MultiLinkWithProps = TypeAliasType(
+    "MultiLinkWithProps",
+    "Annotated[_MultiLink[PT, MT], Field(default_factory=_MultiLink)]",
+    type_params=(PT, MT),
 )
