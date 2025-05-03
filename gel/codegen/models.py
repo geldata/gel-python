@@ -166,7 +166,7 @@ class ModuleAspect(enum.Enum):
 class Import(NamedTuple):
     module: str
     name: str
-    alias: str | None
+    module_alias: str | None
 
 
 @functools.cache
@@ -370,14 +370,14 @@ class BaseGeneratedModule:
         module: str,
         name: str,
         *,
-        alias: str | None = None,
+        suggested_module_alias: str | None = None,
         import_time: ImportTime = ImportTime.runtime,
         directly: bool = True,
     ) -> str:
         return self.py_file.import_name(
             module,
             name,
-            alias=alias,
+            suggested_module_alias=suggested_module_alias,
             import_time=import_time,
             directly=directly,
         )
@@ -402,6 +402,10 @@ class BaseGeneratedModule:
     def not_type_checking(self) -> Iterator[None]:
         with self.py_file.not_type_checking():
             yield
+
+    @property
+    def in_type_checking(self) -> bool:
+        return self.py_file.in_type_checking
 
     @contextmanager
     def code_section(self, section: CodeSection) -> Iterator[None]:
@@ -433,7 +437,6 @@ class BaseGeneratedModule:
         import_directly: bool = False,
     ) -> Import | None:
         imp_mod_canon = imp_mod = imp_path.parent
-        imp_name = imp_path.name
         cur_mod = self.current_modpath
         if aspect is not ModuleAspect.MAIN:
             imp_mod = get_modpath(imp_mod, aspect)
@@ -454,43 +457,44 @@ class BaseGeneratedModule:
                 relative_depth += 1
 
             py_mod = "." * relative_depth + ".".join(import_tail)
-            if import_directly:
-                result = Import(
-                    module=py_mod,
-                    name=imp_name,
-                    alias=None,
-                )
+            if (
+                imp_mod_canon == self.canonical_modpath
+                and self.current_aspect is ModuleAspect.MAIN
+            ):
+                module_alias = "base"
             else:
-                if (
-                    imp_mod_canon == self.canonical_modpath
-                    and self.current_aspect is ModuleAspect.MAIN
-                ):
-                    alias = "base"
-                else:
-                    alias = "_".join(imp_path.parts[:-1])
-                if all(c == "." for c in py_mod):
-                    result = Import(
-                        module=f".{py_mod}",
-                        name=imp_path.parts[-2],
-                        alias=alias,
-                    )
-                else:
-                    result = Import(
-                        module=py_mod,
-                        name=".",
-                        alias=alias,
-                    )
+                module_alias = "_".join(imp_path.parts[:-1])
 
-        return result
+            imp_name = imp_path.name
+
+            if not import_directly and all(c == "." for c in py_mod):
+                if len(imp_path.parts) == 1:
+                    py_mod = f"{py_mod}{imp_path.parts[0]}"
+                    imp_name = "."
+                else:
+                    py_mod = f"{py_mod}.{imp_path.parts[-2]}"
+
+            return Import(
+                module=py_mod,
+                name=imp_name,
+                module_alias=module_alias,
+            )
 
     def get_type(
         self,
         stype: reflection.AnyType,
         *,
-        import_time: ImportTime = ImportTime.runtime,
+        import_time: ImportTime | None = None,
         aspect: ModuleAspect = ModuleAspect.MAIN,
         import_directly: bool | None = None,
     ) -> str:
+        if import_time is None:
+            import_time = (
+                ImportTime.typecheck
+                if self.in_type_checking
+                else ImportTime.runtime
+            )
+
         if reflection.is_array_type(stype):
             arr = self.import_name(BASE_IMPL, "Array")
             elem_type = self.get_type(
@@ -557,12 +561,10 @@ class BaseGeneratedModule:
             result = self.import_name(
                 rel_import.module,
                 rel_import.name,
-                alias=rel_import.alias,
+                suggested_module_alias=rel_import.module_alias,
                 import_time=import_time,
+                directly=import_directly,
             )
-
-            if not import_directly:
-                result = f"{result}.{type_name}"
 
         self._type_import_cache[cache_key] = result
         return result
@@ -931,7 +933,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                 self.import_name(
                     rel_import.module,
                     rel_import.name,
-                    alias=rel_import.alias,
+                    suggested_module_alias=rel_import.module_alias,
                     import_time=ImportTime.late_runtime,
                 )
 
@@ -945,7 +947,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                     ot_ref, import_code = self.py_file.render_name_import(
                         ot_imp.module,
                         ot_imp.name,
-                        alias=ot_imp.alias,
+                        suggested_module_alias=ot_imp.module_alias,
                     )
                     self.write(import_code)
                     for objtype in objtypes:
@@ -953,7 +955,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                         self.write_object_type_reflection(
                             objtype,
                             type_name.name,
-                            f"{ot_ref}.ObjectType",
+                            ot_ref,
                         )
 
                 late_reg = ["schema", "sys"]
@@ -963,13 +965,12 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                         rel_import = self._resolve_rel_import(
                             reflection.SchemaPath(mod),
                             ModuleAspect.VARIANTS,
-                            import_directly=True,
                         )
                         assert rel_import is not None
                         mod_v = self.import_name(
                             rel_import.module,
                             rel_import.name,
-                            alias=rel_import.alias,
+                            suggested_module_alias=rel_import.module_alias,
                             import_time=ImportTime.late_runtime,
                         )
                         self.write(
@@ -1146,13 +1147,12 @@ class GeneratedSchemaModule(BaseGeneratedModule):
 
             with self._class_def("__links__", links_bases):
                 if proplinks:
-                    with self.type_checking():
-                        self.write_object_type_link_variants(
-                            objtype,
-                            target_aspect=ModuleAspect.MAIN,
-                            is_forward_decl=True,
-                            local=None,
-                        )
+                    self.write_object_type_link_variants(
+                        objtype,
+                        target_aspect=ModuleAspect.MAIN,
+                        is_forward_decl=True,
+                        local=None,
+                    )
                 else:
                     self.write("pass")
 
@@ -1349,12 +1349,13 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             return
 
         if is_forward_decl:
-            self._write_object_type_link_variants(
-                objtype,
-                pointers=pointers,
-                target_aspect=target_aspect,
-                is_forward_decl=is_forward_decl,
-            )
+            with self.type_checking():
+                self._write_object_type_link_variants(
+                    objtype,
+                    pointers=pointers,
+                    target_aspect=target_aspect,
+                    is_forward_decl=is_forward_decl,
+                )
         else:
             with self.not_type_checking():
                 type_name = reflection.parse_name(objtype.name)

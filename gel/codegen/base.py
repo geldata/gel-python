@@ -189,12 +189,17 @@ def _new_imports_map() -> _Imports:
     return defaultdict(lambda: defaultdict(lambda: defaultdict(set)))
 
 
+def _is_all_dots(s) -> bool:
+    return bool(s) and all(c == "." for c in s)
+
+
 class GeneratedModule:
     INDENT = " " * 4
 
     def __init__(self, preamble: str) -> None:
         self._comment_preamble = preamble
         self._indent_level = 0
+        self._in_type_checking = False
         self._content: defaultdict[CodeSection, list[str]] = defaultdict(list)
         self._code_section = CodeSection.main
         self._code = self._content[self._code_section]
@@ -203,9 +208,7 @@ class GeneratedModule:
         )
         self._globals: set[str] = set()
         self._exports: set[str] = set()
-        self._imported_names: dict[
-            tuple[str, str, str | None, ImportTime], str
-        ] = {}
+        self._imported_names: dict[tuple[str, str, ImportTime], str] = {}
 
     def has_content(self) -> bool:
         return any(
@@ -307,58 +310,51 @@ class GeneratedModule:
         module: str,
         name: str,
         *,
-        alias: str | None = None,
+        suggested_module_alias: str | None = None,
         import_maps: _Imports,
     ) -> tuple[str, str]:
-        if alias is not None:
-            imported = self._disambiguate_import_name(alias)
-            self._update_import_maps(
-                module,
-                (),
-                {imported: name},
-                import_maps=import_maps,
+        imported_names = ()
+        imported_aliases = {}
+        imported_module = module
+        if _is_all_dots(module):
+            raise ValueError(
+                f"import_name: bare relative imports are "
+                f"not supported: {module!r}"
             )
+        if name != "." and name not in self._globals:
+            imported = name
             new_global = imported
-        elif name != "." and name not in self._globals:
-            self._update_import_maps(
-                module,
-                (name,),
-                {},
-                import_maps=import_maps,
-            )
-            new_global = imported = name
-        elif all(c == "." for c in module):
-            imported_as = self._disambiguate_import_name(name)
-            self._update_import_maps(
-                module,
-                (),
-                {imported_as: name},
-                import_maps=import_maps,
-            )
-            imported = new_global = imported_as
+            imported_names += (name,)
         else:
-            parent_module, _, tail_module = module.rpartition(".")
-            if parent_module:
-                imported_as = self._disambiguate_import_name(tail_module)
-                self._update_import_maps(
-                    parent_module,
-                    (),
-                    {imported_as: tail_module},
-                    import_maps=import_maps,
-                )
+            parent_module, dot, tail_module = module.rpartition(".")
+            if _is_all_dots(parent_module) or (not parent_module and dot):
+                # Pure relative import
+                parent_module += dot
 
-            else:
-                imported_as = self._disambiguate_import_name(module)
-                self._update_import_maps(
-                    module,
-                    (),
-                    {imported_as: "."},
-                    import_maps=import_maps,
+            if parent_module:
+                imported_as = self._disambiguate_import_name(
+                    suggested_module_alias or tail_module
                 )
+                if imported_as == tail_module:
+                    imported_names += (imported_as,)
+                else:
+                    imported_aliases[imported_as] = tail_module
+                imported_module = parent_module
+            else:
+                imported_as = self._disambiguate_import_name(
+                    suggested_module_alias or module
+                )
+                imported_aliases[imported_as] = "."
 
             new_global = imported_as
             imported = imported_as if name == "." else f"{imported_as}.{name}"
 
+        self._update_import_maps(
+            imported_module,
+            imported_names,
+            imported_aliases,
+            import_maps=import_maps,
+        )
         return imported, new_global
 
     def _do_import_name(
@@ -366,17 +362,17 @@ class GeneratedModule:
         module: str,
         name: str,
         *,
-        alias: str | None = None,
+        suggested_module_alias: str | None = None,
         import_time: ImportTime = ImportTime.runtime,
     ) -> str:
-        key = (module, name, alias, import_time)
+        key = (module, name, import_time)
         imported = self._imported_names.get(key)
         if imported is not None:
             return imported
 
         if import_time is ImportTime.late_runtime:
             # See if there was a previous eager import for same name
-            early_key = (module, name, alias, ImportTime.runtime)
+            early_key = (module, name, ImportTime.runtime)
             imported = self._imported_names.get(early_key)
             if imported is not None:
                 self._imported_names[key] = imported
@@ -385,7 +381,7 @@ class GeneratedModule:
         imported, new_global = self._import_name(
             module,
             name,
-            alias=alias,
+            suggested_module_alias=suggested_module_alias,
             import_maps=self._imports[import_time],
         )
 
@@ -399,17 +395,23 @@ class GeneratedModule:
         module: str,
         name: str,
         *,
-        alias: str | None = None,
+        suggested_module_alias: str | None = None,
         import_time: ImportTime = ImportTime.runtime,
         directly: bool = True,
     ) -> str:
         if directly:
             return self._do_import_name(
-                module, name, alias=alias, import_time=import_time
+                module,
+                name,
+                suggested_module_alias=suggested_module_alias,
+                import_time=import_time,
             )
         else:
             mod = self._do_import_name(
-                module, ".", alias=alias, import_time=import_time
+                module,
+                ".",
+                suggested_module_alias=suggested_module_alias,
+                import_time=import_time,
             )
             return f"{mod}.{name}"
 
@@ -418,13 +420,13 @@ class GeneratedModule:
         module: str,
         name: str,
         *,
-        alias: str | None = None,
+        suggested_module_alias: str | None = None,
     ) -> tuple[str, str]:
         import_maps = _new_imports_map()
         imported, _ = self._import_name(
             module,
             name,
-            alias=alias,
+            suggested_module_alias=suggested_module_alias,
             import_maps=import_maps,
         )
 
@@ -451,15 +453,34 @@ class GeneratedModule:
     def type_checking(self) -> Iterator[None]:
         tc = self.import_name("typing", "TYPE_CHECKING")
         self.write(f"if {tc}:")
-        with self.indented():
-            yield
+        old_in_tc = self._in_type_checking
+        try:
+            self._in_type_checking = True
+            with self.indented():
+                yield
+        finally:
+            self._in_type_checking = old_in_tc
 
     @contextlib.contextmanager
     def not_type_checking(self) -> Iterator[None]:
+        if self._in_type_checking:
+            raise AssertionError(
+                "cannot enter `if not TYPE_CHECKING` context: "
+                "already in `if TYPE_CHECKING`"
+            )
         tc = self.import_name("typing", "TYPE_CHECKING")
         self.write(f"if not {tc}:")
-        with self.indented():
-            yield
+        old_in_tc = self._in_type_checking
+        try:
+            self._in_type_checking = False
+            with self.indented():
+                yield
+        finally:
+            self._in_type_checking = old_in_tc
+
+    @property
+    def in_type_checking(self) -> bool:
+        return self._in_type_checking
 
     @contextlib.contextmanager
     def code_section(self, section: CodeSection) -> Iterator[None]:
