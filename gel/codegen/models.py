@@ -1183,12 +1183,16 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                         self.write("tid = cls.__gel_type_reflection__.id")
                         self.write("return type(cls).get_type_reflection(tid)")
                 elif ptr.name == "id":
+                    priv_type = self.import_name("uuid", "UUID")
                     ptr_type = self.get_ptr_type(objtype, ptr)
-                    self.write(f"_p__{ptr.name}: {ptr_type} = {priv_attr}()")
-                    self.write(f"@{comp_f}  # type: ignore[prop-decorator]")
+                    self.write(f"_p__{ptr.name}: {priv_type} = {priv_attr}()")
+                    self.write(f"@{comp_f}  # type: ignore [prop-decorator]")
                     with self._property_def(ptr.name, [], ptr_type):
-                        self.write(f"return self._p__{ptr.name}")
-            self.write()
+                        self.write(
+                            f"return self._p__{ptr.name}  "
+                            "# type: ignore [return-value]"
+                        )
+                self.write()
 
         def _filter(
             v: tuple[reflection.Pointer, reflection.ObjectType],
