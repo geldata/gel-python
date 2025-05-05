@@ -39,7 +39,6 @@ from pydantic_core import core_schema as pydantic_schema
 
 from pydantic._internal import _model_construction  # noqa: PLC2701
 from pydantic._internal import _namespace_utils
-import typing_extensions  # noqa: PLC2701
 
 from gel._internal import _typing_eval, _typing_parametric
 from gel._internal import _typing_inspect
@@ -286,6 +285,10 @@ class GelModel(
             raise TypeError("Model instances without id value are unhashable")
 
         return hash(self._p__id)
+
+    @classmethod
+    def select(cls, /, **kwargs: Any) -> type[Self]:
+        return cls
 
     @classmethod
     def filter(cls, /, *args: Any, **kwargs: Any) -> type[Self]:
