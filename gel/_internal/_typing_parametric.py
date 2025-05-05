@@ -69,16 +69,16 @@ T = TypeVar("T", covariant=True)
 
 
 class ParametricType:
-    types: ClassVar[Optional[Tuple[type, ...]]] = None
-    orig_args: ClassVar[Optional[Tuple[type, ...]]] = None
-    _forward_refs: ClassVar[Dict[str, Tuple[int, str]]] = {}
-    _type_param_map: ClassVar[Dict[Any, str]] = {}
-    _non_type_params: ClassVar[Dict[int, type]] = {}
+    __parametric_type_args__: ClassVar[tuple[type, ...] | None] = None
+    __parametric_orig_args__: ClassVar[tuple[type, ...] | None] = None
+    __parametric_forward_refs__: ClassVar[dict[str, tuple[int, str]]] = {}
+    _type_param_map: ClassVar[dict[Any, str]] = {}
+    _non_type_params: ClassVar[dict[int, type]] = {}
 
     def __init_subclass__(cls) -> None:
         super().__init_subclass__()
 
-        if cls.types is not None:
+        if cls.__parametric_type_args__ is not None:
             return
         elif ParametricType in cls.__bases__:
             cls._init_parametric_base()
@@ -209,9 +209,9 @@ class ParametricType:
         }
 
     def __init__(self) -> None:
-        if self._forward_refs:
+        if self.__parametric_forward_refs__:
             raise TypeError(f"{type(self)!r} unresolved type parameters")
-        if self.types is None:
+        if self.__parametric_type_args__ is None:
             raise TypeError(
                 f"{type(self)!r} must be parametrized to instantiate"
             )
@@ -231,7 +231,7 @@ class ParametricType:
         `__init__()` is called.  That means we wouldn't be able to type-check
         in the initializer using built-in `Generic[T]`.
         """
-        if cls.types is not None:
+        if cls.__parametric_type_args__ is not None:
             raise TypeError(f"{cls!r} is already parametrized")
 
         result = _get_cached_parametric_type(cls, params)
@@ -249,8 +249,8 @@ class ParametricType:
         name = f"{cls.__name__}[{params_str}]"
         bases = (cls,)
         type_dict: Dict[str, Any] = {
-            "types": tuple(type_params),
-            "orig_args": all_params,
+            "__parametric_type_args__": tuple(type_params),
+            "__parametric_orig_args__": all_params,
             "__module__": cls.__module__,
         }
         forward_refs: Dict[str, Tuple[int, str]] = {}
@@ -297,7 +297,7 @@ class ParametricType:
 
         result = type(name, bases, type_dict)
         assert issubclass(result, ParametricType)
-        result._forward_refs = forward_refs
+        result.__parametric_forward_refs__ = forward_refs
 
         _set_cached_parametric_type(cls, params, result)
 
@@ -305,19 +305,19 @@ class ParametricType:
 
     @classmethod
     def is_fully_resolved(cls) -> bool:
-        return not cls._forward_refs
+        return not cls.__parametric_forward_refs__
 
     @classmethod
     def resolve_types(cls, globalns: Dict[str, Any]) -> None:
-        if cls.types is None:
+        if cls.__parametric_type_args__ is None:
             raise TypeError(f"{cls!r} is not parametrized")
 
-        if not cls._forward_refs:
+        if not cls.__parametric_forward_refs__:
             return
 
-        types = list(cls.types)
+        types = list(cls.__parametric_type_args__)
 
-        for ut, (idx, attr) in cls._forward_refs.items():
+        for ut, (idx, attr) in cls.__parametric_forward_refs__.items():
             t = eval(ut, globalns, {})
             if isinstance(t, type) and not isinstance(t, GenericAlias):
                 types[idx] = t
@@ -327,8 +327,8 @@ class ParametricType:
                     f"{cls!r} expects types as type parameters, got {t!r:.100}"
                 )
 
-        cls.types = tuple(types)
-        cls._forward_refs = {}
+        cls.__parametric_type_args__ = tuple(types)
+        cls.__parametric_forward_refs__ = {}
 
     @classmethod
     def is_anon_parametrized(cls) -> bool:

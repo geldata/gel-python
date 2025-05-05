@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+from inspect import Attribute
 import typing
 from typing import (
     TYPE_CHECKING,
@@ -34,11 +35,15 @@ from pydantic import Field
 from pydantic import PrivateAttr as PrivateAttr
 from pydantic import computed_field as computed_field
 from pydantic import field_serializer as field_serializer
-from pydantic._internal import _model_construction  # noqa: PLC2701
 from pydantic_core import core_schema as pydantic_schema
 
-from gel._internal import _typing_parametric as parametric
+from pydantic._internal import _model_construction  # noqa: PLC2701
+from pydantic._internal import _namespace_utils
+import typing_extensions  # noqa: PLC2701
+
+from gel._internal import _typing_eval, _typing_parametric
 from gel._internal import _typing_inspect
+from gel._internal import _typing_parametric as parametric
 from gel._internal import _polyfills
 
 from . import lists
@@ -60,24 +65,74 @@ class UnspecifiedType:
 Unspecified = UnspecifiedType()
 
 
-class ValidatedType(parametric.SingleParametricType[T]):
+class GelClassVar:
+    pass
+
+
+class GelFieldPlaceholder(GelClassVar):
+    __slots__ = (
+        "__gel_annotation__",
+        "__gel_name__",
+        "__gel_resolved_type__",
+    )
+
     @classmethod
-    def __get_pydantic_core_schema__(
+    def _from_pydantic_field(
         cls,
-        source_type: Any,
-        handler: pydantic.GetCoreSchemaHandler,
-    ) -> pydantic_core.CoreSchema:
-        return pydantic_core.core_schema.no_info_after_validator_function(
-            cls.type,
-            handler(cls.type),
-        )
+        name: str,
+        field: pydantic.fields.FieldInfo,
+    ) -> Self:
+        kwargs = dict(field._attributes_set)
+        if field.annotation is None:
+            raise AssertionError(f"unexpected unnannotated model field: {name}")
+        return cls(name, field.annotation)
 
-
-class GelPointer(pydantic.fields.FieldInfo):
-    __slots__ = (*pydantic.fields.FieldInfo.__slots__, "_gel_name")
+    def __init__(self, name: str, annotation: type[Any]) -> None:
+        self.__gel_name__ = name
+        self.__gel_annotation__ = annotation
+        self.__gel_resolved_type__ = None
 
     def __set_name__(self, owner: Any, name: str) -> None:
-        self._gel_name = name
+        self.__gel_name__ = name
+
+    def __get__(
+        self,
+        instance: object | None,
+        owner: type[Any] | None = None,
+    ) -> Any:
+        if instance is None:
+            assert owner is not None
+            t = self.__gel_resolved_type__
+            if t is None:
+                anno = self.__gel_annotation__
+                ns = _namespace_utils.NsResolver(
+                    parent_namespace=getattr(
+                        owner,
+                        "__pydantic_parent_namespace__",
+                        None,
+                    ),
+                )
+                globals, locals = ns.types_namespace
+                t = _typing_eval.try_resolve_type(
+                    self.__gel_annotation__,
+                    owner=owner,
+                    globals=globals,
+                    locals=locals,
+                )
+                if t is not None:
+                    self.__gel_resolved_type__ = t
+
+            if t is not None:
+                if _typing_inspect.is_generic_alias(t):
+                    origin = typing.get_origin(t)
+                    if issubclass(origin, BasePointer):
+                        t = typing.get_args(t)[0]
+                setattr(owner, self.__gel_name__, t)
+                return self
+            else:
+                return self
+        else:
+            return self
 
 
 class Exclusive:
@@ -90,43 +145,11 @@ class ObjectTypeReflection:
     name: str
 
 
-def _get_pointer_from_field(
-    name: str,
-    field: pydantic.fields.FieldInfo,
-) -> GelPointer:
-    kwargs = dict(field._attributes_set)
-    ptr = GelPointer(**kwargs)  # type: ignore [arg-type]
-    ptr.__set_name__(None, name)
-    return ptr
+class GelModelMetadata:
+    __gel_type_reflection__: ClassVar[ObjectTypeReflection]
 
 
-class GelModelMeta(_model_construction.ModelMetaclass, type):
-    def __new__(
-        cls,
-        name: str,
-        bases: tuple[type[Any], ...],
-        namespace: dict[str, Any],
-        **kwargs: Any,
-    ) -> GelModelMeta:
-        with warnings.catch_warnings():
-            # Make pydantic shut up about attribute redefinition.
-            warnings.filterwarnings(
-                "ignore",
-                message=r".*shadows an attribute in parent.*",
-            )
-            new_cls = cast(
-                "type[pydantic.BaseModel]",
-                super().__new__(cls, name, bases, namespace, **kwargs),
-            )
-
-        for fname, field in new_cls.__pydantic_fields__.items():
-            col = _get_pointer_from_field(fname, field)
-            setattr(new_cls, fname, col)
-
-        return new_cls  # type: ignore [return-value]
-
-
-class GelType:
+class GelType(GelClassVar):
     pass
 
 
@@ -199,8 +222,39 @@ class PyTypeScalar(parametric.SingleParametricType[T_co]):
         )
 
 
-class GelModelMetadata:
-    __gel_type_reflection__: ClassVar[ObjectTypeReflection]
+class GelModelMeta(_model_construction.ModelMetaclass, type):
+    def __new__(
+        cls,
+        name: str,
+        bases: tuple[type[Any], ...],
+        namespace: dict[str, Any],
+        **kwargs: Any,
+    ) -> GelModelMeta:
+        with warnings.catch_warnings():
+            # Make pydantic shut up about attribute redefinition.
+            warnings.filterwarnings(
+                "ignore",
+                message=r".*shadows an attribute in parent.*",
+            )
+            new_cls = cast(
+                "type[pydantic.BaseModel]",
+                super().__new__(cls, name, bases, namespace, **kwargs),
+            )
+
+        for fname, field in new_cls.__pydantic_fields__.items():
+            col = GelFieldPlaceholder._from_pydantic_field(fname, field)
+            setattr(new_cls, fname, col)
+
+        return new_cls  # type: ignore [return-value]
+
+    def __setattr__(cls, name: str, value: Any, /) -> None:
+        if name == "__pydantic_fields__":
+            fields: dict[str, pydantic.fields.FieldInfo] = value
+            for fname, field in fields.items():
+                if isinstance(field.default, GelClassVar):
+                    field.default = pydantic_core.PydanticUndefined
+
+        super().__setattr__(name, value)
 
 
 class GelModel(
@@ -314,7 +368,13 @@ class LinkClassNamespace(metaclass=LinkClassNamespaceMeta):
 BT_co = TypeVar("BT_co", covariant=True)
 
 
-class OptionalPointer(GelPointer, Generic[T_co, BT_co]):
+class BasePointer(GelClassVar, Generic[T_co, BT_co]):
+    if TYPE_CHECKING:
+
+        def __get__(self, obj: None, objtype: type[Any]) -> type[T_co]: ...
+
+
+class OptionalPointer(BasePointer[T_co, BT_co]):
     if TYPE_CHECKING:
 
         @overload
@@ -430,7 +490,7 @@ class _MultiLinkMeta(type):
     _list_type: type[lists.DistinctList[GelModel | ProxyModel[GelModel]]]
 
 
-class _MultiLink(GelPointer, Generic[MT, BMT], metaclass=_MultiLinkMeta):
+class _MultiLink(BasePointer[MT, BMT], metaclass=_MultiLinkMeta):
     if TYPE_CHECKING:
 
         @overload
