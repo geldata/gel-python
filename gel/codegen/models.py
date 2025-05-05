@@ -1472,13 +1472,19 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                     if is_forward_decl:
                         self.write("...")
                     else:
-                        self.write("self._p__obj__ = obj")
+                        obj = self.import_name("builtins", "object")
+                        self.write(
+                            f'{obj}.__setattr__(self, "_p__obj__", obj)')
                         self.write(
                             self.format_list(
-                                "self._p__lprops__ = self.__lprops__({list})",
+                                "lprops = self.__class__.__lprops__({list})",
                                 lprop_assign,
                             )
                         )
+                        self.write(
+                            f'{obj}.__setattr__(self, "_p__lprops__", lprops)')
+                        self.write(
+                            f'{obj}.__setattr__(self, "__linkprops__", lprops)')
 
                 self.write()
                 args = [f"obj: {target}", "/", "*", *lprops]

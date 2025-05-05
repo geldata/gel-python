@@ -208,7 +208,10 @@ class GelModel(
 ):
     model_config = pydantic.ConfigDict(
         json_encoders={uuid.UUID: str},
+        validate_assignment=True,
     )
+
+    _p__id__: uuid.UUID = PrivateAttr()
 
     def __init__(self, /, **kwargs: Any) -> None:
         super().__init__(**kwargs)
@@ -244,9 +247,27 @@ MT = TypeVar("MT", bound=GelModel, covariant=True)
 
 class ProxyModel(GelModel, Generic[MT]):
     __proxy_of__: ClassVar[type[MT]]  # type: ignore [misc]
+    _p__obj__: MT
 
     def __init__(self, obj: MT, /) -> None:
-        pass
+        object.__setattr__(self, "_p__obj__", obj)
+
+    def __getattribute__(self, name: str) -> Any:
+        model_fields = object.__getattribute__(self, "model_fields")
+        if name in model_fields or name == "_p__id":
+            base = object.__getattribute__(self, "_p__obj__")
+            return getattr(base, name)
+        return super().__getattribute__(name)
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        model_fields = object.__getattribute__(self, "model_fields")
+        if name in model_fields:
+            # writing to a field: mutate the wrapped model
+            base = object.__getattribute__(self, "_p__obj__")
+            setattr(base, name, value)
+        else:
+            # writing anything else (including _proxied) is normal
+            super().__setattr__(name, value)
 
     @classmethod
     def __pydantic_init_subclass__(cls, **kwargs: Any) -> None:
@@ -350,9 +371,31 @@ class _OptionalLink(OptionalPointer[MT, BMT]):
     ) -> pydantic_core.CoreSchema:
         if _typing_inspect.is_generic_alias(source_type):
             args = typing.get_args(source_type)
-            return handler.generate_schema(args[0])
+            if issubclass(args[0], ProxyModel):
+                return pydantic_schema.no_info_before_validator_function(
+                    functools.partial(cls._validate, generic_args=args),
+                    schema=handler.generate_schema(args[0]),
+                )
+            else:
+                return handler.generate_schema(args[0])
         else:
             return handler.generate_schema(source_type)
+
+    @classmethod
+    def _validate(
+        cls,
+        value: Any,
+        generic_args: tuple[type[Any], type[Any]],
+    ) -> MT:
+        mt, bmt = generic_args
+        if isinstance(value, mt):
+            return value  # type: ignore [no-any-return]
+        elif isinstance(value, bmt):
+            return mt(value)  # type: ignore [no-any-return]
+        else:
+            raise TypeError(
+                f"could not convert {type(value)} to {mt.__name__}"
+            )
 
 
 OptionalLink = TypeAliasType(
