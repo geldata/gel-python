@@ -35,6 +35,7 @@ extend-select = [
     "W",   # warning
 ]
 extend-ignore = [
+    "S101",    # assert
     "COM812",  # missing-trailing-comma
     "ISC002",  # multi-line-implicit-string-concatenation
     "PLC0105", # type-name-incorrect-variance

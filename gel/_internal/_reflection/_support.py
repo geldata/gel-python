@@ -13,7 +13,7 @@ class QualName(NamedTuple):
     name: str
 
 
-class SchemaPath(pathlib.PurePosixPath):
+class SchemaPath(pathlib.PurePath):
     @classmethod
     def from_schema_name(cls, name: str) -> SchemaPath:
         return SchemaPath(*name.split("::"))

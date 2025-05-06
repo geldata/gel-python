@@ -1031,12 +1031,14 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             typeof_bases = [gmm]
         pointers = objtype.pointers
         otr = self.import_name(BASE_IMPL, "ObjectTypeReflection")
+        sp = self.import_name(BASE_IMPL, "SchemaPath")
         uuid = self.import_name("uuid", "UUID")
         with self._class_def(typeof_class, typeof_bases):
             self.write(f"__gel_type_reflection__ = {otr}(")
             with self.indented():
                 self.write(f"id={uuid}({str(objtype.id)!r}),")
-                self.write(f"name={objtype.name!r},")
+                schema_path = ", ".join(repr(p) for p in type_name.parts)
+                self.write(f"name={sp}({schema_path}),")
             self.write(")")
             self.write()
 

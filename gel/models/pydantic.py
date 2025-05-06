@@ -4,7 +4,6 @@
 
 from __future__ import annotations
 
-from inspect import Attribute
 import typing
 from typing import (
     TYPE_CHECKING,
@@ -38,12 +37,14 @@ from pydantic import field_serializer as field_serializer
 from pydantic_core import core_schema as pydantic_schema
 
 from pydantic._internal import _model_construction  # noqa: PLC2701
-from pydantic._internal import _namespace_utils
+from pydantic._internal import _namespace_utils  # noqa: PLC2701
 
-from gel._internal import _typing_eval, _typing_parametric
+from gel._internal import _typing_eval
 from gel._internal import _typing_inspect
 from gel._internal import _typing_parametric as parametric
 from gel._internal import _polyfills
+from gel._internal import _qb
+from gel._internal._reflection import SchemaPath as SchemaPath
 
 from . import lists
 from . import unsetid
@@ -81,9 +82,10 @@ class GelFieldPlaceholder(GelClassVar):
         name: str,
         field: pydantic.fields.FieldInfo,
     ) -> Self:
-        kwargs = dict(field._attributes_set)
         if field.annotation is None:
-            raise AssertionError(f"unexpected unnannotated model field: {name}")
+            raise AssertionError(
+                f"unexpected unnannotated model field: {name}"
+            )
         return cls(name, field.annotation)
 
     def __init__(self, name: str, annotation: type[Any]) -> None:
@@ -103,7 +105,6 @@ class GelFieldPlaceholder(GelClassVar):
             assert owner is not None
             t = self.__gel_resolved_type__
             if t is None:
-                anno = self.__gel_annotation__
                 ns = _namespace_utils.NsResolver(
                     parent_namespace=getattr(
                         owner,
@@ -111,12 +112,12 @@ class GelFieldPlaceholder(GelClassVar):
                         None,
                     ),
                 )
-                globals, locals = ns.types_namespace
+                globalns, localns = ns.types_namespace
                 t = _typing_eval.try_resolve_type(
                     self.__gel_annotation__,
                     owner=owner,
-                    globals=globals,
-                    locals=locals,
+                    globals=globalns,
+                    locals=localns,
                 )
                 if t is not None:
                     self.__gel_resolved_type__ = t
@@ -141,14 +142,23 @@ class Exclusive:
 @dataclasses.dataclass(kw_only=True, frozen=True)
 class ObjectTypeReflection:
     id: uuid.UUID
-    name: str
+    name: SchemaPath
 
 
 class GelModelMetadata:
     __gel_type_reflection__: ClassVar[ObjectTypeReflection]
 
 
-class GelType(GelClassVar):
+@dataclasses.dataclass(kw_only=True, frozen=True)
+class PointerReflection:
+    name: str
+
+
+class GelPointerMetadata:
+    __gel_pointer_reflection__: ClassVar[PointerReflection]
+
+
+class GelType(GelClassVar, _qb.Expression):
     pass
 
 
@@ -249,7 +259,7 @@ class GelModelMeta(_model_construction.ModelMetaclass, type):
     def __setattr__(cls, name: str, value: Any, /) -> None:
         if name == "__pydantic_fields__":
             fields: dict[str, pydantic.fields.FieldInfo] = value
-            for fname, field in fields.items():
+            for field in fields.values():
                 if isinstance(field.default, GelClassVar):
                     field.default = pydantic_core.PydanticUndefined
 
@@ -257,7 +267,10 @@ class GelModelMeta(_model_construction.ModelMetaclass, type):
 
 
 class GelModel(
-    pydantic.BaseModel, GelModelMetadata, GelType, metaclass=GelModelMeta
+    pydantic.BaseModel,
+    GelModelMetadata,
+    GelType,
+    metaclass=GelModelMeta,
 ):
     model_config = pydantic.ConfigDict(
         json_encoders={uuid.UUID: str},
@@ -287,7 +300,7 @@ class GelModel(
         return hash(self._p__id)
 
     @classmethod
-    def select(cls, /, **kwargs: Any) -> type[Self]:
+    def select(cls, /, **kwargs: bool | type[GelType]) -> type[Self]:
         return cls
 
     @classmethod
@@ -541,7 +554,7 @@ class _MultiLink(BasePointer[MT, BMT], metaclass=_MultiLinkMeta):
     ) -> lists.DistinctList[MT]:
         lt: type[_UpcastingDistinctList[MT, BMT]] = _UpcastingDistinctList[
             generic_args[0],  # type: ignore [valid-type]
-            generic_args[1]   # type: ignore [valid-type]
+            generic_args[1],  # type: ignore [valid-type]
         ]
         if isinstance(value, lt):
             return value
