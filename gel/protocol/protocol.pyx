@@ -110,6 +110,7 @@ cdef class ExecuteContext:
         allow_capabilities: enums.Capability = enums.Capability.ALL,
         state: typing.Optional[dict] = None,
         annotations: typing.Optional[dict[str, str]] = None,
+        transaction_options: typing.Optional[object] = None,
     ):
         self.query = query
         self.args = args
@@ -125,11 +126,13 @@ cdef class ExecuteContext:
         self.inline_typeids = bool(inline_typeids)
         self.allow_capabilities = allow_capabilities
         self.state = state
+        self.tx_options = transaction_options
 
         self.cardinality = None
         self.in_dc = self.out_dc = None
         self.capabilities = 0
         self.warnings = ()
+        self.unsafe_isolation_dangers = ()
         self.annotations = annotations
 
     cdef inline bint has_na_cardinality(self):
@@ -148,7 +151,13 @@ cdef class ExecuteContext:
         if rv is None:
             return False
         else:
-            self.cardinality, self.in_dc, self.out_dc, self.capabilities = rv
+            (
+                self.cardinality,
+                self.in_dc,
+                self.out_dc,
+                self.capabilities,
+                self.unsafe_isolation_dangers
+            ) = rv
             return True
 
     cdef inline store_to_cache(self):
@@ -163,8 +172,21 @@ cdef class ExecuteContext:
             self.expect_one,
         )
         self.qc[key] = (
-            self.cardinality, self.in_dc, self.out_dc, self.capabilities
+            self.cardinality,
+            self.in_dc,
+            self.out_dc,
+            self.capabilities,
+            self.unsafe_isolation_dangers,
         )
+
+
+cdef prefers_repeatable_read(state):
+    return (
+        state
+        and (config := state.get('config'))
+        and config.get('default_transaction_isolation')
+        == 'PreferRepeatableRead'
+    )
 
 
 cdef class SansIOProtocol:
@@ -273,7 +295,8 @@ cdef class SansIOProtocol:
             raise errors.ClientConnectionClosedError(
                 'the connection has been closed')
 
-    cdef WriteBuffer encode_parse_params(self, ExecuteContext ctx):
+    # state is its own argument because some paths override it
+    cdef WriteBuffer encode_parse_params(self, ExecuteContext ctx, dict state):
         cdef:
             WriteBuffer buf
 
@@ -293,11 +316,65 @@ cdef class SansIOProtocol:
         buf.write_byte(CARDINALITY_ONE if ctx.expect_one else CARDINALITY_MANY)
         buf.write_len_prefixed_utf8(ctx.query)
 
-        state_type_id, state_data = self.encode_state(ctx.state)
+        state_type_id, state_data = self.encode_state(state)
         buf.write_bytes(state_type_id)
         buf.write_bytes(state_data)
 
         return buf
+
+    def _get_active_state(self, ctx: ExecuteContext, *, bint is_execute):
+        '''Make any adjustments to state before encoding it.
+
+        Currently this consists of copying TransactionOptions into
+        config and implementing PrefersRepeatableRead.
+        '''
+        tx_options = ctx.tx_options
+        state = ctx.state
+        copied = False
+
+        if (
+            tx_options
+            and (
+                tx_options._isolation is not None
+                or tx_options._readonly is not None
+            )
+            # 6.0 or later
+            and self.protocol_version >= (3, 0)
+        ):
+            state = state.copy()
+            config = state['config'] = (
+                state['config'].copy() if 'config' in state else {}
+            )
+            copied = True
+
+            if tx_options._isolation is not None:
+                config['default_transaction_isolation'] = tx_options._isolation
+            if tx_options._readonly is not None:
+                config['default_transaction_access_mode'] = (
+                    'ReadOnly' if tx_options._readonly else 'ReadWrite'
+                )
+
+        if prefers_repeatable_read(state):
+            if not copied:
+                state = state.copy()
+                state['config'] = state['config'].copy()
+
+            # If we are actually doing an execute, and parse didn't
+            # report any isolation dangers with the query, then adjust
+            # default_transaction_isolation to RepeatableRead.
+            # Otherwise, clear it.
+            if (
+                is_execute
+                and not ctx.unsafe_isolation_dangers
+                and not self.is_in_transaction()
+            ):
+                state['config']['default_transaction_isolation'] = (
+                    'RepeatableRead'
+                )
+            else:
+                del state['config']['default_transaction_isolation']
+
+        return state
 
     async def _parse(self, ctx: ExecuteContext):
         cdef:
@@ -313,7 +390,9 @@ cdef class SansIOProtocol:
         buf = WriteBuffer.new_message(PREPARE_MSG)
         self.write_annotations(ctx, buf)
 
-        params = self.encode_parse_params(ctx)
+        params = self.encode_parse_params(
+            ctx, self._get_active_state(ctx, is_execute=False)
+        )
 
         buf.write_buffer(params)
         buf.end_message()
@@ -370,7 +449,9 @@ cdef class SansIOProtocol:
             char mtype
             object result
 
-        params = self.encode_parse_params(ctx)
+        params = self.encode_parse_params(
+            ctx, self._get_active_state(ctx, is_execute=True)
+        )
 
         buf = WriteBuffer.new_message(EXECUTE_MSG)
         self.write_annotations(ctx, buf)
@@ -487,13 +568,22 @@ cdef class SansIOProtocol:
 
         if ctx.load_from_cache():
             pass
-        elif not ctx.args and not ctx.kwargs and not ctx.required_one:
+        elif (
+            not ctx.args
+            and not ctx.kwargs
+            and not ctx.required_one
+            and not prefers_repeatable_read(ctx.state)
+        ):
             # We don't have knowledge about the in/out desc of the command, but
             # the caller didn't provide any arguments, so let's try using NULL
             # for both in (assumed) and out (the server will correct it) desc
             # without an additional Parse, unless required_one is set because
             # it'll be too late to find out the cardinality is wrong when the
             # command is already executed.
+            #
+            # We also can't do it if we want to lower to
+            # RepeatableRead if possible, since we need to find out if
+            # it is allowed.
             ctx.in_dc = ctx.out_dc = NULL_CODEC
         else:
             await self._parse(ctx)
@@ -1037,6 +1127,14 @@ cdef class SansIOProtocol:
                 for w in warnings:
                     w._query = ctx.query
                 ctx.warnings = warnings
+            if headers and 'unsafe_isolation_dangers' in headers:
+                dangers = tuple([
+                    errors.EdgeDBError._from_json(w)
+                    for w in json.loads(headers['unsafe_isolation_dangers'])
+                ])
+                for w in dangers:
+                    w._query = ctx.query
+                ctx.unsafe_isolation_dangers = dangers
 
             ctx.capabilities = self.buffer.read_int64()
             ctx.cardinality = self.buffer.read_byte()

@@ -53,7 +53,7 @@ cdef class LRUMapping:
         self._dict_get = self._dict.get
         self._maxsize = maxsize
 
-    cdef get(self, key, default):
+    cpdef get(self, key, default):
         o = self._dict_get(key, _LRU_MARKER)
         if o is _LRU_MARKER:
             return default

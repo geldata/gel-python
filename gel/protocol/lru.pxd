@@ -25,4 +25,4 @@ cdef class LRUMapping:
         object _dict_move_to_end
         object _dict_get
 
-    cdef get(self, key, default)
+    cpdef get(self, key, default)

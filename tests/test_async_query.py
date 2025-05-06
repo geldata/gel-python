@@ -1035,6 +1035,7 @@ class TestAsyncQuery(tb.AsyncQueryTestCase):
                 ),
                 retry_options=None,
                 state=None,
+                transaction_options=None,
                 warning_handler=lambda _ex, _: None,
                 annotations={},
             )
@@ -1153,9 +1154,7 @@ class TestAsyncQuery(tb.AsyncQueryTestCase):
                 ''', uuid.uuid4())
 
     async def test_async_query_sql_01(self):
-        if await self.client.query_required_single('''
-            select sys::get_version().major < 6
-        '''):
+        if self.server_version.major < 6:
             self.skipTest("Buggy in versions earlier than 6.0")
 
         res = await self.client.query_sql("SELECT 1")

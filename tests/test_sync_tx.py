@@ -31,10 +31,17 @@ class TestSyncTx(tb.SyncQueryTestCase):
         CREATE TYPE test::TransactionTest EXTENDING std::Object {
             CREATE PROPERTY name -> std::str;
         };
-    '''
 
-    TEARDOWN = '''
-        DROP TYPE test::TransactionTest;
+        CREATE TYPE test::Tmp {
+            CREATE REQUIRED PROPERTY tmp -> std::str;
+        };
+        CREATE TYPE test::TmpConflict {
+            CREATE REQUIRED PROPERTY tmp -> std::str {
+                CREATE CONSTRAINT exclusive;
+            }
+        };
+
+        CREATE TYPE test::TmpConflictChild extending test::TmpConflict;
     '''
 
     def test_sync_transaction_regular_01(self):
@@ -65,6 +72,15 @@ class TestSyncTx(tb.SyncQueryTestCase):
             None,
             edgedb.IsolationLevel.Serializable,
         ]
+        if not (
+            str(self.server_version.stage) != 'dev'
+            and (self.server_version.major, self.server_version.minor) < (6, 5)
+        ):
+            isolations += [
+                edgedb.IsolationLevel.PreferRepeatableRead,
+                edgedb.IsolationLevel.RepeatableRead,
+            ]
+
         booleans = [None, True, False]
         all = itertools.product(isolations, booleans, booleans)
         for isolation, readonly, deferrable in all:
@@ -91,6 +107,63 @@ class TestSyncTx(tb.SyncQueryTestCase):
             for tx in client.transaction():
                 with tx:
                     pass
+
+    def _try_bogus_rr_tx(self, con, first_try):
+        # A transaction that needs to be serializable
+        for tx in con.transaction():
+            with tx:
+                res1 = tx.query_single('''
+                    select {
+                        ins := (insert test::Tmp { tmp := "test1" }),
+                        level := sys::get_transaction_isolation(),
+                    }
+                ''')
+                # If this is the second time we've tried to run this
+                # transaction, then the cache should ensure we *only*
+                # try Serializable.
+                if not first_try:
+                    self.assertEqual(res1.level, 'Serializable')
+
+                res2 = tx.query_single('''
+                    select {
+                        ins := (insert test::TmpConflict {
+                            tmp := <str>random()
+                        }),
+                        level := sys::get_transaction_isolation(),
+                    }
+                ''')
+
+                # N.B: res1 will be RepeatableRead on the first
+                # iteration, maybe, but contingent on the second query
+                # succeeding it will be Serializable!
+                self.assertEqual(res1.level, 'Serializable')
+                self.assertEqual(res2.level, 'Serializable')
+
+    def test_sync_transaction_prefer_rr(self):
+        if (
+            str(self.server_version.stage) != 'dev'
+            and (self.server_version.major, self.server_version.minor) < (6, 5)
+        ):
+            self.skipTest("DML in RepeatableRead not supported yet")
+        con = self.client.with_transaction_options(
+            edgedb.TransactionOptions(
+                isolation=edgedb.IsolationLevel.PreferRepeatableRead
+            )
+        )
+        # A transaction that needs to be serializable
+        self._try_bogus_rr_tx(con, first_try=True)
+        self._try_bogus_rr_tx(con, first_try=False)
+
+        # And one that doesn't
+        for tx in con.transaction():
+            with tx:
+                res = tx.query_single('''
+                    select {
+                        ins := (insert test::Tmp { tmp := "test" }),
+                        level := sys::get_transaction_isolation(),
+                    }
+                ''')
+            self.assertEqual(str(res.level), 'RepeatableRead')
 
     def test_sync_transaction_commit_failure(self):
         with self.assertRaises(edgedb.errors.QueryError):
