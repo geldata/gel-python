@@ -30,21 +30,21 @@ class NoPydanticValidation:
 class LinkPropResult(NoPydanticValidation):
     id: uuid.UUID
     name: str
-    friends: typing.List[LinkPropResultFriendsItem]
+    friends: list[LinkPropResultFriendsItem]
 
 
 @dataclasses.dataclass
 class LinkPropResultFriendsItem(NoPydanticValidation):
     id: uuid.UUID
     name: str
-    created_at: typing.Optional[datetime.datetime]
+    created_at: datetime.datetime | None
 
     @typing.overload
-    def __getitem__(self, key: typing.Literal["@created_at"]) -> typing.Optional[datetime.datetime]:
+    def __getitem__(self, key: typing.Literal["@created_at"]) -> datetime.datetime | None:
         ...
 
     @typing.overload
-    def __getitem__(self, key: typing.Literal["@strength"]) -> typing.Optional[float]:
+    def __getitem__(self, key: typing.Literal["@strength"]) -> float | None:
         ...
 
     def __getitem__(self, key: str) -> typing.Any:
@@ -53,7 +53,7 @@ class LinkPropResultFriendsItem(NoPydanticValidation):
 
 async def link_prop(
     executor: gel.AsyncIOExecutor,
-) -> typing.List[LinkPropResult]:
+) -> list[LinkPropResult]:
     return await executor.query(
         """\
         create type Person {
