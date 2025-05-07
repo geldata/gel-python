@@ -5,7 +5,6 @@
 from __future__ import annotations
 import dataclasses
 import gel
-import typing
 import uuid
 
 
@@ -30,19 +29,19 @@ class SelectObjectResult(NoPydanticValidation):
     id: uuid.UUID
     Name: str
     Language: str
-    Params: typing.List[SelectObjectResultParamsItem]
+    Params: list[SelectObjectResultParamsItem]
 
 
 @dataclasses.dataclass
 class SelectObjectResultParamsItem(NoPydanticValidation):
     id: uuid.UUID
     Name: str
-    Default: typing.Optional[str]
+    Default: str | None
 
 
 async def select_object(
     executor: gel.AsyncIOExecutor,
-) -> typing.Optional[SelectObjectResult]:
+) -> SelectObjectResult | None:
     return await executor.query_single(
         """\
         select schema::Function {
