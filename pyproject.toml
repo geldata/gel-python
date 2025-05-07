@@ -32,8 +32,7 @@ dependencies = ['certifi>=2021.5.30; platform_system == "Windows"']
 [project.optional-dependencies]
 test = [
     'pytest>=3.6.0',
-    'pycodestyle~=2.11.1',
-    'pyflakes~=3.2.0',
+    'ruff~=0.11.0',
     'uvloop>=0.15.1; platform_system != "Windows"',
 ]
 sqltest = [
@@ -109,7 +108,7 @@ target-version = ["py39"]
 # ========================
 
 [tool.ruff]
-line-length = 80
+line-length = 79
 indent-width = 4
 target-version = "py39"
 exclude = [
@@ -154,7 +153,6 @@ ignore = [
     "B904", # raise-without-from-inside-except
     "E402", # module-import-not-at-top-of-file
     "E252", # missing-whitespace-around-parameter-equals
-    "F401", # unused-import
     "F541", # f-string-missing-placeholders
 ]
 
