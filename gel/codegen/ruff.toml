@@ -50,4 +50,5 @@ extend-ignore = [
     "PLR6301", # no-self-use
     "PLW3201", # bad-dunder-method-name
     "S101",    # assert
+    "SIM117",  # multiple-with-statements
 ]

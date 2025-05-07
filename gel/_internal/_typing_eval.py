@@ -132,5 +132,5 @@ def try_resolve_type(
             locals=locals,
             type_params=type_params,
         )
-    except NameError as e:
+    except NameError:
         return None

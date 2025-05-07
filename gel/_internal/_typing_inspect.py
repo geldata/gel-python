@@ -3,7 +3,7 @@
 # SPDX-FileCopyrightText: Copyright Gel Data Inc. and the contributors.
 
 
-from typing import Any, ClassVar, TypeGuard, get_origin
+from typing import Annotated, Any, ClassVar, TypeGuard, get_origin
 from typing import _GenericAlias  # type: ignore
 from types import GenericAlias
 
@@ -20,6 +20,10 @@ def is_generic_alias(t: Any) -> bool:
 
 def is_type_alias(t: Any) -> TypeGuard[TypeAliasType]:
     return isinstance(t, TypeAliasType)
+
+
+def is_annotated(t: Any) -> TypeGuard[Annotated[Any, ...]]:
+    return is_generic_alias(t) and get_origin(t) is Annotated
 
 
 def is_forward_ref(t: Any) -> TypeGuard[ForwardRef]:

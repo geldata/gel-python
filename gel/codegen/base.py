@@ -484,6 +484,8 @@ class GeneratedModule:
 
     @contextlib.contextmanager
     def code_section(self, section: CodeSection) -> Iterator[None]:
+        orig_indent_level = self._indent_level
+        self._indent_level = 0
         orig_section = self._code_section
         self._code_section = section
         self._code = self._content[self._code_section]
@@ -492,6 +494,7 @@ class GeneratedModule:
         finally:
             self._code_section = orig_section
             self._code = self._content[self._code_section]
+            self._indent_level = orig_indent_level
 
     def reset_indent(self) -> None:
         self._indent_level = 0

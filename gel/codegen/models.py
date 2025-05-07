@@ -43,7 +43,6 @@ if TYPE_CHECKING:
         Iterable,
         Iterator,
         Mapping,
-        Sequence,
     )
 
 
@@ -526,7 +525,6 @@ class BaseGeneratedModule:
             type_name = stype.name
             if import_directly is None:
                 import_directly = False
-
         type_path = reflection.parse_name(type_name)
 
         if (
@@ -536,6 +534,14 @@ class BaseGeneratedModule:
             # std modules have complex cyclic deps,
             # especially where scalars are involved.
             aspect = ModuleAspect.VARIANTS
+
+        if (
+            self._schema_part is not reflection.SchemaPart.STD
+            and type_path.parent not in self._modules
+            and not reflection.is_named_tuple_type(stype)
+            and import_time is ImportTime.late_runtime
+        ):
+            import_time = ImportTime.runtime
 
         cur_aspect = self.current_aspect
         cache_key = (
@@ -853,7 +859,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                     )
                     if pybase is not None:
                         pts = self.import_name(BASE_IMPL, "PyTypeScalar")
-                        parents = [f"{pts}[{pybase}]", pybase]
+                        parents = [pybase, f"{pts}[{pybase}]"]
                     else:
                         parents = []
 
@@ -908,10 +914,6 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             else:
                 self.write_object_type(objtype)
 
-        with self.aspect(ModuleAspect.LATE):
-            for objtype in objtypes:
-                self.write_object_type_link_variants(objtype, local=False)
-
         with self.aspect(ModuleAspect.VARIANTS):
             for objtype in objtypes:
                 type_name = reflection.parse_name(objtype.name)
@@ -919,9 +921,6 @@ class GeneratedSchemaModule(BaseGeneratedModule):
 
             for objtype in objtypes:
                 self.write_object_type_variants(objtype)
-
-            for objtype in objtypes:
-                self.write_object_type_link_variants(objtype, local=True)
 
             if self.py_files[ModuleAspect.LATE].has_content():
                 rel_import = self._resolve_rel_import(
@@ -1149,12 +1148,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
 
             with self._class_def("__links__", links_bases):
                 if proplinks:
-                    self.write_object_type_link_variants(
-                        objtype,
-                        target_aspect=ModuleAspect.MAIN,
-                        is_forward_decl=True,
-                        local=None,
-                    )
+                    self.write_object_type_link_variants(objtype)
                 else:
                     self.write("pass")
 
@@ -1342,168 +1336,215 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         self,
         objtype: reflection.ObjectType,
         *,
-        local: bool | None = False,
-        target_aspect: ModuleAspect | None = None,
-        is_forward_decl: bool = False,
+        target_aspect: ModuleAspect = ModuleAspect.MAIN,
     ) -> None:
-        pointers = self._get_links_with_props(objtype, local=local)
+        pointers = self._get_links_with_props(objtype)
         if not pointers:
             return
 
-        if is_forward_decl:
-            with self.type_checking():
-                self._write_object_type_link_variants(
+        all_ptr_origins = self._get_all_pointer_origins(objtype)
+        lazydef_base = self.import_name(BASE_IMPL, "LazyLinkClassDef")
+
+        with self.type_checking():
+            for pointer in pointers:
+                self._write_object_type_link_variant(
                     objtype,
-                    pointers=pointers,
+                    pointer=pointer,
+                    ptr_origins=all_ptr_origins[pointer.name],
                     target_aspect=target_aspect,
-                    is_forward_decl=is_forward_decl,
+                    is_forward_decl=True,
                 )
-        else:
+
+        # with self.not_type_checking():
+        #     type_name = reflection.parse_name(objtype.name)
+        #     obj_class = type_name.name
+        #     for pointer in pointers:
+        #         target_type = self.get_type(
+        #             self._types[pointer.target_id],
+        #             import_time=ImportTime.late_runtime,
+        #             aspect=target_aspect,
+        #         )
+        #         ptrname = pointer.name
+        #         lazydef = f"__define_{ptrname}__"
+        #         base = f'{lazydef_base}["{obj_class}", "{target_type}"]'
+        #         with self._class_def(lazydef, [base]):
+        #             with self._method_def("_define", ["name: str"], "type"):
+        #                 classname = self._write_object_type_link_variant(
+        #                     objtype,
+        #                     pointer=pointer,
+        #                     ptr_origins=all_ptr_origins[pointer.name],
+        #                     target_aspect=target_aspect,
+        #                     is_forward_decl=False,
+        #                 )
+        #                 self.write(f"{classname}.__name__ = {ptrname!r}")
+        #                 qualname = f"{obj_class}.{ptrname}"
+        #                 self.write(f"{classname}.__qualname__ = {qualname!r}")
+        #                 self.write(f"return {classname}")
+
+        #         self.write(f"{ptrname} = {lazydef}({ptrname!r})")
+
+        with self.code_section(CodeSection.after_late_import):
             with self.not_type_checking():
                 type_name = reflection.parse_name(objtype.name)
                 obj_class = type_name.name
-                classes = self._write_object_type_link_variants(
-                    objtype,
-                    pointers=pointers,
-                    target_aspect=target_aspect,
-                    is_forward_decl=is_forward_decl,
-                )
-                for ptrname, classname in classes.items():
-                    self.write(f"{classname}.__name__ = {ptrname!r}")
-                    qualname = f"{obj_class}.{ptrname}"
-                    self.write(f"{classname}.__qualname__ = {qualname!r}")
-                    self.write(
-                        f"{obj_class}.__links__.{ptrname} = {classname}"
-                    )
-                    self.write(f"del {classname}")
+                for pointer in pointers:
+                    ptrname = pointer.name
+                    lazydef = f"__define_{ptrname}__"
+                    with self._class_def(lazydef, [lazydef_base]):
+                        with self._method_def(
+                            "_define", ["name: str"], "type"
+                        ):
+                            classname = self._write_object_type_link_variant(
+                                objtype,
+                                pointer=pointer,
+                                ptr_origins=all_ptr_origins[pointer.name],
+                                target_aspect=target_aspect,
+                                is_forward_decl=False,
+                            )
+                            self.write(f"{classname}.__name__ = {ptrname!r}")
+                            qualname = f"{obj_class}.{ptrname}"
+                            self.write(
+                                f"{classname}.__qualname__ = {qualname!r}"
+                            )
+                            self.write(f"return {classname}")
 
-    def _write_object_type_link_variants(
+                    self.write(
+                        f"{obj_class}.__links__.{ptrname} = {lazydef}({ptrname!r})"
+                    )
+                    self.write(f"del {lazydef}")
+
+    def _write_object_type_link_variant(
         self,
         objtype: reflection.ObjectType,
         *,
-        pointers: Sequence[reflection.Pointer],
-        local: bool | None = False,
+        pointer: reflection.Pointer,
+        ptr_origins: list[reflection.ObjectType],
         target_aspect: ModuleAspect | None = None,
         is_forward_decl: bool = False,
-    ) -> Mapping[str, str]:
+    ) -> str:
         type_name = reflection.parse_name(objtype.name)
         name = type_name.name
 
         self_t = self.import_name("typing", "Self")
         proxymodel_t = self.import_name(BASE_IMPL, "ProxyModel")
-        all_ptr_origins = self._get_all_pointer_origins(objtype)
+        config_dict_t = self.import_name(BASE_IMPL, "ConfigDict")
 
         if target_aspect is None:
             target_aspect = self.current_aspect
 
-        classnames = {}
-        for ptr in pointers:
-            pname = ptr.name
-            ptr_origins = [
-                self.get_type(
-                    ptr,
-                    import_time=ImportTime.typecheck,
-                    aspect=self.current_aspect,
-                )
-                for ptr in all_ptr_origins[pname]
-            ]
+        ptr = pointer
+        pname = ptr.name
+        target_type = self._types[ptr.target_id]
+        import_time = (
+            ImportTime.typecheck
+            if is_forward_decl
+            else ImportTime.late_runtime
+        )
+        target = self.get_type(
+            target_type,
+            import_time=import_time,
+            aspect=target_aspect,
+        )
 
-            target_type = self._types[ptr.target_id]
-            target = self.get_type(
-                target_type,
-                aspect=target_aspect,
+        ptr_origin_types = [
+            self.get_type(
+                origin,
+                import_time=ImportTime.typecheck,
+                aspect=self.current_aspect,
+            )
+            for origin in ptr_origins
+        ]
+
+        classname = pname if is_forward_decl else f"{name}__{pname}"
+        with self._class_def(
+            classname,
+            (
+                [f"{s}.__links__.{pname}" for s in ptr_origin_types]
+                + [target, f"{proxymodel_t}[{target}]"]
+            ),
+        ):
+            self.write(
+                f'"""link {objtype.name}.{pname}: {target_type.name}"""'
             )
 
-            classname = pname if is_forward_decl else f"{name}__{pname}"
-            classnames[pname] = classname
-            with self._class_def(
-                classname,
-                (
-                    [f"{s}.__links__.{pname}" for s in ptr_origins]
-                    + [target, f"{proxymodel_t}[{target}]"]
-                ),
-            ):
-                self.write(
-                    f'"""link {objtype.name}.{pname}: {target_type.name}"""'
+            if ptr_origin_types:
+                lprops_bases = _map_name(
+                    functools.partial(
+                        lambda s, pn: f"{s}.__links__.{pn}.__lprops__",
+                        pn=pname,
+                    ),
+                    ptr_origin_types,
                 )
+            else:
+                b = self.import_name(BASE_IMPL, "GelLinkModel")
+                lprops_bases = [b]
 
-                if ptr_origins:
-                    lprops_bases = _map_name(
-                        functools.partial(
-                            lambda s, pn: f"{s}.__links__.{pn}.__lprops__",
-                            pn=pname,
-                        ),
-                        ptr_origins,
+            with self._class_def("__lprops__", lprops_bases):
+                assert ptr.pointers
+                lprops = []
+                lprop_assign = []
+                for lprop in ptr.pointers:
+                    if lprop.name in {"source", "target"}:
+                        continue
+                    lprop_assign.append(f"{lprop.name}={lprop.name}")
+                    ttype = self._types[lprop.target_id]
+                    assert reflection.is_scalar_type(ttype)
+                    ptr_type = self.get_type(ttype, import_time=import_time)
+                    pytype = self._get_pybase_for_scalar(ttype)
+                    py_anno = self._py_anno_for_ptr(
+                        lprop,
+                        ptr_type,
+                        pytype,
+                        reflection.Cardinality(lprop.card),
                     )
+                    lprop_line = f"{lprop.name}: {py_anno}"
+                    self.write(lprop_line)
+                    lprop_line = f"{lprop.name}: {pytype} | None = None"
+                    lprops.append(lprop_line)
+
+            self.write()
+            priv_attr = self.import_name(BASE_IMPL, "PrivateAttr")
+
+            self.write(f"_p__obj__: {target} = {priv_attr}()")
+            self.write(f"_p__lprops__: __lprops__ = {priv_attr}()")
+
+            self.write()
+            args = [f"obj: {target}", "/", "*", *lprops]
+            with self._method_def("__init__", args):
+                if is_forward_decl:
+                    self.write("...")
                 else:
-                    b = self.import_name(BASE_IMPL, "GelLinkModel")
-                    lprops_bases = [b]
-
-                with self._class_def("__lprops__", lprops_bases):
-                    assert ptr.pointers
-                    lprops = []
-                    lprop_assign = []
-                    for lprop in ptr.pointers:
-                        if lprop.name in {"source", "target"}:
-                            continue
-                        lprop_assign.append(f"{lprop.name}={lprop.name}")
-                        ttype = self._types[lprop.target_id]
-                        assert reflection.is_scalar_type(ttype)
-                        ptr_type = self.get_type(ttype)
-                        pytype = self._get_pybase_for_scalar(ttype)
-                        py_anno = self._py_anno_for_ptr(
-                            lprop,
-                            ptr_type,
-                            pytype,
-                            reflection.Cardinality(lprop.card),
+                    obj = self.import_name("builtins", "object")
+                    self.write(f'{obj}.__setattr__(self, "_p__obj__", obj)')
+                    self.write(
+                        self.format_list(
+                            "lprops = self.__class__.__lprops__({list})",
+                            lprop_assign,
                         )
-                        lprop_line = f"{lprop.name}: {py_anno}"
-                        self.write(lprop_line)
-                        lprop_line = f"{lprop.name}: {pytype} | None = None"
-                        lprops.append(lprop_line)
+                    )
+                    self.write(
+                        f'{obj}.__setattr__(self, "_p__lprops__", lprops)'
+                    )
+                    self.write(
+                        f'{obj}.__setattr__(self, "__linkprops__", lprops)'
+                    )
 
-                self.write()
-                priv_attr = self.import_name(BASE_IMPL, "PrivateAttr")
+            self.write()
+            args = [f"obj: {target}", "/", "*", *lprops]
+            with self._classmethod_def("link", args, self_t):
+                if is_forward_decl:
+                    self.write("...")
+                else:
+                    self.write(
+                        self.format_list(
+                            "return cls({list})",
+                            ["obj", *lprop_assign],
+                        ),
+                    )
 
-                self.write(f"_p__obj__: {target} = {priv_attr}()")
-                self.write(f"_p__lprops__: __lprops__ = {priv_attr}()")
+            self.write()
 
-                self.write()
-                args = [f"obj: {target}", "/", "*", *lprops]
-                with self._method_def("__init__", args):
-                    if is_forward_decl:
-                        self.write("...")
-                    else:
-                        obj = self.import_name("builtins", "object")
-                        self.write(
-                            f'{obj}.__setattr__(self, "_p__obj__", obj)')
-                        self.write(
-                            self.format_list(
-                                "lprops = self.__class__.__lprops__({list})",
-                                lprop_assign,
-                            )
-                        )
-                        self.write(
-                            f'{obj}.__setattr__(self, "_p__lprops__", lprops)')
-                        self.write(
-                            f'{obj}.__setattr__(self, "__linkprops__", lprops)')
-
-                self.write()
-                args = [f"obj: {target}", "/", "*", *lprops]
-                with self._classmethod_def("link", args, self_t):
-                    if is_forward_decl:
-                        self.write("...")
-                    else:
-                        self.write(
-                            self.format_list(
-                                "return cls({list})",
-                                ["obj", *lprop_assign],
-                            ),
-                        )
-
-                self.write()
-
-        return classnames
+        return classname
 
     def write_object_type(
         self,

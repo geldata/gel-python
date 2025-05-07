@@ -11,6 +11,7 @@ from typing import (
     Any,
     ClassVar,
     Generic,
+    NoReturn,
     TypeVar,
     cast,
     final,
@@ -21,15 +22,19 @@ from typing_extensions import (
     Self,
     TypeAliasType,
 )
+from typing import ForwardRef
 
 import dataclasses
 import functools
+import inspect
+import sys
 import uuid
 import warnings
 
 import pydantic
 import pydantic.fields
 import pydantic_core
+from pydantic import ConfigDict as ConfigDict
 from pydantic import Field
 from pydantic import PrivateAttr as PrivateAttr
 from pydantic import computed_field as computed_field
@@ -69,16 +74,88 @@ class GelClassVar:
     pass
 
 
-class GelFieldPlaceholder(GelClassVar):
+def _is_dunder(attr: str) -> bool:
+    return attr.startswith("__") and attr.endswith("__")
+
+
+def _type_repr(t: type) -> str:
+    if isinstance(t, type):
+        if t.__module__ == "builtins":
+            return t.__qualname__
+        else:
+            return f"{t.__module__}.{t.__qualname__}"
+    else:
+        return repr(t)
+
+
+def _get_field_descriptor(cls: type, name: str) -> GelFieldDescriptor | None:
+    for ancestor in cls.__mro__:
+        desc = ancestor.__dict__.get(name, Unspecified)
+        if desc is not Unspecified and isinstance(desc, GelFieldDescriptor):
+            return desc
+
+    return None
+
+
+class _PathAlias:
+    def __init__(self, origin: type, metadata: PathMetadata) -> None:
+        self.__gel_origin__ = origin
+        self.__gel_metadata__ = metadata
+
+    def __call__(self, *args: Any, **kwargs: Any) -> Any:
+        return self.__gel_origin__(*args, **kwargs)
+
+    def __mro_entries__(self, bases: tuple[type, ...]) -> tuple[type, ...]:
+        return (self.__gel_origin__,)
+
+    def __getattr__(self, attr: str) -> Any:
+        if "__gel_origin__" in self.__dict__ and not _is_dunder(attr):
+            origin = self.__gel_origin__
+            descriptor = _get_field_descriptor(origin, attr)
+            if descriptor is not None:
+                return descriptor.get(self)
+
+            return getattr(origin, attr)
+        else:
+            raise AttributeError(attr)
+
+    def __setattr__(self, attr: str, val: Any) -> None:
+        if _is_dunder(attr):
+            super().__setattr__(attr, val)
+        else:
+            setattr(self.__gel_origin__, attr, val)
+
+    def __instancecheck__(self, obj: object) -> bool:
+        return isinstance(obj, self.__gel_origin__)
+
+    def __subclasscheck__(self, cls: type) -> bool:
+        return issubclass(cls, self.__gel_origin__)
+
+    def __dir__(self) -> list[str]:
+        return dir(self.__gel_origin__)
+
+    def __repr__(self) -> str:
+        origin = _type_repr(self.__gel_origin__)
+        metadata = repr(self.__gel_metadata__)
+        return f"gel.models.PathAlias[{origin}, {metadata}]"
+
+
+def AnnotatedPath(origin: type, metadata: PathMetadata) -> _PathAlias:  # noqa: N802
+    return _PathAlias(origin, metadata)
+
+
+class GelFieldDescriptor(GelClassVar):
     __slots__ = (
         "__gel_annotation__",
         "__gel_name__",
+        "__gel_origin__",
         "__gel_resolved_type__",
     )
 
     @classmethod
     def _from_pydantic_field(
         cls,
+        origin: type,
         name: str,
         field: pydantic.fields.FieldInfo,
     ) -> Self:
@@ -86,53 +163,78 @@ class GelFieldPlaceholder(GelClassVar):
             raise AssertionError(
                 f"unexpected unnannotated model field: {name}"
             )
-        return cls(name, field.annotation)
+        return cls(origin, name, field.annotation)
 
-    def __init__(self, name: str, annotation: type[Any]) -> None:
+    def __init__(self, origin: type, name: str, annotation: type[Any]) -> None:
+        self.__gel_origin__ = origin
         self.__gel_name__ = name
         self.__gel_annotation__ = annotation
         self.__gel_resolved_type__ = None
 
+    def __repr__(self) -> str:
+        qualname = f"{self.__gel_origin__.__qualname__}.{self.__gel_name__}"
+        anno = self.__gel_annotation__
+        return f"<{self.__class__.__name__} {qualname}: {anno}>"
+
     def __set_name__(self, owner: Any, name: str) -> None:
         self.__gel_name__ = name
+
+    def _resolve(self) -> type[Any] | None:
+        pass
+
+    def get(
+        self,
+        owner: type[Any] | _PathAlias,
+    ) -> Any:
+        t = self.__gel_resolved_type__
+        if t is None:
+            globalns = sys.modules[owner.__module__].__dict__
+            origin = self.__gel_origin__
+            ns = _namespace_utils.NsResolver(
+                parent_namespace=getattr(
+                    origin,
+                    "__pydantic_parent_namespace__",
+                    None,
+                ),
+            )
+            with ns.push(origin):
+                globalns, localns = ns.types_namespace
+
+            t = _typing_eval.try_resolve_type(
+                self.__gel_annotation__,
+                owner=origin,
+                globals=globalns,
+                locals=localns,
+            )
+            if t is not None:
+                if _typing_inspect.is_generic_alias(t) and issubclass(
+                    typing.get_origin(t), BasePointer
+                ):
+                    t = typing.get_args(t)[0]
+
+                self.__gel_resolved_type__ = t
+
+        if t is not None:
+            metadata = PathMetadata(
+                source=owner,
+                name=self.__gel_name__,
+            )
+            t = AnnotatedPath(t, metadata)
+            # setattr(owner, self.__gel_name__, t)
+            return t
+        else:
+            return self
 
     def __get__(
         self,
         instance: object | None,
         owner: type[Any] | None = None,
     ) -> Any:
-        if instance is None:
-            assert owner is not None
-            t = self.__gel_resolved_type__
-            if t is None:
-                ns = _namespace_utils.NsResolver(
-                    parent_namespace=getattr(
-                        owner,
-                        "__pydantic_parent_namespace__",
-                        None,
-                    ),
-                )
-                globalns, localns = ns.types_namespace
-                t = _typing_eval.try_resolve_type(
-                    self.__gel_annotation__,
-                    owner=owner,
-                    globals=globalns,
-                    locals=localns,
-                )
-                if t is not None:
-                    self.__gel_resolved_type__ = t
-
-            if t is not None:
-                if _typing_inspect.is_generic_alias(t):
-                    origin = typing.get_origin(t)
-                    if issubclass(origin, BasePointer):
-                        t = typing.get_args(t)[0]
-                setattr(owner, self.__gel_name__, t)
-                return self
-            else:
-                return self
-        else:
+        if instance is not None:
             return self
+        else:
+            assert owner is not None
+            return self.get(owner)
 
 
 class Exclusive:
@@ -150,12 +252,9 @@ class GelModelMetadata:
 
 
 @dataclasses.dataclass(kw_only=True, frozen=True)
-class PointerReflection:
+class PathMetadata:
+    source: type[GelModel]
     name: str
-
-
-class GelPointerMetadata:
-    __gel_pointer_reflection__: ClassVar[PointerReflection]
 
 
 class GelType(GelClassVar, _qb.Expression):
@@ -251,8 +350,11 @@ class GelModelMeta(_model_construction.ModelMetaclass, type):
             )
 
         for fname, field in new_cls.__pydantic_fields__.items():
-            col = GelFieldPlaceholder._from_pydantic_field(fname, field)
-            setattr(new_cls, fname, col)
+            if fname in new_cls.__annotations__:
+                col = GelFieldDescriptor._from_pydantic_field(
+                    new_cls, fname, field
+                )
+                setattr(new_cls, fname, col)
 
         return new_cls  # type: ignore [return-value]
 
@@ -260,7 +362,11 @@ class GelModelMeta(_model_construction.ModelMetaclass, type):
         if name == "__pydantic_fields__":
             fields: dict[str, pydantic.fields.FieldInfo] = value
             for field in fields.values():
-                if isinstance(field.default, GelClassVar):
+                fdef = field.default
+                if isinstance(fdef, GelClassVar) or (
+                    _typing_inspect.is_annotated(fdef)
+                    and isinstance(fdef.__origin__, GelClassVar)
+                ):
                     field.default = pydantic_core.PydanticUndefined
 
         super().__setattr__(name, value)
@@ -275,6 +381,7 @@ class GelModel(
     model_config = pydantic.ConfigDict(
         json_encoders={uuid.UUID: str},
         validate_assignment=True,
+        defer_build=True,
     )
 
     _p__id__: uuid.UUID = PrivateAttr()
@@ -309,7 +416,10 @@ class GelModel(
 
 
 class GelLinkModel(pydantic.BaseModel, metaclass=GelModelMeta):
-    pass
+    model_config = pydantic.ConfigDict(
+        validate_assignment=True,
+        defer_build=True,
+    )
 
 
 MT = TypeVar("MT", bound=GelModel, covariant=True)
@@ -577,3 +687,44 @@ MultiLinkWithProps = TypeAliasType(
     "Annotated[_MultiLink[PT, MT], Field(default_factory=_MultiLink)]",
     type_params=(PT, MT),
 )
+
+
+class LazyLinkClassDef:
+    def __init__(self, name: str) -> None:
+        self._recursion_guard: ForwardRef | None = None
+        self._name = name
+
+    def _define(self, name: str) -> type[Any]:
+        raise NotImplementedError
+
+    def __set_name__(self, owner: type[Any], name: str) -> None:
+        self._name = name
+
+    def __get__(
+        self,
+        instance: object | None,
+        owner: type[Any] | None = None,
+    ) -> Any:
+        if instance is not None:
+            raise AssertionError(
+                "unexpected lazy class def access on containing "
+                "class instance (not class)"
+            )
+
+        assert owner is not None
+
+        fqname = f"{owner.__qualname__}.{self._name}"
+        if self._recursion_guard is not None:
+            raise NameError(f"recursion while resolving {fqname}")
+
+        self._recursion_guard = ForwardRef(fqname)
+
+        try:
+            defined = self._define(self._name)
+        except AttributeError as e:
+            raise NameError(f"cannot define {fqname} yet") from e
+        finally:
+            self._recursion_guard = None
+
+        setattr(owner, self._name, defined)
+        return defined

@@ -7,7 +7,6 @@ from typing import (
     Any,
     ClassVar,
     Generic,
-    Optional,
     Tuple,
     Type,
     TypeVar,
@@ -15,6 +14,7 @@ from typing import (
     get_type_hints,
 )
 
+import collections
 import contextvars
 import types
 import sys
@@ -22,6 +22,7 @@ import typing
 import weakref
 from types import GenericAlias
 
+from . import _typing_eval
 from . import _typing_inspect
 
 
@@ -208,7 +209,7 @@ class ParametricType:
             if p not in cls._type_param_map
         }
 
-    def __init__(self) -> None:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         if self.__parametric_forward_refs__:
             raise TypeError(f"{type(self)!r} unresolved type parameters")
         if self.__parametric_type_args__ is None:
@@ -216,7 +217,7 @@ class ParametricType:
                 f"{type(self)!r} must be parametrized to instantiate"
             )
 
-        super().__init__()
+        super().__init__(*args, **kwargs)
 
     def __class_getitem__(
         cls,
@@ -308,7 +309,10 @@ class ParametricType:
         return not cls.__parametric_forward_refs__
 
     @classmethod
-    def resolve_types(cls, globalns: Dict[str, Any]) -> None:
+    def try_resolve_types(
+        cls,
+        globalns: dict[str, Any] | None = None,
+    ) -> None:
         if cls.__parametric_type_args__ is None:
             raise TypeError(f"{cls!r} is not parametrized")
 
@@ -317,18 +321,31 @@ class ParametricType:
 
         types = list(cls.__parametric_type_args__)
 
-        for ut, (idx, attr) in cls.__parametric_forward_refs__.items():
-            t = eval(ut, globalns, {})
-            if isinstance(t, type) and not isinstance(t, GenericAlias):
+        ns = {}
+        try:
+            module_dict = sys.modules[cls.__module__].__dict__
+        except AttributeError:
+            pass
+        else:
+            ns.update(module_dict)
+
+        if globalns is not None:
+            ns.update(globalns)
+
+        for ut, (idx, attr) in tuple(cls.__parametric_forward_refs__.items()):
+            t = _typing_eval.try_resolve_type(ut, globals=ns)
+            if t is None:
+                continue
+            elif isinstance(t, type) and not isinstance(t, GenericAlias):
                 types[idx] = t
                 setattr(cls, attr, t)
+                del cls.__parametric_forward_refs__[ut]
             else:
                 raise TypeError(
                     f"{cls!r} expects types as type parameters, got {t!r:.100}"
                 )
 
         cls.__parametric_type_args__ = tuple(types)
-        cls.__parametric_forward_refs__ = {}
 
     @classmethod
     def is_anon_parametrized(cls) -> bool:
