@@ -11,7 +11,7 @@ from typing import (
     Any,
     ClassVar,
     Generic,
-    NoReturn,
+    NamedTuple,
     TypeVar,
     cast,
     final,
@@ -22,14 +22,13 @@ from typing_extensions import (
     Self,
     TypeAliasType,
 )
-from typing import ForwardRef
 
-import dataclasses
 import functools
 import inspect
 import sys
 import uuid
 import warnings
+import weakref
 
 import pydantic
 import pydantic.fields
@@ -55,7 +54,10 @@ from . import lists
 from . import unsetid
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import (
+        Callable,
+        Sequence,
+    )
 
 
 T = TypeVar("T")
@@ -76,6 +78,17 @@ class GelClassVar:
 
 def _is_dunder(attr: str) -> bool:
     return attr.startswith("__") and attr.endswith("__")
+
+
+def _module_ns_of(obj: object) -> dict[str, Any]:
+    """Return the namespace of the module where *obj* is defined."""
+    module_name = getattr(obj, "__module__", None)
+    if module_name:
+        module = sys.modules.get(module_name)
+        if module is not None:
+            return module.__dict__
+
+    return {}
 
 
 def _type_repr(t: type) -> str:
@@ -114,8 +127,8 @@ class _PathAlias:
             descriptor = _get_field_descriptor(origin, attr)
             if descriptor is not None:
                 return descriptor.get(self)
-
-            return getattr(origin, attr)
+            else:
+                return getattr(origin, attr)
         else:
             raise AttributeError(attr)
 
@@ -179,8 +192,39 @@ class GelFieldDescriptor(GelClassVar):
     def __set_name__(self, owner: Any, name: str) -> None:
         self.__gel_name__ = name
 
-    def _resolve(self) -> type[Any] | None:
-        pass
+    def _try_resolve_type(self) -> Any:
+        origin = self.__gel_origin__
+        globalns = _module_ns_of(origin)
+        ns = _namespace_utils.NsResolver(
+            parent_namespace=getattr(
+                origin,
+                "__pydantic_parent_namespace__",
+                None,
+            ),
+        )
+        with ns.push(origin):
+            globalns, localns = ns.types_namespace
+
+        t = _typing_eval.try_resolve_type(
+            self.__gel_annotation__,
+            owner=origin,
+            globals=globalns,
+            locals=localns,
+        )
+        if (
+            t is not None
+            and _typing_inspect.is_generic_alias(t)
+            and issubclass(typing.get_origin(t), BasePointer)
+        ):
+            t = typing.get_args(t)[0]
+            if not isinstance(
+                t, type
+            ) and not _typing_inspect.is_generic_alias(t):
+                raise AssertionError(
+                    f"BasePointer type argument is not a type: {t}"
+                )
+
+        return t
 
     def get(
         self,
@@ -188,42 +232,30 @@ class GelFieldDescriptor(GelClassVar):
     ) -> Any:
         t = self.__gel_resolved_type__
         if t is None:
-            globalns = sys.modules[owner.__module__].__dict__
-            origin = self.__gel_origin__
-            ns = _namespace_utils.NsResolver(
-                parent_namespace=getattr(
-                    origin,
-                    "__pydantic_parent_namespace__",
-                    None,
-                ),
-            )
-            with ns.push(origin):
-                globalns, localns = ns.types_namespace
-
-            t = _typing_eval.try_resolve_type(
-                self.__gel_annotation__,
-                owner=origin,
-                globals=globalns,
-                locals=localns,
-            )
+            t = self._try_resolve_type()
             if t is not None:
-                if _typing_inspect.is_generic_alias(t) and issubclass(
-                    typing.get_origin(t), BasePointer
-                ):
-                    t = typing.get_args(t)[0]
-
                 self.__gel_resolved_type__ = t
 
-        if t is not None:
-            metadata = PathMetadata(
-                source=owner,
+        if t is None:
+            return self
+        else:
+            source: SourceSet | Path
+            if isinstance(owner, _PathAlias):
+                source = owner.__gel_metadata__
+            elif isinstance(owner, type) and issubclass(
+                owner, GelModelMetadata
+            ):
+                source = SourceSet(name=owner.__reflection__.name)
+            else:
+                raise AssertionError(
+                    f"{self.__class__.__name__} must be defined "
+                    f"on a subtype of GelModel"
+                )
+            metadata = Path(
+                source=source,
                 name=self.__gel_name__,
             )
-            t = AnnotatedPath(t, metadata)
-            # setattr(owner, self.__gel_name__, t)
-            return t
-        else:
-            return self
+            return AnnotatedPath(t, metadata)
 
     def __get__(
         self,
@@ -241,19 +273,18 @@ class Exclusive:
     pass
 
 
-@dataclasses.dataclass(kw_only=True, frozen=True)
-class ObjectTypeReflection:
-    id: uuid.UUID
+class SourceSet(NamedTuple):
     name: SchemaPath
 
 
 class GelModelMetadata:
-    __gel_type_reflection__: ClassVar[ObjectTypeReflection]
+    class __reflection__:  # noqa: N801
+        id: ClassVar[uuid.UUID]
+        name: ClassVar[SchemaPath]
 
 
-@dataclasses.dataclass(kw_only=True, frozen=True)
-class PathMetadata:
-    source: type[GelModel]
+class Path(NamedTuple):
+    source: SourceSet | Path
     name: str
 
 
@@ -331,11 +362,17 @@ class PyTypeScalar(parametric.SingleParametricType[T_co]):
 
 
 class GelModelMeta(_model_construction.ModelMetaclass, type):
+    __gel_class_registry__: ClassVar[
+        weakref.WeakValueDictionary[uuid.UUID, type[Any]]
+    ] = weakref.WeakValueDictionary()
+
     def __new__(
-        cls,
+        mcls,
         name: str,
         bases: tuple[type[Any], ...],
         namespace: dict[str, Any],
+        *,
+        __gel_type_id__: uuid.UUID | None = None,
         **kwargs: Any,
     ) -> GelModelMeta:
         with warnings.catch_warnings():
@@ -344,19 +381,22 @@ class GelModelMeta(_model_construction.ModelMetaclass, type):
                 "ignore",
                 message=r".*shadows an attribute in parent.*",
             )
-            new_cls = cast(
+            cls = cast(
                 "type[pydantic.BaseModel]",
-                super().__new__(cls, name, bases, namespace, **kwargs),
+                super().__new__(mcls, name, bases, namespace, **kwargs),
             )
 
-        for fname, field in new_cls.__pydantic_fields__.items():
-            if fname in new_cls.__annotations__:
+        for fname, field in cls.__pydantic_fields__.items():
+            if fname in cls.__annotations__:
                 col = GelFieldDescriptor._from_pydantic_field(
-                    new_cls, fname, field
+                    cls, fname, field
                 )
-                setattr(new_cls, fname, col)
+                setattr(cls, fname, col)
 
-        return new_cls  # type: ignore [return-value]
+        if __gel_type_id__ is not None:
+            mcls.__gel_class_registry__[__gel_type_id__] = cls
+
+        return cls  # type: ignore [return-value]
 
     def __setattr__(cls, name: str, value: Any, /) -> None:
         if name == "__pydantic_fields__":
@@ -370,6 +410,15 @@ class GelModelMeta(_model_construction.ModelMetaclass, type):
                     field.default = pydantic_core.PydanticUndefined
 
         super().__setattr__(name, value)
+
+    @classmethod
+    def get_class_by_id(cls, tid: uuid.UUID) -> type[GelModel]:
+        try:
+            return cls.__gel_class_registry__[tid]
+        except KeyError:
+            raise LookupError(
+                f"cannot find GelModel for object type id {tid}"
+            ) from None
 
 
 class GelModel(
@@ -689,9 +738,26 @@ MultiLinkWithProps = TypeAliasType(
 )
 
 
+class LazyClassProperty(Generic[T]):
+    def __init__(self, meth: classmethod[Any, Any, T], /) -> None:
+        self._func = meth.__func__
+
+    def __set_name__(self, owned: type[Any], name: str) -> None:
+        self._name = name
+
+    def __get__(self, instance: Any, owner: type[Any] | None = None) -> T:
+        if owner is None:
+            raise RuntimeError(
+                f"{self.__class__.__name__} called on an instance not a class"
+            )
+        value = self._func(owner)
+        setattr(owner, self._name, value)
+        return value
+
+
 class LazyLinkClassDef:
     def __init__(self, name: str) -> None:
-        self._recursion_guard: ForwardRef | None = None
+        self._recursion_guard = False
         self._name = name
 
     def _define(self, name: str) -> type[Any]:
@@ -714,17 +780,17 @@ class LazyLinkClassDef:
         assert owner is not None
 
         fqname = f"{owner.__qualname__}.{self._name}"
-        if self._recursion_guard is not None:
+        if self._recursion_guard:
             raise NameError(f"recursion while resolving {fqname}")
 
-        self._recursion_guard = ForwardRef(fqname)
+        self._recursion_guard = True
 
         try:
             defined = self._define(self._name)
         except AttributeError as e:
             raise NameError(f"cannot define {fqname} yet") from e
         finally:
-            self._recursion_guard = None
+            self._recursion_guard = False
 
         setattr(owner, self._name, defined)
         return defined

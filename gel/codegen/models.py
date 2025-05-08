@@ -638,11 +638,14 @@ class BaseGeneratedModule:
         *,
         kind: Literal["classmethod", "method", "property", "func"] = "func",
         overload: bool = False,
+        decorators: Iterable[str] = (),
         line_comment: str | None = None,
     ) -> Iterator[None]:
         if overload:
             over = self.import_name("typing", "overload")
             self.write(f"@{over}")
+        for decorator in decorators:
+            self.write(f"@{decorator}")
         if kind == "classmethod":
             self.write("@classmethod")
         elif kind == "property":
@@ -670,6 +673,7 @@ class BaseGeneratedModule:
         *,
         kind: Literal["classmethod", "method", "property", "func"] = "func",
         overload: bool = False,
+        decorators: Iterable[str] = (),
         line_comment: str | None = None,
     ) -> Iterator[None]:
         with self._func_def(
@@ -678,6 +682,7 @@ class BaseGeneratedModule:
             return_type,
             kind="classmethod",
             overload=overload,
+            decorators=decorators,
             line_comment=line_comment,
         ):
             yield
@@ -936,68 +941,19 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                     import_time=ImportTime.late_runtime,
                 )
 
-            with self.code_section(CodeSection.after_late_import):
-                with self._func_def("__gel_type_reflection_register__"):
-                    ot_imp = self._resolve_rel_import(
-                        reflection.parse_name(self._schema_object_type.name),
-                        aspect=ModuleAspect.MAIN,
-                    )
-                    assert ot_imp is not None
-                    ot_ref, import_code = self.py_file.render_name_import(
-                        ot_imp.module,
-                        ot_imp.name,
-                        suggested_module_alias=ot_imp.module_alias,
-                    )
-                    self.write(import_code)
-                    for objtype in objtypes:
-                        type_name = reflection.parse_name(objtype.name)
-                        self.write_object_type_reflection(
-                            objtype,
-                            type_name.name,
-                            ot_ref,
-                        )
-
-                late_reg = ["schema", "sys"]
-                this_modpath = str(self.canonical_modpath)
-                if this_modpath == "std":
-                    for mod in late_reg:
-                        rel_import = self._resolve_rel_import(
-                            reflection.SchemaPath(mod),
-                            ModuleAspect.VARIANTS,
-                        )
-                        assert rel_import is not None
-                        mod_v = self.import_name(
-                            rel_import.module,
-                            rel_import.name,
-                            suggested_module_alias=rel_import.module_alias,
-                            import_time=ImportTime.late_runtime,
-                        )
-                        self.write(
-                            f"{mod_v}.__gel_type_reflection_register__()"
-                        )
-
-                if this_modpath not in late_reg:
-                    self.write("__gel_type_reflection_register__()")
-
-    def write_object_type_reflection(
-        self, objtype: reflection.ObjectType, classname: str, refl_t: str
+    def _write_object_type_reflection(
+        self,
+        objtype: reflection.ObjectType,
+        refl_t: str,
     ) -> None:
-        if objtype.name == "std::FreeObject":
-            return
         uuid_t = self.import_name("uuid", "UUID")
-        self.write(f"type({classname}).__gel_type_reflection_register__(")
-        with self.indented():
-            self.write(f"{refl_t}(")
-            with self.indented():
-                self.write(f"id={uuid_t}({str(objtype.id)!r}),")
-                self.write(f"name={objtype.name!r},")
-                self.write(f"builtin={objtype.builtin!r},")
-                self.write(f"internal={objtype.internal!r},")
-                self.write(f"abstract={objtype.abstract!r},")
-                self.write(f"final={objtype.final!r},")
-                self.write(f"compound_type={objtype.compound_type!r},")
-            self.write("),")
-        self.write(")")
+        self.write(f"id={uuid_t}({str(objtype.id)!r}),")
+        self.write(f"name={objtype.name!r},")
+        self.write(f"builtin={objtype.builtin!r},")
+        self.write(f"internal={objtype.internal!r},")
+        self.write(f"abstract={objtype.abstract!r},")
+        self.write(f"final={objtype.final!r},")
+        self.write(f"compound_type={objtype.compound_type!r},")
 
     def write_object_type_variants(
         self,
@@ -1029,16 +985,46 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             gmm = self.import_name(BASE_IMPL, "GelModelMetadata")
             typeof_bases = [gmm]
         pointers = objtype.pointers
-        otr = self.import_name(BASE_IMPL, "ObjectTypeReflection")
         sp = self.import_name(BASE_IMPL, "SchemaPath")
+        lazyclassproperty = self.import_name(BASE_IMPL, "LazyClassProperty")
+        objecttype_t = self.get_type(
+            self._schema_object_type,
+            aspect=ModuleAspect.MAIN,
+            import_time=ImportTime.typecheck,
+        )
+        objecttype_import = self._resolve_rel_import(
+            reflection.parse_name(self._schema_object_type.name),
+            aspect=ModuleAspect.MAIN,
+        )
+        assert objecttype_import is not None
         uuid = self.import_name("uuid", "UUID")
         with self._class_def(typeof_class, typeof_bases):
-            self.write(f"__gel_type_reflection__ = {otr}(")
-            with self.indented():
-                self.write(f"id={uuid}({str(objtype.id)!r}),")
+            with self._class_def(
+                "__reflection__",
+                _map_name(
+                    lambda s: f"{_mangle_typeof(s)}.__reflection__",
+                    base_types,
+                ),
+            ):
+                self.write(f"id = {uuid}({str(objtype.id)!r})")
                 schema_path = ", ".join(repr(p) for p in type_name.parts)
-                self.write(f"name={sp}({schema_path}),")
-            self.write(")")
+                self.write(f"name = {sp}({schema_path})")
+                with self._classmethod_def(
+                    "object",
+                    [],
+                    objecttype_t,
+                    decorators=(f"{lazyclassproperty}[{objecttype_t}]",),
+                ):
+                    objecttype, import_code = self.py_file.render_name_import(
+                        objecttype_import.module,
+                        objecttype_import.name,
+                        suggested_module_alias=objecttype_import.module_alias,
+                    )
+                    self.write(import_code)
+                    self.write(f"return {objecttype}(")
+                    with self.indented():
+                        self._write_object_type_reflection(objtype, objecttype)
+                    self.write(")")
             self.write()
 
             with self._class_def(
@@ -1061,50 +1047,13 @@ class GeneratedSchemaModule(BaseGeneratedModule):
 
         self.write()
         self.write()
-        class_kwargs = {}
-        if objtype.name == "std::BaseObject":
-            gel_meta = self.import_name(BASE_IMPL, "GelModelMeta")
-            uuid = self.import_name("uuid", "UUID")
-            classvar = self.import_name("typing", "ClassVar")
-            refl_t = self.get_type(
-                self._schema_object_type,
-                import_time=base.ImportTime.typecheck,
-                aspect=ModuleAspect.MAIN,
-            )
-            with self._class_def("_BaseObjectMeta", [gel_meta]):
-                assert refl_t is not None
-                registry = "__gel_type_reflection_registry__"
-                self.write(
-                    f"{registry}: {classvar}[dict[{uuid}, {refl_t}]] = {{}}"
-                )
-                self.write()
-
-                with self._classmethod_def(
-                    "__gel_type_reflection_register__",
-                    [f"rtype: {refl_t}"],
-                    "None",
-                ):
-                    self.write(f"cls.{registry}[rtype.id] = rtype")
-
-                self.write()
-                with self._classmethod_def(
-                    "get_type_reflection",
-                    [f"tid: {uuid}"],
-                    refl_t,
-                ):
-                    self.write(f"return cls.{registry}[tid]")
-
-                self.write()
-
-            class_kwargs["metaclass"] = "_BaseObjectMeta"
-            self.write()
-            self.write()
 
         if not base_types:
             gel_model = self.import_name(BASE_IMPL, "GelModel")
             vbase_types = [gel_model]
         else:
             vbase_types = base_types
+        class_kwargs = {"__gel_type_id__": f"{uuid}(int={objtype.id.int})"}
         with self._class_def(
             name,
             [typeof_class, *vbase_types],
@@ -1128,11 +1077,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                 else:
                     gel_model = self.import_name(BASE_IMPL, "GelModel")
                     base_bases.append(gel_model)
-                with self._class_def(
-                    "Base",
-                    base_bases,
-                    class_kwargs=class_kwargs,
-                ):
+                with self._class_def("Base", base_bases):
                     self._write_base_object_type_body(objtype, typeof_class)
 
                 self.write()
@@ -1175,9 +1120,11 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                         cardinality=reflection.Cardinality.One,
                     )
                     with self._property_def(ptr.name, [], ptr_type):
-                        self.write("cls = type(self)")
-                        self.write("tid = cls.__gel_type_reflection__.id")
-                        self.write("return type(cls).get_type_reflection(tid)")
+                        self.write("cls = self.__class__")
+                        self.write("mcls = cls.__class__")
+                        self.write("tid = cls.__reflection__.id")
+                        self.write("actualcls = mcls.get_class_by_id(tid)")
+                        self.write("return actualcls.__reflection__.object")
                 elif ptr.name == "id":
                     priv_type = self.import_name("uuid", "UUID")
                     ptr_type = self.get_ptr_type(objtype, ptr)
