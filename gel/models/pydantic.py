@@ -24,7 +24,6 @@ from typing_extensions import (
 )
 
 import functools
-import inspect
 import sys
 import uuid
 import warnings
@@ -111,7 +110,7 @@ def _get_field_descriptor(cls: type, name: str) -> GelFieldDescriptor | None:
 
 
 class _PathAlias:
-    def __init__(self, origin: type, metadata: PathMetadata) -> None:
+    def __init__(self, origin: type, metadata: Path) -> None:
         self.__gel_origin__ = origin
         self.__gel_metadata__ = metadata
 
@@ -153,7 +152,7 @@ class _PathAlias:
         return f"gel.models.PathAlias[{origin}, {metadata}]"
 
 
-def AnnotatedPath(origin: type, metadata: PathMetadata) -> _PathAlias:  # noqa: N802
+def AnnotatedPath(origin: type, metadata: Path) -> _PathAlias:  # noqa: N802
     return _PathAlias(origin, metadata)
 
 
@@ -247,13 +246,11 @@ class GelFieldDescriptor(GelClassVar):
             ):
                 source = SourceSet(name=owner.__reflection__.name)
             else:
-                raise AssertionError(
-                    f"{self.__class__.__name__} must be defined "
-                    f"on a subtype of GelModel"
-                )
+                return t
             metadata = Path(
                 source=source,
                 name=self.__gel_name__,
+                is_lprop=False,
             )
             return AnnotatedPath(t, metadata)
 
@@ -286,6 +283,7 @@ class GelModelMetadata:
 class Path(NamedTuple):
     source: SourceSet | Path
     name: str
+    is_lprop: bool
 
 
 class GelType(GelClassVar, _qb.Expression):
@@ -403,9 +401,12 @@ class GelModelMeta(_model_construction.ModelMetaclass, type):
             fields: dict[str, pydantic.fields.FieldInfo] = value
             for field in fields.values():
                 fdef = field.default
-                if isinstance(fdef, GelClassVar) or (
-                    _typing_inspect.is_annotated(fdef)
-                    and isinstance(fdef.__origin__, GelClassVar)
+                if (
+                    isinstance(fdef, (GelClassVar, _PathAlias))
+                    or (
+                        _typing_inspect.is_annotated(fdef)
+                        and isinstance(fdef.__origin__, GelClassVar)
+                    )
                 ):
                     field.default = pydantic_core.PydanticUndefined
 
@@ -727,20 +728,28 @@ class _MultiLink(BasePointer[MT, BMT], metaclass=_MultiLinkMeta):
 
 MultiLink = TypeAliasType(
     "MultiLink",
-    "Annotated[_MultiLink[MT, MT], Field(default_factory=_MultiLink)]",
+    "Annotated[_MultiLink[MT, MT], Field(default_factory=lists.DistinctList)]",
     type_params=(MT,),
 )
 
 MultiLinkWithProps = TypeAliasType(
     "MultiLinkWithProps",
-    "Annotated[_MultiLink[PT, MT], Field(default_factory=_MultiLink)]",
+    "Annotated[_MultiLink[PT, MT], Field(default_factory=lists.DistinctList)]",
     type_params=(PT, MT),
 )
 
 
 class LazyClassProperty(Generic[T]):
-    def __init__(self, meth: classmethod[Any, Any, T], /) -> None:
-        self._func = meth.__func__
+    def __init__(
+        self, meth: Callable[[type[Any]], T] | classmethod[Any, Any, T], /
+    ) -> None:
+        if isinstance(meth, classmethod):
+            self._func = meth.__func__
+        else:
+            raise TypeError(
+                f"{self.__class__.__name__} must be used to "
+                f"decorate classmethods"
+            )
 
     def __set_name__(self, owned: type[Any], name: str) -> None:
         self._name = name

@@ -947,7 +947,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         refl_t: str,
     ) -> None:
         uuid_t = self.import_name("uuid", "UUID")
-        self.write(f"id={uuid_t}({str(objtype.id)!r}),")
+        self.write(f"id={uuid_t}(int={objtype.id.int}),")
         self.write(f"name={objtype.name!r},")
         self.write(f"builtin={objtype.builtin!r},")
         self.write(f"internal={objtype.internal!r},")
@@ -1006,14 +1006,14 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                     base_types,
                 ),
             ):
-                self.write(f"id = {uuid}({str(objtype.id)!r})")
+                self.write(f"id = {uuid}(int={objtype.id.int})")
                 schema_path = ", ".join(repr(p) for p in type_name.parts)
                 self.write(f"name = {sp}({schema_path})")
                 with self._classmethod_def(
                     "object",
                     [],
                     objecttype_t,
-                    decorators=(f"{lazyclassproperty}[{objecttype_t}]",),
+                    decorators=(f'{lazyclassproperty}["{objecttype_t}"]',),
                 ):
                     objecttype, import_code = self.py_file.render_name_import(
                         objecttype_import.module,
@@ -1110,6 +1110,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
     ) -> None:
         if objtype.name == "std::BaseObject":
             priv_attr = self.import_name(BASE_IMPL, "PrivateAttr")
+            gmm = self.import_name(BASE_IMPL, "GelModelMeta")
             comp_f = self.import_name(BASE_IMPL, "computed_field")
             for ptr in objtype.pointers:
                 if ptr.name == "__type__":
@@ -1120,11 +1121,12 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                         cardinality=reflection.Cardinality.One,
                     )
                     with self._property_def(ptr.name, [], ptr_type):
-                        self.write("cls = self.__class__")
-                        self.write("mcls = cls.__class__")
-                        self.write("tid = cls.__reflection__.id")
-                        self.write("actualcls = mcls.get_class_by_id(tid)")
-                        self.write("return actualcls.__reflection__.object")
+                        self.write("tid = self.__class__.__reflection__.id")
+                        self.write(f"actualcls = {gmm}.get_class_by_id(tid)")
+                        self.write(
+                            "return actualcls.__reflection__.object"
+                            "  # type: ignore [attr-defined]"
+                        )
                 elif ptr.name == "id":
                     priv_type = self.import_name("uuid", "UUID")
                     ptr_type = self.get_ptr_type(objtype, ptr)
@@ -1302,63 +1304,57 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                     is_forward_decl=True,
                 )
 
-        # with self.not_type_checking():
-        #     type_name = reflection.parse_name(objtype.name)
-        #     obj_class = type_name.name
-        #     for pointer in pointers:
-        #         target_type = self.get_type(
-        #             self._types[pointer.target_id],
-        #             import_time=ImportTime.late_runtime,
-        #             aspect=target_aspect,
-        #         )
-        #         ptrname = pointer.name
-        #         lazydef = f"__define_{ptrname}__"
-        #         base = f'{lazydef_base}["{obj_class}", "{target_type}"]'
-        #         with self._class_def(lazydef, [base]):
-        #             with self._method_def("_define", ["name: str"], "type"):
-        #                 classname = self._write_object_type_link_variant(
-        #                     objtype,
-        #                     pointer=pointer,
-        #                     ptr_origins=all_ptr_origins[pointer.name],
-        #                     target_aspect=target_aspect,
-        #                     is_forward_decl=False,
-        #                 )
-        #                 self.write(f"{classname}.__name__ = {ptrname!r}")
-        #                 qualname = f"{obj_class}.{ptrname}"
-        #                 self.write(f"{classname}.__qualname__ = {qualname!r}")
-        #                 self.write(f"return {classname}")
+        with self.not_type_checking():
+            type_name = reflection.parse_name(objtype.name)
+            obj_class = type_name.name
+            for pointer in pointers:
+                ptrname = pointer.name
+                lazydef = f"__define_{ptrname}__"
+                with self._class_def(lazydef, [lazydef_base]):
+                    with self._method_def("_define", ["name: str"], "type"):
+                        classname = self._write_object_type_link_variant(
+                            objtype,
+                            pointer=pointer,
+                            ptr_origins=all_ptr_origins[pointer.name],
+                            target_aspect=target_aspect,
+                            is_forward_decl=False,
+                        )
+                        self.write(f"{classname}.__name__ = {ptrname!r}")
+                        qualname = f"{obj_class}.{ptrname}"
+                        self.write(f"{classname}.__qualname__ = {qualname!r}")
+                        self.write(f"return {classname}")
 
-        #         self.write(f"{ptrname} = {lazydef}({ptrname!r})")
+                self.write(f"{ptrname} = {lazydef}({ptrname!r})")
 
-        with self.code_section(CodeSection.after_late_import):
-            with self.not_type_checking():
-                type_name = reflection.parse_name(objtype.name)
-                obj_class = type_name.name
-                for pointer in pointers:
-                    ptrname = pointer.name
-                    lazydef = f"__define_{ptrname}__"
-                    with self._class_def(lazydef, [lazydef_base]):
-                        with self._method_def(
-                            "_define", ["name: str"], "type"
-                        ):
-                            classname = self._write_object_type_link_variant(
-                                objtype,
-                                pointer=pointer,
-                                ptr_origins=all_ptr_origins[pointer.name],
-                                target_aspect=target_aspect,
-                                is_forward_decl=False,
-                            )
-                            self.write(f"{classname}.__name__ = {ptrname!r}")
-                            qualname = f"{obj_class}.{ptrname}"
-                            self.write(
-                                f"{classname}.__qualname__ = {qualname!r}"
-                            )
-                            self.write(f"return {classname}")
+        # with self.code_section(CodeSection.after_late_import):
+        #     with self.not_type_checking():
+        #         type_name = reflection.parse_name(objtype.name)
+        #         obj_class = type_name.name
+        #         for pointer in pointers:
+        #             ptrname = pointer.name
+        #             lazydef = f"__define_{ptrname}__"
+        #             with self._class_def(lazydef, [lazydef_base]):
+        #                 with self._method_def(
+        #                     "_define", ["name: str"], "type"
+        #                 ):
+        #                     classname = self._write_object_type_link_variant(
+        #                         objtype,
+        #                         pointer=pointer,
+        #                         ptr_origins=all_ptr_origins[pointer.name],
+        #                         target_aspect=target_aspect,
+        #                         is_forward_decl=False,
+        #                     )
+        #                     self.write(f"{classname}.__name__ = {ptrname!r}")
+        #                     qualname = f"{obj_class}.{ptrname}"
+        #                     self.write(
+        #                         f"{classname}.__qualname__ = {qualname!r}"
+        #                     )
+        #                     self.write(f"return {classname}")
 
-                    self.write(
-                        f"{obj_class}.__links__.{ptrname} = {lazydef}({ptrname!r})"
-                    )
-                    self.write(f"del {lazydef}")
+        #             self.write(
+        #                 f"{obj_class}.__links__.{ptrname} = {lazydef}({ptrname!r})"
+        #             )
+        #             self.write(f"del {lazydef}")
 
     def _write_object_type_link_variant(
         self,
@@ -1374,7 +1370,6 @@ class GeneratedSchemaModule(BaseGeneratedModule):
 
         self_t = self.import_name("typing", "Self")
         proxymodel_t = self.import_name(BASE_IMPL, "ProxyModel")
-        config_dict_t = self.import_name(BASE_IMPL, "ConfigDict")
 
         if target_aspect is None:
             target_aspect = self.current_aspect
