@@ -12,6 +12,7 @@ from typing import (
     ClassVar,
     Generic,
     NamedTuple,
+    Protocol,
     TypeVar,
     cast,
     final,
@@ -46,7 +47,7 @@ from gel._internal import _typing_eval
 from gel._internal import _typing_inspect
 from gel._internal import _typing_parametric as parametric
 from gel._internal import _polyfills
-from gel._internal import _qb
+from gel._internal._hybridmethod import hybridmethod
 from gel._internal._reflection import SchemaPath as SchemaPath
 
 from . import lists
@@ -71,13 +72,33 @@ class UnspecifiedType:
 Unspecified = UnspecifiedType()
 
 
-def edgeql(source: object) -> str:
-    dunder = getattr(source, "__edgeql__", Unspecified)
-    if dunder is Unspecified:
-        raise TypeError(f"{type(source)} does not support __edgeql__ protocol")
-    if not callable(dunder):
+class InstanceSupportsEdgeQL(Protocol):
+    def __edgeql__(self) -> str: ...
+
+
+class TypeSupportsEdgeQL(Protocol):
+    @classmethod
+    def __edgeql__(cls) -> str: ...
+
+
+SupportsEdgeQL = TypeAliasType(
+    "SupportsEdgeQL",
+    InstanceSupportsEdgeQL | type[TypeSupportsEdgeQL],
+)
+
+
+def edgeql(source: SupportsEdgeQL) -> str:
+    try:
+        __edgeql__ = source.__edgeql__
+    except AttributeError:
+        raise TypeError(
+            f"{type(source)} does not support __edgeql__ protocol"
+        ) from None
+
+    if not callable(__edgeql__):
         raise TypeError(f"{type(source)}.__edgeql__ is not callable")
-    value = dunder()
+
+    value = __edgeql__()
     if not isinstance(value, str):
         raise ValueError("{type(source)}.__edgeql__()")
     return value
@@ -324,8 +345,20 @@ class Path(NamedTuple):
         return ".".join(reversed(steps))
 
 
-class GelType(GelClassVar, _qb.Expression):
-    pass
+class GelType(GelClassVar):
+    if TYPE_CHECKING:
+        @staticmethod
+        def __edgeql__() -> str: ...
+    else:
+        @hybridmethod
+        def __edgeql__(self) -> str:
+            if isinstance(self, type):
+                raise NotImplementedError(f"{self.__name__}.__edgeql__")
+            else:
+                return self.__as_edgeql__()
+
+    def __as_edgeql__(self) -> str:
+        raise NotImplementedError(f"{type(self).__name__}.__as_edgeql__")
 
 
 class GelPrimitiveType(GelType):
@@ -439,12 +472,9 @@ class GelModelMeta(_model_construction.ModelMetaclass, type):
             fields: dict[str, pydantic.fields.FieldInfo] = value
             for field in fields.values():
                 fdef = field.default
-                if (
-                    isinstance(fdef, (GelClassVar, _PathAlias))
-                    or (
-                        _typing_inspect.is_annotated(fdef)
-                        and isinstance(fdef.__origin__, GelClassVar)
-                    )
+                if isinstance(fdef, (GelClassVar, _PathAlias)) or (
+                    _typing_inspect.is_annotated(fdef)
+                    and isinstance(fdef.__origin__, GelClassVar)
                 ):
                     field.default = pydantic_core.PydanticUndefined
 

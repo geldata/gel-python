@@ -14,7 +14,10 @@ from typing import (
     get_type_hints,
 )
 
-import collections
+from typing_extensions import (
+    Self,
+)
+
 import contextvars
 import types
 import sys
@@ -209,15 +212,16 @@ class ParametricType:
             if p not in cls._type_param_map
         }
 
-    def __init__(self, *args: Any, **kwargs: Any) -> None:
-        if self.__parametric_forward_refs__:
-            raise TypeError(f"{type(self)!r} unresolved type parameters")
-        if self.__parametric_type_args__ is None:
+    def __new__(cls, *args: Any, **kwargs: Any) -> Self:
+        if cls.__parametric_forward_refs__:
             raise TypeError(
-                f"{type(self)!r} must be parametrized to instantiate"
+                f"{cls.__qualname__} has unresolved type parameters")
+        if cls.__parametric_type_args__ is None:
+            raise TypeError(
+                f"{cls.__qualname__} must be parametrized to instantiate"
             )
 
-        super().__init__(*args, **kwargs)
+        return super().__new__(*args, **kwargs)  # type: ignore [no-any-return]
 
     def __class_getitem__(
         cls,
