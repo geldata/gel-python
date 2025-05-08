@@ -71,6 +71,18 @@ class UnspecifiedType:
 Unspecified = UnspecifiedType()
 
 
+def edgeql(source: object) -> str:
+    dunder = getattr(source, "__edgeql__", Unspecified)
+    if dunder is Unspecified:
+        raise TypeError(f"{type(source)} does not support __edgeql__ protocol")
+    if not callable(dunder):
+        raise TypeError(f"{type(source)}.__edgeql__ is not callable")
+    value = dunder()
+    if not isinstance(value, str):
+        raise ValueError("{type(source)}.__edgeql__()")
+    return value
+
+
 class GelClassVar:
     pass
 
@@ -151,9 +163,15 @@ class _PathAlias:
         metadata = repr(self.__gel_metadata__)
         return f"gel.models.PathAlias[{origin}, {metadata}]"
 
+    def __edgeql__(self) -> str:
+        return self.__gel_metadata__.__edgeql__()
+
 
 def AnnotatedPath(origin: type, metadata: Path) -> _PathAlias:  # noqa: N802
     return _PathAlias(origin, metadata)
+
+
+PathSource = TypeAliasType("PathSource", "Symbol | SchemaSet | Path")
 
 
 class GelFieldDescriptor(GelClassVar):
@@ -238,13 +256,13 @@ class GelFieldDescriptor(GelClassVar):
         if t is None:
             return self
         else:
-            source: SourceSet | Path
+            source: PathSource
             if isinstance(owner, _PathAlias):
                 source = owner.__gel_metadata__
             elif isinstance(owner, type) and issubclass(
                 owner, GelModelMetadata
             ):
-                source = SourceSet(name=owner.__reflection__.name)
+                source = SchemaSet(name=owner.__reflection__.name)
             else:
                 return t
             metadata = Path(
@@ -270,8 +288,15 @@ class Exclusive:
     pass
 
 
-class SourceSet(NamedTuple):
+class Symbol(NamedTuple):
+    symbol: str
+
+
+class SchemaSet(NamedTuple):
     name: SchemaPath
+
+    def __edgeql__(self) -> str:
+        return "::".join(self.name.parts)
 
 
 class GelModelMetadata:
@@ -281,9 +306,22 @@ class GelModelMetadata:
 
 
 class Path(NamedTuple):
-    source: SourceSet | Path
+    source: Symbol | SchemaSet | Path
     name: str
     is_lprop: bool
+
+    def __edgeql__(self) -> str:
+        steps = []
+        current: PathSource = self
+        while isinstance(current, Path):
+            steps.append(current.name)
+            current = current.source
+
+        if not isinstance(current, SchemaSet):
+            raise ValueError("Path does not start with a SourceSet")
+        steps.append(current.__edgeql__())
+
+        return ".".join(reversed(steps))
 
 
 class GelType(GelClassVar, _qb.Expression):
