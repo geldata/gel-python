@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import typing
 from typing import (
     TYPE_CHECKING,
@@ -19,11 +20,14 @@ from typing import (
     overload,
 )
 
+from typing import NamedTupleMeta
+
 from typing_extensions import (
     Self,
     TypeAliasType,
 )
 
+import enum
 import functools
 import sys
 import uuid
@@ -142,16 +146,30 @@ def _get_field_descriptor(cls: type, name: str) -> GelFieldDescriptor | None:
     return None
 
 
-class _PathAlias:
-    def __init__(self, origin: type, metadata: Path) -> None:
+class _BaseAlias:
+    def __init__(self, origin: type) -> None:
         self.__gel_origin__ = origin
-        self.__gel_metadata__ = metadata
 
     def __call__(self, *args: Any, **kwargs: Any) -> Any:
         return self.__gel_origin__(*args, **kwargs)
 
     def __mro_entries__(self, bases: tuple[type, ...]) -> tuple[type, ...]:
         return (self.__gel_origin__,)
+
+    def __dir__(self) -> list[str]:
+        return dir(self.__gel_origin__)
+
+    def __instancecheck__(self, obj: object) -> bool:
+        return isinstance(obj, self.__gel_origin__)
+
+    def __subclasscheck__(self, cls: type) -> bool:
+        return issubclass(cls, self.__gel_origin__)
+
+
+class _PathAlias(_BaseAlias):
+    def __init__(self, origin: type, metadata: Path) -> None:
+        super().__init__(origin)
+        self.__gel_metadata__ = metadata
 
     def __getattr__(self, attr: str) -> Any:
         if "__gel_origin__" in self.__dict__ and not _is_dunder(attr):
@@ -170,15 +188,6 @@ class _PathAlias:
         else:
             setattr(self.__gel_origin__, attr, val)
 
-    def __instancecheck__(self, obj: object) -> bool:
-        return isinstance(obj, self.__gel_origin__)
-
-    def __subclasscheck__(self, cls: type) -> bool:
-        return issubclass(cls, self.__gel_origin__)
-
-    def __dir__(self) -> list[str]:
-        return dir(self.__gel_origin__)
-
     def __repr__(self) -> str:
         origin = _type_repr(self.__gel_origin__)
         metadata = repr(self.__gel_metadata__)
@@ -190,6 +199,24 @@ class _PathAlias:
 
 def AnnotatedPath(origin: type, metadata: Path) -> _PathAlias:  # noqa: N802
     return _PathAlias(origin, metadata)
+
+
+class _ExprAlias(_BaseAlias):
+    def __init__(self, origin: type, metadata: Expr) -> None:
+        super().__init__(origin)
+        self.__gel_metadata__ = metadata
+
+    def __repr__(self) -> str:
+        origin = _type_repr(self.__gel_origin__)
+        metadata = repr(self.__gel_metadata__)
+        return f"gel.models.ExprAlias[{origin}, {metadata}]"
+
+    def __edgeql__(self) -> str:
+        return self.__gel_metadata__.__edgeql__()
+
+
+def AnnotatedExpr(origin: type, metadata: Expr) -> _ExprAlias:  # noqa: N802
+    return _ExprAlias(origin, metadata)
 
 
 PathSource = TypeAliasType("PathSource", "Symbol | SchemaSet | Path")
@@ -326,7 +353,13 @@ class GelModelMetadata:
         name: ClassVar[SchemaPath]
 
 
-class Path(NamedTuple):
+class Expr:
+    def __edgeql__(self) -> str:
+        raise NotImplementedError(f"{type(self).__name__}.__edgeql__")
+
+
+@dataclasses.dataclass(frozen=True, kw_only=True)
+class Path(Expr):
     source: Symbol | SchemaSet | Path
     name: str
     is_lprop: bool
@@ -345,11 +378,30 @@ class Path(NamedTuple):
         return ".".join(reversed(steps))
 
 
-class GelType(GelClassVar):
+@dataclasses.dataclass(frozen=True, kw_only=True)
+class BinOp(Expr):
+    lexpr: Expr
+    rexpr: Expr
+    op: str
+
+    def __edgeql__(self) -> str:
+        return f"{edgeql(self.lexpr)} {self.op} {edgeql(self.rexpr)}"
+
+
+GelType_T = TypeVar("GelType_T", bound="GelType")
+
+
+class GelTypeMeta(type):
+    pass
+
+
+class GelType(GelClassVar, metaclass=GelTypeMeta):
     if TYPE_CHECKING:
+
         @staticmethod
         def __edgeql__() -> str: ...
     else:
+
         @hybridmethod
         def __edgeql__(self) -> str:
             if isinstance(self, type):
@@ -381,15 +433,36 @@ class BaseScalar(GelPrimitiveType):
     pass
 
 
+class AnyTupleMeta(NamedTupleMeta, GelTypeMeta):  # type: ignore [misc]
+    def __new__(
+        mcls,
+        typename: str,
+        bases: tuple[type[Any], ...],
+        ns: dict[str, Any],
+    ) -> type[Any]:
+        return GelTypeMeta.__new__(mcls, typename, bases, ns)
+
+
 class AnyTuple(GelPrimitiveType):
     pass
 
 
-class AnyEnum(BaseScalar, _polyfills.StrEnum):
+class AnyEnumMeta(enum.EnumMeta, GelTypeMeta):
     pass
 
 
-class Array(list[T], GelPrimitiveType):
+class AnyEnum(BaseScalar, _polyfills.StrEnum, metaclass=AnyEnumMeta):
+    pass
+
+
+if TYPE_CHECKING:
+    class _ArrayMeta(GelTypeMeta, typing._ProtocolMeta):
+        pass
+else:
+    _ArrayMeta = type(list)
+
+
+class Array(list[T], GelPrimitiveType, metaclass=_ArrayMeta):
     if TYPE_CHECKING:
 
         def __set__(self, obj: Any, value: Array[T] | Sequence[T]) -> None: ...
@@ -430,7 +503,7 @@ class PyTypeScalar(parametric.SingleParametricType[T_co]):
         )
 
 
-class GelModelMeta(_model_construction.ModelMetaclass, type):
+class GelModelMeta(_model_construction.ModelMetaclass, GelTypeMeta):
     __gel_class_registry__: ClassVar[
         weakref.WeakValueDictionary[uuid.UUID, type[Any]]
     ] = weakref.WeakValueDictionary()
@@ -529,7 +602,24 @@ class GelModel(
         return cls
 
     @classmethod
-    def filter(cls, /, *args: Any, **kwargs: Any) -> type[Self]:
+    def filter(cls, /, *exprs: Any, **properties: Any) -> type[Self]:
+        all_exprs = list(exprs)
+
+        for propname, value in properties.items():
+            prop = getattr(cls, propname, Unspecified)
+            if prop is Unspecified:
+                sn = cls.__reflection__.name.as_schema_name()
+                msg = f"{propname} is not a valid {sn} property"
+                raise AttributeError(msg)
+            assert type(prop) is type
+            prop_comp = prop == value
+            if not isinstance(prop_comp, BaseScalar):
+                raise AssertionError(
+                    f"comparing {prop} to {value} did not produce "
+                    "a Gel expression type"
+                )
+            all_exprs.append(prop_comp)
+
         return cls
 
 

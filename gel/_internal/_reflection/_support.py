@@ -3,7 +3,7 @@
 # SPDX-FileCopyrightText: Copyright Gel Data Inc. and the contributors.
 
 from __future__ import annotations
-from typing import NamedTuple
+from typing import Any, NamedTuple
 
 import pathlib
 
@@ -18,6 +18,10 @@ class SchemaPath(pathlib.PurePath):
     def from_schema_name(cls, name: str) -> SchemaPath:
         return SchemaPath(*name.split("::"))
 
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self._schema_name = "::".join(self.parts)
+
     def common_parts(self, other: SchemaPath) -> list[str]:
         prefix = []
         for a, b in zip(self.parts, other.parts, strict=False):
@@ -30,6 +34,9 @@ class SchemaPath(pathlib.PurePath):
 
     def has_prefix(self, other: SchemaPath) -> bool:
         return self.parts[: len(other.parts)] == other.parts
+
+    def as_schema_name(self) -> str:
+        return self._schema_name
 
 
 def parse_name(name: str) -> SchemaPath:

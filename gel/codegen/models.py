@@ -603,14 +603,22 @@ class BaseGeneratedModule:
         bases: Iterable[str],
         *,
         class_kwargs: dict[str, str] | None = None,
+        first_line_comment: str | None = None,
     ) -> str:
         args = list(bases)
         if class_kwargs:
             args.extend(f"{k}={v}" for k, v in class_kwargs.items())
         if args:
-            return self.format_list(f"class {class_name}({{list}}):", args)
+            return self.format_list(
+                f"class {class_name}({{list}}):",
+                args,
+                first_line_comment=first_line_comment,
+            )
         else:
-            return f"class {class_name}:"
+            line = f"class {class_name}:"
+            if first_line_comment:
+                line = f"{line}  # {first_line_comment}"
+            return line
 
     @contextmanager
     def _class_def(
@@ -619,11 +627,13 @@ class BaseGeneratedModule:
         base_types: Iterable[str],
         *,
         class_kwargs: dict[str, str] | None = None,
+        line_comment: str | None = None,
     ) -> Iterator[None]:
         class_line = self._format_class_line(
             class_name,
             base_types,
             class_kwargs=class_kwargs,
+            first_line_comment=line_comment,
         )
         self.write(class_line)
         with self.indented():
@@ -876,7 +886,17 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                     if not parents:
                         parents = [self.import_name(BASE_IMPL, "BaseScalar")]
 
-                    with self._class_def(tname, parents):
+                    base_type = base.TYPE_MAPPING.get(stype.name)
+                    if base_type is not None and base_type in {
+                        "bytes",
+                        "json",
+                        "str",
+                    }:
+                        tignore = "type: ignore [misc]"
+                    else:
+                        tignore = None
+
+                    with self._class_def(tname, parents, line_comment=tignore):
                         self.write("pass")
 
                 self.write_section_break()
@@ -1247,7 +1267,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                 self.write("...")
                 self.write()
 
-        if objtype.name.startswith("schema::"):
+        if objtype.name == "schema::ObjectType":
             any_ = self.import_name("typing", "Any")
             with (
                 self.not_type_checking(),
@@ -1720,11 +1740,13 @@ class GeneratedGlobalModule(BaseGeneratedModule):
     ) -> None:
         namedtuple = self.import_name("typing", "NamedTuple")
         anytuple = self.import_name(BASE_IMPL, "AnyTuple")
+        anytuplemeta = self.import_name(BASE_IMPL, "AnyTupleMeta")
 
         self.write("#")
         self.write(f"# tuple type {t.name}")
         self.write("#")
         classname = self.get_tuple_name(t)
+        class_kwargs = {"metaclass": anytuplemeta}
         with self._class_def(f"_{classname}", [namedtuple]):
             for elem in t.tuple_elements:
                 elem_type = self.get_type(
@@ -1733,6 +1755,10 @@ class GeneratedGlobalModule(BaseGeneratedModule):
                 )
                 self.write(f"{elem.name}: {elem_type}")
         self.write_section_break()
-        with self._class_def(classname, [f"_{classname}", anytuple]):
-            self.write("pass")
+        with self._class_def(
+            classname,
+            [f"_{classname}", anytuple],
+            class_kwargs=class_kwargs,
+        ):
+            self.write("__slots__ = ()")
         self.write()
