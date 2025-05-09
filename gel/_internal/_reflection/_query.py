@@ -14,6 +14,23 @@ ORDER BY
 """
 
 
+CASTS = """
+WITH
+    MODULE schema
+SELECT Cast {
+    id,
+    from_type,
+    to_type,
+    allow_assignment,
+    allow_implicit,
+}
+FILTER
+    .from_type IS ScalarType
+    AND .to_type IS ScalarType
+    AND .builtin = <bool>$builtin
+"""
+
+
 TYPES = """
 WITH
     MODULE schema,

@@ -97,6 +97,7 @@ class SchemaGenerator:
         self._outdir = outdir
         self._modules: dict[reflection.SchemaPath, IntrospectedModule] = {}
         self._types: Mapping[uuid.UUID, reflection.AnyType] = {}
+        self._casts: reflection.CastMatrix
         self._named_tuples: dict[uuid.UUID, reflection.NamedTupleType] = {}
         self._wrapped_types: set[str] = set()
 
@@ -116,6 +117,8 @@ class SchemaGenerator:
             module.write_files(self._outdir)
 
     def introspect_schema(self) -> None:
+        self._casts = reflection.fetch_casts(self._client, self._schema_part)
+
         for mod in reflection.fetch_modules(self._client, self._schema_part):
             self._modules[reflection.parse_name(mod)] = {
                 "scalar_types": {},

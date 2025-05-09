@@ -14,6 +14,11 @@ from ._support import (
     SchemaPath,
 )
 
+from ._casts import (
+    CastMatrix,
+    fetch_casts,
+)
+
 from ._types import (
     Type,
     AnyType,
@@ -62,6 +67,7 @@ __all__ = (
     "TypeKind",
     "TypeKind",
     "parse_name",
+    "fetch_casts",
     "fetch_modules",
     "fetch_types",
     "is_array_type",
