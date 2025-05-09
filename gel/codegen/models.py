@@ -1402,36 +1402,6 @@ class GeneratedSchemaModule(BaseGeneratedModule):
 
                 self.write(f"{ptrname} = {lazydef}({ptrname!r})")
 
-        # with self.code_section(CodeSection.after_late_import):
-        #     with self.not_type_checking():
-        #         type_name = reflection.parse_name(objtype.name)
-        #         obj_class = type_name.name
-        #         for pointer in pointers:
-        #             ptrname = pointer.name
-        #             lazydef = f"__define_{ptrname}__"
-        #             with self._class_def(lazydef, [lazydef_base]):
-        #                 with self._method_def(
-        #                     "_define", ["name: str"], "type"
-        #                 ):
-        #                     classname = self._write_object_type_link_variant(
-        #                         objtype,
-        #                         pointer=pointer,
-        #                         ptr_origins=all_ptr_origins[pointer.name],
-        #                         target_aspect=target_aspect,
-        #                         is_forward_decl=False,
-        #                     )
-        #                     self.write(f"{classname}.__name__ = {ptrname!r}")
-        #                     qualname = f"{obj_class}.{ptrname}"
-        #                     self.write(
-        #                         f"{classname}.__qualname__ = {qualname!r}"
-        #                     )
-        #                     self.write(f"return {classname}")
-
-        #             self.write(
-        #                 f"{obj_class}.__links__.{ptrname} = {lazydef}({ptrname!r})"
-        #             )
-        #             self.write(f"del {lazydef}")
-
     def _write_object_type_link_variant(
         self,
         objtype: reflection.ObjectType,
