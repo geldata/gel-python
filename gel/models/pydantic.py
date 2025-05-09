@@ -20,8 +20,6 @@ from typing import (
     overload,
 )
 
-from typing import NamedTupleMeta
-
 from typing_extensions import (
     Self,
     TypeAliasType,
@@ -395,7 +393,7 @@ class GelTypeMeta(type):
     pass
 
 
-class GelType(GelClassVar, metaclass=GelTypeMeta):
+class GelType(GelClassVar):
     if TYPE_CHECKING:
 
         @staticmethod
@@ -433,22 +431,24 @@ class BaseScalar(GelPrimitiveType):
     pass
 
 
-class AnyTupleMeta(NamedTupleMeta, GelTypeMeta):  # type: ignore [misc]
-    def __new__(
-        mcls,
-        typename: str,
-        bases: tuple[type[Any], ...],
-        ns: dict[str, Any],
-    ) -> type[Any]:
-        return GelTypeMeta.__new__(mcls, typename, bases, ns)
+if TYPE_CHECKING:
+    from typing import NamedTupleMeta  # type: ignore [attr-defined]
+
+    class AnyTupleMeta(NamedTupleMeta, GelTypeMeta):  # type: ignore [misc]
+        ...
+else:
+    AnyTupleMeta = type(GelPrimitiveType)
 
 
-class AnyTuple(GelPrimitiveType):
+class AnyTuple(GelPrimitiveType, metaclass=AnyTupleMeta):
     pass
 
 
-class AnyEnumMeta(enum.EnumMeta, GelTypeMeta):
-    pass
+if TYPE_CHECKING:
+    class AnyEnumMeta(enum.EnumMeta, GelTypeMeta):
+        pass
+else:
+    AnyEnumMeta = type(_polyfills.StrEnum)
 
 
 class AnyEnum(BaseScalar, _polyfills.StrEnum, metaclass=AnyEnumMeta):
@@ -456,6 +456,7 @@ class AnyEnum(BaseScalar, _polyfills.StrEnum, metaclass=AnyEnumMeta):
 
 
 if TYPE_CHECKING:
+
     class _ArrayMeta(GelTypeMeta, typing._ProtocolMeta):
         pass
 else:

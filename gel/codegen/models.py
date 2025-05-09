@@ -878,26 +878,58 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                     else:
                         parents = []
 
-                    parents.extend(
+                    scalar_bases = [
                         self.get_type(self._types[base.id])
                         for base in stype.bases
-                    )
+                    ]
 
+                    parents.extend(scalar_bases)
                     if not parents:
                         parents = [self.import_name(BASE_IMPL, "BaseScalar")]
 
+                    # Some builtin types are defined as protocols in
+                    # type stubs and mypy will complain if we don't
+                    # include the (internal) _ProtocolMeta when defining
+                    # the scalar metaclass (yuck!).
                     base_type = base.TYPE_MAPPING.get(stype.name)
-                    if base_type is not None and base_type in {
+                    is_proto_meta = base_type is not None and base_type in {
                         "bytes",
                         "json",
                         "str",
-                    }:
-                        tignore = "type: ignore [misc]"
-                    else:
-                        tignore = None
+                    }
 
-                    with self._class_def(tname, parents, line_comment=tignore):
-                        self.write("pass")
+                    gel_type_meta = self.import_name(BASE_IMPL, "GelTypeMeta")
+                    tmeta = f"__{tname}_meta__"
+                    with self.type_checking():
+                        self.write()
+                        if scalar_bases:
+                            meta_bases = _map_name(
+                                lambda n: f"__{n}_meta__",
+                                scalar_bases,
+                            )
+                        else:
+                            meta_bases = [gel_type_meta]
+                        if is_proto_meta:
+                            proto_meta = self.import_name(
+                                "typing",
+                                "_ProtocolMeta",
+                                import_time=ImportTime.typecheck,
+                            )
+                            meta_bases.append(proto_meta)
+                        with self._class_def(tmeta, meta_bases):
+                            self.write("pass")
+                        self.write()
+                        with self._class_def(
+                            tname, parents, class_kwargs={"metaclass": tmeta}
+                        ):
+                            self.write("pass")
+
+                    self.write_section_break()
+
+                    with self.not_type_checking():
+                        self.write()
+                        with self._class_def(tname, parents):
+                            self.write("pass")
 
                 self.write_section_break()
 
@@ -1740,13 +1772,11 @@ class GeneratedGlobalModule(BaseGeneratedModule):
     ) -> None:
         namedtuple = self.import_name("typing", "NamedTuple")
         anytuple = self.import_name(BASE_IMPL, "AnyTuple")
-        anytuplemeta = self.import_name(BASE_IMPL, "AnyTupleMeta")
 
         self.write("#")
         self.write(f"# tuple type {t.name}")
         self.write("#")
         classname = self.get_tuple_name(t)
-        class_kwargs = {"metaclass": anytuplemeta}
         with self._class_def(f"_{classname}", [namedtuple]):
             for elem in t.tuple_elements:
                 elem_type = self.get_type(
@@ -1755,10 +1785,6 @@ class GeneratedGlobalModule(BaseGeneratedModule):
                 )
                 self.write(f"{elem.name}: {elem_type}")
         self.write_section_break()
-        with self._class_def(
-            classname,
-            [f"_{classname}", anytuple],
-            class_kwargs=class_kwargs,
-        ):
+        with self._class_def(classname, [f"_{classname}", anytuple]):
             self.write("__slots__ = ()")
         self.write()
