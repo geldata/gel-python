@@ -48,6 +48,25 @@ class TypeKind(StrEnum):
     Pseudo = "Pseudo"
 
 
+class TypeModifier(StrEnum):
+    SetOf = "SetOfType"
+    Optional = "OptionalType"
+    Singleton = "SingletonType"
+
+
 class PointerKind(StrEnum):
     Link = "Link"
     Property = "Property"
+
+
+class OperatorKind(StrEnum):
+    Infix = "Infix"
+    Postfix = "Postfix"
+    Prefix = "Prefix"
+    Ternary = "Ternary"
+
+
+class CallableParamKind(StrEnum):
+    Variadic = "Variadic"
+    NamedOnly = "NamedOnly"
+    Positional = "Positional"

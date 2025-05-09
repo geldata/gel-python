@@ -98,6 +98,7 @@ class SchemaGenerator:
         self._modules: dict[reflection.SchemaPath, IntrospectedModule] = {}
         self._types: Mapping[uuid.UUID, reflection.AnyType] = {}
         self._casts: reflection.CastMatrix
+        self._operators: list[reflection.Operator]
         self._named_tuples: dict[uuid.UUID, reflection.NamedTupleType] = {}
         self._wrapped_types: set[str] = set()
 
@@ -111,14 +112,17 @@ class SchemaGenerator:
                 continue
 
             module = GeneratedSchemaModule(
-                modname, self._types, self._modules, self._schema_part
+                modname,
+                all_types=self._types,
+                all_casts=self._casts,
+                all_operators=self._operators,
+                modules=self._modules,
+                schema_part=self._schema_part,
             )
             module.process(content)
             module.write_files(self._outdir)
 
     def introspect_schema(self) -> None:
-        self._casts = reflection.fetch_casts(self._client, self._schema_part)
-
         for mod in reflection.fetch_modules(self._client, self._schema_part):
             self._modules[reflection.parse_name(mod)] = {
                 "scalar_types": {},
@@ -126,14 +130,21 @@ class SchemaGenerator:
                 "imports": {},
             }
 
-        refl_types = reflection.fetch_types(self._client, self._schema_part)
-        if self._schema_part is not reflection.SchemaPart.STD:
-            std_types = reflection.fetch_types(
-                self._client, reflection.SchemaPart.STD
-            )
+        this_part = self._schema_part
+        std_part = reflection.SchemaPart.STD
+
+        self._types = reflection.fetch_types(self._client, this_part)
+        refl_types = self._types
+        self._casts = reflection.fetch_casts(self._client, this_part)
+        self._operators = reflection.fetch_operators(self._client, this_part)
+
+        if self._schema_part is not std_part:
+            std_types = reflection.fetch_types(self._client, std_part)
             self._types = collections.ChainMap(std_types, refl_types)
-        else:
-            self._types = refl_types
+            std_casts = reflection.fetch_casts(self._client, std_part)
+            self._casts = self._casts.chain(std_casts)
+            std_operators = reflection.fetch_operators(self._client, std_part)
+            self._operators += std_operators
 
         for t in refl_types.values():
             if reflection.is_object_type(t):
@@ -153,7 +164,12 @@ class SchemaGenerator:
         if self._schema_part is reflection.SchemaPart.STD:
             mod = reflection.SchemaPath("std") / mod
         module = GeneratedGlobalModule(
-            mod, self._types, self._modules, self._schema_part
+            mod,
+            all_types=self._types,
+            all_casts=self._casts,
+            all_operators=self._operators,
+            modules=self._modules,
+            schema_part=self._schema_part,
         )
         module.process(self._named_tuples)
         module.write_files(self._outdir)
@@ -210,7 +226,10 @@ class BaseGeneratedModule:
     def __init__(
         self,
         modname: reflection.SchemaPath,
+        *,
         all_types: Mapping[uuid.UUID, reflection.AnyType],
+        all_casts: reflection.CastMatrix,
+        all_operators: list[reflection.Operator],
         modules: Collection[reflection.SchemaPath],
         schema_part: reflection.SchemaPart,
     ) -> None:
@@ -218,6 +237,8 @@ class BaseGeneratedModule:
         self._modpath = modname
         self._types = all_types
         self._types_by_name = {}
+        self._casts = all_casts
+        self._operators = all_operators
         schema_obj_type = None
         for t in all_types.values():
             self._types_by_name[t.name] = t
@@ -1688,6 +1709,21 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                 target_type,
                 import_time=ImportTime.late_runtime,
             )
+            union = {bare_ptr_type}
+            assn_casts = self._casts.assignment_casts_to.get(
+                target_type.id,
+                [],
+            )
+            for type_id in assn_casts:
+                assn_type = self._types[type_id]
+                if reflection.is_primitive_type(assn_type):
+                    assn_pytype = self._get_pybase_for_primitive_type(
+                        assn_type,
+                        import_time=ImportTime.late_runtime,
+                    )
+                    union.add(assn_pytype)
+            bare_ptr_type = " | ".join(sorted(union))
+
             if prefer_broad_target_type:
                 ptr_type = bare_ptr_type
 

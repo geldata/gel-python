@@ -4,10 +4,17 @@
 
 
 from __future__ import annotations
+from collections.abc import (
+    MutableMapping,
+)
+from typing_extensions import (
+    Self,
+    TypeAliasType,
+)
 
 import dataclasses
 import uuid
-from collections import defaultdict
+from collections import ChainMap, defaultdict
 
 from gel import abstract
 from . import _enums
@@ -44,14 +51,46 @@ def _trace_all_casts(
     return reachable
 
 
+CastMap = TypeAliasType("CastMap", MutableMapping[uuid.UUID, list[uuid.UUID]])
+
+
 @dataclasses.dataclass(frozen=True, kw_only=True)
 class CastMatrix:
-    explicit_casts_from: dict[uuid.UUID, list[uuid.UUID]]
-    explicit_casts_to: dict[uuid.UUID, list[uuid.UUID]]
-    implicit_casts_from: dict[uuid.UUID, list[uuid.UUID]]
-    implicit_casts_to: dict[uuid.UUID, list[uuid.UUID]]
-    assignment_casts_from: dict[uuid.UUID, list[uuid.UUID]]
-    assignment_casts_to: dict[uuid.UUID, list[uuid.UUID]]
+    explicit_casts_from: CastMap
+    explicit_casts_to: CastMap
+    implicit_casts_from: CastMap
+    implicit_casts_to: CastMap
+    assignment_casts_from: CastMap
+    assignment_casts_to: CastMap
+
+    def chain(self, other: CastMatrix) -> Self:
+        return dataclasses.replace(
+            self,
+            explicit_casts_from=ChainMap(
+                self.explicit_casts_from,
+                other.explicit_casts_from,
+            ),
+            explicit_casts_to=ChainMap(
+                self.explicit_casts_to,
+                other.explicit_casts_to,
+            ),
+            implicit_casts_from=ChainMap(
+                self.implicit_casts_from,
+                other.implicit_casts_from,
+            ),
+            implicit_casts_to=ChainMap(
+                self.implicit_casts_to,
+                other.implicit_casts_to,
+            ),
+            assignment_casts_from=ChainMap(
+                self.assignment_casts_from,
+                other.assignment_casts_from,
+            ),
+            assignment_casts_to=ChainMap(
+                self.assignment_casts_to,
+                other.assignment_casts_to,
+            ),
+        )
 
 
 def fetch_casts(

@@ -31,6 +31,48 @@ FILTER
 """
 
 
+OPERATORS = """
+WITH
+    MODULE schema,
+SELECT Operator {
+    id,
+    name,
+    description := assert_single((
+        WITH
+            tid := .id,
+        SELECT (ScalarType UNION ObjectType) {
+            description := (SELECT .annotations {
+                value := materialized(@value)
+            } FILTER .name = "std::description"),
+        } FILTER .id = tid
+    ).description.value),
+    suggested_ident := assert_single((
+        WITH
+            tid := .id,
+        SELECT (ScalarType UNION ObjectType) {
+            description := (SELECT .annotations {
+                value := materialized(@value)
+            } FILTER .name = "std::identifier"),
+        } FILTER .id = tid
+    ).description.value),
+    operator_kind,
+    return_type,
+    return_typemod,
+    params: {
+        name,
+        type,
+        kind,
+        typemod,
+        default,
+    } ORDER BY @index,
+}
+FILTER
+    .builtin = <bool>$builtin
+    AND NOT .internal
+    AND NOT .abstract
+"""
+
+
 TYPES = """
 WITH
     MODULE schema,

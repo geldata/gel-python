@@ -19,6 +19,11 @@ from ._casts import (
     fetch_casts,
 )
 
+from ._operators import (
+    Operator,
+    fetch_operators,
+)
+
 from ._types import (
     Type,
     AnyType,
@@ -54,9 +59,11 @@ __all__ = (
     "AnyType",
     "ArrayType",
     "Cardinality",
+    "CastMatrix",
     "InheritingType",
     "NamedTupleType",
     "ObjectType",
+    "Operator",
     "Pointer",
     "PointerKind",
     "PrimitiveType",
@@ -67,6 +74,7 @@ __all__ = (
     "TypeKind",
     "TypeKind",
     "parse_name",
+    "fetch_operators",
     "fetch_casts",
     "fetch_modules",
     "fetch_types",
