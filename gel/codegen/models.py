@@ -878,86 +878,16 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         scalar_types: dict[str, reflection.ScalarType],
     ) -> None:
         with self.aspect(ModuleAspect.VARIANTS):
-            scalars = {}
+            scalars: list[reflection.ScalarType] = []
             for scalar in self._sorted_types(scalar_types.values()):
                 type_name = reflection.parse_name(scalar.name)
-                scalars[type_name.name] = scalar
+                scalars.append(scalar)
                 self.py_file.add_global(type_name.name)
 
-            for tname, stype in scalars.items():
-                if stype.enum_values:
-                    anyenum = self.import_name(BASE_IMPL, "AnyEnum")
-                    with self._class_def(tname, [anyenum]):
-                        self.write_description(stype)
-                        for value in stype.enum_values:
-                            self.write(f"{value} = {value!r}")
-                else:
-                    pybase = self._get_pybase_for_this_scalar(
-                        stype,
-                        require_subclassable=True,
-                    )
-                    if pybase is not None:
-                        pts = self.import_name(BASE_IMPL, "PyTypeScalar")
-                        parents = [pybase, f"{pts}[{pybase}]"]
-                    else:
-                        parents = []
+            for stype in scalars:
+                self._write_scalar_type(stype)
 
-                    scalar_bases = [
-                        self.get_type(self._types[base.id])
-                        for base in stype.bases
-                    ]
-
-                    parents.extend(scalar_bases)
-                    if not parents:
-                        parents = [self.import_name(BASE_IMPL, "BaseScalar")]
-
-                    # Some builtin types are defined as protocols in
-                    # type stubs and mypy will complain if we don't
-                    # include the (internal) _ProtocolMeta when defining
-                    # the scalar metaclass (yuck!).
-                    base_type = base.TYPE_MAPPING.get(stype.name)
-                    is_proto_meta = base_type is not None and base_type in {
-                        "bytes",
-                        "json",
-                        "str",
-                    }
-
-                    gel_type_meta = self.import_name(BASE_IMPL, "GelTypeMeta")
-                    tmeta = f"__{tname}_meta__"
-                    with self.type_checking():
-                        self.write()
-                        if scalar_bases:
-                            meta_bases = _map_name(
-                                lambda n: f"__{n}_meta__",
-                                scalar_bases,
-                            )
-                        else:
-                            meta_bases = [gel_type_meta]
-                        if is_proto_meta:
-                            proto_meta = self.import_name(
-                                "typing",
-                                "_ProtocolMeta",
-                                import_time=ImportTime.typecheck,
-                            )
-                            meta_bases.append(proto_meta)
-                        with self._class_def(tmeta, meta_bases):
-                            self.write("pass")
-                        self.write()
-                        with self._class_def(
-                            tname, parents, class_kwargs={"metaclass": tmeta}
-                        ):
-                            self.write("pass")
-
-                    self.write_section_break()
-
-                    with self.not_type_checking():
-                        self.write()
-                        with self._class_def(tname, parents):
-                            self.write("pass")
-
-                self.write_section_break()
-
-        for stype in scalars.values():
+        for stype in scalars:
             classname = self.get_type(
                 stype,
                 aspect=ModuleAspect.VARIANTS,
@@ -965,6 +895,99 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                 import_directly=True,
             )
             self.export(classname)
+
+    def _write_enum_scalar_type(
+        self,
+        stype: reflection.ScalarType,
+    ) -> None:
+        type_name = reflection.parse_name(stype.name)
+        tname = type_name.name
+        assert stype.enum_values
+        anyenum = self.import_name(BASE_IMPL, "AnyEnum")
+        with self._class_def(tname, [anyenum]):
+            self.write_description(stype)
+            for value in stype.enum_values:
+                self.write(f"{value} = {value!r}")
+        self.write_section_break()
+
+    def _write_scalar_type(
+        self,
+        stype: reflection.ScalarType,
+    ) -> None:
+        if stype.enum_values:
+            self._write_enum_scalar_type(stype)
+        else:
+            self._write_regular_scalar_type(stype)
+
+    def _write_regular_scalar_type(
+        self,
+        stype: reflection.ScalarType,
+    ) -> None:
+        type_name = reflection.parse_name(stype.name)
+        tname = type_name.name
+        pybase = self._get_pybase_for_this_scalar(
+            stype,
+            require_subclassable=True,
+        )
+        if pybase is not None:
+            pts = self.import_name(BASE_IMPL, "PyTypeScalar")
+            parents = [pybase, f"{pts}[{pybase}]"]
+        else:
+            parents = []
+
+        scalar_bases = [
+            self.get_type(self._types[base.id]) for base in stype.bases
+        ]
+
+        parents.extend(scalar_bases)
+        if not parents:
+            parents = [self.import_name(BASE_IMPL, "BaseScalar")]
+
+        # Some builtin types are defined as protocols in
+        # type stubs and mypy will complain if we don't
+        # include the (internal) _ProtocolMeta when defining
+        # the scalar metaclass (yuck!).
+        base_type = base.TYPE_MAPPING.get(stype.name)
+        is_proto_meta = base_type is not None and base_type in {
+            "bytes",
+            "json",
+            "str",
+        }
+
+        gel_type_meta = self.import_name(BASE_IMPL, "GelTypeMeta")
+        tmeta = f"__{tname}_meta__"
+        with self.type_checking():
+            self.write()
+            if scalar_bases:
+                meta_bases = _map_name(
+                    lambda n: f"__{n}_meta__",
+                    scalar_bases,
+                )
+            else:
+                meta_bases = [gel_type_meta]
+            if is_proto_meta:
+                proto_meta = self.import_name(
+                    "typing",
+                    "_ProtocolMeta",
+                    import_time=ImportTime.typecheck,
+                )
+                meta_bases.append(proto_meta)
+            with self._class_def(tmeta, meta_bases):
+                self.write("pass")
+            self.write()
+            with self._class_def(
+                tname, parents, class_kwargs={"metaclass": tmeta}
+            ):
+                self.write("pass")
+
+        self.write_section_break()
+
+        with self.not_type_checking():
+            self.write()
+            with self._class_def(tname, parents):
+                self.write("pass")
+
+        self.write_section_break()
 
     def write_object_types(
         self,
