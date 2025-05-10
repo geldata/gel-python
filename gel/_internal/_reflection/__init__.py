@@ -91,5 +91,5 @@ __all__ = (
     "is_scalar_type",
     "is_tuple_type",
     "is_link",
-    "is_property",
+    "is_property", "INFIX_OPERATOR_MAP", "PREFIX_OPERATOR_MAP",
 )

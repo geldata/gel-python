@@ -22,7 +22,7 @@ from . import _types
 from . import _query
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True, kw_only=True)
 class CallableParam:
     name: str
     type: _types.TypeRef
@@ -31,11 +31,12 @@ class CallableParam:
     default: str
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True, kw_only=True)
 class Operator:
     id: uuid.UUID
     name: str
     suggested_ident: str
+    py_magic: str | None = None
     description: str
     operator_kind: _enums.OperatorKind
     return_type: _types.TypeRef
@@ -48,15 +49,40 @@ OperatorMap = TypeAliasType(
 )
 
 
+INFIX_OPERATOR_MAP = {
+    "std::=": "__eq__",
+    "std::!=": "__ne__",
+    "std::<": "__lt__",
+    "std::<=": "__le__",
+    "std::>": "__gt__",
+    "std::>=": "__ge__",
+    "std::+": "__add__",
+    "std::++": "__add__",
+    "std::-": "__sub__",
+    "std::*": "__mul__",
+    "std::/": "__truediv__",
+    "std:://": "__floordiv__",
+    "std::%": "__mod__",
+    "std::^": "__pow__",
+}
+
+PREFIX_OPERATOR_MAP = {
+    "std::+": "__pos__",
+    "std::-": "__neg__",
+}
+
+
 @dataclasses.dataclass(frozen=True)
 class OperatorMatrix:
-    """Maps of binary and unary operators indexed by first argument type."""
+    """Maps of binary and unary operators that are overloadable in Python;
+    indexed by first argument type."""
+
     binary_ops: OperatorMap
     """Binary operators."""
     unary_ops: OperatorMap
     """Unary operators."""
     other_ops: list[Operator]
-    """Non binary or unary operators."""
+    """Non-overloadable or non binary/unary operators."""
 
     def chain(self, other: OperatorMatrix) -> Self:
         return dataclasses.replace(

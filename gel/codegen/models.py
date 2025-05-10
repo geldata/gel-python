@@ -973,7 +973,12 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                 meta_bases.append(proto_meta)
             tmeta = f"__{tname}_meta__"
             with self._class_def(tmeta, meta_bases):
+                bin_ops = self._operators.binary_ops.get(stype.id, [])
+                for bin_op in bin_ops:
+                    print(stype.name)
+                    print(bin_op)
                 self.write("pass")
+
             self.write()
             with self._class_def(
                 tname, parents, class_kwargs={"metaclass": tmeta}

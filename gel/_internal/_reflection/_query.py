@@ -40,7 +40,7 @@ SELECT Operator {
     description := assert_single((
         WITH
             tid := .id,
-        SELECT (ScalarType UNION ObjectType) {
+        SELECT DETACHED Operator {
             description := (SELECT .annotations {
                 value := materialized(@value)
             } FILTER .name = "std::description"),
@@ -49,12 +49,12 @@ SELECT Operator {
     suggested_ident := assert_single((
         WITH
             tid := .id,
-        SELECT (ScalarType UNION ObjectType) {
-            description := (SELECT .annotations {
+        SELECT DETACHED Operator {
+            identifier := (SELECT .annotations {
                 value := materialized(@value)
             } FILTER .name = "std::identifier"),
         } FILTER .id = tid
-    ).description.value),
+    ).identifier.value),
     operator_kind,
     return_type,
     return_typemod,
