@@ -31,9 +31,12 @@ class Cast:
     allow_assignment: bool
 
 
+CastMap = TypeAliasType("CastMap", MutableMapping[uuid.UUID, list[uuid.UUID]])
+
+
 def _trace_all_casts(
     from_type: uuid.UUID,
-    cast_map: dict[uuid.UUID, list[uuid.UUID]],
+    cast_map: CastMap,
     *,
     _seen: set[uuid.UUID] | None = None,
 ) -> set[uuid.UUID]:
@@ -49,9 +52,6 @@ def _trace_all_casts(
         reachable.update(_trace_all_casts(to_type, cast_map, _seen=_seen))
 
     return reachable
-
-
-CastMap = TypeAliasType("CastMap", MutableMapping[uuid.UUID, list[uuid.UUID]])
 
 
 @dataclasses.dataclass(frozen=True, kw_only=True)
@@ -100,12 +100,12 @@ def fetch_casts(
     builtin = schema_part is _enums.SchemaPart.STD
     casts: list[Cast] = db.query(_query.CASTS, builtin=builtin)
 
-    casts_from: dict[uuid.UUID, list[uuid.UUID]] = defaultdict(list)
-    casts_to: dict[uuid.UUID, list[uuid.UUID]] = defaultdict(list)
-    implicit_casts_from: dict[uuid.UUID, list[uuid.UUID]] = defaultdict(list)
-    implicit_casts_to: dict[uuid.UUID, list[uuid.UUID]] = defaultdict(list)
-    assignment_casts_from: dict[uuid.UUID, list[uuid.UUID]] = defaultdict(list)
-    assignment_casts_to: dict[uuid.UUID, list[uuid.UUID]] = defaultdict(list)
+    casts_from: CastMap = defaultdict(list)
+    casts_to: CastMap = defaultdict(list)
+    implicit_casts_from: CastMap = defaultdict(list)
+    implicit_casts_to: CastMap = defaultdict(list)
+    assignment_casts_from: CastMap = defaultdict(list)
+    assignment_casts_to: CastMap = defaultdict(list)
     types: set[uuid.UUID] = set()
 
     for cast in casts:
@@ -122,10 +122,10 @@ def fetch_casts(
             implicit_casts_from[cast.from_type.id].append(cast.to_type.id)
             implicit_casts_to[cast.to_type.id].append(cast.from_type.id)
 
-    all_implicit_casts_from: dict[uuid.UUID, list[uuid.UUID]] = {}
-    all_implicit_casts_to: dict[uuid.UUID, list[uuid.UUID]] = {}
-    all_assignment_casts_from: dict[uuid.UUID, list[uuid.UUID]] = {}
-    all_assignment_casts_to: dict[uuid.UUID, list[uuid.UUID]] = {}
+    all_implicit_casts_from: CastMap = {}
+    all_implicit_casts_to: CastMap = {}
+    all_assignment_casts_from: CastMap = {}
+    all_assignment_casts_to: CastMap = {}
 
     for type in types:
         all_implicit_casts_from[type] = list(

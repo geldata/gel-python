@@ -98,7 +98,7 @@ class SchemaGenerator:
         self._modules: dict[reflection.SchemaPath, IntrospectedModule] = {}
         self._types: Mapping[uuid.UUID, reflection.AnyType] = {}
         self._casts: reflection.CastMatrix
-        self._operators: list[reflection.Operator]
+        self._operators: reflection.OperatorMatrix
         self._named_tuples: dict[uuid.UUID, reflection.NamedTupleType] = {}
         self._wrapped_types: set[str] = set()
 
@@ -144,7 +144,7 @@ class SchemaGenerator:
             std_casts = reflection.fetch_casts(self._client, std_part)
             self._casts = self._casts.chain(std_casts)
             std_operators = reflection.fetch_operators(self._client, std_part)
-            self._operators += std_operators
+            self._operators = self._operators.chain(std_operators)
 
         for t in refl_types.values():
             if reflection.is_object_type(t):
@@ -229,7 +229,7 @@ class BaseGeneratedModule:
         *,
         all_types: Mapping[uuid.UUID, reflection.AnyType],
         all_casts: reflection.CastMatrix,
-        all_operators: list[reflection.Operator],
+        all_operators: reflection.OperatorMatrix,
         modules: Collection[reflection.SchemaPath],
         schema_part: reflection.SchemaPart,
     ) -> None:
@@ -955,7 +955,6 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         }
 
         gel_type_meta = self.import_name(BASE_IMPL, "GelTypeMeta")
-        tmeta = f"__{tname}_meta__"
         with self.type_checking():
             self.write()
             if scalar_bases:
@@ -972,6 +971,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                     import_time=ImportTime.typecheck,
                 )
                 meta_bases.append(proto_meta)
+            tmeta = f"__{tname}_meta__"
             with self._class_def(tmeta, meta_bases):
                 self.write("pass")
             self.write()

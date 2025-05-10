@@ -21,6 +21,7 @@ from ._casts import (
 
 from ._operators import (
     Operator,
+    OperatorMatrix,
     fetch_operators,
 )
 
@@ -64,6 +65,7 @@ __all__ = (
     "NamedTupleType",
     "ObjectType",
     "Operator",
+    "OperatorMatrix",
     "Pointer",
     "PointerKind",
     "PrimitiveType",
