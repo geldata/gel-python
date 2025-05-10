@@ -27,6 +27,19 @@ import typing_extensions
 
 from . import _typing_inspect
 
+try:
+    # yury: I spent 1 hour debugging this, I don't want to do this ever
+    # again if some dependencies are not installed properly.
+    # The problem is that accessing attempting to call
+    # `typing_extensions.evaluate_forward_ref` from within a descriptor
+    # raises an AttributeError, completely breaking the entire descriptor
+    # protocol magic we do and making it really really hard to undestand
+    # why nothing works.
+    typing_extensions.evaluate_forward_ref
+except AttributeError:
+    raise ImportError(
+        'old version of typing_extensions, "evaluate_forward_ref" is missing')
+
 
 def resolve_type(
     value: Any,
