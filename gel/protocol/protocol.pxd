@@ -171,6 +171,7 @@ cdef class SansIOProtocol:
     cdef ensure_connected(self)
 
     cdef WriteBuffer encode_parse_params(self, ExecuteContext ctx, dict state)
+    cdef _handle_query_result(self, ExecuteContext ctx, ret)
 
 
 include "protocol_v0.pxd"

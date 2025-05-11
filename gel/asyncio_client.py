@@ -17,6 +17,9 @@
 #
 
 
+from __future__ import annotations
+from typing import Any
+
 import asyncio
 import contextlib
 import logging
@@ -344,6 +347,110 @@ class AsyncIORetry(transaction.BaseRetry):
         iteration = AsyncIOIteration(self, self._owner, self._iteration)
         self._iteration += 1
         return iteration
+
+
+class AsyncIOBatch:
+    def __init__(
+        self, client: AsyncIOClient, optimistic_isolation: bool
+    ) -> None:
+        self._client = client
+        self._optimistic_isolation = optimistic_isolation
+        self._batched_ops = []
+
+    async def _privileged_execute(self, query: str) -> None:
+        await self._connection.privileged_execute(abstract.ExecuteContext(
+            query=abstract.QueryWithArgs(query, (), {}),
+            cache=self._client._get_query_cache(),
+            state=self._client._get_state(),
+            transaction_options=None,
+            retry_options=None,
+            warning_handler=self._client._get_warning_handler(),
+            annotations=self._client._get_annotations(),
+        ))
+
+    async def __aenter__(self) -> AsyncIOBatch:
+        conn = await self._client._impl.acquire()
+        self._connection = conn
+        try:
+            tx_options = self._client._options.transaction_options
+            query = tx_options.start_transaction_query(
+                optimistic_isolation=self._optimistic_isolation
+            )
+            if conn.is_closed():
+                await conn.connect()
+            await self._privileged_execute(query)
+        except BaseException:
+            try:
+                await self._privileged_execute("ROLLBACK;")
+                raise
+            finally:
+                self._connection = None
+                await self._client._impl.release(conn)
+
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        try:
+            if exc_type is None:
+                await self._privileged_execute("COMMIT;")
+            else:
+                await self._privileged_execute("ROLLBACK;")
+        finally:
+            conn, self._connection = self._connection, None
+            await self._client._impl.release(conn)
+
+    async def send_query(self, query: str, *args, **kwargs) -> None:
+        self._batched_ops.append(abstract.QueryContext(
+            query=abstract.QueryWithArgs(query, args, kwargs),
+            cache=self._client._get_query_cache(),
+            query_options=abstract._query_opts,
+            retry_options=None,
+            state=self._client._get_state(),
+            transaction_options=None,
+            warning_handler=self._client._get_warning_handler(),
+            annotations=self._client._get_annotations(),
+        ))
+
+    async def send_query_single(self, query: str, *args, **kwargs) -> None:
+        self._batched_ops.append(abstract.QueryContext(
+            query=abstract.QueryWithArgs(query, args, kwargs),
+            cache=self._client._get_query_cache(),
+            query_options=abstract._query_single_opts,
+            retry_options=None,
+            state=self._client._get_state(),
+            transaction_options=None,
+            warning_handler=self._client._get_warning_handler(),
+            annotations=self._client._get_annotations(),
+        ))
+
+    async def send_query_required_single(
+        self, query: str, *args, **kwargs
+    ) -> None:
+        self._batched_ops.append(abstract.QueryContext(
+            query=abstract.QueryWithArgs(query, args, kwargs),
+            cache=self._client._get_query_cache(),
+            query_options=abstract._query_required_single_opts,
+            retry_options=None,
+            state=self._client._get_state(),
+            transaction_options=None,
+            warning_handler=self._client._get_warning_handler(),
+            annotations=self._client._get_annotations(),
+        ))
+
+    async def send_execute(self, commands: str, *args, **kwargs) -> None:
+        self._batched_ops.append(abstract.ExecuteContext(
+            query=abstract.QueryWithArgs(commands, args, kwargs),
+            cache=self._client._get_query_cache(),
+            retry_options=None,
+            state=self._client._get_state(),
+            transaction_options=None,
+            warning_handler=self._client._get_warning_handler(),
+            annotations=self._client._get_annotations(),
+        ))
+
+    async def wait(self) -> list[Any]:
+        ops, self._batched_ops[:] = self._batched_ops[:], []
+        return await self._connection.batch_query(ops)
 
 
 class AsyncIOClient(base_client.BaseClient, abstract.AsyncIOExecutor):
