@@ -488,6 +488,9 @@ class AsyncIOClient(base_client.BaseClient, abstract.AsyncIOExecutor):
     def transaction(self) -> AsyncIORetry:
         return AsyncIORetry(self)
 
+    def _batch(self, *, optimistic_isolation: bool) -> AsyncIOBatch:
+        return AsyncIOBatch(self, optimistic_isolation)
+
     async def __aenter__(self):
         return await self.ensure_connected()
 

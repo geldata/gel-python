@@ -734,7 +734,7 @@ cdef class SansIOProtocol:
                     self.fallthrough()
 
             finally:
-                self.buffer.discard_message()
+                self.buffer.finish_message()
 
         if exc is not None:
             raise exc
@@ -819,6 +819,8 @@ cdef class SansIOProtocol:
                     return ret
 
     async def batch_execute(self, ctxs: list[ExecuteContext]):
+        cdef ExecuteContext ctx
+
         self.ensure_connected()
         self.reset_status()
 
