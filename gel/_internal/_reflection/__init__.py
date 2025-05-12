@@ -4,8 +4,10 @@
 
 from ._enums import (
     Cardinality,
+    OperatorKind,
     PointerKind,
     TypeKind,
+    TypeModifier,
     SchemaPart,
 )
 
@@ -65,6 +67,7 @@ __all__ = (
     "NamedTupleType",
     "ObjectType",
     "Operator",
+    "OperatorKind",
     "OperatorMatrix",
     "Pointer",
     "PointerKind",
@@ -74,7 +77,7 @@ __all__ = (
     "SchemaPath",
     "TupleType",
     "TypeKind",
-    "TypeKind",
+    "TypeModifier",
     "parse_name",
     "fetch_operators",
     "fetch_casts",

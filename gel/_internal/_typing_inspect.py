@@ -3,9 +3,17 @@
 # SPDX-FileCopyrightText: Copyright Gel Data Inc. and the contributors.
 
 
-from typing import Annotated, Any, ClassVar, TypeGuard, get_origin
+from typing import (
+    Annotated,
+    Any,
+    ClassVar,
+    TypeGuard,
+    Union,
+    get_args,
+    get_origin,
+)
 from typing import _GenericAlias  # type: ignore
-from types import GenericAlias
+from types import GenericAlias, UnionType
 
 from typing_extensions import ForwardRef, TypeAliasType
 
@@ -28,3 +36,13 @@ def is_annotated(t: Any) -> TypeGuard[Annotated[Any, ...]]:
 
 def is_forward_ref(t: Any) -> TypeGuard[ForwardRef]:
     return isinstance(t, ForwardRef)
+
+
+def is_union_type(t: Any) -> bool:
+    return (is_generic_alias(t) and get_origin(t) is Union) or isinstance(
+        t, UnionType
+    )
+
+
+def is_optional_type(t: Any) -> bool:
+    return is_union_type(t) and type(None) in get_args(t)

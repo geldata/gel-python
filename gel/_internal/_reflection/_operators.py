@@ -17,6 +17,8 @@ import uuid
 from collections import ChainMap, defaultdict
 
 from gel import abstract
+from gel._internal import _dataclass_extras
+
 from . import _enums
 from . import _types
 from . import _query
@@ -111,9 +113,19 @@ def fetch_operators(
     other_ops: list[Operator] = []
 
     for op in ops:
-        if op.operator_kind == _enums.OperatorKind.Infix:
+        if (
+            op.operator_kind == _enums.OperatorKind.Infix
+            and op.name in INFIX_OPERATOR_MAP
+        ):
+            op = _dataclass_extras.coerce_to_dataclass(Operator, op)
+            op = dataclasses.replace(op, py_magic=INFIX_OPERATOR_MAP[op.name])
             binary_ops[op.params[0].type.id].append(op)
-        elif op.operator_kind == _enums.OperatorKind.Prefix:
+        elif (
+            op.operator_kind == _enums.OperatorKind.Prefix
+            and op.name in PREFIX_OPERATOR_MAP
+        ):
+            op = _dataclass_extras.coerce_to_dataclass(Operator, op)
+            op = dataclasses.replace(op, py_magic=PREFIX_OPERATOR_MAP[op.name])
             unary_ops[op.params[0].type.id].append(op)
         else:
             other_ops.append(op)

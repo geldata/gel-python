@@ -729,12 +729,18 @@ class BaseGeneratedModule:
         return_type: str = "None",
         *,
         kind: Literal["classmethod", "method", "property", "func"] = "func",
+        overload: bool = False,
+        decorators: Iterable[str] = (),
+        line_comment: str | None = None,
     ) -> Iterator[None]:
         with self._func_def(
             func_name,
             params,
             return_type,
             kind="property",
+            overload=overload,
+            decorators=decorators,
+            line_comment=line_comment,
         ):
             yield
 
@@ -746,12 +752,18 @@ class BaseGeneratedModule:
         return_type: str = "None",
         *,
         kind: Literal["classmethod", "method", "property", "func"] = "func",
+        overload: bool = False,
+        decorators: Iterable[str] = (),
+        line_comment: str | None = None,
     ) -> Iterator[None]:
         with self._func_def(
             func_name,
             params,
             return_type,
             kind="method",
+            overload=overload,
+            decorators=decorators,
+            line_comment=line_comment,
         ):
             yield
 
@@ -974,10 +986,12 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             tmeta = f"__{tname}_meta__"
             with self._class_def(tmeta, meta_bases):
                 bin_ops = self._operators.binary_ops.get(stype.id, [])
-                for bin_op in bin_ops:
-                    print(stype.name)
-                    print(bin_op)
-                self.write("pass")
+                un_ops = self._operators.unary_ops.get(stype.id, [])
+                if not bin_ops and not un_ops:
+                    self.write("pass")
+                else:
+                    self.write_unary_operator_overloads(un_ops)
+                    self.write_binary_operator_overloads(bin_ops)
 
             self.write()
             with self._class_def(
@@ -993,6 +1007,82 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                 self.write("pass")
 
         self.write_section_break()
+
+    def render_callable_sig_type(
+        self,
+        tp: reflection.AnyType,
+        _mod: reflection.TypeModifier,
+    ) -> str:
+        result = self.get_type(tp, import_time=ImportTime.typecheck)
+        type_ = self.import_name(
+            "builtins", "type", import_time=ImportTime.typecheck
+        )
+        result = f"{type_}[{result}]"
+        return result
+
+    def write_unary_operator_overloads(
+        self,
+        ops: list[reflection.Operator],
+    ) -> None:
+        for op in ops:
+            rtype = self.render_callable_sig_type(
+                self._types[op.return_type.id], op.return_typemod
+            )
+            if op.py_magic is None:
+                raise AssertionError(f"expected {op} to have py_magic set")
+            if op.operator_kind == reflection.OperatorKind.Prefix:
+                with self._method_def(op.py_magic, [], rtype):
+                    self.write("...")
+                self.write()
+
+    def write_binary_operator_overloads(
+        self,
+        ops: list[reflection.Operator],
+    ) -> None:
+        opmap = defaultdict(lambda: defaultdict(set))
+
+        for op in ops:
+            rtype = self.render_callable_sig_type(
+                self._types[op.return_type.id], op.return_typemod
+            )
+            right_param = op.params[1]
+            right_type_id = right_param.type.id
+            right_type = self._types[right_type_id]
+            implicit_casts = self._casts.implicit_casts_to.get(right_type_id)
+            union = [right_type]
+            if implicit_casts:
+                union.extend(self._types[ic] for ic in implicit_casts)
+            if op.py_magic is None:
+                raise AssertionError(f"expected {op} to have py_magic set")
+            opmap[op.py_magic][rtype].update(union)
+
+        for meth, overloads in opmap.items():
+            overload = len(overloads) > 1
+            all_other_types = set()
+            for rtype, other_types in overloads.items():
+                other_type_strs = [self.get_type(m) for m in other_types]
+                other_type_strs.sort()
+                all_other_types.update(other_type_strs)
+                other_type = " | ".join(other_type_strs)
+
+                with self._method_def(
+                    meth,
+                    [f"other: {other_type}"],
+                    rtype,
+                    overload=overload,
+                    line_comment="type: ignore [override]",
+                ):
+                    self.write("...")
+                self.write()
+
+            if overload:
+                with self._method_def(
+                    meth,
+                    [f"other: {' | '.join(sorted(all_other_types))}"],
+                    " | ".join(sorted(overloads)),
+                    line_comment="type: ignore [override]",
+                ):
+                    self.write("...")
 
     def write_object_types(
         self,
