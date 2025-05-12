@@ -576,7 +576,7 @@ class BaseGeneratedModule:
             elif stype.name == "anytuple":
                 return f"tuple[{self.import_name('typing', 'Any')}, ...]"
             elif stype.name == "anytype":
-                return self.import_name(BASE_IMPL, "GelType")
+                return self.import_name(BASE_IMPL, "GelType_T")
             else:
                 raise AssertionError(f"unsupported pseudo-type: {stype.name}")
 
