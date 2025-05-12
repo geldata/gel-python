@@ -1165,3 +1165,94 @@ class TestAsyncQuery(tb.AsyncQueryTestCase):
 
         res = await self.client.query_sql("SELECT FROM generate_series(0, 1)")
         self.assertEqual(res[0].as_dict(), {})
+
+    async def test_batch_01(self):
+        async for bx in self.client._batch():
+            async with bx:
+                await bx.send_query_single('SELECT 1')
+                await bx.send_query_single('SELECT 2')
+                await bx.send_query_single('SELECT 3')
+
+                self.assertEqual(await bx.wait(), [1, 2, 3])
+
+                await bx.send_query_single('SELECT 4')
+                await bx.send_query_single('SELECT 5')
+                await bx.send_query_single('SELECT 6')
+
+                self.assertEqual(await bx.wait(), [4, 5, 6])
+
+    async def test_batch_02(self):
+        async for bx in self.client._batch():
+            async with bx:
+                await bx.send_query_required_single('''
+                    INSERT test::Tmp {
+                        tmp := 'Test Batch'
+                    };
+                ''')
+                await bx.send_query('''
+                    SELECT
+                        test::Tmp
+                    FILTER
+                        .tmp = 'Test Batch';
+                ''')
+                inserted, selected = await bx.wait()
+
+        self.assertEqual([inserted.id], [o.id for o in selected])
+
+    async def test_batch_03(self):
+        async for bx in self.client._batch():
+            async with bx:
+                await bx.send_execute('''
+                    INSERT test::Tmp {
+                        tmp := 'Test Auto Wait'
+                    };
+                ''')
+                # No explicit wait() - should auto-wait on scope exit
+
+        rv = await self.client.query('''
+            SELECT
+                test::Tmp
+            FILTER
+                .tmp = 'Test Auto Wait';
+        ''')
+        self.assertEqual(len(rv), 1)
+
+    async def test_batch_04(self):
+        with self.assertRaises(edgedb.TransactionError):
+            async for bx in self.client._batch():
+                async with bx:
+                    await bx.send_execute('''
+                        INSERT test::Tmp {
+                            tmp := 'Test Atomic'
+                        };
+                    ''')
+                    await bx.send_query_single('SELECT 1/0')
+                    await bx.send_execute('''
+                        INSERT test::Tmp {
+                            tmp := 'Test Atomic'
+                        };
+                    ''')
+
+                    with self.assertRaises(edgedb.DivisionByZeroError):
+                        await bx.wait()
+
+        rv = await self.client.query('''
+            SELECT
+                test::Tmp
+            FILTER
+                .tmp = 'Test Atomic';
+        ''')
+        self.assertEqual(len(rv), 0)
+
+    async def test_batch_05(self):
+        async for bx in self.client._batch():
+            async with bx:
+                # Test alternating queries that need Parse
+                await bx.send_query_single('SELECT 1')
+                await bx.send_query_single('SELECT <int16>$0', 2)
+                await bx.send_query_single('SELECT 3')
+                await bx.send_query_single('SELECT <int32>$0', 4)
+                await bx.send_query_single('SELECT 5')
+                await bx.send_query_single('SELECT <int64>$0', 6)
+                await bx.send_query_single('SELECT 7')
+                self.assertEqual(await bx.wait(), [1, 2, 3, 4, 5, 6, 7])
