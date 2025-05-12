@@ -1605,7 +1605,10 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         name = type_name.name
 
         self_t = self.import_name("typing", "Self")
+        classvar_t = self.import_name("typing", "ClassVar")
         proxymodel_t = self.import_name(BASE_IMPL, "ProxyModel")
+        prop_desc_t = self.import_name(BASE_IMPL, "LinkPropsDescriptor")
+        priv_attr = self.import_name(BASE_IMPL, "PrivateAttr")
 
         if target_aspect is None:
             target_aspect = self.current_aspect
@@ -1681,8 +1684,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                     lprops.append(lprop_line)
 
             self.write()
-            priv_attr = self.import_name(BASE_IMPL, "PrivateAttr")
-
+            self.write(f"__linkprops__: {classvar_t}[{prop_desc_t}[__lprops__]] = {prop_desc_t}()")
             self.write(f"_p__obj__: {target} = {priv_attr}()")
             self.write(f"_p__lprops__: __lprops__ = {priv_attr}()")
 

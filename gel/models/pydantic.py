@@ -46,7 +46,6 @@ from pydantic_core import core_schema as pydantic_schema
 
 from pydantic._internal import _model_construction  # noqa: PLC2701
 from pydantic._internal import _namespace_utils
-import typing_extensions  # noqa: PLC2701
 
 from gel.datatypes import range
 from gel._internal import _typing_eval
@@ -747,11 +746,32 @@ class GelModel(
         return cls
 
 
+class LinkPropsDescriptor(Generic[T_co]):
+    @overload
+    def __get__(self, obj: None, owner: type[Any]) -> type[T_co]: ...
+
+    @overload
+    def __get__(self, obj: object, owner: type[Any] | None = None) -> T_co: ...
+
+    def __get__(
+        self, obj: Any, owner: type[Any] | None = None
+    ) -> T_co | type[T_co]:
+        if obj is None:
+            assert owner is not None
+            return owner.__lprops__  # type: ignore [no-any-return]
+        else:
+            return obj._p__lprops__  # type: ignore [no-any-return]
+
+
 class GelLinkModel(pydantic.BaseModel, metaclass=GelModelMeta):
     model_config = pydantic.ConfigDict(
         validate_assignment=True,
         defer_build=True,
     )
+
+    @classmethod
+    def __descriptor__(cls) -> LinkPropsDescriptor[Self]:
+        return LinkPropsDescriptor()
 
 
 MT = TypeVar("MT", bound=GelModel, covariant=True)
