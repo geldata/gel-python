@@ -1039,7 +1039,12 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         self,
         ops: list[reflection.Operator],
     ) -> None:
-        opmap = defaultdict(lambda: defaultdict(set))
+        opmap: defaultdict[str, defaultdict[str, set[reflection.AnyType]]] = (
+            defaultdict(lambda: defaultdict(set))
+        )
+
+        explicit_right_types = {op.params[1].type.id for op in ops}
+        type_ = self.import_name("builtins", "type")
 
         for op in ops:
             rtype = self.render_callable_sig_type(
@@ -1051,7 +1056,10 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             implicit_casts = self._casts.implicit_casts_to.get(right_type_id)
             union = [right_type]
             if implicit_casts:
-                union.extend(self._types[ic] for ic in implicit_casts)
+                union.extend(
+                    self._types[ic]
+                    for ic in set(implicit_casts) - explicit_right_types
+                )
             if op.py_magic is None:
                 raise AssertionError(f"expected {op} to have py_magic set")
             opmap[op.py_magic][rtype].update(union)
@@ -1063,7 +1071,9 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                 other_type_strs = [self.get_type(m) for m in other_types]
                 other_type_strs.sort()
                 all_other_types.update(other_type_strs)
-                other_type = " | ".join(other_type_strs)
+                other_type = " | ".join(
+                    f"{type_}[{t}]" for t in other_type_strs
+                )
 
                 with self._method_def(
                     meth,
@@ -1076,9 +1086,12 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                 self.write()
 
             if overload:
+                other_union = " | ".join(
+                    sorted(f"{type_}[{t}]" for t in all_other_types)
+                )
                 with self._method_def(
                     meth,
-                    [f"other: {' | '.join(sorted(all_other_types))}"],
+                    [f"other: {other_union}"],
                     " | ".join(sorted(overloads)),
                     line_comment="type: ignore [override]",
                 ):
