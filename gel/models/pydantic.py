@@ -27,7 +27,6 @@ from typing_extensions import (
     Unpack,
 )
 
-import enum
 import functools
 import sys
 import uuid
@@ -45,24 +44,27 @@ from pydantic import field_serializer as field_serializer
 from pydantic_core import core_schema as pydantic_schema
 
 from pydantic._internal import _model_construction  # noqa: PLC2701
-from pydantic._internal import _namespace_utils
+from pydantic._internal import _namespace_utils  # noqa: PLC2701
 
-from gel.datatypes import range
+from gel.datatypes import range as range_t
 from gel._internal import _typing_eval
 from gel._internal import _typing_inspect
 from gel._internal import _typing_parametric as parametric
 from gel._internal import _polyfills
 from gel._internal._hybridmethod import hybridmethod
-from gel._internal._reflection import SchemaPath as SchemaPath
 
 from . import lists
 from . import unsetid
 
 if TYPE_CHECKING:
+    import enum
+
     from collections.abc import (
         Callable,
         Sequence,
     )
+
+    from gel._internal._reflection import SchemaPath as SchemaPath
 
 
 T = TypeVar("T")
@@ -556,11 +558,11 @@ else:
     _RangeMeta = type
 
 
-class Range(range.Range[T], GelPrimitiveType, metaclass=_RangeMeta):
+class Range(range_t.Range[T], GelPrimitiveType, metaclass=_RangeMeta):
     if TYPE_CHECKING:
 
         def __set__(
-            self, obj: Any, value: Range[T] | range.Range[T]
+            self, obj: Any, value: Range[T] | range_t.Range[T]
         ) -> None: ...
 
     @classmethod
@@ -593,7 +595,7 @@ class MultiRange(
         def __set__(
             self,
             obj: Any,
-            value: MultiRange[T] | range.MultiRange[T],
+            value: MultiRange[T] | range_t.MultiRange[T],
         ) -> None: ...
 
     @classmethod
