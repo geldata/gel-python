@@ -76,7 +76,7 @@ FILTER
 FUNCTIONS = """
 WITH
     MODULE schema,
-SELECT Operator {
+SELECT Function {
     id,
     name,
     description := assert_single((

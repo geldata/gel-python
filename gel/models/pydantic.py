@@ -23,6 +23,8 @@ from typing import (
 from typing_extensions import (
     Self,
     TypeAliasType,
+    TypeVarTuple,
+    Unpack,
 )
 
 import enum
@@ -43,8 +45,10 @@ from pydantic import field_serializer as field_serializer
 from pydantic_core import core_schema as pydantic_schema
 
 from pydantic._internal import _model_construction  # noqa: PLC2701
-from pydantic._internal import _namespace_utils  # noqa: PLC2701
+from pydantic._internal import _namespace_utils
+import typing_extensions  # noqa: PLC2701
 
+from gel.datatypes import range
 from gel._internal import _typing_eval
 from gel._internal import _typing_inspect
 from gel._internal import _typing_parametric as parametric
@@ -445,6 +449,7 @@ class AnyTuple(GelPrimitiveType, metaclass=AnyTupleMeta):
 
 
 if TYPE_CHECKING:
+
     class AnyEnumMeta(enum.EnumMeta, GelTypeMeta):
         pass
 else:
@@ -483,6 +488,124 @@ class Array(list[T], GelPrimitiveType, metaclass=_ArrayMeta):
                     list,
                 ),
             )
+        else:
+            return handler.generate_schema(source_type)
+
+
+if TYPE_CHECKING:
+
+    class _TupleMeta(GelTypeMeta, typing._ProtocolMeta):
+        pass
+else:
+    _TupleMeta = type(tuple)
+
+
+Ts = TypeVarTuple("Ts")
+
+
+class Tuple(tuple[Unpack[Ts]], GelPrimitiveType, metaclass=_TupleMeta):
+    __slots__ = ()
+
+    if TYPE_CHECKING:
+
+        def __set__(self, obj: Any, value: Tuple[T] | Sequence[T]) -> None: ...
+
+    @classmethod
+    def __get_pydantic_core_schema__(
+        cls,
+        source_type: Any,
+        handler: pydantic.GetCoreSchemaHandler,
+    ) -> pydantic_core.CoreSchema:
+        if _typing_inspect.is_generic_alias(source_type):
+            args = typing.get_args(source_type)
+            return pydantic_schema.tuple_schema(
+                items_schema=[handler.generate_schema(arg) for arg in args],
+                serialization=pydantic_schema.plain_serializer_function_ser_schema(
+                    tuple,
+                ),
+            )
+        else:
+            return handler.generate_schema(source_type)
+
+
+def _get_range_pydantic_schema(
+    source_type: Any,
+    handler: pydantic.GetCoreSchemaHandler,
+) -> pydantic_schema.ModelFieldsSchema:
+    args = typing.get_args(source_type)
+    item_schema = handler.generate_schema(args[0])
+    opt_item_schema = pydantic_schema.nullable_schema(item_schema)
+    item_field_schema = pydantic_schema.model_field(opt_item_schema)
+    bool_schema = pydantic_schema.bool_schema()
+    bool_field_schema = pydantic_schema.model_field(bool_schema)
+    return pydantic_schema.model_fields_schema(
+        {
+            "lower": item_field_schema,
+            "upper": item_field_schema,
+            "inc_lower": bool_field_schema,
+            "inc_upper": bool_field_schema,
+            "empty": bool_field_schema,
+        }
+    )
+
+
+if TYPE_CHECKING:
+
+    class _RangeMeta(GelTypeMeta):
+        pass
+else:
+    _RangeMeta = type
+
+
+class Range(range.Range[T], GelPrimitiveType, metaclass=_RangeMeta):
+    if TYPE_CHECKING:
+
+        def __set__(
+            self, obj: Any, value: Range[T] | range.Range[T]
+        ) -> None: ...
+
+    @classmethod
+    def __get_pydantic_core_schema__(
+        cls,
+        source_type: Any,
+        handler: pydantic.GetCoreSchemaHandler,
+    ) -> pydantic_core.CoreSchema:
+        if _typing_inspect.is_generic_alias(source_type):
+            return _get_range_pydantic_schema(source_type, handler)
+        else:
+            return handler.generate_schema(source_type)
+
+
+if TYPE_CHECKING:
+
+    class _MultiRangeMeta(GelTypeMeta):
+        pass
+else:
+    _MultiRangeMeta = type
+
+
+class MultiRange(
+    GelPrimitiveType,
+    Generic[T],
+    metaclass=_MultiRangeMeta,
+):
+    if TYPE_CHECKING:
+
+        def __set__(
+            self,
+            obj: Any,
+            value: MultiRange[T] | range.MultiRange[T],
+        ) -> None: ...
+
+    @classmethod
+    def __get_pydantic_core_schema__(
+        cls,
+        source_type: Any,
+        handler: pydantic.GetCoreSchemaHandler,
+    ) -> pydantic_core.CoreSchema:
+        if _typing_inspect.is_generic_alias(source_type):
+            range_schema = _get_range_pydantic_schema(source_type, handler)
+            return pydantic_schema.list_schema(range_schema)
         else:
             return handler.generate_schema(source_type)
 

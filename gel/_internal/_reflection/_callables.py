@@ -18,7 +18,7 @@ class CallableParam:
     type: _types.TypeRef
     kind: _enums.CallableParamKind
     typemod: _enums.TypeModifier
-    default: str
+    default: str | None
 
 
 @dataclasses.dataclass(frozen=True, kw_only=True)

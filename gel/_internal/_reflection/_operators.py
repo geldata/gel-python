@@ -21,14 +21,21 @@ from gel._internal import _dataclass_extras
 
 from . import _enums
 from . import _query
-from ._callables import Callable
+from . import _types
+from ._callables import Callable, CallableParam
 
 
 @dataclasses.dataclass(frozen=True, kw_only=True)
 class Operator(Callable):
+    id: uuid.UUID
+    name: str
+    description: str
     suggested_ident: str
     py_magic: str | None = None
     operator_kind: _enums.OperatorKind
+    return_type: _types.TypeRef
+    return_typemod: _enums.TypeModifier
+    params: list[CallableParam]
 
 
 OperatorMap = TypeAliasType(

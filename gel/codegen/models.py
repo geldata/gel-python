@@ -16,6 +16,7 @@ import collections
 import enum
 import graphlib
 import functools
+import keyword
 import logging
 import pathlib
 import sys
@@ -141,7 +142,7 @@ class SchemaGenerator:
         self._casts = reflection.fetch_casts(self._client, this_part)
         self._operators = reflection.fetch_operators(self._client, this_part)
         these_funcs = reflection.fetch_functions(self._client, this_part)
-        self._funcs = these_funcs
+        self._functions = these_funcs
 
         if self._schema_part is not std_part:
             std_types = reflection.fetch_types(self._client, std_part)
@@ -150,7 +151,7 @@ class SchemaGenerator:
             self._casts = self._casts.chain(std_casts)
             std_operators = reflection.fetch_operators(self._client, std_part)
             self._operators = self._operators.chain(std_operators)
-            self._functions += reflection.fetch_functions(
+            self._functions = these_funcs + reflection.fetch_functions(
                 self._client, std_part
             )
 
@@ -539,15 +540,47 @@ class BaseGeneratedModule:
             )
             return f"{arr}[{elem_type}]"
 
-        if reflection.is_pseudo_type(stype):
+        elif reflection.is_tuple_type(stype):
+            tup = self.import_name(BASE_IMPL, "Tuple")
+            elem_types = [
+                self.get_type(
+                    self._types[elem.type_id],
+                    import_time=import_time,
+                    aspect=aspect,
+                )
+                for elem in stype.tuple_elements
+            ]
+            return f"{tup}[{', '.join(elem_types)}]"
+
+        elif reflection.is_range_type(stype):
+            rang = self.import_name(BASE_IMPL, "Range")
+            elem_type = self.get_type(
+                self._types[stype.range_element_id],
+                import_time=import_time,
+                aspect=aspect,
+            )
+            return f"{rang}[{elem_type}]"
+
+        elif reflection.is_multi_range_type(stype):
+            rang = self.import_name(BASE_IMPL, "MultiRange")
+            elem_type = self.get_type(
+                self._types[stype.multirange_element_id],
+                import_time=import_time,
+                aspect=aspect,
+            )
+            return f"{rang}[{elem_type}]"
+
+        elif reflection.is_pseudo_type(stype):
             if stype.name == "anyobject":
                 return self.import_name(BASE_IMPL, "GelModel")
             elif stype.name == "anytuple":
                 return f"tuple[{self.import_name('typing', 'Any')}, ...]"
+            elif stype.name == "anytype":
+                return self.import_name(BASE_IMPL, "GelType")
             else:
                 raise AssertionError(f"unsupported pseudo-type: {stype.name}")
 
-        if reflection.is_named_tuple_type(stype):
+        elif reflection.is_named_tuple_type(stype):
             mod = "__types__"
             if stype.builtin:
                 mod = f"std::{mod}"
@@ -557,10 +590,12 @@ class BaseGeneratedModule:
             # Named tuples are always imported from __types__,
             # which has only the MAIN aspect.
             aspect = ModuleAspect.MAIN
+
         else:
             type_name = stype.name
             if import_directly is None:
                 import_directly = False
+
         type_path = reflection.parse_name(type_name)
 
         if (
@@ -623,10 +658,12 @@ class BaseGeneratedModule:
         line_length = len(output_string) + len(self.current_indentation())
         if line_length > MAX_LINE_LENGTH:
             list_string = ",\n    ".join(values)
+            if list_string:
+                list_string += ","
             if first_line_comment:
-                list_string = f"  # {first_line_comment}\n    {list_string},\n"
+                list_string = f"  # {first_line_comment}\n    {list_string}\n"
             else:
-                list_string = f"\n    {list_string},\n"
+                list_string = f"\n    {list_string}\n"
             output_string = tpl.format(list=list_string)
         elif first_line_comment:
             output_string += f"  # {first_line_comment}"
@@ -1024,13 +1061,22 @@ class GeneratedSchemaModule(BaseGeneratedModule):
     def render_callable_sig_type(
         self,
         tp: reflection.AnyType,
-        _mod: reflection.TypeModifier,
+        typemod: reflection.TypeModifier,
+        default: str | None = None,
     ) -> str:
         result = self.get_type(tp, import_time=ImportTime.typecheck)
         type_ = self.import_name(
             "builtins", "type", import_time=ImportTime.typecheck
         )
         result = f"{type_}[{result}]"
+
+        if typemod == reflection.TypeModifier.Optional:
+            result = f"{result} | None"
+        if default is not None:
+            unspec_t = self.import_name(BASE_IMPL, "UnspecifiedType")
+            unspec = self.import_name(BASE_IMPL, "Unspecified")
+            result = f"{result} | {unspec_t} = {unspec}"
+
         return result
 
     def write_unary_operator_overloads(
@@ -1727,19 +1773,89 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                 self.write("pass")
                 self.write()
 
-    def write_functions(self, functions: dict[str, reflection.Function]) -> None:
+    def write_functions(
+        self, functions: dict[str, reflection.Function]
+    ) -> None:
+        param_map: defaultdict[str, defaultdict[str, set[uuid.UUID]]] = (
+            defaultdict(lambda: defaultdict(set))
+        )
+        funcmap: defaultdict[str, list[reflection.Function]] = defaultdict(
+            list
+        )
         for function in functions.values():
-            self._write_function(function)
+            for param in function.params:
+                param_map[function.name][param.name].add(param.type.id)
+            funcmap[function.name].append(function)
 
-    def _write_function(self, function: reflection.Function) -> None:
+        for fname, overloads in funcmap.items():
+            self._write_function(fname, overloads, param_map)
+
+    def _write_function(
+        self,
+        fname: str,
+        overloads: list[reflection.Function],
+        param_map: defaultdict[str, defaultdict[str, set[uuid.UUID]]],
+    ) -> None:
+        if len(overloads) > 1:
+            for overload in overloads:
+                self._write_function_overload(
+                    overload, param_map, mark_overload=True)
+        else:
+            self._write_function_overload(
+                overloads[0], param_map, mark_overload=False)
+
+    def _write_function_overload(
+        self,
+        function: reflection.Function,
+        param_map: defaultdict[str, defaultdict[str, set[uuid.UUID]]],
+        *,
+        mark_overload: bool,
+    ) -> None:
         name = reflection.parse_name(function.name)
         args = []
         kwargs = []
         variadic = None
         for param in function.params:
-            pt = self.get_type()
+            pt = self.render_callable_sig_type(
+                self._types[param.type.id],
+                param.typemod,
+                param.default,
+            )
+            param_decl = f"{param.name}: {pt}"
             if param.kind == reflection.CallableParamKind.Positional:
-                pass
+                args.append(param_decl)
+            elif param.kind == reflection.CallableParamKind.Variadic:
+                if variadic is not None:
+                    raise AssertionError(
+                        f"multiple variadict parameters declared "
+                        f"in function {name}"
+                    )
+                variadic = param_decl
+            elif param.kind == reflection.CallableParamKind.NamedOnly:
+                kwargs.append(param_decl)
+            else:
+                raise AssertionError(
+                    f"unexpected parameter kind in {name}: {param.kind}"
+                )
+
+        if variadic is None and kwargs:
+            args.append("*")
+        args.extend(kwargs)
+
+        rtype = self.render_callable_sig_type(
+            self._types[function.return_type.id],
+            function.return_typemod,
+        )
+
+        fname = name.name
+        if keyword.iskeyword(fname):
+            fname += "_"
+
+        with self._func_def(fname, args, rtype, overload=mark_overload):
+            # XXX
+            self.write("return None  # type: ignore [return-value]")
+
+        self.write()
 
     def _get_pointer_origins(
         self,

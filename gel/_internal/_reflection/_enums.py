@@ -67,6 +67,6 @@ class OperatorKind(StrEnum):
 
 
 class CallableParamKind(StrEnum):
-    Variadic = "Variadic"
-    NamedOnly = "NamedOnly"
-    Positional = "Positional"
+    Variadic = "VariadicParam"
+    NamedOnly = "NamedOnlyParam"
+    Positional = "PositionalParam"
