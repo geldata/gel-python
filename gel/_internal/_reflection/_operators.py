@@ -20,30 +20,15 @@ from gel import abstract
 from gel._internal import _dataclass_extras
 
 from . import _enums
-from . import _types
 from . import _query
+from ._callables import Callable
 
 
 @dataclasses.dataclass(frozen=True, kw_only=True)
-class CallableParam:
-    name: str
-    type: _types.TypeRef
-    kind: _enums.CallableParamKind
-    typemod: _enums.TypeModifier
-    default: str
-
-
-@dataclasses.dataclass(frozen=True, kw_only=True)
-class Operator:
-    id: uuid.UUID
-    name: str
+class Operator(Callable):
     suggested_ident: str
     py_magic: str | None = None
-    description: str
     operator_kind: _enums.OperatorKind
-    return_type: _types.TypeRef
-    return_typemod: _enums.TypeModifier
-    params: list[CallableParam]
 
 
 OperatorMap = TypeAliasType(

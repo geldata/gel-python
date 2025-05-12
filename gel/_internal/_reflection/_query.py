@@ -73,6 +73,38 @@ FILTER
 """
 
 
+FUNCTIONS = """
+WITH
+    MODULE schema,
+SELECT Operator {
+    id,
+    name,
+    description := assert_single((
+        WITH
+            tid := .id,
+        SELECT DETACHED Operator {
+            description := (SELECT .annotations {
+                value := materialized(@value)
+            } FILTER .name = "std::description"),
+        } FILTER .id = tid
+    ).description.value),
+    return_type,
+    return_typemod,
+    params: {
+        name,
+        type,
+        kind,
+        typemod,
+        default,
+    } ORDER BY @index,
+    preserves_optionality,
+}
+FILTER
+    .builtin = <bool>$builtin
+    AND NOT .internal
+"""
+
+
 TYPES = """
 WITH
     MODULE schema,

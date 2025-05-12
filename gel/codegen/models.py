@@ -61,6 +61,7 @@ class IntrospectedModule(TypedDict):
     imports: dict[str, str]
     object_types: dict[str, reflection.ObjectType]
     scalar_types: dict[str, reflection.ScalarType]
+    functions: dict[str, reflection.Function]
 
 
 class ModelsGenerator(base.Generator):
@@ -99,6 +100,7 @@ class SchemaGenerator:
         self._types: Mapping[uuid.UUID, reflection.AnyType] = {}
         self._casts: reflection.CastMatrix
         self._operators: reflection.OperatorMatrix
+        self._functions: list[reflection.Function]
         self._named_tuples: dict[uuid.UUID, reflection.NamedTupleType] = {}
         self._wrapped_types: set[str] = set()
 
@@ -127,6 +129,7 @@ class SchemaGenerator:
             self._modules[reflection.parse_name(mod)] = {
                 "scalar_types": {},
                 "object_types": {},
+                "functions": {},
                 "imports": {},
             }
 
@@ -134,19 +137,24 @@ class SchemaGenerator:
         std_part = reflection.SchemaPart.STD
 
         self._types = reflection.fetch_types(self._client, this_part)
-        refl_types = self._types
+        these_types = self._types
         self._casts = reflection.fetch_casts(self._client, this_part)
         self._operators = reflection.fetch_operators(self._client, this_part)
+        these_funcs = reflection.fetch_functions(self._client, this_part)
+        self._funcs = these_funcs
 
         if self._schema_part is not std_part:
             std_types = reflection.fetch_types(self._client, std_part)
-            self._types = collections.ChainMap(std_types, refl_types)
+            self._types = collections.ChainMap(std_types, these_types)
             std_casts = reflection.fetch_casts(self._client, std_part)
             self._casts = self._casts.chain(std_casts)
             std_operators = reflection.fetch_operators(self._client, std_part)
             self._operators = self._operators.chain(std_operators)
+            self._functions += reflection.fetch_functions(
+                self._client, std_part
+            )
 
-        for t in refl_types.values():
+        for t in these_types.values():
             if reflection.is_object_type(t):
                 name = reflection.parse_name(t.name)
                 self._modules[name.parent]["object_types"][name.name] = t
@@ -155,6 +163,10 @@ class SchemaGenerator:
                 self._modules[name.parent]["scalar_types"][name.name] = t
             elif reflection.is_named_tuple_type(t):
                 self._named_tuples[t.id] = t
+
+        for f in these_funcs:
+            name = reflection.parse_name(f.name)
+            self._modules[name.parent]["functions"][name.name] = f
 
     def get_comment_preamble(self) -> str:
         return COMMENT
@@ -775,6 +787,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
     def process(self, mod: IntrospectedModule) -> None:
         self.write_scalar_types(mod["scalar_types"])
         self.write_object_types(mod["object_types"])
+        self.write_functions(mod["functions"])
 
     def write_description(
         self,
@@ -1713,6 +1726,20 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             else:
                 self.write("pass")
                 self.write()
+
+    def write_functions(self, functions: dict[str, reflection.Function]) -> None:
+        for function in functions.values():
+            self._write_function(function)
+
+    def _write_function(self, function: reflection.Function) -> None:
+        name = reflection.parse_name(function.name)
+        args = []
+        kwargs = []
+        variadic = None
+        for param in function.params:
+            pt = self.get_type()
+            if param.kind == reflection.CallableParamKind.Positional:
+                pass
 
     def _get_pointer_origins(
         self,

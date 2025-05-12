@@ -3,22 +3,28 @@
 # SPDX-FileCopyrightText: Copyright Gel Data Inc. and the contributors.
 
 from ._enums import (
+    CallableParamKind,
     Cardinality,
     OperatorKind,
     PointerKind,
+    SchemaPart,
     TypeKind,
     TypeModifier,
-    SchemaPart,
 )
 
 from ._support import (
-    parse_name,
     SchemaPath,
+    parse_name,
 )
 
 from ._casts import (
     CastMatrix,
     fetch_casts,
+)
+
+from ._functions import (
+    Function,
+    fetch_functions,
 )
 
 from ._operators import (
@@ -28,7 +34,6 @@ from ._operators import (
 )
 
 from ._types import (
-    Type,
     AnyType,
     ArrayType,
     InheritingType,
@@ -38,19 +43,20 @@ from ._types import (
     PrimitiveType,
     ScalarType,
     TupleType,
+    Type,
     fetch_types,
     is_array_type,
+    is_link,
     is_multi_range_type,
     is_named_tuple_type,
     is_non_enum_scalar_type,
     is_object_type,
-    is_pseudo_type,
     is_primitive_type,
+    is_property,
+    is_pseudo_type,
     is_range_type,
     is_scalar_type,
     is_tuple_type,
-    is_link,
-    is_property,
 )
 
 from ._modules import (
@@ -58,11 +64,12 @@ from ._modules import (
 )
 
 __all__ = (
-    "Type",
     "AnyType",
     "ArrayType",
+    "CallableParamKind",
     "Cardinality",
     "CastMatrix",
+    "Function",
     "InheritingType",
     "NamedTupleType",
     "ObjectType",
@@ -76,23 +83,25 @@ __all__ = (
     "SchemaPart",
     "SchemaPath",
     "TupleType",
+    "Type",
     "TypeKind",
     "TypeModifier",
-    "parse_name",
-    "fetch_operators",
     "fetch_casts",
+    "fetch_functions",
     "fetch_modules",
+    "fetch_operators",
     "fetch_types",
     "is_array_type",
+    "is_link",
     "is_multi_range_type",
     "is_named_tuple_type",
     "is_non_enum_scalar_type",
     "is_object_type",
-    "is_pseudo_type",
     "is_primitive_type",
+    "is_property",
+    "is_pseudo_type",
     "is_range_type",
     "is_scalar_type",
     "is_tuple_type",
-    "is_link",
-    "is_property", "INFIX_OPERATOR_MAP", "PREFIX_OPERATOR_MAP",
+    "parse_name",
 )
