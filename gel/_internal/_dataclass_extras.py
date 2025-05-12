@@ -30,6 +30,7 @@ def coerce_to_dataclass(cls: type[T], obj: Any) -> T:
 
         if value is not None:
             if dataclasses.is_dataclass(field_type):
+                assert isinstance(field_type, type)
                 value = coerce_to_dataclass(field_type, value)
             elif _typing_inspect.is_generic_alias(field_type):
                 origin = typing.get_origin(field_type)

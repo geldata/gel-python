@@ -189,7 +189,7 @@ def _new_imports_map() -> _Imports:
     return defaultdict(lambda: defaultdict(lambda: defaultdict(set)))
 
 
-def _is_all_dots(s) -> bool:
+def _is_all_dots(s: str) -> bool:
     return bool(s) and all(c == "." for c in s)
 
 
@@ -313,7 +313,7 @@ class GeneratedModule:
         suggested_module_alias: str | None = None,
         import_maps: _Imports,
     ) -> tuple[str, str]:
-        imported_names = ()
+        imported_names: tuple[str, ...] = ()
         imported_aliases = {}
         imported_module = module
         if _is_all_dots(module):
