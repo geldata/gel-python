@@ -27,6 +27,8 @@ from typing_extensions import (
     Unpack,
 )
 
+from types import GenericAlias
+
 import functools
 import operator
 import sys
@@ -150,6 +152,13 @@ OP_OVERLOADS = frozenset(
 )
 
 
+PROXIED_DUNDERS = frozenset(
+    {
+        "__linkprops__",
+    }
+)
+
+
 def _module_ns_of(obj: object) -> dict[str, Any]:
     """Return the namespace of the module where *obj* is defined."""
     module_name = getattr(obj, "__module__", None)
@@ -161,7 +170,7 @@ def _module_ns_of(obj: object) -> dict[str, Any]:
     return {}
 
 
-def _type_repr(t: type) -> str:
+def _type_repr(t: type | GenericAlias) -> str:
     if isinstance(t, type):
         if t.__module__ == "builtins":
             return t.__qualname__
@@ -197,8 +206,14 @@ class _BaseAliasMeta(type):
 
 
 class _BaseAlias(metaclass=_BaseAliasMeta):
-    def __init__(self, origin: type) -> None:
-        self.__gel_origin__ = origin
+    def __init__(self, origin: type | GenericAlias) -> None:
+        if _typing_inspect.is_generic_alias(origin):
+            origin_origin = typing.get_origin(origin)
+            assert isinstance(origin_origin, type)
+            self.__gel_origin__ = origin_origin
+        else:
+            assert isinstance(origin, type)
+            self.__gel_origin__ = origin
 
     def __call__(self, *args: Any, **kwargs: Any) -> Any:
         return self.__gel_origin__(*args, **kwargs)
@@ -217,12 +232,14 @@ class _BaseAlias(metaclass=_BaseAliasMeta):
 
 
 class _PathAlias(_BaseAlias):
-    def __init__(self, origin: type, metadata: Path) -> None:
+    def __init__(self, origin: type | GenericAlias, metadata: Path) -> None:
         super().__init__(origin)
         self.__gel_metadata__ = metadata
 
     def __getattr__(self, attr: str) -> Any:
-        if "__gel_origin__" in self.__dict__ and not _is_dunder(attr):
+        if "__gel_origin__" in self.__dict__ and (
+            not _is_dunder(attr) or attr in PROXIED_DUNDERS
+        ):
             origin = self.__gel_origin__
             descriptor = _get_field_descriptor(origin, attr)
             if descriptor is not None:
@@ -272,7 +289,7 @@ def AnnotatedPath(origin: type, metadata: Path) -> _PathAlias:  # noqa: N802
 
 
 class _ExprAlias(_BaseAlias):
-    def __init__(self, origin: type, metadata: Expr) -> None:
+    def __init__(self, origin: type | GenericAlias, metadata: Expr) -> None:
         super().__init__(origin)
         self.__gel_metadata__ = metadata
 
@@ -288,7 +305,7 @@ class _ExprAlias(_BaseAlias):
         return self.__gel_metadata__.__edgeql__()
 
 
-def AnnotatedExpr(origin: type, metadata: Expr) -> _ExprAlias:  # noqa: N802
+def AnnotatedExpr(origin: type | GenericAlias, metadata: Expr) -> _ExprAlias:  # noqa: N802
     return _ExprAlias(origin, metadata)
 
 
@@ -454,7 +471,7 @@ class Path(Expr):
 @dataclasses.dataclass(kw_only=True)
 class PrefixOp(Expr):
     op: str
-    expr: Expr
+    expr: Any
 
     def __edgeql__(self) -> str:
         return f"{self.op} {edgeql(self.expr)}"
@@ -462,8 +479,8 @@ class PrefixOp(Expr):
 
 @dataclasses.dataclass(kw_only=True)
 class InfixOp(Expr):
-    lexpr: Expr
-    rexpr: Expr
+    lexpr: Any
+    rexpr: Any
     op: str
 
     def __edgeql__(self) -> str:
@@ -473,8 +490,8 @@ class InfixOp(Expr):
 @dataclasses.dataclass(frozen=True, kw_only=True)
 class FuncCall(Expr):
     fname: str
-    args: list[Expr]
-    kwargs: dict[str, Expr]
+    args: list[Any]
+    kwargs: dict[str, Any]
 
     def __edgeql__(self) -> str:
         args = ", ".join(

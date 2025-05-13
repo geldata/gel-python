@@ -22,7 +22,7 @@ def is_classvar(t: Any) -> bool:
     return t is ClassVar or (is_generic_alias(t) and get_origin(t) is ClassVar)
 
 
-def is_generic_alias(t: Any) -> bool:
+def is_generic_alias(t: Any) -> TypeGuard[GenericAlias]:
     return isinstance(t, (GenericAlias, _GenericAlias))
 
 
