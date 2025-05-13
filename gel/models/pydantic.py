@@ -28,7 +28,6 @@ from typing_extensions import (
 )
 
 import functools
-import operator
 import sys
 import uuid
 import warnings
@@ -67,8 +66,6 @@ if TYPE_CHECKING:
         Callable,
         Sequence,
     )
-
-    from types import GenericAlias
 
 
 T = TypeVar("T")
@@ -907,14 +904,14 @@ class ProxyModel(GelModel, Generic[MT]):
         object.__setattr__(self, "_p__obj__", obj)
 
     def __getattribute__(self, name: str) -> Any:
-        model_fields = object.__getattribute__(self, "model_fields")
+        model_fields = type(self).__proxy_of__.model_fields
         if name in model_fields or name == "_p__id":
             base = object.__getattribute__(self, "_p__obj__")
             return getattr(base, name)
         return super().__getattribute__(name)
 
     def __setattr__(self, name: str, value: Any) -> None:
-        model_fields = object.__getattribute__(self, "model_fields")
+        model_fields = type(self).__proxy_of__.model_fields
         if name in model_fields:
             # writing to a field: mutate the wrapped model
             base = object.__getattribute__(self, "_p__obj__")
