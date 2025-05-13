@@ -179,6 +179,20 @@ cdef class ExecuteContext:
             self.unsafe_isolation_dangers,
         )
 
+    cdef inline invalidate_cache(self):
+        key = (
+            self.query,
+            self.output_format,
+            self.implicit_limit,
+            self.inline_typenames,
+            self.inline_typeids,
+            self.expect_one,
+        )
+        try:
+            del self.qc[key]
+        except KeyError:
+            pass
+
 
 cdef prefers_repeatable_read(state):
     return (
@@ -636,7 +650,7 @@ cdef class SansIOProtocol:
             WriteBuffer packet, buf, params
             char mtype
             object result
-            ExecuteContext ctx
+            ExecuteContext ctx, c
 
         if not ctxs:
             return []
@@ -723,6 +737,20 @@ cdef class SansIOProtocol:
                                 )
                             except errors.QueryArgumentError as ex:
                                 exc = ex
+                            else:
+                                # Now we know for sure that the new codec can
+                                # encode the same arguments, let's hint the
+                                # caller to retry as a special case.
+                                exc.tags = exc.tags.union(
+                                    {errors.SHOULD_RETRY}
+                                )
+
+                                # If we may retry this batch, invalidate codec
+                                # cache for all queries except the current one
+                                # because we just updated its input codec
+                                for c in ctxs:
+                                    if c is not ctx:
+                                        c.invalidate_cache()
                             finally:
                                 buf = None
                     else:

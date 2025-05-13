@@ -49,9 +49,13 @@ class TestAsyncQuery(tb.AsyncQueryTestCase):
         CREATE SCALAR TYPE MyEnum EXTENDING enum<"A", "B">;
 
         CREATE SCALAR TYPE test::MyType EXTENDING int32;
+        CREATE SCALAR TYPE test::MyType2 EXTENDING int64;
+        CREATE SCALAR TYPE test::MyType3 EXTENDING int16;
     '''
 
     TEARDOWN = '''
+        DROP SCALAR TYPE test::MyType3;
+        DROP SCALAR TYPE test::MyType2;
         DROP SCALAR TYPE test::MyType;
         DROP TYPE test::Tmp;
     '''
@@ -1303,3 +1307,31 @@ class TestAsyncQuery(tb.AsyncQueryTestCase):
                 await bx.send_query_single('SELECT <int64>$0', 6)
                 await bx.send_query_single('SELECT 7')
                 self.assertEqual(await bx.wait(), [1, 2, 3, 4, 5, 6, 7])
+
+    async def test_batch_06(self):
+        # Cache the input type descriptors first
+        val = await self.client.query_single("SELECT <test::MyType>$0", 42)
+        self.assertEqual(val, 42)
+        val = await self.client.query_single("SELECT <test::MyType2>$0", 42)
+        self.assertEqual(val, 42)
+        val = await self.client.query_single("SELECT <test::MyType3>$0", 42)
+        self.assertEqual(val, 42)
+
+        # Modify the schema to outdate the previous type descriptors
+        await self.client.execute("""
+            DROP SCALAR TYPE test::MyType;
+            DROP SCALAR TYPE test::MyType2;
+            DROP SCALAR TYPE test::MyType3;
+            CREATE SCALAR TYPE test::MyType EXTENDING std::int64;
+            CREATE SCALAR TYPE test::MyType2 EXTENDING std::int16;
+            CREATE SCALAR TYPE test::MyType3 EXTENDING std::int32;
+        """)
+
+        # We should retry only once and succeed here
+        c = self.client.with_retry_options(edgedb.RetryOptions(attempts=2))
+        async for bx in c._batch():
+            async with bx:
+                await bx.send_query_single('SELECT <test::MyType>$0', 42)
+                await bx.send_query_single('SELECT <test::MyType2>$0', 42)
+                await bx.send_query_single('SELECT <test::MyType3>$0', 42)
+                self.assertEqual(await bx.wait(), [42, 42, 42])

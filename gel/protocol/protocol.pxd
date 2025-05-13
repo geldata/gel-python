@@ -103,6 +103,7 @@ cdef class ExecuteContext:
     cdef inline bint has_na_cardinality(self)
     cdef bint load_from_cache(self)
     cdef inline store_to_cache(self)
+    cdef inline invalidate_cache(self)
 
 
 cdef class SansIOProtocol:
