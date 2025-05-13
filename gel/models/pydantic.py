@@ -170,7 +170,7 @@ def _module_ns_of(obj: object) -> dict[str, Any]:
     return {}
 
 
-def _type_repr(t: type | GenericAlias) -> str:
+def _type_repr(t: type[Any]) -> str:
     if isinstance(t, type):
         if t.__module__ == "builtins":
             return t.__qualname__
@@ -206,14 +206,8 @@ class _BaseAliasMeta(type):
 
 
 class _BaseAlias(metaclass=_BaseAliasMeta):
-    def __init__(self, origin: type | GenericAlias) -> None:
-        if _typing_inspect.is_generic_alias(origin):
-            origin_origin = typing.get_origin(origin)
-            assert isinstance(origin_origin, type)
-            self.__gel_origin__ = origin_origin
-        else:
-            assert isinstance(origin, type)
-            self.__gel_origin__ = origin
+    def __init__(self, origin: type[GelType]) -> None:
+        self.__gel_origin__ = origin
 
     def __call__(self, *args: Any, **kwargs: Any) -> Any:
         return self.__gel_origin__(*args, **kwargs)
@@ -232,7 +226,7 @@ class _BaseAlias(metaclass=_BaseAliasMeta):
 
 
 class _PathAlias(_BaseAlias):
-    def __init__(self, origin: type | GenericAlias, metadata: Path) -> None:
+    def __init__(self, origin: type[GelType], metadata: Path) -> None:
         super().__init__(origin)
         self.__gel_metadata__ = metadata
 
@@ -288,8 +282,10 @@ class _PathAlias(_BaseAlias):
 
         expr = op_impl(this_operand, other_operand)
         assert isinstance(expr, _ExprAlias)
-        expr.__gel_metadata__.lexpr = self
-        expr.__gel_metadata__.rexpr = operand
+        metadata = expr.__gel_metadata__
+        assert isinstance(metadata, InfixOp)
+        metadata.lexpr = self
+        metadata.rexpr = operand
         return expr
 
 
@@ -298,7 +294,7 @@ def AnnotatedPath(origin: type, metadata: Path) -> _PathAlias:  # noqa: N802
 
 
 class _ExprAlias(_BaseAlias):
-    def __init__(self, origin: type | GenericAlias, metadata: Expr) -> None:
+    def __init__(self, origin: type[GelType], metadata: Expr) -> None:
         super().__init__(origin)
         self.__gel_metadata__ = metadata
 
@@ -314,7 +310,7 @@ class _ExprAlias(_BaseAlias):
         return self.__gel_metadata__.__edgeql__()
 
 
-def AnnotatedExpr(origin: type | GenericAlias, metadata: Expr) -> _ExprAlias:  # noqa: N802
+def AnnotatedExpr(origin: type[GelType], metadata: Expr) -> _ExprAlias:  # noqa: N802
     return _ExprAlias(origin, metadata)
 
 

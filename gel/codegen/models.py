@@ -1144,6 +1144,20 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         type_ = self.import_name("builtins", "type", import_time=import_time)
         return f"{type_}[{result}]"
 
+    def render_callable_runtime_return_type(
+        self,
+        tp: reflection.AnyType,
+        typemod: reflection.TypeModifier,
+        *,
+        default: str | None = None,
+        import_time: ImportTime = ImportTime.late_runtime,
+    ) -> str:
+        return self.get_type(
+            tp,
+            import_time=import_time,
+            allow_typevars=False,
+        )
+
     def render_callable_sig_type(
         self,
         tp: reflection.AnyType,
@@ -1188,11 +1202,9 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             rtype = self.render_callable_return_type(
                 self._types[op.return_type.id], op.return_typemod
             )
-            rtype_rt = self.render_callable_return_type(
+            rtype_rt = self.render_callable_runtime_return_type(
                 self._types[op.return_type.id],
                 op.return_typemod,
-                import_time=ImportTime.late_runtime,
-                allow_typevars=False,
             )
             with self._method_def(
                 op.py_magic,
@@ -1231,11 +1243,9 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                 self._types[op.return_type.id],
                 op.return_typemod,
             )
-            rtype_rt = self.render_callable_return_type(
+            rtype_rt = self.render_callable_runtime_return_type(
                 self._types[op.return_type.id],
                 op.return_typemod,
-                import_time=ImportTime.late_runtime,
-                allow_typevars=False,
             )
             right_param = op.params[1]
             right_type_id = right_param.type.id
@@ -2023,11 +2033,9 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             function.return_typemod,
         )
 
-        rtype_rt = self.render_callable_return_type(
+        rtype_rt = self.render_callable_runtime_return_type(
             self._types[function.return_type.id],
             function.return_typemod,
-            import_time=ImportTime.late_runtime,
-            allow_typevars=False,
         )
 
         fname = name.name
@@ -2072,10 +2080,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                 with self.indented():
                     self.write(f'fname="{function.name}",')
                     self.write(
-                        self.format_list(
-                            f"args=[v for v in args if v is not {unsp}],",
-                            arg_names,
-                        )
+                        f"args=[v for v in args if v is not {unsp}],",
                     )
                     self.write(
                         f"kwargs={{n: v for n, v in kw.items() "
