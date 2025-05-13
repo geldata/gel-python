@@ -599,6 +599,13 @@ cdef class SansIOProtocol:
                                 )
                             except errors.QueryArgumentError as ex:
                                 exc = ex
+                            else:
+                                # Now we know for sure that the new codec can
+                                # encode the same arguments, let's hint the
+                                # caller to retry as a special case.
+                                exc.tags = exc.tags.union(
+                                    {errors.SHOULD_RETRY}
+                                )
                             finally:
                                 buf = None
                     else:
