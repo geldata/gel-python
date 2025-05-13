@@ -47,9 +47,12 @@ class TestSyncQuery(tb.SyncQueryTestCase):
         CREATE TYPE test::TmpConflictChild extending test::TmpConflict;
 
         CREATE SCALAR TYPE MyEnum EXTENDING enum<"A", "B">;
+
+        CREATE SCALAR TYPE test::MyType EXTENDING int32;
     '''
 
     TEARDOWN = '''
+        DROP SCALAR TYPE test::MyType;
         DROP TYPE test::Tmp;
         DROP TYPE test::TmpConflictChild;
         DROP TYPE test::TmpConflict;
@@ -992,3 +995,47 @@ class TestSyncQuery(tb.SyncQueryTestCase):
                 }
             ''')
             self.assertEqual(str(res.level), 'RepeatableRead')
+
+    def test_retry_mismatch_input_typedesc(self):
+        # Cache the input type descriptor first
+        val = self.client.query_single("SELECT <test::MyType>$0", 42)
+        self.assertEqual(val, 42)
+
+        # Modify the schema to outdate the previous type descriptor
+        self.client.execute("""
+            DROP SCALAR TYPE test::MyType;
+            CREATE SCALAR TYPE test::MyType EXTENDING std::int64;
+        """)
+
+        # Run again with the outdated type descriptor. The server shall send a
+        # ParameterTypeMismatchError following a CommandDataDescription message
+        # with an updated type descriptor. Because we can re-encode `42` as
+        # `int64`, the client should just retry and work fine.
+        val = self.client.query_single("SELECT <test::MyType>$0", 42)
+        self.assertEqual(val, 42)
+
+        # Modify the schema again to an incompatible type
+        self.client.execute("""
+            DROP SCALAR TYPE test::MyType;
+            CREATE SCALAR TYPE test::MyType EXTENDING std::str;
+        """)
+
+        # The cached codec doesn't know about the change, so the client cannot
+        # encode this string yet:
+        with self.assertRaisesRegex(
+            edgedb.InvalidArgumentError, 'expected an int'
+        ):
+            self.client.query_single("SELECT <test::MyType>$0", "foo")
+
+        # Try `42` again. The cached codec encodes properly, but the server
+        # sends a ParameterTypeMismatchError due to mismatching input type, and
+        # we shall receive the new string codec. Because we cannot re-encode
+        # `42` as str, the client shouldn't retry but raise a translated error.
+        with self.assertRaisesRegex(
+            edgedb.QueryArgumentError, 'expected str, got int'
+        ):
+            self.client.query_single("SELECT <test::MyType>$0", 42)
+
+        # At last, verify that a string gets encoded properly
+        val = self.client.query_single("SELECT <test::MyType>$0", "foo")
+        self.assertEqual(val, 'foo')
