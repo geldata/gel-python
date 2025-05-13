@@ -272,6 +272,26 @@ class BaseConnection(metaclass=abc.ABCMeta):
                 _inner, execute_context.retry_options, ctx
             )
 
+    async def batch_query(
+        self,
+        ops: list[
+            typing.Union[abstract.QueryContext, abstract.ExecuteContext]
+        ],
+    ) -> list[typing.Any]:
+        ctxs = [
+            ctx.lower(
+                allow_capabilities=(
+                    enums.Capability.EXECUTE & ~enums.Capability.DDL
+                )
+            )
+            for ctx in ops
+        ]
+        rv = await self._protocol.batch_execute(ctxs)
+        return [
+            op.warning_handler(ctx.warnings, res) if ctx.warnings else res
+            for op, ctx, res in zip(ops, ctxs, rv)
+        ]
+
     async def describe(
         self, describe_context: abstract.DescribeContext
     ) -> abstract.DescribeResult:

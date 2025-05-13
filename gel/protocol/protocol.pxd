@@ -103,6 +103,7 @@ cdef class ExecuteContext:
     cdef inline bint has_na_cardinality(self)
     cdef bint load_from_cache(self)
     cdef inline store_to_cache(self)
+    cdef inline invalidate_cache(self)
 
 
 cdef class SansIOProtocol:
@@ -171,6 +172,7 @@ cdef class SansIOProtocol:
     cdef ensure_connected(self)
 
     cdef WriteBuffer encode_parse_params(self, ExecuteContext ctx, dict state)
+    cdef _handle_query_result(self, ExecuteContext ctx, ret)
 
 
 include "protocol_v0.pxd"
