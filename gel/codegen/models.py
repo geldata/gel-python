@@ -19,7 +19,6 @@ import functools
 import keyword
 import logging
 import pathlib
-import sys
 import textwrap
 
 from collections import defaultdict
@@ -66,24 +65,29 @@ class IntrospectedModule(TypedDict):
 
 
 class ModelsGenerator(base.Generator):
-    def __init__(self, args: argparse.Namespace):
-        super().__init__(args)
-
     def run(self) -> None:
         try:
             self._client.ensure_connected()
         except gel.EdgeDBError:
             logger.exception("could not connect to Gel instance")
-            sys.exit(61)
+            self.abort(61)
 
         with self._client:
-            std_gen = SchemaGenerator(self._client, reflection.SchemaPart.STD)
+            std_gen = SchemaGenerator(
+                self._client,
+                reflection.SchemaPart.STD,
+                self._project_dir / 'models',
+            )
             std_gen.run()
 
-            usr_gen = SchemaGenerator(self._client, reflection.SchemaPart.USER)
+            usr_gen = SchemaGenerator(
+                self._client,
+                reflection.SchemaPart.USER,
+                self._project_dir / 'models',
+            )
             usr_gen.run()
 
-        base.print_msg(f"{C.GREEN}{C.BOLD}Done.{C.ENDC}")
+        self.print_msg(f"{C.GREEN}{C.BOLD}Done.{C.ENDC}")
 
 
 class SchemaGenerator:
@@ -91,7 +95,7 @@ class SchemaGenerator:
         self,
         client: abstract.ReadOnlyExecutor,
         schema_part: reflection.SchemaPart,
-        outdir: pathlib.Path = pathlib.Path("models"),
+        outdir: pathlib.Path,
     ) -> None:
         self._client = client
         self._schema_part = schema_part

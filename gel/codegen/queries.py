@@ -33,7 +33,7 @@ from gel import abstract
 from gel import describe
 
 from . import base
-from .base import C, print_msg, print_error
+from .base import C
 
 if TYPE_CHECKING:
     import uuid
@@ -63,11 +63,11 @@ class QueriesGenerator(base.Generator):
             ):
                 self._search_dirs.append(search_dir)
             else:
-                print_error(
+                self.print_error(
                     f"--dir '{search_dir}' is not under "
                     f"the project directory: {self._project_dir}"
                 )
-                sys.exit(1)
+                self.abort(1)
         self._method_names: set[str] = set()
         self._describe_results: list[
             tuple[str, pathlib.Path, str, abstract.DescribeResult]
@@ -92,8 +92,8 @@ class QueriesGenerator(base.Generator):
         try:
             self._client.ensure_connected()
         except gel.EdgeDBError as e:
-            print_error(f"Failed to connect to EdgeDB instance: {e}")
-            sys.exit(61)
+            self.print_error(f"Failed to connect to EdgeDB instance: {e}")
+            self.abort(61)
         with self._client:
             if self._search_dirs:
                 for search_dir in self._search_dirs:
@@ -108,7 +108,7 @@ class QueriesGenerator(base.Generator):
                 else:
                     self._generate_files(suffix)
                 self._new_file()
-        print_msg(f"{C.GREEN}{C.BOLD}Done.{C.ENDC}")
+        self.print_msg(f"{C.GREEN}{C.BOLD}Done.{C.ENDC}")
 
     def _process_dir(self, dir_: pathlib.Path) -> None:
         for file_or_dir in dir_.iterdir():
@@ -123,14 +123,14 @@ class QueriesGenerator(base.Generator):
                 self._process_file(file_or_dir)
 
     def _process_file(self, source: pathlib.Path) -> None:
-        print_msg(f"{C.BOLD}Processing{C.ENDC} {C.BLUE}{source}{C.ENDC}")
+        self.print_msg(f"{C.BOLD}Processing{C.ENDC} {C.BLUE}{source}{C.ENDC}")
         with source.open() as f:
             query = f.read()
         name = source.stem
         if self._single_mode_files:
             if name in self._method_names:
-                print_error(f"Conflict method names: {name}")
-                sys.exit(17)
+                self.print_error(f"Conflict method names: {name}")
+                self.abort(17)
             self._method_names.add(name)
         dr = self._client._describe_query(query, inject_type_names=True)
         self._describe_results.append((name, source, query, dr))
@@ -138,7 +138,7 @@ class QueriesGenerator(base.Generator):
     def _generate_files(self, suffix: str) -> None:
         for name, source, query, dr in self._describe_results:
             target = source.parent / f"{name}{suffix}"
-            print_msg(f"{C.BOLD}Generating{C.ENDC} {C.BLUE}{target}{C.ENDC}")
+            self.print_msg(f"{C.BOLD}Generating{C.ENDC} {C.BLUE}{target}{C.ENDC}")
             self._new_file()
             content = self._generate(name, query, dr)
             buf = io.StringIO()
@@ -149,7 +149,7 @@ class QueriesGenerator(base.Generator):
                 f.write(buf.getvalue())
 
     def _generate_single_file(self, suffix: str) -> None:
-        print_msg(f"{C.BOLD}Generating single file output...{C.ENDC}")
+        self.print_msg(f"{C.BOLD}Generating single file output...{C.ENDC}")
         buf = io.StringIO()
         output = []
         sources = []
@@ -169,7 +169,7 @@ class QueriesGenerator(base.Generator):
                 target = pathlib.Path(path).absolute()
             else:
                 target = self._project_dir / f"{FILE_MODE_OUTPUT_FILE}{suffix}"
-            print_msg(f"{C.BOLD}Writing{C.ENDC} {C.BLUE}{target}{C.ENDC}")
+            self.print_msg(f"{C.BOLD}Writing{C.ENDC} {C.BLUE}{target}{C.ENDC}")
             with target.open("w") as f:
                 f.write(buf.getvalue())
 
@@ -478,8 +478,8 @@ class QueriesGenerator(base.Generator):
                     name = new
                     break
             else:
-                print_error(f"Failed to find a unique name for: {name}")
-                sys.exit(17)
+                self.print_error(f"Failed to find a unique name for: {name}")
+                self.abort(17)
         self._names.add(name)
         return name
 
@@ -516,8 +516,8 @@ class QueriesGenerator(base.Generator):
                 name_id = name
                 sep = name.endswith("_")
             else:
-                print_error(f"{name} is not a valid identifier")
-                sys.exit(2)
+                self.print_error(f"{name} is not a valid identifier")
+                self.abort(2)
 
             rv = name_id
             if not sep:

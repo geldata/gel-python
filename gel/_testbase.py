@@ -17,6 +17,7 @@
 #
 
 
+import argparse
 import asyncio
 import atexit
 import contextlib
@@ -26,11 +27,13 @@ import inspect
 import json
 import logging
 import os
+import pathlib
 import re
 import shutil
 import subprocess
 import sys
 import tempfile
+import textwrap
 import time
 import unittest
 import warnings
@@ -675,6 +678,43 @@ class SyncQueryTestCase(DatabaseTestCase):
         return result
 
 
+class ModelTestCase(SyncQueryTestCase):
+
+    DEFAULT_MODULE = 'default'
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+
+        cls.tmp_model_dir = tempfile.TemporaryDirectory()
+
+        from gel.codegen.models import ModelsGenerator
+        cls.gen = ModelsGenerator(
+            argparse.Namespace(),
+            project_dir=pathlib.Path(cls.tmp_model_dir.name),
+            client=cls.client,
+            interactive=False,
+        )
+
+        try:
+            cls.gen.run()
+        except Exception as e:
+            raise RuntimeError(
+                f'error running model codegen, its stderr:\n'
+                f'{cls.gen.get_error_output()}'
+            ) from e
+
+        sys.path.insert(0, cls.tmp_model_dir.name)
+
+    @classmethod
+    def tearDownClass(cls):
+        try:
+            super().tearDownClass()
+        finally:
+            sys.path.remove(cls.tmp_model_dir.name)
+            cls.tmp_model_dir.cleanup()
+
+
 class ORMTestCase(SyncQueryTestCase):
     MODEL_PACKAGE = None
     DEFAULT_MODULE = 'default'
@@ -710,10 +750,12 @@ class ORMTestCase(SyncQueryTestCase):
 
     @classmethod
     def tearDownClass(cls):
-        super().tearDownClass()
-        # cleanup the temp modules
-        sys.path.remove(cls.tmpormdir.name)
-        cls.tmpormdir.cleanup()
+        try:
+            super().tearDownClass()
+        finally:
+            # cleanup the temp modules
+            sys.path.remove(cls.tmpormdir.name)
+            cls.tmpormdir.cleanup()
 
 
 class SQLATestCase(ORMTestCase):
@@ -826,6 +868,98 @@ def gen_lock_key():
     global _lock_cnt
     _lock_cnt += 1
     return os.getpid() * 1000 + _lock_cnt
+
+
+def typecheck(func):
+    source_code = inspect.getsource(func)
+
+    lines = source_code.split('\n')
+    for i, line in enumerate(lines):
+        if line.strip().startswith('def '):
+            break
+    else:
+        raise RuntimeError(f"couldn't extract source of {func}")
+
+    source_code = '\n'.join(lines[i+1:])
+    dedented_body = textwrap.dedent(source_code)
+
+    source_code = f'''\
+import unittest
+import typing
+
+if not typing.TYPE_CHECKING:
+    def reveal_type(_: typing.Any) -> str:
+        return ''
+
+class TestModel(unittest.TestCase):
+    def test_model(self) -> None:
+{textwrap.indent(dedented_body, '    ' * 2)}
+    '''
+
+    def run(self):
+        d = type(self).tmp_model_dir.name
+
+        testfn = pathlib.Path(d) / 'test.py'
+        inifn = pathlib.Path(d) / 'mypy.ini'
+
+        with open(testfn, 'wt') as f:
+            f.write(source_code)
+
+        with open(inifn, 'wt') as f:
+            f.write(textwrap.dedent("""\
+                [mypy]
+                strict = True
+                ignore_errors = False
+                follow_imports = normal
+                show_error_codes = True
+                local_partial_types = True
+            """))
+
+        try:
+            res = subprocess.run(
+                [
+                    'mypy',
+                    '--strict',
+
+                    # XXX -- we should probably fix this, right? :)
+                    '--disable-error-code', 'no-any-return',
+                    '--disable-error-code', 'unused-ignore',
+
+                    testfn
+                ],
+                capture_output=True,
+                cwd=testfn.parent,
+                env=os.environ,
+                check=False,
+            )
+        finally:
+            inifn.unlink()
+            testfn.unlink()
+
+        if res.returncode != 0:
+            raise RuntimeError(
+                f'mypy check failed for {func.__name__} '
+                f'\n\nmypy stdout: \n{res.stdout.decode()}'
+                f'\n\nmypy stderr: \n{res.stderr.decode()}'
+            )
+
+        types = []
+
+        out = res.stdout.decode().split('\n')
+        for line in out:
+            if m := re.match(
+                r'.*Revealed type is "type\[(?P<name>[^"]+)\]".*' , line
+            ):
+                types.append(m.group('name'))
+
+        def reveal_type(_, *, ncalls=[0], types=types):
+            ncalls[0] += 1
+            return types[ncalls[0] - 1]
+
+        func.__globals__['reveal_type'] = reveal_type
+        func(self)
+
+    return run
 
 
 if os.environ.get('USE_UVLOOP'):

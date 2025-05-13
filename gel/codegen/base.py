@@ -34,6 +34,7 @@ import pathlib
 import re
 import sys
 import textwrap
+import typing
 from collections import defaultdict
 
 import gel
@@ -42,6 +43,7 @@ from gel.color import get_color
 
 
 C = get_color()
+
 if pyver_env := os.environ.get("GEL_PYTHON_CODEGEN_PY_VER"):
     try:
         SYS_VERSION_INFO = tuple(map(int, pyver_env.split(".")))[:2]
@@ -67,12 +69,22 @@ TYPE_MAPPING: dict[str, str | tuple[str, str]] = {
     "std::datetime": ("datetime", "datetime"),
     "std::duration": ("datetime", "timedelta"),
     "std::json": "str",
+
+    "cal::local_date": ("datetime", "date"),
+    "cal::local_time": ("datetime", "time"),
+    "cal::local_datetime": ("datetime", "datetime"),
+    "cal::relative_duration": ("gel", "RelativeDuration"),
+    "cal::date_duration": ("gel", "DateDuration"),
+
     "std::cal::local_date": ("datetime", "date"),
     "std::cal::local_time": ("datetime", "time"),
     "std::cal::local_datetime": ("datetime", "datetime"),
     "std::cal::relative_duration": ("gel", "RelativeDuration"),
     "std::cal::date_duration": ("gel", "DateDuration"),
+
     "cfg::memory": ("gel", "ConfigMemory"),
+    "std::cfg::memory": ("gel", "ConfigMemory"),
+
     "ext::pgvector::vector": ("array", "array"),
 }
 
@@ -103,58 +115,93 @@ class NoPydanticValidation:
 MAX_LINE_LENGTH = 79
 
 
-def print_msg(msg: str) -> None:
-    print(msg, file=sys.stderr)  # noqa: T201
-
-
-def print_error(msg: str) -> None:
-    print_msg(f"{C.BOLD}{C.FAIL}error: {C.ENDC}{C.BOLD}{msg}{C.ENDC}")
-
-
-def _get_conn_args(args: argparse.Namespace) -> dict[str, Any]:
-    if args.password_from_stdin:
-        if args.password:
-            print_error(
-                "--password and --password-from-stdin are mutually exclusive",
-            )
-            sys.exit(22)
-        if sys.stdin.isatty():
-            password = getpass.getpass()
-        else:
-            password = sys.stdin.read().strip()
-    else:
-        password = args.password
-    if args.dsn and args.instance:
-        print_error("--dsn and --instance are mutually exclusive")
-        sys.exit(22)
-    return dict(
-        dsn=args.dsn or args.instance,
-        credentials_file=args.credentials_file,
-        host=args.host,
-        port=args.port,
-        database=args.database,
-        user=args.user,
-        password=password,
-        tls_ca_file=args.tls_ca_file,
-        tls_security=args.tls_security,
-    )
-
-
 class Generator:
-    def __init__(self, args: argparse.Namespace):
+    def __init__(
+        self,
+        args: argparse.Namespace,
+        *,
+        project_dir: pathlib.Path = None,
+        client: gel.Client = None,
+        interactive: bool = True,
+    ):
         self._default_module = "default"
         self._async = False
-        try:
-            self._project_dir = pathlib.Path(find_gel_project_dir())
-        except gel.ClientConnectionError:
-            print_error(
-                "Cannot find gel.toml: "
-                "codegen must be run inside a Gel project directory"
-            )
-            sys.exit(2)
-        print_msg(f"Found Gel project: {C.BOLD}{self._project_dir}{C.ENDC}")
 
-        self._client = gel.create_client(**_get_conn_args(args))
+        self._interactive = interactive
+        if not interactive:
+            self._stderr = io.StringIO()
+        else:
+            self._stderr = sys.stderr
+
+        if project_dir is None:
+            try:
+                self._project_dir = pathlib.Path(find_gel_project_dir())
+            except gel.ClientConnectionError:
+                self.print_error(
+                    "Cannot find gel.toml: "
+                    "codegen must be run inside a Gel project directory"
+                )
+                self.abort(2)
+
+            self.print_msg(
+                f"Found Gel project: {C.BOLD}{self._project_dir}{C.ENDC}"
+            )
+        else:
+            self._project_dir = project_dir
+
+        if client is None:
+            self._client = gel.create_client(**self._get_conn_args(args))
+        else:
+            self._client = client
+
+    def get_error_output(self) -> str:
+        if isinstance(self._stderr, io.StringIO):
+            return self._stderr.getvalue()
+        else:
+            raise RuntimeError("Cannot get error output in non-silent mode")
+
+    def abort(self, code: int) -> typing.NoReturn:
+        if self._interactive:
+            raise RuntimeError(f"aborting codegen, code={code}")
+        else:
+            sys.exit(code)
+
+    def print_msg(self, msg: str) -> None:
+        print(msg, file=self._stderr)  # noqa: T201
+
+    def print_error(self, msg: str) -> None:
+        print(
+            f"{C.BOLD}{C.FAIL}error: {C.ENDC}{C.BOLD}{msg}{C.ENDC}",
+            file=self._stderr,
+        )
+
+    def _get_conn_args(self, args: argparse.Namespace) -> dict[str, Any]:
+        if args.password_from_stdin:
+            if args.password:
+                self.print_error(
+                    "--password and --password-from-stdin are mutually exclusive",
+                )
+                self.abort(22)
+            if sys.stdin.isatty():
+                password = getpass.getpass()
+            else:
+                password = sys.stdin.read().strip()
+        else:
+            password = args.password
+        if args.dsn and args.instance:
+            self.print_error("--dsn and --instance are mutually exclusive")
+            self.abort(22)
+        return dict(
+            dsn=args.dsn or args.instance,
+            credentials_file=args.credentials_file,
+            host=args.host,
+            port=args.port,
+            database=args.database,
+            user=args.user,
+            password=password,
+            tls_ca_file=args.tls_ca_file,
+            tls_security=args.tls_security,
+        )
 
 
 class _ImportSource(enum.Enum):
