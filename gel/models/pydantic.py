@@ -264,6 +264,7 @@ class _PathAlias(_BaseAlias):
         return self.__gel_metadata__.__edgeql__()
 
     def __infix_op__(self, op: str, operand: Any) -> Any:
+        this_operand = self.__gel_origin__
         other_operand = operand
         if isinstance(operand, _BaseAlias):
             other_operand = operand.__gel_origin__
@@ -276,8 +277,16 @@ class _PathAlias(_BaseAlias):
             else:
                 return self is not operand
 
-        this_operand = self.__gel_origin__
-        expr = getattr(operator, op)(this_operand, other_operand)
+        meta_impl = this_operand.__type_meta_impl__
+        op_impl = getattr(meta_impl, op, None)
+        if op_impl is None:
+            t1 = _type_repr(this_operand)
+            t2 = _type_repr(other_operand)
+            raise TypeError(
+                f"operation not supported between instances of {t1} and {t2}"
+            )
+
+        expr = op_impl(this_operand, other_operand)
         assert isinstance(expr, _ExprAlias)
         expr.__gel_metadata__.lexpr = self
         expr.__gel_metadata__.rexpr = operand
@@ -512,6 +521,8 @@ class GelTypeMeta(type):
 
 
 class GelType(GelClassVar):
+    __type_meta_impl__: ClassVar[type]
+
     if TYPE_CHECKING:
 
         @staticmethod

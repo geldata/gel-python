@@ -1119,8 +1119,11 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                 self.write("pass")
 
         with self.not_type_checking():
+            classvar = self.import_name(
+                "typing", "ClassVar", import_time=ImportTime.typecheck
+            )
             with self._class_def(tname, runtime_parents):
-                self.write("pass")
+                self.write(f"__type_meta_impl__: {classvar}[type] = {tmeta}")
 
         self.write_section_break()
 
@@ -1248,7 +1251,8 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                 raise AssertionError(f"expected {op} to have py_magic set")
             if op.operator_kind != reflection.OperatorKind.Infix:
                 raise AssertionError(f"expected {op} to be an infix operator")
-            opmap[op.py_magic, op.name][rtype, rtype_rt].update(union)
+            opname = reflection.parse_name(op.name).name
+            opmap[op.py_magic, opname][rtype, rtype_rt].update(union)
 
         for (meth, opname), overloads in opmap.items():
             overload = len(overloads) > 1
@@ -2044,10 +2048,17 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         ):
             aexpr = self.import_name(BASE_IMPL, "AnnotatedExpr")
             fcall = self.import_name(BASE_IMPL, "FuncCall")
-            unspec = self.import_name(BASE_IMPL, "Unspecified")
+            unsp = self.import_name(BASE_IMPL, "Unspecified")
             any_ = self.import_name("typing", "Any")
             dict_ = self.import_name("builtins", "dict")
             str_ = self.import_name("builtins", "str")
+            list_ = self.import_name("builtins", "list")
+            self.write(
+                self.format_list(
+                    f"args: {list_}[{any_}] = [{{list}}]",
+                    arg_names,
+                ),
+            )
             self.write(
                 self.format_list(
                     f"kw: {dict_}[{str_}, {any_}] = {{{{{{list}}}}}}",
@@ -2060,10 +2071,15 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                 self.write(f"{fcall}(")
                 with self.indented():
                     self.write(f'fname="{function.name}",')
-                    self.write(self.format_list("args=[{list}],", arg_names))
+                    self.write(
+                        self.format_list(
+                            f"args=[v for v in args if v is not {unsp}],",
+                            arg_names,
+                        )
+                    )
                     self.write(
                         f"kwargs={{n: v for n, v in kw.items() "
-                        f"if v is not {unspec}}},"
+                        f"if v is not {unsp}}},"
                     )
                 self.write(")")
             self.write(")")
