@@ -62,7 +62,7 @@ class IntrospectedModule(TypedDict):
     imports: dict[str, str]
     object_types: dict[str, reflection.ObjectType]
     scalar_types: dict[str, reflection.ScalarType]
-    functions: dict[str, reflection.Function]
+    functions: list[reflection.Function]
 
 
 class ModelsGenerator(base.Generator):
@@ -130,7 +130,7 @@ class SchemaGenerator:
             self._modules[reflection.parse_name(mod)] = {
                 "scalar_types": {},
                 "object_types": {},
-                "functions": {},
+                "functions": [],
                 "imports": {},
             }
 
@@ -167,7 +167,7 @@ class SchemaGenerator:
 
         for f in these_funcs:
             name = reflection.parse_name(f.name)
-            self._modules[name.parent]["functions"][name.name] = f
+            self._modules[name.parent]["functions"].append(f)
 
     def get_comment_preamble(self) -> str:
         return COMMENT
@@ -232,6 +232,22 @@ CORE_OBJECTS = {
     "std::BaseObject",
     "std::Object",
     "std::FreeObject",
+}
+
+ABSTRACT_SCALAR_MAPPING: dict[str, list[tuple[str, str] | str]] = {
+    "std::anyfloat": [("builtins", "float")],
+    "std::anyint": [("builtins", "int")],
+    "std::anynumeric": [("builtins", "int"), ("decimal", "Decimal")],
+    "std::anyreal": ["std::anyfloat", "std::anyint", "std::anynumeric"],
+    "std::anyenum": [("builtins", "str")],
+    "std::anydiscrete": [("builtins", "int")],
+    "std::anycontiguous": [
+        ("decimal", "Decimal"),
+        ("datetime", "datetime"),
+        ("datetime", "timedelta"),
+        "std::anyfloat",
+    ],
+    "std::anypoint": ["std::anydiscrete", "std::anycontiguous"],
 }
 
 
@@ -738,8 +754,11 @@ class BaseGeneratedModule:
             params = ["cls", *params]
         elif kind in {"method", "property"}:
             params = ["self", *params]
+        tpl = f"def {func_name}({{list}}) -> {return_type}:"
+        if overload:
+            tpl += " ..."
         def_line = self.format_list(
-            f"def {func_name}({{list}}) -> {return_type}:",
+            tpl,
             params,
             first_line_comment=line_comment,
         )
@@ -860,11 +879,31 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             stype = self._types[tid]
             yield stype  # type: ignore [misc]
 
+    def _maybe_get_pybase_for_abstract_scalar(
+        self,
+        typename: str,
+    ) -> set[str]:
+        types = ABSTRACT_SCALAR_MAPPING.get(typename)
+        if types is None:
+            return set()
+
+        union = set()
+        for typespec in types:
+            if isinstance(typespec, str):
+                union.update(
+                    self._maybe_get_pybase_for_abstract_scalar(typespec)
+                )
+            else:
+                union.add(self.import_name(*typespec))
+
+        return union
+
     def _get_pybase_for_this_scalar(
         self,
         stype: reflection.ScalarType,
         *,
         require_subclassable: bool = False,
+        consider_abstract: bool = True,
     ) -> str | None:
         base_type = base.TYPE_MAPPING.get(stype.name)
         if base_type is not None:
@@ -874,21 +913,32 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                 base_type = ("builtins", base_type)
 
             return self.import_name(*base_type)
-        else:
-            return None
+
+        if consider_abstract:
+            base_types = self._maybe_get_pybase_for_abstract_scalar(stype.name)
+            if base_types:
+                return " | ".join(sorted(base_types))
+
+        return None
 
     def _get_pybase_for_scalar(
         self,
         stype: reflection.ScalarType,
+        *,
+        consider_abstract: bool = True,
     ) -> str:
         for a_ref in stype.ancestors:
             ancestor = self._types[a_ref.id]
             assert reflection.is_scalar_type(ancestor)
-            pybase = self._get_pybase_for_this_scalar(ancestor)
+            pybase = self._get_pybase_for_this_scalar(
+                ancestor, consider_abstract=consider_abstract
+            )
             if pybase is not None:
                 break
         else:
-            pybase = self._get_pybase_for_this_scalar(stype)
+            pybase = self._get_pybase_for_this_scalar(
+                stype, consider_abstract=consider_abstract
+            )
             if pybase is None:
                 raise AssertionError(
                     f"could not find Python base type for "
@@ -918,7 +968,29 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                 el = self.get_type(el_type, import_time=import_time)
             lst = self.import_name("builtins", "list")
             return f"{lst}[{el}]"
-        elif reflection.is_named_tuple_type(stype):
+        elif reflection.is_range_type(stype):
+            el_type = self._types[stype.range_element_id]
+            if reflection.is_primitive_type(el_type):
+                el = self._get_pybase_for_primitive_type(
+                    el_type, import_time=import_time
+                )
+            else:
+                el = self.get_type(el_type, import_time=import_time)
+            rng = self.import_name("gel", "Range")
+            return f"{rng}[{el}]"
+        elif reflection.is_multi_range_type(stype):
+            el_type = self._types[stype.multirange_element_id]
+            if reflection.is_primitive_type(el_type):
+                el = self._get_pybase_for_primitive_type(
+                    el_type, import_time=import_time
+                )
+            else:
+                el = self.get_type(el_type, import_time=import_time)
+            rng = self.import_name("gel", "MultiRange")
+            return f"{rng}[{el}]"
+        elif reflection.is_named_tuple_type(stype) or reflection.is_tuple_type(
+            stype
+        ):
             elems = []
             for elem in stype.tuple_elements:
                 el_type = self._types[elem.type_id]
@@ -990,31 +1062,26 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         pybase = self._get_pybase_for_this_scalar(
             stype,
             require_subclassable=True,
+            consider_abstract=False,
         )
         if pybase is not None:
             pts = self.import_name(BASE_IMPL, "PyTypeScalar")
-            parents = [pybase, f"{pts}[{pybase}]"]
+            typecheck_parents = [f"{pts}[{pybase}]"]
+            runtime_parents = [pybase, *typecheck_parents]
         else:
-            parents = []
+            typecheck_parents = []
+            runtime_parents = []
 
         scalar_bases = [
             self.get_type(self._types[base.id]) for base in stype.bases
         ]
 
-        parents.extend(scalar_bases)
-        if not parents:
-            parents = [self.import_name(BASE_IMPL, "BaseScalar")]
+        typecheck_parents.extend(scalar_bases)
+        runtime_parents.extend(scalar_bases)
 
-        # Some builtin types are defined as protocols in
-        # type stubs and mypy will complain if we don't
-        # include the (internal) _ProtocolMeta when defining
-        # the scalar metaclass (yuck!).
-        base_type = base.TYPE_MAPPING.get(stype.name)
-        is_proto_meta = base_type is not None and base_type in {
-            "bytes",
-            "json",
-            "str",
-        }
+        if not runtime_parents:
+            typecheck_parents = [self.import_name(BASE_IMPL, "BaseScalar")]
+            runtime_parents = typecheck_parents
 
         gel_type_meta = self.import_name(BASE_IMPL, "GelTypeMeta")
         with self.type_checking():
@@ -1026,13 +1093,6 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                 )
             else:
                 meta_bases = [gel_type_meta]
-            if is_proto_meta:
-                proto_meta = self.import_name(
-                    "typing",
-                    "_ProtocolMeta",
-                    import_time=ImportTime.typecheck,
-                )
-                meta_bases.append(proto_meta)
             tmeta = f"__{tname}_meta__"
             with self._class_def(tmeta, meta_bases):
                 bin_ops = self._operators.binary_ops.get(stype.id, [])
@@ -1045,7 +1105,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
 
             self.write()
             with self._class_def(
-                tname, parents, class_kwargs={"metaclass": tmeta}
+                tname, typecheck_parents, class_kwargs={"metaclass": tmeta}
             ):
                 self.write("pass")
 
@@ -1053,12 +1113,12 @@ class GeneratedSchemaModule(BaseGeneratedModule):
 
         with self.not_type_checking():
             self.write()
-            with self._class_def(tname, parents):
+            with self._class_def(tname, runtime_parents):
                 self.write("pass")
 
         self.write_section_break()
 
-    def render_callable_sig_type(
+    def render_callable_return_type(
         self,
         tp: reflection.AnyType,
         typemod: reflection.TypeModifier,
@@ -1068,7 +1128,28 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         type_ = self.import_name(
             "builtins", "type", import_time=ImportTime.typecheck
         )
+        return f"{type_}[{result}]"
+
+    def render_callable_sig_type(
+        self,
+        tp: reflection.AnyType,
+        typemod: reflection.TypeModifier,
+        default: str | None = None,
+        *,
+        include_pybase: bool = False,
+    ) -> str:
+        result = self.get_type(tp, import_time=ImportTime.typecheck)
+        type_ = self.import_name(
+            "builtins", "type", import_time=ImportTime.typecheck
+        )
         result = f"{type_}[{result}]"
+
+        if include_pybase and reflection.is_primitive_type(tp):
+            pybase = self._get_pybase_for_primitive_type(
+                tp,
+                import_time=ImportTime.typecheck,
+            )
+            result = f"{result} | {pybase}"
 
         if typemod == reflection.TypeModifier.Optional:
             result = f"{result} | None"
@@ -1084,7 +1165,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         ops: list[reflection.Operator],
     ) -> None:
         for op in ops:
-            rtype = self.render_callable_sig_type(
+            rtype = self.render_callable_return_type(
                 self._types[op.return_type.id], op.return_typemod
             )
             if op.py_magic is None:
@@ -1106,7 +1187,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         type_ = self.import_name("builtins", "type")
 
         for op in ops:
-            rtype = self.render_callable_sig_type(
+            rtype = self.render_callable_return_type(
                 self._types[op.return_type.id], op.return_typemod
             )
             right_param = op.params[1]
@@ -1141,7 +1222,11 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                     overload=overload,
                     line_comment="type: ignore [override]",
                 ):
-                    self.write("...")
+                    if not overload:
+                        # XXX
+                        self.write(
+                            "return None  # type: ignore [return-value]"
+                        )
                 self.write()
 
             if overload:
@@ -1684,7 +1769,10 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                     lprops.append(lprop_line)
 
             self.write()
-            self.write(f"__linkprops__: {classvar_t}[{prop_desc_t}[__lprops__]] = {prop_desc_t}()")
+            self.write(
+                f"__linkprops__: {classvar_t}[{prop_desc_t}[__lprops__]]"
+                f" = {prop_desc_t}()"
+            )
             self.write(f"_p__obj__: {target} = {priv_attr}()")
             self.write(f"_p__lprops__: __lprops__ = {priv_attr}()")
 
@@ -1775,19 +1863,18 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                 self.write("pass")
                 self.write()
 
-    def write_functions(
-        self, functions: dict[str, reflection.Function]
-    ) -> None:
+    def write_functions(self, functions: list[reflection.Function]) -> None:
         param_map: defaultdict[str, defaultdict[str, set[uuid.UUID]]] = (
             defaultdict(lambda: defaultdict(set))
         )
         funcmap: defaultdict[str, list[reflection.Function]] = defaultdict(
             list
         )
-        for function in functions.values():
+        for function in functions:
             for param in function.params:
                 param_map[function.name][param.name].add(param.type.id)
-            funcmap[function.name].append(function)
+            funcname = reflection.parse_name(function.name)
+            funcmap[funcname.name].append(function)
 
         for fname, overloads in funcmap.items():
             self._write_function(fname, overloads, param_map)
@@ -1801,17 +1888,41 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         if len(overloads) > 1:
             for overload in overloads:
                 self._write_function_overload(
-                    overload, param_map, mark_overload=True)
+                    overload, param_map, overload=True
+                )
+            any_ = self.import_name(
+                "typing", "Any", import_time=ImportTime.typecheck
+            )
+            gel_type_t = self.import_name(
+                BASE_IMPL, "GelType", import_time=ImportTime.typecheck
+            )
+            type_t = self.import_name(
+                "builtins", "type", import_time=ImportTime.typecheck
+            )
+            with self._func_def(
+                fname,
+                [f"*args: {any_}", f"**kwargs: {any_}"],
+                f"{type_t}[{gel_type_t}]",
+            ):
+                # XXX
+                self.write("return None  # type: ignore [return-value]")
+            self.write()
         else:
             self._write_function_overload(
-                overloads[0], param_map, mark_overload=False)
+                overloads[0],
+                param_map,
+                overload=False,
+                allow_pybase_args=True,
+            )
 
     def _write_function_overload(
         self,
         function: reflection.Function,
         param_map: defaultdict[str, defaultdict[str, set[uuid.UUID]]],
         *,
-        mark_overload: bool,
+        overload: bool,
+        generic_signature: bool = False,
+        allow_pybase_args: bool = False,
     ) -> None:
         name = reflection.parse_name(function.name)
         args = []
@@ -1822,6 +1933,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                 self._types[param.type.id],
                 param.typemod,
                 param.default,
+                include_pybase=allow_pybase_args,
             )
             param_decl = f"{param.name}: {pt}"
             if param.kind == reflection.CallableParamKind.Positional:
@@ -1844,7 +1956,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             args.append("*")
         args.extend(kwargs)
 
-        rtype = self.render_callable_sig_type(
+        rtype = self.render_callable_return_type(
             self._types[function.return_type.id],
             function.return_typemod,
         )
@@ -1853,9 +1965,21 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         if keyword.iskeyword(fname):
             fname += "_"
 
-        with self._func_def(fname, args, rtype, overload=mark_overload):
-            # XXX
-            self.write("return None  # type: ignore [return-value]")
+        if overload:
+            line_comment = "type: ignore [overload-cannot-match]"
+        else:
+            line_comment = None
+
+        with self._func_def(
+            fname,
+            args,
+            rtype,
+            overload=overload,
+            line_comment=line_comment,
+        ):
+            if not overload:
+                # XXX
+                self.write("return None  # type: ignore [return-value]")
 
         self.write()
 
