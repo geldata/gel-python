@@ -279,7 +279,11 @@ class BaseConnection(metaclass=abc.ABCMeta):
         ],
     ) -> list[typing.Any]:
         ctxs = [
-            ctx.lower(allow_capabilities=enums.Capability.EXECUTE)
+            ctx.lower(
+                allow_capabilities=(
+                    enums.Capability.EXECUTE & ~enums.Capability.DDL
+                )
+            )
             for ctx in ops
         ]
         rv = await self._protocol.batch_execute(ctxs)
