@@ -27,8 +27,6 @@ from typing_extensions import (
     Unpack,
 )
 
-from types import GenericAlias
-
 import functools
 import operator
 import sys
@@ -69,6 +67,8 @@ if TYPE_CHECKING:
         Callable,
         Sequence,
     )
+
+    from types import GenericAlias
 
 
 T = TypeVar("T")
@@ -1145,13 +1145,19 @@ class _MultiLink(BasePointer[MT, BMT], metaclass=_MultiLinkMeta):
 
 MultiLink = TypeAliasType(
     "MultiLink",
-    "Annotated[_MultiLink[MT, MT], Field(default_factory=lists.DistinctList)]",
+    Annotated[
+        _MultiLink[MT, MT],
+        Field(default_factory=lists.DistinctList[GelModel]),
+    ],
     type_params=(MT,),
 )
 
 MultiLinkWithProps = TypeAliasType(
     "MultiLinkWithProps",
-    "Annotated[_MultiLink[PT, MT], Field(default_factory=lists.DistinctList)]",
+    Annotated[
+        _MultiLink[PT, MT],
+        Field(default_factory=lists.DistinctList[ProxyModel[GelModel]]),
+    ],
     type_params=(PT, MT),
 )
 

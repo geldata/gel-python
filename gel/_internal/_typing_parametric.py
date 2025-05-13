@@ -212,7 +212,8 @@ class ParametricType:
             if p not in cls._type_param_map
         }
 
-    def __new__(cls, *args: Any, **kwargs: Any) -> Self:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        cls = type(self)
         if cls.__parametric_forward_refs__:
             raise TypeError(
                 f"{cls.__qualname__} has unresolved type parameters")
@@ -221,7 +222,7 @@ class ParametricType:
                 f"{cls.__qualname__} must be parametrized to instantiate"
             )
 
-        return super().__new__(*args, **kwargs)  # type: ignore [no-any-return]
+        super().__init__(*args, **kwargs)
 
     def __class_getitem__(
         cls,
