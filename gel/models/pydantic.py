@@ -28,6 +28,7 @@ from typing_extensions import (
 )
 
 import functools
+import operator
 import sys
 import uuid
 import warnings
@@ -49,9 +50,12 @@ from pydantic._internal import _namespace_utils  # noqa: PLC2701
 from gel.datatypes import range as range_t
 from gel._internal import _typing_eval
 from gel._internal import _typing_inspect
+from gel._internal import _typing_dispatch
 from gel._internal import _typing_parametric as parametric
 from gel._internal import _polyfills
 from gel._internal._hybridmethod import hybridmethod
+
+from gel._internal._reflection import SchemaPath as SchemaPath  # noqa: TC001
 
 from . import lists
 from . import unsetid
@@ -63,8 +67,6 @@ if TYPE_CHECKING:
         Callable,
         Sequence,
     )
-
-    from gel._internal._reflection import SchemaPath as SchemaPath
 
 
 T = TypeVar("T")
@@ -94,6 +96,9 @@ SupportsEdgeQL = TypeAliasType(
 )
 
 
+dispatch_overload = _typing_dispatch.dispatch_overload
+
+
 def edgeql(source: SupportsEdgeQL) -> str:
     try:
         __edgeql__ = source.__edgeql__
@@ -117,6 +122,32 @@ class GelClassVar:
 
 def _is_dunder(attr: str) -> bool:
     return attr.startswith("__") and attr.endswith("__")
+
+
+OP_OVERLOADS = frozenset(
+    {
+        "__add__",
+        "__and__",
+        "__divmod__",
+        "__eq__",
+        "__floordiv__",
+        "__ge__",
+        "__gt__",
+        "__le__",
+        "__lshift__",
+        "__lt__",
+        "__matmul__",
+        "__mod__",
+        "__mul__",
+        "__ne__",
+        "__or__",
+        "__pow__",
+        "__rshift__",
+        "__sub__",
+        "__truediv__",
+        "__xor__",
+    }
+)
 
 
 def _module_ns_of(obj: object) -> dict[str, Any]:
@@ -149,7 +180,23 @@ def _get_field_descriptor(cls: type, name: str) -> GelFieldDescriptor | None:
     return None
 
 
-class _BaseAlias:
+class _BaseAliasMeta(type):
+    def __new__(
+        mcls,
+        name: str,
+        bases: tuple[type[Any], ...],
+        namespace: dict[str, Any],
+    ) -> _BaseAliasMeta:
+        for op in OP_OVERLOADS:
+            namespace.setdefault(
+                op,
+                lambda self, other, op=op: self.__infix_op__(op, other),
+            )
+
+        return super().__new__(mcls, name, bases, namespace)
+
+
+class _BaseAlias(metaclass=_BaseAliasMeta):
     def __init__(self, origin: type) -> None:
         self.__gel_origin__ = origin
 
@@ -199,6 +246,26 @@ class _PathAlias(_BaseAlias):
     def __edgeql__(self) -> str:
         return self.__gel_metadata__.__edgeql__()
 
+    def __infix_op__(self, op: str, operand: Any) -> Any:
+        other_operand = operand
+        if isinstance(operand, _BaseAlias):
+            other_operand = operand.__gel_origin__
+
+        if op in {"__eq__", "__ne__"} and not isinstance(
+            other_operand, GelType
+        ):
+            if op == "__eq__":
+                return self is operand
+            else:
+                return self is not operand
+
+        this_operand = self.__gel_origin__
+        expr = getattr(operator, op)(this_operand, other_operand)
+        assert isinstance(expr, _ExprAlias)
+        expr.__gel_metadata__.lexpr = self
+        expr.__gel_metadata__.rexpr = operand
+        return expr
+
 
 def AnnotatedPath(origin: type, metadata: Path) -> _PathAlias:  # noqa: N802
     return _PathAlias(origin, metadata)
@@ -213,6 +280,9 @@ class _ExprAlias(_BaseAlias):
         origin = _type_repr(self.__gel_origin__)
         metadata = repr(self.__gel_metadata__)
         return f"gel.models.ExprAlias[{origin}, {metadata}]"
+
+    def __bool__(self) -> bool:
+        return False
 
     def __edgeql__(self) -> str:
         return self.__gel_metadata__.__edgeql__()
@@ -381,14 +451,40 @@ class Path(Expr):
         return ".".join(reversed(steps))
 
 
-@dataclasses.dataclass(frozen=True, kw_only=True)
-class BinOp(Expr):
+@dataclasses.dataclass(kw_only=True)
+class PrefixOp(Expr):
+    op: str
+    expr: Expr
+
+    def __edgeql__(self) -> str:
+        return f"{self.op} {edgeql(self.expr)}"
+
+
+@dataclasses.dataclass(kw_only=True)
+class InfixOp(Expr):
     lexpr: Expr
     rexpr: Expr
     op: str
 
     def __edgeql__(self) -> str:
         return f"{edgeql(self.lexpr)} {self.op} {edgeql(self.rexpr)}"
+
+
+@dataclasses.dataclass(frozen=True, kw_only=True)
+class FuncCall(Expr):
+    fname: str
+    args: list[Expr]
+    kwargs: dict[str, Expr]
+
+    def __edgeql__(self) -> str:
+        args = ", ".join(
+            [
+                *(edgeql(arg) for arg in self.args),
+                *(f"{n} := edgeql({v})" for n, v in self.kwargs.items()),
+            ]
+        )
+
+        return f"{self.fname}({args})"
 
 
 GelType_T = TypeVar("GelType_T", bound="GelType")

@@ -737,6 +737,7 @@ class BaseGeneratedModule:
         *,
         kind: Literal["classmethod", "method", "property", "func"] = "func",
         overload: bool = False,
+        stub: bool = False,
         decorators: Iterable[str] = (),
         line_comment: str | None = None,
     ) -> Iterator[None]:
@@ -755,7 +756,7 @@ class BaseGeneratedModule:
         elif kind in {"method", "property"}:
             params = ["self", *params]
         tpl = f"def {func_name}({{list}}) -> {return_type}:"
-        if overload:
+        if stub:
             tpl += " ..."
         def_line = self.format_list(
             tpl,
@@ -1083,38 +1084,35 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             typecheck_parents = [self.import_name(BASE_IMPL, "BaseScalar")]
             runtime_parents = typecheck_parents
 
-        gel_type_meta = self.import_name(BASE_IMPL, "GelTypeMeta")
-        with self.type_checking():
-            self.write()
-            if scalar_bases:
-                meta_bases = _map_name(
-                    lambda n: f"__{n}_meta__",
-                    scalar_bases,
-                )
+        bin_ops = self._operators.binary_ops.get(stype.id, [])
+        un_ops = self._operators.unary_ops.get(stype.id, [])
+
+        self.write()
+        if scalar_bases:
+            meta_bases = _map_name(
+                lambda n: f"__{n}_meta__",
+                scalar_bases,
+            )
+        else:
+            gel_type_meta = self.import_name(BASE_IMPL, "GelTypeMeta")
+            meta_bases = [gel_type_meta]
+        tmeta = f"__{tname}_meta__"
+        with self._class_def(tmeta, meta_bases):
+            if not bin_ops and not un_ops:
+                self.write("pass")
             else:
-                meta_bases = [gel_type_meta]
-            tmeta = f"__{tname}_meta__"
-            with self._class_def(tmeta, meta_bases):
-                bin_ops = self._operators.binary_ops.get(stype.id, [])
-                un_ops = self._operators.unary_ops.get(stype.id, [])
-                if not bin_ops and not un_ops:
-                    self.write("pass")
-                else:
+                with self.type_checking():
                     self.write_unary_operator_overloads(un_ops)
                     self.write_binary_operator_overloads(bin_ops)
+                with self.not_type_checking():
+                    self.write_unary_operator_impls(un_ops)
+                    self.write_binary_operator_impls(bin_ops)
 
-            self.write()
-            with self._class_def(
-                tname, typecheck_parents, class_kwargs={"metaclass": tmeta}
-            ):
-                self.write("pass")
-
-        self.write_section_break()
-
-        with self.not_type_checking():
-            self.write()
-            with self._class_def(tname, runtime_parents):
-                self.write("pass")
+        self.write()
+        with self._class_def(
+            tname, typecheck_parents, class_kwargs={"metaclass": tmeta}
+        ):
+            self.write("pass")
 
         self.write_section_break()
 
@@ -1122,12 +1120,12 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         self,
         tp: reflection.AnyType,
         typemod: reflection.TypeModifier,
+        *,
         default: str | None = None,
+        import_time: ImportTime = ImportTime.typecheck,
     ) -> str:
-        result = self.get_type(tp, import_time=ImportTime.typecheck)
-        type_ = self.import_name(
-            "builtins", "type", import_time=ImportTime.typecheck
-        )
+        result = self.get_type(tp, import_time=import_time)
+        type_ = self.import_name("builtins", "type", import_time=import_time)
         return f"{type_}[{result}]"
 
     def render_callable_sig_type(
@@ -1173,6 +1171,30 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             if op.operator_kind == reflection.OperatorKind.Prefix:
                 with self._method_def(op.py_magic, [], rtype):
                     self.write("...")
+                self.write()
+
+    def write_unary_operator_impls(
+        self,
+        ops: list[reflection.Operator],
+    ) -> None:
+        aexpr = self.import_name(BASE_IMPL, "AnnotatedExpr")
+        pfxop = self.import_name(BASE_IMPL, "PrefixOp")
+        for op in ops:
+            rtype = self.render_callable_return_type(
+                self._types[op.return_type.id], op.return_typemod
+            )
+            rtype_rt = self.render_callable_return_type(
+                self._types[op.return_type.id],
+                op.return_typemod,
+                import_time=ImportTime.late_runtime,
+            )
+            name = reflection.parse_name(op.name)
+            if op.py_magic is None:
+                raise AssertionError(f"expected {op} to have py_magic set")
+            if op.operator_kind == reflection.OperatorKind.Prefix:
+                with self._method_def(op.py_magic, [], rtype):
+                    opexpr = f'{pfxop}(expr=self, op="{name.name}")'
+                    self.write(f"return {aexpr}({rtype_rt}, {opexpr})")
                 self.write()
 
     def write_binary_operator_overloads(
@@ -1227,6 +1249,8 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                         self.write(
                             "return None  # type: ignore [return-value]"
                         )
+                    else:
+                        self.write("...")
                 self.write()
 
             if overload:
@@ -1240,6 +1264,36 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                     line_comment="type: ignore [override]",
                 ):
                     self.write("...")
+
+    def write_binary_operator_impls(
+        self,
+        ops: list[reflection.Operator],
+    ) -> None:
+        aexpr = self.import_name(BASE_IMPL, "AnnotatedExpr")
+        infxop = self.import_name(BASE_IMPL, "InfixOp")
+        any_ = self.import_name("typing", "Any")
+        seen = set()
+        for op in ops:
+            rtype = self.render_callable_return_type(
+                self._types[op.return_type.id], op.return_typemod
+            )
+            rtype_rt = self.render_callable_return_type(
+                self._types[op.return_type.id],
+                op.return_typemod,
+                import_time=ImportTime.late_runtime,
+            )
+            name = reflection.parse_name(op.name)
+            if op.py_magic is None:
+                raise AssertionError(f"expected {op} to have py_magic set")
+            if op.operator_kind != reflection.OperatorKind.Infix:
+                raise AssertionError(f"expected {op} to be infix")
+            if op.py_magic in seen:
+                continue
+            seen.add(op.py_magic)
+            with self._method_def(op.py_magic, [f"other: {any_}"], rtype):
+                opexpr = f'{infxop}(lexpr=self, op="{name.name}", rexpr=other)'
+                self.write(f"return {aexpr}({rtype_rt}, {opexpr})")
+            self.write()
 
     def write_object_types(
         self,
@@ -1899,13 +1953,13 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             type_t = self.import_name(
                 "builtins", "type", import_time=ImportTime.typecheck
             )
+            dispatch = self.import_name(BASE_IMPL, "dispatch_overload")
             with self._func_def(
                 fname,
                 [f"*args: {any_}", f"**kwargs: {any_}"],
                 f"{type_t}[{gel_type_t}]",
             ):
-                # XXX
-                self.write("return None  # type: ignore [return-value]")
+                self.write(f"return {dispatch}({fname}, *args, **kwargs)")
             self.write()
         else:
             self._write_function_overload(
@@ -1926,7 +1980,9 @@ class GeneratedSchemaModule(BaseGeneratedModule):
     ) -> None:
         name = reflection.parse_name(function.name)
         args = []
+        arg_names = []
         kwargs = []
+        kwarg_names = []
         variadic = None
         for param in function.params:
             pt = self.render_callable_sig_type(
@@ -1938,6 +1994,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             param_decl = f"{param.name}: {pt}"
             if param.kind == reflection.CallableParamKind.Positional:
                 args.append(param_decl)
+                arg_names.append(param.name)
             elif param.kind == reflection.CallableParamKind.Variadic:
                 if variadic is not None:
                     raise AssertionError(
@@ -1947,6 +2004,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                 variadic = param_decl
             elif param.kind == reflection.CallableParamKind.NamedOnly:
                 kwargs.append(param_decl)
+                kwarg_names.append(param.name)
             else:
                 raise AssertionError(
                     f"unexpected parameter kind in {name}: {param.kind}"
@@ -1959,6 +2017,12 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         rtype = self.render_callable_return_type(
             self._types[function.return_type.id],
             function.return_typemod,
+        )
+
+        rtype_rt = self.render_callable_return_type(
+            self._types[function.return_type.id],
+            function.return_typemod,
+            import_time=ImportTime.late_runtime,
         )
 
         fname = name.name
@@ -1977,9 +2041,12 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             overload=overload,
             line_comment=line_comment,
         ):
-            if not overload:
-                # XXX
-                self.write("return None  # type: ignore [return-value]")
+            aexpr = self.import_name(BASE_IMPL, "AnnotatedExpr")
+            fcall = self.import_name(BASE_IMPL, "FuncCall")
+            args_coll = ", ".join(arg_names)
+            kwargs_coll = ", ".join(f'"{n}": {n}' for n in kwarg_names)
+            op = f'{fcall}(fname="{function.name}", args=[{args_coll}], kwargs={{{kwargs_coll}}})'
+            self.write(f"return {aexpr}({rtype_rt}, {op})  # type: ignore [return-value]")
 
         self.write()
 

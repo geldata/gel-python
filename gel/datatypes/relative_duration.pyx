@@ -27,7 +27,6 @@ DEF USECS_PER_SEC           = 1000000
 DEF MAX_INTERVAL_PRECISION  = 6
 
 
-@cython.final
 cdef class RelativeDuration:
 
     def __init__(self, *, int64_t microseconds=0,
