@@ -16,6 +16,7 @@
 # limitations under the License.
 #
 
+import dataclasses
 import os
 import typing
 import unittest
@@ -24,6 +25,15 @@ if typing.TYPE_CHECKING:
     from typing import reveal_type
 
 from gel import _testbase as tb
+
+
+@dataclasses.dataclass
+class Q:
+    type: typing.Type
+    query: str
+
+    def __edgeql__(self):
+        return (self.type, self.query)
 
 
 class TestModelGenerator(tb.ModelTestCase):
@@ -55,3 +65,22 @@ class TestModelGenerator(tb.ModelTestCase):
             reveal_type(default.User.groups),
             'models.default.UserGroup'
         )
+
+    def test_modelgen_data_unpack_1(self):
+        from models import default
+
+        q = Q(default.Post, '''
+            select Post {
+              body,
+              author: {
+                *
+              }
+            } filter .body = 'Hello' limit 1
+        ''')
+
+        d = self.client.query_single(q)
+
+        self.assertIsInstance(d, default.Post)
+        self.assertEqual(d.body, 'Hello')
+        self.assertIsInstance(d.author, default.User)
+        self.assertEqual(d.author.name, 'Alice')

@@ -18,6 +18,8 @@
 
 import dataclasses
 
+from gel.datatypes import datatypes
+
 
 cdef dict CARDS_MAP = {
     datatypes.EdgeFieldCardinality.NO_RESULT: enums.Cardinality.NO_RESULT,
@@ -149,45 +151,129 @@ cdef class ObjectCodec(BaseNamedRecordCodec):
 
         return errors.QueryArgumentError(error_message)
 
-    cdef decode(self, FRBuffer *buf):
+    cdef decode(self, object return_type, FRBuffer *buf):
         cdef:
-            object result
+            object result, lprops
             Py_ssize_t elem_count
             Py_ssize_t i
             int32_t elem_len
             BaseCodec elem_codec
             FRBuffer elem_buf
             tuple fields_codecs = (<BaseRecordCodec>self).fields_codecs
+            tuple fields_types
+            tuple names
+            tuple flags
+            object return_type_proxy
+            Py_ssize_t fields_codecs_len = len(fields_codecs)
             descriptor = (<BaseNamedRecordCodec>self).descriptor
 
         if self.is_sparse:
             raise NotImplementedError
 
+        names = self.names
+        flags = self.flags
+
+        if return_type is not self.cached_return_type:
+            if return_type is None:
+                self.cached_return_type = None
+                self.cached_return_type_subcodecs = (None,) * fields_codecs_len
+                self.cached_return_type_proxy = None
+            else:
+                lprops_type = None
+                proxy = getattr(return_type, '__proxy_of__', None)
+                if proxy is not None:
+                    self.cached_return_type_proxy = return_type
+                    self.cached_return_type = proxy
+                    lprops_type = self.cached_return_type_proxy.__lprops__
+                else:
+                    self.cached_return_type = return_type
+                    self.cached_return_type_proxy = None
+
+                subs = []
+                for i, name in enumerate(names):
+                    if flags[i] & datatypes._EDGE_POINTER_IS_LINK:
+                        if flags[i] & datatypes._EDGE_POINTER_IS_LINKPROP:
+                            sub = getattr(lprops_type, name)
+                            subs.append(sub.__gel_origin__)
+                        else:
+                            sub = getattr(return_type, name)
+                            subs.append(sub.__gel_origin__)
+                    else:
+                        subs.append(None)
+                self.cached_return_type_subcodecs = tuple(subs)
+
+        fields_types = self.cached_return_type_subcodecs
+
+        return_type = self.cached_return_type
+        return_type_proxy = self.cached_return_type_proxy
+
         elem_count = <Py_ssize_t><uint32_t>hton.unpack_int32(frb_read(buf, 4))
 
-        if elem_count != len(fields_codecs):
+        if elem_count != fields_codecs_len:
             raise RuntimeError(
-                f'cannot decode Object: expected {len(fields_codecs)} '
+                f'cannot decode Object: expected {fields_codecs_len} '
                 f'elements, got {elem_count}')
 
-        result = datatypes.object_new(descriptor)
+        if return_type is None:
+            result = datatypes.object_new(descriptor)
 
-        for i in range(elem_count):
-            frb_read(buf, 4)  # reserved
-            elem_len = hton.unpack_int32(frb_read(buf, 4))
+            for i in range(elem_count):
+                frb_read(buf, 4)  # reserved
+                elem_len = hton.unpack_int32(frb_read(buf, 4))
 
-            if elem_len == -1:
-                elem = None
+                if elem_len == -1:
+                    elem = None
+                else:
+                    elem_codec = <BaseCodec>fields_codecs[i]
+                    elem = elem_codec.decode(
+                        fields_types[i],
+                        frb_slice_from(&elem_buf, buf, elem_len)
+                    )
+                    if frb_get_len(&elem_buf):
+                        raise RuntimeError(
+                            f'unexpected trailing data in buffer after '
+                            f'object element decoding: {frb_get_len(&elem_buf)}')
+
+                datatypes.object_set(result, i, elem)
+        else:
+            result = return_type.model_construct()
+            if return_type_proxy is not None:
+                lprops = return_type_proxy.__lprops__.model_construct()
             else:
-                elem_codec = <BaseCodec>fields_codecs[i]
-                elem = elem_codec.decode(
-                    frb_slice_from(&elem_buf, buf, elem_len))
-                if frb_get_len(&elem_buf):
-                    raise RuntimeError(
-                        f'unexpected trailing data in buffer after '
-                        f'object element decoding: {frb_get_len(&elem_buf)}')
+                lprops = None
 
-            datatypes.object_set(result, i, elem)
+            for i in range(elem_count):
+                frb_read(buf, 4)  # reserved
+                elem_len = hton.unpack_int32(frb_read(buf, 4))
+                if elem_len == -1:
+                    elem = None
+                else:
+                    elem_codec = <BaseCodec>fields_codecs[i]
+                    elem = elem_codec.decode(
+                        fields_types[i],
+                        frb_slice_from(&elem_buf, buf, elem_len)
+                    )
+                    if frb_get_len(&elem_buf):
+                        raise RuntimeError(
+                            f'unexpected trailing data in buffer after '
+                            f'object element decoding: {frb_get_len(&elem_buf)}')
+
+                name = names[i]
+                if flags[i] & datatypes._EDGE_POINTER_IS_LINKPROP:
+                    assert name[0] == '@' # XXX fix this
+                    object.__setattr__(lprops, name[1:], elem)
+                else:
+                    if name == 'id':
+                        object.__setattr__(result, '_p__id', elem)
+                    else:
+                        object.__setattr__(result, name, elem)
+
+            if return_type_proxy is not None:
+                nested = result
+                result = return_type_proxy.model_construct()
+                object.__setattr__(result, '_p__obj__', nested)
+                object.__setattr__(result, '_p__lprops__', lprops)
+                object.__setattr__(result, '__linkprops__', lprops)
 
         return result
 
@@ -220,11 +306,15 @@ cdef class ObjectCodec(BaseNamedRecordCodec):
             codec.name = 'SparseObject'
         else:
             codec.name = 'Object'
+        codec.cached_return_type_proxy = None
+        codec.cached_return_type = None
+        codec.cached_return_type_subcodecs = (None,) * len(names)
+        codec.flags = flags
         codec.is_sparse = is_sparse
         codec.descriptor = datatypes.record_desc_new(names, flags, cards)
         codec.descriptor.set_dataclass_fields_func(codec.get_dataclass_fields)
         codec.fields_codecs = codecs
-
+        codec.names = names
         return codec
 
     def make_type(self, describe_context):

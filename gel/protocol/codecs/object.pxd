@@ -22,6 +22,12 @@ cdef class ObjectCodec(BaseNamedRecordCodec):
     cdef:
         bint is_sparse
         object cached_dataclass_fields
+        tuple names
+        tuple flags
+
+        object cached_return_type_proxy
+        object cached_return_type
+        object cached_return_type_subcodecs
 
     cdef encode_args(self, WriteBuffer buf, dict obj)
 

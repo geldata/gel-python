@@ -45,7 +45,7 @@ cdef class BaseCodec:
     cdef encode(self, WriteBuffer buf, object obj):
         raise NotImplementedError
 
-    cdef decode(self, FRBuffer *buf):
+    cdef decode(self, object return_type, FRBuffer *buf):
         raise NotImplementedError
 
     cdef dump(self, int level = 0):
@@ -65,8 +65,8 @@ cdef class CodecPythonOverride(BaseCodec):
     cdef encode(self, WriteBuffer buf, object obj):
         self.codec.encode(buf, self.encoder(obj))
 
-    cdef decode(self, FRBuffer *buf):
-        return self.decoder(self.codec.decode(buf))
+    cdef decode(self, object return_type, FRBuffer *buf):
+        return self.decoder(self.codec.decode(return_type, buf))
 
     cdef dump(self, int level = 0):
         return f'{level * " "}<Python override>{self.name}'
@@ -110,7 +110,7 @@ cdef class EmptyTupleCodec(BaseCodec):
                 f'got {len(obj)}')
         buf.write_bytes(EMPTY_RECORD_DATA)
 
-    cdef decode(self, FRBuffer *buf):
+    cdef decode(self, object return_type, FRBuffer *buf):
         elem_count = <Py_ssize_t><uint32_t>hton.unpack_int32(frb_read(buf, 4))
         if elem_count != 0:
             raise RuntimeError(

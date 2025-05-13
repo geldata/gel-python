@@ -104,10 +104,10 @@ cdef class BaseArrayCodec(BaseCodec):
 
         buf.write_buffer(elem_data)
 
-    cdef decode(self, FRBuffer *buf):
-        return self._decode_array(buf)
+    cdef decode(self, object return_type, FRBuffer *buf):
+        return self._decode_array(False,return_type, buf)
 
-    cdef inline _decode_array(self, FRBuffer *buf):
+    cdef inline _decode_array(self, bint is_set, object return_type, FRBuffer *buf):
         cdef:
             Py_ssize_t elem_count
             int32_t ndims = hton.unpack_int32(frb_read(buf, 4))
@@ -156,12 +156,16 @@ cdef class BaseArrayCodec(BaseCodec):
                     tuple_elem_len = hton.unpack_int32(frb_read(buf, 4))
 
                     elem = self.sub_codec.decode(
+                        return_type,
                         frb_slice_from(&elem_buf, buf, tuple_elem_len)
                     )
 
                 else:
                     frb_slice_from(&elem_buf, buf, elem_len)
-                    elem = self.sub_codec.decode(&elem_buf)
+                    elem = self.sub_codec.decode(
+                        return_type,
+                        &elem_buf
+                    )
 
                 if frb_get_len(&elem_buf):
                     raise RuntimeError(

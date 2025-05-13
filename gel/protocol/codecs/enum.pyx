@@ -35,7 +35,7 @@ cdef class EnumCodec(BaseCodec):
                     f'got {type(obj).__name__}') from None
         pgproto.text_encode(DEFAULT_CODEC_CONTEXT, buf, str(obj))
 
-    cdef decode(self, FRBuffer *buf):
+    cdef decode(self, object return_type, FRBuffer *buf):
         label = pgproto.text_decode(DEFAULT_CODEC_CONTEXT, buf)
         return self.cls(label)
 

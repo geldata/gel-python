@@ -686,7 +686,14 @@ class ModelTestCase(SyncQueryTestCase):
     def setUpClass(cls):
         super().setUpClass()
 
-        cls.tmp_model_dir = tempfile.TemporaryDirectory()
+        cls.orm_debug = os.environ.get('GEL_PYTHON_TEST_ORM') in {'1', 'true'}
+
+        cls.tmp_model_dir = tempfile.TemporaryDirectory(
+            delete=not cls.orm_debug
+        )
+
+        if cls.orm_debug:
+            print(cls.tmp_model_dir.name)
 
         from gel.codegen.models import ModelsGenerator
         cls.gen = ModelsGenerator(
@@ -712,7 +719,8 @@ class ModelTestCase(SyncQueryTestCase):
             super().tearDownClass()
         finally:
             sys.path.remove(cls.tmp_model_dir.name)
-            cls.tmp_model_dir.cleanup()
+            if not cls.orm_debug:
+                cls.tmp_model_dir.cleanup()
 
 
 class ORMTestCase(SyncQueryTestCase):

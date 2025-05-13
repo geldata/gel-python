@@ -43,11 +43,37 @@ __all__ = (
 )
 
 
+class TypedEdgeQLQuery(typing.Protocol):
+
+    def __edgeql__(self) -> typing.Tuple[typing.Type, str]:
+        ...
+
+
+EdgeQLQuery = TypedEdgeQLQuery | str
+# todo: add support for typing.Sequence[EdgeQLQuery]?
+
+
 class QueryWithArgs(typing.NamedTuple):
     query: str
+    return_type: typing.Type
     args: typing.Tuple
     kwargs: typing.Dict[str, typing.Any]
     input_language: protocol.InputLanguage = protocol.InputLanguage.EDGEQL
+
+    @classmethod
+    def from_query(cls, query: EdgeQLQuery, args, kwargs) -> QueryWithArgs:
+        if query.__class__ is str or isinstance(query, str):
+            return cls(query, None, args, kwargs)
+
+        try:
+            eql = query.__edgeql__
+        except AttributeError:
+            pass
+        else:
+            return_type, query = eql()
+            return cls(query, return_type, args, kwargs)
+
+        raise ValueError('unsupported query type')
 
 
 class QueryCache(typing.NamedTuple):
@@ -76,6 +102,7 @@ class QueryContext(typing.NamedTuple):
     ) -> protocol.ExecuteContext:
         return protocol.ExecuteContext(
             query=self.query.query,
+            return_type=self.query.return_type,
             args=self.query.args,
             kwargs=self.query.kwargs,
             reg=self.cache.codecs_registry,
@@ -115,6 +142,7 @@ class ExecuteContext(typing.NamedTuple):
             state=self.state.as_dict() if self.state else None,
             annotations=self.annotations,
             transaction_options=self.transaction_options,
+            return_type=None,
         )
 
 
@@ -217,9 +245,9 @@ class ReadOnlyExecutor(BaseReadOnlyExecutor):
     def _query(self, query_context: QueryContext):
         ...
 
-    def query(self, query: str, *args, **kwargs) -> list:
+    def query(self, query: EdgeQLQuery, *args, **kwargs) -> list:
         return self._query(QueryContext(
-            query=QueryWithArgs(query, args, kwargs),
+            query=QueryWithArgs.from_query(query, args, kwargs),
             cache=self._get_query_cache(),
             query_options=_query_opts,
             retry_options=self._get_retry_options(),
@@ -230,10 +258,10 @@ class ReadOnlyExecutor(BaseReadOnlyExecutor):
         ))
 
     def query_single(
-        self, query: str, *args, **kwargs
+        self, query: EdgeQLQuery, *args, **kwargs
     ) -> typing.Union[typing.Any, None]:
         return self._query(QueryContext(
-            query=QueryWithArgs(query, args, kwargs),
+            query=QueryWithArgs.from_query(query, args, kwargs),
             cache=self._get_query_cache(),
             query_options=_query_single_opts,
             retry_options=self._get_retry_options(),
@@ -243,9 +271,9 @@ class ReadOnlyExecutor(BaseReadOnlyExecutor):
             annotations=self._get_annotations(),
         ))
 
-    def query_required_single(self, query: str, *args, **kwargs) -> typing.Any:
+    def query_required_single(self, query: EdgeQLQuery, *args, **kwargs) -> typing.Any:
         return self._query(QueryContext(
-            query=QueryWithArgs(query, args, kwargs),
+            query=QueryWithArgs.from_query(query, args, kwargs),
             cache=self._get_query_cache(),
             query_options=_query_required_single_opts,
             retry_options=self._get_retry_options(),
@@ -255,9 +283,9 @@ class ReadOnlyExecutor(BaseReadOnlyExecutor):
             annotations=self._get_annotations(),
         ))
 
-    def query_json(self, query: str, *args, **kwargs) -> str:
+    def query_json(self, query: EdgeQLQuery, *args, **kwargs) -> str:
         return self._query(QueryContext(
-            query=QueryWithArgs(query, args, kwargs),
+            query=QueryWithArgs.from_query(query, args, kwargs),
             cache=self._get_query_cache(),
             query_options=_query_json_opts,
             retry_options=self._get_retry_options(),
@@ -267,9 +295,9 @@ class ReadOnlyExecutor(BaseReadOnlyExecutor):
             annotations=self._get_annotations(),
         ))
 
-    def query_single_json(self, query: str, *args, **kwargs) -> str:
+    def query_single_json(self, query: EdgeQLQuery, *args, **kwargs) -> str:
         return self._query(QueryContext(
-            query=QueryWithArgs(query, args, kwargs),
+            query=QueryWithArgs.from_query(query, args, kwargs),
             cache=self._get_query_cache(),
             query_options=_query_single_json_opts,
             retry_options=self._get_retry_options(),
@@ -279,9 +307,9 @@ class ReadOnlyExecutor(BaseReadOnlyExecutor):
             annotations=self._get_annotations(),
         ))
 
-    def query_required_single_json(self, query: str, *args, **kwargs) -> str:
+    def query_required_single_json(self, query: EdgeQLQuery, *args, **kwargs) -> str:
         return self._query(QueryContext(
-            query=QueryWithArgs(query, args, kwargs),
+            query=QueryWithArgs.from_query(query, args, kwargs),
             cache=self._get_query_cache(),
             query_options=_query_required_single_json_opts,
             retry_options=self._get_retry_options(),
@@ -295,6 +323,7 @@ class ReadOnlyExecutor(BaseReadOnlyExecutor):
         return self._query(QueryContext(
             query=QueryWithArgs(
                 query,
+                None,
                 args,
                 kwargs,
                 input_language=protocol.InputLanguage.SQL,
@@ -314,7 +343,7 @@ class ReadOnlyExecutor(BaseReadOnlyExecutor):
 
     def execute(self, commands: str, *args, **kwargs) -> None:
         self._execute(ExecuteContext(
-            query=QueryWithArgs(commands, args, kwargs),
+            query=QueryWithArgs(commands, None, args, kwargs),
             cache=self._get_query_cache(),
             retry_options=self._get_retry_options(),
             state=self._get_state(),
@@ -327,6 +356,7 @@ class ReadOnlyExecutor(BaseReadOnlyExecutor):
         self._execute(ExecuteContext(
             query=QueryWithArgs(
                 commands,
+                None,
                 args,
                 kwargs,
                 input_language=protocol.InputLanguage.SQL,
@@ -355,9 +385,9 @@ class AsyncIOReadOnlyExecutor(BaseReadOnlyExecutor):
     async def _query(self, query_context: QueryContext):
         ...
 
-    async def query(self, query: str, *args, **kwargs) -> list:
+    async def query(self, query: EdgeQLQuery, *args, **kwargs) -> list:
         return await self._query(QueryContext(
-            query=QueryWithArgs(query, args, kwargs),
+            query=QueryWithArgs.from_query(query, args, kwargs),
             cache=self._get_query_cache(),
             query_options=_query_opts,
             retry_options=self._get_retry_options(),
@@ -367,9 +397,9 @@ class AsyncIOReadOnlyExecutor(BaseReadOnlyExecutor):
             annotations=self._get_annotations(),
         ))
 
-    async def query_single(self, query: str, *args, **kwargs) -> typing.Any:
+    async def query_single(self, query: EdgeQLQuery, *args, **kwargs) -> typing.Any:
         return await self._query(QueryContext(
-            query=QueryWithArgs(query, args, kwargs),
+            query=QueryWithArgs.from_query(query, args, kwargs),
             cache=self._get_query_cache(),
             query_options=_query_single_opts,
             retry_options=self._get_retry_options(),
@@ -381,12 +411,12 @@ class AsyncIOReadOnlyExecutor(BaseReadOnlyExecutor):
 
     async def query_required_single(
         self,
-        query: str,
+        query: EdgeQLQuery,
         *args,
         **kwargs
     ) -> typing.Any:
         return await self._query(QueryContext(
-            query=QueryWithArgs(query, args, kwargs),
+            query=QueryWithArgs.from_query(query, args, kwargs),
             cache=self._get_query_cache(),
             query_options=_query_required_single_opts,
             retry_options=self._get_retry_options(),
@@ -396,9 +426,9 @@ class AsyncIOReadOnlyExecutor(BaseReadOnlyExecutor):
             annotations=self._get_annotations(),
         ))
 
-    async def query_json(self, query: str, *args, **kwargs) -> str:
+    async def query_json(self, query: EdgeQLQuery, *args, **kwargs) -> str:
         return await self._query(QueryContext(
-            query=QueryWithArgs(query, args, kwargs),
+            query=QueryWithArgs.from_query(query, args, kwargs),
             cache=self._get_query_cache(),
             query_options=_query_json_opts,
             retry_options=self._get_retry_options(),
@@ -408,9 +438,9 @@ class AsyncIOReadOnlyExecutor(BaseReadOnlyExecutor):
             annotations=self._get_annotations(),
         ))
 
-    async def query_single_json(self, query: str, *args, **kwargs) -> str:
+    async def query_single_json(self, query: EdgeQLQuery, *args, **kwargs) -> str:
         return await self._query(QueryContext(
-            query=QueryWithArgs(query, args, kwargs),
+            query=QueryWithArgs.from_query(query, args, kwargs),
             cache=self._get_query_cache(),
             query_options=_query_single_json_opts,
             retry_options=self._get_retry_options(),
@@ -422,12 +452,12 @@ class AsyncIOReadOnlyExecutor(BaseReadOnlyExecutor):
 
     async def query_required_single_json(
         self,
-        query: str,
+        query: EdgeQLQuery,
         *args,
         **kwargs
     ) -> str:
         return await self._query(QueryContext(
-            query=QueryWithArgs(query, args, kwargs),
+            query=QueryWithArgs.from_query(query, args, kwargs),
             cache=self._get_query_cache(),
             query_options=_query_required_single_json_opts,
             retry_options=self._get_retry_options(),
@@ -441,6 +471,7 @@ class AsyncIOReadOnlyExecutor(BaseReadOnlyExecutor):
         return await self._query(QueryContext(
             query=QueryWithArgs(
                 query,
+                None,
                 args,
                 kwargs,
                 input_language=protocol.InputLanguage.SQL,
@@ -460,7 +491,7 @@ class AsyncIOReadOnlyExecutor(BaseReadOnlyExecutor):
 
     async def execute(self, commands: str, *args, **kwargs) -> None:
         await self._execute(ExecuteContext(
-            query=QueryWithArgs(commands, args, kwargs),
+            query=QueryWithArgs(commands, None, args, kwargs),
             cache=self._get_query_cache(),
             retry_options=self._get_retry_options(),
             state=self._get_state(),
@@ -473,6 +504,7 @@ class AsyncIOReadOnlyExecutor(BaseReadOnlyExecutor):
         await self._execute(ExecuteContext(
             query=QueryWithArgs(
                 commands,
+                None,
                 args,
                 kwargs,
                 input_language=protocol.InputLanguage.SQL,

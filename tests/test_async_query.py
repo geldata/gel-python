@@ -1025,7 +1025,7 @@ class TestAsyncQuery(tb.AsyncQueryTestCase):
         result = await self.client.connection.raw_query(
             abstract.QueryContext(
                 query=abstract.QueryWithArgs(
-                    'SELECT {"aaa", "bbb"}', (), {}
+                    'SELECT {"aaa", "bbb"}', None, (), {}
                 ),
                 cache=self.client._get_query_cache(),
                 query_options=abstract.QueryOptions(

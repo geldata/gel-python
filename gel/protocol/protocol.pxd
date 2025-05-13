@@ -37,7 +37,7 @@ include "./lru.pxd"
 include "./codecs/codecs.pxd"
 
 
-ctypedef object (*decode_row_method)(BaseCodec, FRBuffer *buf)
+ctypedef object (*decode_row_method)(BaseCodec, object return_type, FRBuffer *buf)
 
 
 cpdef enum InputLanguage:
@@ -91,6 +91,7 @@ cdef class ExecuteContext:
         object state
         object annotations
         object tx_options
+        object return_type
 
         # Contextual variables
         readonly bytes cardinality
@@ -137,12 +138,12 @@ cdef class SansIOProtocol:
     cdef encode_args(self, BaseCodec in_dc, WriteBuffer buf, args, kwargs)
     cdef encode_state(self, state)
 
-    cdef parse_data_messages(self, BaseCodec out_dc, result)
+    cdef parse_data_messages(self, ExecuteContext ctx, result)
     cdef parse_sync_message(self)
     cdef parse_command_complete_message(self)
     cdef parse_describe_type_message(self, ExecuteContext ctx)
     cdef parse_describe_state_message(self)
-    cdef parse_type_data(self, CodecsRegistry reg)
+    cdef parse_type_data(self, ExecuteContext ctx)
     cdef _amend_parse_error(
         self,
         exc,
