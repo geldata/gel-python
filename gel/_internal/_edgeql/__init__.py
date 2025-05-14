@@ -9,8 +9,15 @@ from ._quoting import (
     needs_quoting,
 )
 
+from ._tokens import (
+    Token,
+    PRECEDENCE,
+)
+
 
 __all__ = (
+    "PRECEDENCE",
+    "Token",
     "quote_ident",
     "quote_literal",
     "needs_quoting",
