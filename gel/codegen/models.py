@@ -1281,6 +1281,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                     self.get_type(m, import_time=ImportTime.typecheck)
                     for m in other_types
                 ]
+                other_type_main = other_type_strs[0]
                 other_type_strs.sort()
                 all_other_types.update(other_type_strs)
                 other_type = " | ".join(
@@ -1295,6 +1296,9 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                     line_comment="type: ignore [override]",
                     implicit_param=False,
                 ):
+                    self.write(f"if not isinstance(other, ({type_}, {other_type_main})):")
+                    with self.indented():
+                        self.write(f"other = {other_type_main}(other)")
                     opexpr = f'{infxop}(lexpr=cls, op="{opname}", rexpr=other)'
                     self.write(
                         self.format_list(
