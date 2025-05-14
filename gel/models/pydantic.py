@@ -14,6 +14,7 @@ from typing import (
     Generic,
     NamedTuple,
     Protocol,
+    TypeGuard,
     TypeVar,
     cast,
     final,
@@ -21,13 +22,17 @@ from typing import (
 )
 
 from typing_extensions import (
+    ParamSpec,
     Self,
     TypeAliasType,
     TypeVarTuple,
     Unpack,
 )
 
+import abc
+import builtins
 import functools
+import textwrap
 import sys
 import uuid
 import warnings
@@ -47,6 +52,7 @@ from pydantic._internal import _model_construction  # noqa: PLC2701
 from pydantic._internal import _namespace_utils  # noqa: PLC2701
 
 from gel.datatypes import range as range_t
+from gel._internal import _edgeql
 from gel._internal import _typing_eval
 from gel._internal import _typing_inspect
 from gel._internal import _typing_dispatch
@@ -221,6 +227,47 @@ class _BaseAlias(metaclass=_BaseAliasMeta):
     def __subclasscheck__(self, cls: type) -> bool:
         return issubclass(cls, self.__gel_origin__)
 
+    def __getattr__(self, attr: str) -> Any:
+        if "__gel_origin__" in self.__dict__ and not _is_dunder(attr):
+            attrval = getattr(self.__gel_origin__, attr)
+            if _is_gel_expr_method(attrval):
+
+                @functools.wraps(attrval)
+                def wrapper(*args: Any, **kwargs: Any) -> Any:
+                    return attrval(*args, __operand__=self, **kwargs)
+
+                return wrapper
+            else:
+                return attrval
+        else:
+            raise AttributeError(attr)
+
+    def __infix_op__(self, op: str, operand: Any) -> Any:
+        if op == "__eq__" and operand is self:
+            return True
+
+        this_operand = self.__gel_origin__
+        other_operand = operand
+        if isinstance(operand, _BaseAlias):
+            other_operand = operand.__gel_origin__
+
+        meta_impl = this_operand.__type_meta_impl__
+        op_impl = getattr(meta_impl, op, None)
+        if op_impl is None:
+            t1 = _type_repr(this_operand)
+            t2 = _type_repr(other_operand)
+            raise TypeError(
+                f"operation not supported between instances of {t1} and {t2}"
+            )
+
+        expr = op_impl(this_operand, other_operand)
+        assert isinstance(expr, _ExprAlias)
+        metadata = expr.__gel_metadata__
+        assert isinstance(metadata, InfixOp)
+        metadata.lexpr = self
+        metadata.rexpr = operand
+        return expr
+
 
 class _PathAlias(_BaseAlias):
     def __init__(self, origin: type[GelType], metadata: Path) -> None:
@@ -253,37 +300,6 @@ class _PathAlias(_BaseAlias):
 
     def __edgeql__(self) -> str:
         return self.__gel_metadata__.__edgeql__()
-
-    def __infix_op__(self, op: str, operand: Any) -> Any:
-        this_operand = self.__gel_origin__
-        other_operand = operand
-        if isinstance(operand, _BaseAlias):
-            other_operand = operand.__gel_origin__
-
-        if op in {"__eq__", "__ne__"} and not isinstance(
-            other_operand, GelType
-        ):
-            if op == "__eq__":
-                return self is operand
-            else:
-                return self is not operand
-
-        meta_impl = this_operand.__type_meta_impl__
-        op_impl = getattr(meta_impl, op, None)
-        if op_impl is None:
-            t1 = _type_repr(this_operand)
-            t2 = _type_repr(other_operand)
-            raise TypeError(
-                f"operation not supported between instances of {t1} and {t2}"
-            )
-
-        expr = op_impl(this_operand, other_operand)
-        assert isinstance(expr, _ExprAlias)
-        metadata = expr.__gel_metadata__
-        assert isinstance(metadata, InfixOp)
-        metadata.lexpr = self
-        metadata.rexpr = operand
-        return expr
 
 
 def AnnotatedPath(origin: type, metadata: Path) -> _PathAlias:  # noqa: N802
@@ -428,8 +444,14 @@ class Exclusive:
     pass
 
 
-class Symbol(NamedTuple):
-    symbol: str
+class Symbol(abc.ABC):
+    @abc.abstractmethod
+    def __edgeql__(self) -> str: ...
+
+
+class PathPrefix(Symbol):
+    def __edgeql__(self) -> str:
+        return ""
 
 
 class SchemaSet(NamedTuple):
@@ -450,7 +472,7 @@ class Expr:
         raise NotImplementedError(f"{type(self).__name__}.__edgeql__")
 
 
-@dataclasses.dataclass(frozen=True, kw_only=True)
+@dataclasses.dataclass(kw_only=True)
 class Path(Expr):
     source: Symbol | SchemaSet | Path
     name: str
@@ -463,8 +485,10 @@ class Path(Expr):
             steps.append(current.name)
             current = current.source
 
-        if not isinstance(current, SchemaSet):
-            raise ValueError("Path does not start with a SourceSet")
+        if not isinstance(current, (SchemaSet, Symbol)):
+            raise AssertionError(
+                "Path does not start with a SourceSet or a Symbol"
+            )
         steps.append(current.__edgeql__())
 
         return ".".join(reversed(steps))
@@ -499,11 +523,32 @@ class FuncCall(Expr):
         args = ", ".join(
             [
                 *(edgeql(arg) for arg in self.args),
-                *(f"{n} := edgeql({v})" for n, v in self.kwargs.items()),
+                *(f"{n} := {edgeql(v)}" for n, v in self.kwargs.items()),
             ]
         )
 
         return f"{self.fname}({args})"
+
+
+@dataclasses.dataclass(frozen=True, kw_only=True)
+class Filter(Expr):
+    expr: Any
+    filters: list[Any]
+
+    def __edgeql__(self) -> str:
+        filter_expr = " AND ".join(edgeql(f) for f in self.filters)
+        return f"{edgeql(self.expr)} FILTER {filter_expr}"
+
+
+@dataclasses.dataclass(frozen=True, kw_only=True)
+class Shape(Expr):
+    expr: Any
+    elements: dict[str, Any]
+
+    def __edgeql__(self) -> str:
+        els = (f"{n} := {edgeql(ex)}" for n, ex in self.elements.items())
+        shape = "{\n" + textwrap.indent("\n".join(els), "  ") + "\n}"
+        return f"{edgeql(self.expr)} {shape}"
 
 
 GelType_T = TypeVar("GelType_T", bound="GelType")
@@ -527,10 +572,10 @@ class GelType(GelClassVar):
             if isinstance(self, type):
                 raise NotImplementedError(f"{self.__name__}.__edgeql__")
             else:
-                return self.__as_edgeql__()
+                return self.__edgeql_literal__()
 
-    def __as_edgeql__(self) -> str:
-        raise NotImplementedError(f"{type(self).__name__}.__as_edgeql__")
+    def __edgeql_literal__(self) -> str:
+        raise NotImplementedError(f"{type(self).__name__}.__edgeql_literal__")
 
 
 class GelPrimitiveType(GelType):
@@ -731,6 +776,7 @@ class MultiRange(
 class PyTypeScalar(parametric.SingleParametricType[T_co]):
     if TYPE_CHECKING:
 
+        def __init__(self, val: Any) -> None: ...
         def __set__(self, obj: Any, value: T_co) -> None: ...  # type: ignore [misc]
 
     @classmethod
@@ -743,6 +789,18 @@ class PyTypeScalar(parametric.SingleParametricType[T_co]):
             cls.type,
             handler(cls.type),
         )
+
+    def __edgeql_literal__(self) -> str:
+        cls = type(self)
+        match cls.type:
+            case builtins.bool:
+                return "true" if self else "false"
+            case builtins.int | builtins.float:
+                return str(self)
+            case builtins.str:
+                return _edgeql.quote_literal(str(self))
+
+        raise NotImplementedError(f"{cls}.__edgeql_literal__")
 
 
 class GelModelMeta(_model_construction.ModelMetaclass, GelTypeMeta):
@@ -805,6 +863,25 @@ class GelModelMeta(_model_construction.ModelMetaclass, GelTypeMeta):
             ) from None
 
 
+P = ParamSpec("P")
+R = TypeVar("R")
+
+
+def exprmethod(func: Callable[P, R]) -> Callable[P, R]:
+    actual_func: Callable[P, R] = getattr(func, "__func__", func)
+    actual_func.__gel_expr_method__ = True  # type: ignore [attr-defined]
+    return func
+
+
+def _is_gel_expr_method(obj: Any) -> TypeGuard[Callable[..., Any]]:
+    if hasattr(obj, "__gel_expr_method__"):
+        return True
+    func = getattr(obj, "__func__", None)
+    if func is not None:
+        return hasattr(func, "__gel_expr_method__")
+    return False
+
+
 class GelModel(
     pydantic.BaseModel,
     GelModelMetadata,
@@ -839,30 +916,114 @@ class GelModel(
 
         return hash(self._p__id)
 
-    @classmethod
-    def select(cls, /, **kwargs: bool | type[GelType]) -> type[Self]:
-        return cls
+    if TYPE_CHECKING:
+        @classmethod
+        def select(cls, /, **kwargs: bool | type[GelType]) -> type[Self]: ...
+    else:
+        @exprmethod
+        @classmethod
+        def select(
+            cls,
+            /,
+            __operand__: _ExprAlias | None = None,
+            **kwargs: bool | type[GelType],
+        ) -> type[Self]:
+            shape = {}
 
-    @classmethod
-    def filter(cls, /, *exprs: Any, **properties: Any) -> type[Self]:
-        all_exprs = list(exprs)
+            for ptrname, kwarg in kwargs.items():
+                if isinstance(kwarg, bool):
+                    ptr = getattr(cls, ptrname, Unspecified)
+                    if ptr is Unspecified and isinstance(kwarg, bool):
+                        sn = cls.__reflection__.name.as_schema_name()
+                        msg = f"{ptrname} is not a valid {sn} property"
+                        raise AttributeError(msg)
+                    if not isinstance(ptr, _PathAlias):
+                        raise AssertionError(
+                            f"expected {cls.__name__}.{ptrname} "
+                            f"to be a PathAlias"
+                        )
 
-        for propname, value in properties.items():
-            prop = getattr(cls, propname, Unspecified)
-            if prop is Unspecified:
-                sn = cls.__reflection__.name.as_schema_name()
-                msg = f"{propname} is not a valid {sn} property"
-                raise AttributeError(msg)
-            assert type(prop) is type
-            prop_comp = prop == value
-            if not isinstance(prop_comp, BaseScalar):
-                raise AssertionError(
-                    f"comparing {prop} to {value} did not produce "
-                    "a Gel expression type"
+                    if kwarg:
+                        ptr.__gel_metadata__.source = PathPrefix()
+                        shape[ptrname] = ptr
+                else:
+                    shape[ptrname] = kwarg
+
+            operand: type[Self] | Expr
+
+            if __operand__ is not None:
+                operand = __operand__.__gel_metadata__
+            else:
+                operand = cls
+
+            expr = Shape(expr=operand, elements=shape)
+
+            return AnnotatedExpr(  # type: ignore [return-value]
+                cls,
+                expr,
+            )
+
+    if TYPE_CHECKING:
+        @classmethod
+        def filter(
+            cls,
+            /,
+            *exprs: Any,
+            **properties: Any,
+        ) -> type[Self]: ...
+    else:
+        @exprmethod
+        @classmethod
+        def filter(
+            cls,
+            /,
+            *exprs: Any,
+            __operand__: _ExprAlias | None = None,
+            **properties: Any,
+        ) -> type[Self]:
+            all_exprs = list(exprs)
+
+            for propname, value in properties.items():
+                prop = getattr(cls, propname, Unspecified)
+                if prop is Unspecified:
+                    sn = cls.__reflection__.name.as_schema_name()
+                    msg = f"{propname} is not a valid {sn} property"
+                    raise AttributeError(msg)
+                if not isinstance(prop, _PathAlias):
+                    raise AssertionError(
+                        f"expected {cls.__name__}.{propname} to be a PathAlias"
+                    )
+                prop.__gel_metadata__.source = PathPrefix()
+                prop_comp = prop == value
+                if not isinstance(prop_comp, _ExprAlias):
+                    raise AssertionError(
+                        f"comparing {prop} to {value} did not produce "
+                        "a Gel expression type"
+                    )
+                all_exprs.append(prop_comp)
+
+            operand: type[Self] | Expr
+
+            if __operand__ is not None:
+                operand = __operand__.__gel_metadata__
+            else:
+                operand = cls
+
+            if isinstance(operand, Filter):
+                expr = Filter(
+                    expr=operand.expr, filters=operand.filters + all_exprs
                 )
-            all_exprs.append(prop_comp)
+            else:
+                expr = Filter(expr=operand, filters=all_exprs)
 
-        return cls
+            return AnnotatedExpr(  # type: ignore [return-value]
+                cls,
+                expr,
+            )
+
+    @classmethod
+    def __edgeql__(cls) -> str:  # pyright: ignore [reportIncompatibleMethodOverride]
+        return cls.__reflection__.name.as_schema_name()
 
 
 class LinkPropsDescriptor(Generic[T_co]):
@@ -913,7 +1074,7 @@ class ProxyModel(GelModel, Generic[MT]):
     def __setattr__(self, name: str, value: Any) -> None:
         model_fields = type(self).__proxy_of__.model_fields
         if name in model_fields:
-            # writing to a field: mutate the wrapped model
+            # writing to a field: mutate the  wrapped model
             base = object.__getattribute__(self, "_p__obj__")
             setattr(base, name, value)
         else:

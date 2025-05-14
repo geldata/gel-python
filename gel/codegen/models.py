@@ -1073,8 +1073,13 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             consider_abstract=False,
         )
         if pybase is not None:
+            real_pybase = self._get_pybase_for_this_scalar(
+                stype,
+                consider_abstract=False,
+            )
+            assert real_pybase is not None
             pts = self.import_name(BASE_IMPL, "PyTypeScalar")
-            typecheck_parents = [f"{pts}[{pybase}]"]
+            typecheck_parents = [f"{pts}[{real_pybase}]"]
             runtime_parents = [pybase, *typecheck_parents]
         else:
             typecheck_parents = []
@@ -1275,7 +1280,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                 other_type_strs.sort()
                 all_other_types.update(other_type_strs)
                 other_type = " | ".join(
-                    f"{type_}[{t}]" for t in other_type_strs
+                    f"{type_}[{t}] | {t}" for t in other_type_strs
                 )
 
                 with self._method_def(
