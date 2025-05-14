@@ -86,18 +86,18 @@ class UnspecifiedType:
 Unspecified = UnspecifiedType()
 
 
-class InstanceSupportsEdgeQL(Protocol):
-    def __edgeql__(self) -> str: ...
+class InstanceSupportsEdgeQLExpr(Protocol):
+    def __edgeql_expr__(self) -> str: ...
 
 
-class TypeSupportsEdgeQL(Protocol):
+class TypeSupportsEdgeQLExpr(Protocol):
     @classmethod
-    def __edgeql__(cls) -> str: ...
+    def __edgeql_expr__(cls) -> str: ...
 
 
-SupportsEdgeQL = TypeAliasType(
-    "SupportsEdgeQL",
-    InstanceSupportsEdgeQL | type[TypeSupportsEdgeQL],
+SupportsEdgeQLExpr = TypeAliasType(
+    "SupportsEdgeQLExpr",
+    InstanceSupportsEdgeQLExpr | type[TypeSupportsEdgeQLExpr],
 )
 
 
@@ -315,8 +315,8 @@ class _ExprAlias(_BaseAlias):
     def __bool__(self) -> bool:
         return False
 
-    def __edgeql__(self) -> str:
-        return self.__gel_metadata__.__edgeql__()
+    def __edgeql_expr__(self) -> str:
+        return self.__gel_metadata__.__edgeql_expr__()
 
 
 def AnnotatedExpr(origin: type[GelType], metadata: Expr) -> _ExprAlias:  # noqa: N802
@@ -452,7 +452,7 @@ class ExprCompatibleInstance(Protocol):
 
 class ExprCompatibleType(Protocol):
     @classmethod
-    def __edgeql__(cls) -> str: ...
+    def __edgeql_expr__(cls) -> str: ...
 
 
 ExprCompatible = TypeAliasType(
@@ -461,26 +461,26 @@ ExprCompatible = TypeAliasType(
 )
 
 
-def edgeql(source: SupportsEdgeQL | ExprCompatible) -> str:
+def edgeql(source: SupportsEdgeQLExpr | ExprCompatible) -> str:
     try:
-        __edgeql__ = source.__edgeql__  # type: ignore [union-attr]
+        __edgeql_expr__ = source.__edgeql_expr__  # type: ignore [union-attr]
     except AttributeError:
         try:
             __edgeql_qb_expr__ = source.__edgeql_qb_expr__  # type: ignore [union-attr]
         except AttributeError:
             raise TypeError(
-                f"{type(source)} does not support __edgeql__ protocol"
+                f"{type(source)} does not support __edgeql_expr__ protocol"
             ) from None
         else:
             expr = __edgeql_qb_expr__()
-            __edgeql__ = expr.__edgeql__
+            __edgeql_expr__ = expr.__edgeql_expr__
 
-    if not callable(__edgeql__):
-        raise TypeError(f"{type(source)}.__edgeql__ is not callable")
+    if not callable(__edgeql_expr__):
+        raise TypeError(f"{type(source)}.__edgeql_expr__ is not callable")
 
-    value = __edgeql__()
+    value = __edgeql_expr__()
     if not isinstance(value, str):
-        raise ValueError("{type(source)}.__edgeql__()")
+        raise ValueError("{type(source)}.__edgeql_expr__()")
     return value
 
 
@@ -507,7 +507,7 @@ class Expr(abc.ABC):
     def precedence(self) -> _edgeql.Precedence: ...
 
     @abc.abstractmethod
-    def __edgeql__(self) -> str: ...
+    def __edgeql_expr__(self) -> str: ...
 
     def __edgeql_qb_expr__(self) -> Self:
         return self
@@ -518,7 +518,7 @@ class ExprPlaceholder(Expr):
     def precedence(self) -> _edgeql.Precedence:
         raise TypeError("unreplaced ExprPlaceholder")
 
-    def __edgeql__(self) -> str:
+    def __edgeql_expr__(self) -> str:
         raise TypeError("unreplaced ExprPlaceholder")
 
 
@@ -533,7 +533,7 @@ class Symbol(IdentLikeExpr):
 
 
 class PathPrefix(Symbol):
-    def __edgeql__(self) -> str:
+    def __edgeql_expr__(self) -> str:
         return ""
 
 
@@ -541,7 +541,7 @@ class PathPrefix(Symbol):
 class SchemaSet(IdentLikeExpr):
     name: SchemaPath
 
-    def __edgeql__(self) -> str:
+    def __edgeql_expr__(self) -> str:
         return "::".join(self.name.parts)
 
 
@@ -553,7 +553,7 @@ class Literal(IdentLikeExpr):
 class BoolLiteral(Literal):
     val: bool
 
-    def __edgeql__(self) -> str:
+    def __edgeql_expr__(self) -> str:
         return "true" if self.val else "false"
 
 
@@ -561,7 +561,7 @@ class BoolLiteral(Literal):
 class IntLiteral(Literal):
     val: int
 
-    def __edgeql__(self) -> str:
+    def __edgeql_expr__(self) -> str:
         return str(self.val)
 
 
@@ -569,7 +569,7 @@ class IntLiteral(Literal):
 class FloatLiteral(Literal):
     val: float
 
-    def __edgeql__(self) -> str:
+    def __edgeql_expr__(self) -> str:
         return str(self.val)
 
 
@@ -577,7 +577,7 @@ class FloatLiteral(Literal):
 class BigIntLiteral(Literal):
     val: int
 
-    def __edgeql__(self) -> str:
+    def __edgeql_expr__(self) -> str:
         return f"n{self.val}"
 
 
@@ -585,7 +585,7 @@ class BigIntLiteral(Literal):
 class DecimalLiteral(Literal):
     val: decimal.Decimal
 
-    def __edgeql__(self) -> str:
+    def __edgeql_expr__(self) -> str:
         return f"n{self.val}"
 
 
@@ -593,7 +593,7 @@ class DecimalLiteral(Literal):
 class BytesLiteral(Literal):
     val: bytes
 
-    def __edgeql__(self) -> str:
+    def __edgeql_expr__(self) -> str:
         v = _edgeql.quote_literal(repr(self.val)[2:-1])
         return f"b{v}"
 
@@ -602,7 +602,7 @@ class BytesLiteral(Literal):
 class StringLiteral(Literal):
     val: str
 
-    def __edgeql__(self) -> str:
+    def __edgeql_expr__(self) -> str:
         return _edgeql.quote_literal(self.val)
 
 
@@ -616,7 +616,7 @@ class Path(Expr):
     def precedence(self) -> _edgeql.Precedence:
         return _edgeql.PRECEDENCE[_edgeql.Operation.PATH]
 
-    def __edgeql__(self) -> str:
+    def __edgeql_expr__(self) -> str:
         steps = []
         current: PathSource = self
         while isinstance(current, Path):
@@ -627,7 +627,7 @@ class Path(Expr):
             raise AssertionError(
                 "Path does not start with a SourceSet or a Symbol"
             )
-        steps.append(current.__edgeql__())
+        steps.append(current.__edgeql_expr__())
 
         return ".".join(reversed(steps))
 
@@ -656,7 +656,7 @@ class PrefixOp(Op):
             op = _edgeql.Token.from_str(op)
         self.op = op
 
-    def __edgeql__(self) -> str:
+    def __edgeql_expr__(self) -> str:
         return f"{self.op} {edgeql(self.expr)}"
 
 
@@ -678,7 +678,7 @@ class InfixOp(Op):
             op = _edgeql.Token.from_str(op)
         self.op = op
 
-    def __edgeql__(self) -> str:
+    def __edgeql_expr__(self) -> str:
         left = edgeql(self.lexpr)
         if self._need_left_parens():
             left = f"({left})"
@@ -720,7 +720,7 @@ class FuncCall(Expr):
     def precedence(self) -> _edgeql.Precedence:
         return _edgeql.PRECEDENCE[_edgeql.Operation.CALL]
 
-    def __edgeql__(self) -> str:
+    def __edgeql_expr__(self) -> str:
         args = ", ".join(
             [
                 *(edgeql(arg) for arg in self.args),
@@ -740,7 +740,7 @@ class Filter(Expr):
     def precedence(self) -> _edgeql.Precedence:
         return _edgeql.PRECEDENCE[_edgeql.Token.FILTER]
 
-    def __edgeql__(self) -> str:
+    def __edgeql_expr__(self) -> str:
         fexpr = self.filters[0]
         for item in self.filters[1:]:
             fexpr = InfixOp(lexpr=fexpr, op=_edgeql.Token.AND, rexpr=item)
@@ -757,7 +757,7 @@ class Shape(Expr):
     def precedence(self) -> _edgeql.Precedence:
         return _edgeql.PRECEDENCE[_edgeql.Token.LBRACE]
 
-    def __edgeql__(self) -> str:
+    def __edgeql_expr__(self) -> str:
         els = (f"{n} := {edgeql(ex)}" for n, ex in self.elements.items())
         shape = "{\n" + textwrap.indent("\n".join(els), "  ") + "\n}"
         return f"{edgeql(self.expr)} {shape}"
@@ -777,7 +777,7 @@ if TYPE_CHECKING:
         def __edgeql_qb_expr__(self) -> Expr: ...
 
         @staticmethod
-        def __edgeql__() -> str: ...
+        def __edgeql_expr__() -> str: ...
 else:
     GelTypeMeta = type
 
@@ -1249,7 +1249,7 @@ class GelModel(
             )
 
     @classmethod
-    def __edgeql__(cls) -> str:  # pyright: ignore [reportIncompatibleMethodOverride]
+    def __edgeql_expr__(cls) -> str:  # pyright: ignore [reportIncompatibleMethodOverride]
         return cls.__reflection__.name.as_schema_name()
 
 
