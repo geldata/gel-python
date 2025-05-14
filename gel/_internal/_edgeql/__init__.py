@@ -10,15 +10,21 @@ from ._quoting import (
 )
 
 from ._tokens import (
-    Token,
     PRECEDENCE,
+    Assoc,
+    Operation,
+    Precedence,
+    Token,
 )
 
 
 __all__ = (
     "PRECEDENCE",
+    "Assoc",
+    "Operation",
+    "Precedence",
     "Token",
+    "needs_quoting",
     "quote_ident",
     "quote_literal",
-    "needs_quoting",
 )

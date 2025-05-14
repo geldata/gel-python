@@ -3,11 +3,19 @@
 # SPDX-FileCopyrightText: Copyright Gel Data Inc. and the contributors.
 
 
+from __future__ import annotations
+
+from typing import NamedTuple, final
+
 import enum
 
 from gel._internal._polyfills import StrEnum
 
 
+_token_str_map: dict[str, Token] = {}
+
+
+@final
 class Token(StrEnum):
     ADDASSIGN = "+="
     AMPER = "&"
@@ -181,6 +189,7 @@ class Token(StrEnum):
     OPERATOR = "OPERATOR"
     OPTIONALITY = "OPTIONALITY"
     ORDER = "ORDER"
+    ORDER_BY = "ORDER BY"
     ORPHAN = "ORPHAN"
     OVERLOADED = "OVERLOADED"
     OWNED = "OWNED"
@@ -230,6 +239,17 @@ class Token(StrEnum):
     VIEW = "VIEW"
     WRITE = "WRITE"
 
+    @classmethod
+    def from_str(cls, s: str, /) -> Token:
+        if not _token_str_map:
+            _token_str_map.update({
+                str(v): v for v in cls.__members__.values()
+            })
+        try:
+            return _token_str_map[s]
+        except KeyError:
+            raise ValueError(f"{s!r} is not a valid Token") from None
+
 
 class Assoc(enum.Enum):
     LEFT = enum.auto()
@@ -240,64 +260,73 @@ class Assoc(enum.Enum):
 class Operation(enum.Enum):
     TYPECAST = enum.auto()
     PARENEXPR = enum.auto()
+    PATH = enum.auto()
+    CALL = enum.auto()
 
 
-PRECEDENCE: dict[
-    Token | tuple[Token, int] | Operation, tuple[int, Assoc]
-] = {
-    Token.UNION: (0, Assoc.LEFT),
-    Token.EXCEPT: (0, Assoc.LEFT),
-    Token.INTERSECT: (1, Assoc.LEFT),
-    Token.IF: (2, Assoc.RIGHT),
-    Token.ELSE: (2, Assoc.RIGHT),
-    Token.OR: (3, Assoc.LEFT),
-    Token.AND: (4, Assoc.LEFT),
-    Token.NOT: (5, Assoc.RIGHT),
-    Token.LIKE: (6, Assoc.NONASSOC),
-    Token.ILIKE: (6, Assoc.NONASSOC),
-    Token.IN: (7, Assoc.NONASSOC),
-    Token.IDENT: (8, Assoc.NONASSOC),
-    Token.DISTINCTFROM: (9, Assoc.NONASSOC),
-    Token.EQUALS: (9, Assoc.NONASSOC),
-    Token.GREATEREQ: (9, Assoc.NONASSOC),
-    Token.LANGBRACKET: (9, Assoc.NONASSOC),
-    Token.LESSEQ: (9, Assoc.NONASSOC),
-    Token.NOTDISTINCTFROM: (9, Assoc.NONASSOC),
-    Token.NOTEQ: (9, Assoc.NONASSOC),
-    Token.RANGBRACKET: (9, Assoc.NONASSOC),
-    Token.IS: (10, Assoc.NONASSOC),
-    Token.PLUS: (11, Assoc.LEFT),
-    Token.MINUS: (11, Assoc.LEFT),
-    Token.DOUBLEPLUS: (11, Assoc.LEFT),
-    Token.STAR: (12, Assoc.LEFT),
-    Token.SLASH: (12, Assoc.LEFT),
-    Token.DOUBLESLASH: (12, Assoc.LEFT),
-    Token.PERCENT: (12, Assoc.LEFT),
-    Token.DOUBLEQMARK: (13, Assoc.RIGHT),
-    Token.TYPEOF: (14, Assoc.NONASSOC),
-    Token.INTROSPECT: (15, Assoc.NONASSOC),
-    Token.PIPE: (16, Assoc.LEFT),
-    Token.AMPER: (17, Assoc.LEFT),
-    (Token.MINUS, 1): (18, Assoc.RIGHT),
-    Operation.PARENEXPR: (18, Assoc.NONASSOC),
-    Token.EXISTS: (18, Assoc.RIGHT),
-    Token.DISTINCT: (18, Assoc.RIGHT),
-    Token.CIRCUMFLEX: (19, Assoc.RIGHT),
-    Operation.TYPECAST: (20, Assoc.RIGHT),
-    Token.LBRACE: (21, Assoc.LEFT),
-    Token.RBRACE: (21, Assoc.LEFT),
-    Token.LBRACKET: (22, Assoc.LEFT),
-    Token.RBRACKET: (22, Assoc.LEFT),
-    Token.LPAREN: (23, Assoc.LEFT),
-    Token.RPAREN: (23, Assoc.LEFT),
-    Token.DOT: (24, Assoc.LEFT),
-    Token.DOTBW: (24, Assoc.LEFT),
-    Token.DETACHED: (24, Assoc.RIGHT),
-    Token.GLOBAL: (25, Assoc.RIGHT),
-    Token.DOUBLECOLON: (26, Assoc.LEFT),
-    Token.AT: (27, Assoc.LEFT),
-    Token.REQUIRED: (28, Assoc.RIGHT),
-    Token.OPTIONAL: (28, Assoc.RIGHT),
-    Token.MULTI: (28, Assoc.RIGHT),
-    Token.SINGLE: (28, Assoc.RIGHT),
+class Precedence(NamedTuple):
+    value: int
+    assoc: Assoc
+
+
+PRECEDENCE: dict[Token | tuple[Token, int] | Operation, Precedence] = {
+    Token.UNION: Precedence(-1, Assoc.LEFT),
+    Token.EXCEPT: Precedence(-1, Assoc.LEFT),
+    Token.INTERSECT: Precedence(0, Assoc.LEFT),
+    Token.FILTER: Precedence(1, Assoc.NONASSOC),
+    Token.ORDER_BY: Precedence(1, Assoc.NONASSOC),
+    Token.IF: Precedence(2, Assoc.RIGHT),
+    Token.ELSE: Precedence(2, Assoc.RIGHT),
+    Token.OR: Precedence(3, Assoc.LEFT),
+    Token.AND: Precedence(4, Assoc.LEFT),
+    Token.NOT: Precedence(5, Assoc.RIGHT),
+    Token.LIKE: Precedence(6, Assoc.NONASSOC),
+    Token.ILIKE: Precedence(6, Assoc.NONASSOC),
+    Token.IN: Precedence(7, Assoc.NONASSOC),
+    Token.IDENT: Precedence(8, Assoc.NONASSOC),
+    Token.DISTINCTFROM: Precedence(9, Assoc.NONASSOC),
+    Token.EQUALS: Precedence(9, Assoc.NONASSOC),
+    Token.GREATEREQ: Precedence(9, Assoc.NONASSOC),
+    Token.LANGBRACKET: Precedence(9, Assoc.NONASSOC),
+    Token.LESSEQ: Precedence(9, Assoc.NONASSOC),
+    Token.NOTDISTINCTFROM: Precedence(9, Assoc.NONASSOC),
+    Token.NOTEQ: Precedence(9, Assoc.NONASSOC),
+    Token.RANGBRACKET: Precedence(9, Assoc.NONASSOC),
+    Token.IS: Precedence(10, Assoc.NONASSOC),
+    Token.PLUS: Precedence(11, Assoc.LEFT),
+    Token.MINUS: Precedence(11, Assoc.LEFT),
+    Token.DOUBLEPLUS: Precedence(11, Assoc.LEFT),
+    Token.STAR: Precedence(12, Assoc.LEFT),
+    Token.SLASH: Precedence(12, Assoc.LEFT),
+    Token.DOUBLESLASH: Precedence(12, Assoc.LEFT),
+    Token.PERCENT: Precedence(12, Assoc.LEFT),
+    Token.DOUBLEQMARK: Precedence(13, Assoc.RIGHT),
+    Token.TYPEOF: Precedence(14, Assoc.NONASSOC),
+    Token.INTROSPECT: Precedence(15, Assoc.NONASSOC),
+    Token.PIPE: Precedence(16, Assoc.LEFT),
+    Token.AMPER: Precedence(17, Assoc.LEFT),
+    (Token.MINUS, 1): Precedence(18, Assoc.RIGHT),
+    Operation.PARENEXPR: Precedence(18, Assoc.NONASSOC),
+    Token.EXISTS: Precedence(18, Assoc.RIGHT),
+    Token.DISTINCT: Precedence(18, Assoc.RIGHT),
+    Token.CIRCUMFLEX: Precedence(19, Assoc.RIGHT),
+    Operation.TYPECAST: Precedence(20, Assoc.RIGHT),
+    Token.LBRACE: Precedence(21, Assoc.LEFT),
+    Token.RBRACE: Precedence(21, Assoc.LEFT),
+    Token.LBRACKET: Precedence(22, Assoc.LEFT),
+    Token.RBRACKET: Precedence(22, Assoc.LEFT),
+    Token.LPAREN: Precedence(23, Assoc.LEFT),
+    Token.RPAREN: Precedence(23, Assoc.LEFT),
+    Operation.CALL: Precedence(23, Assoc.LEFT),
+    Token.DOT: Precedence(24, Assoc.LEFT),
+    Token.DOTBW: Precedence(24, Assoc.LEFT),
+    Operation.PATH: Precedence(24, Assoc.LEFT),
+    Token.DETACHED: Precedence(24, Assoc.RIGHT),
+    Token.GLOBAL: Precedence(25, Assoc.RIGHT),
+    Token.DOUBLECOLON: Precedence(26, Assoc.LEFT),
+    Token.AT: Precedence(27, Assoc.LEFT),
+    Token.REQUIRED: Precedence(28, Assoc.RIGHT),
+    Token.OPTIONAL: Precedence(28, Assoc.RIGHT),
+    Token.MULTI: Precedence(28, Assoc.RIGHT),
+    Token.SINGLE: Precedence(28, Assoc.RIGHT),
 }

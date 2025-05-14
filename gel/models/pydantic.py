@@ -4,15 +4,12 @@
 
 from __future__ import annotations
 
-import dataclasses
-import typing
 from typing import (
     TYPE_CHECKING,
     Annotated,
     Any,
     ClassVar,
     Generic,
-    NamedTuple,
     Protocol,
     TypeGuard,
     TypeVar,
@@ -31,9 +28,12 @@ from typing_extensions import (
 
 import abc
 import builtins
+import dataclasses
+import decimal
 import functools
-import textwrap
 import sys
+import textwrap
+import typing
 import uuid
 import warnings
 import weakref
@@ -102,23 +102,6 @@ SupportsEdgeQL = TypeAliasType(
 
 
 dispatch_overload = _typing_dispatch.dispatch_overload
-
-
-def edgeql(source: SupportsEdgeQL) -> str:
-    try:
-        __edgeql__ = source.__edgeql__
-    except AttributeError:
-        raise TypeError(
-            f"{type(source)} does not support __edgeql__ protocol"
-        ) from None
-
-    if not callable(__edgeql__):
-        raise TypeError(f"{type(source)}.__edgeql__ is not callable")
-
-    value = __edgeql__()
-    if not isinstance(value, str):
-        raise ValueError("{type(source)}.__edgeql__()")
-    return value
 
 
 class GelClassVar:
@@ -242,6 +225,11 @@ class _BaseAlias(metaclass=_BaseAliasMeta):
         else:
             raise AttributeError(attr)
 
+    def __edgeql_qb_expr__(self) -> Expr:
+        raise NotImplementedError(
+            f"{self.__class__.__name__}.__edgeql_qb_expr__"
+        )
+
     def __infix_op__(self, op: str, operand: Any) -> Any:
         if op == "__eq__" and operand is self:
             return True
@@ -264,8 +252,13 @@ class _BaseAlias(metaclass=_BaseAliasMeta):
         assert isinstance(expr, _ExprAlias)
         metadata = expr.__gel_metadata__
         assert isinstance(metadata, InfixOp)
-        metadata.lexpr = self
-        metadata.rexpr = operand
+        metadata.lexpr = self.__edgeql_qb_expr__()
+        if hasattr(operand, "__edgeql_qb_expr__"):
+            metadata.rexpr = operand.__edgeql_qb_expr__()
+        else:
+            raise NotImplementedError(
+                f"unsupported infix iop type: {operand!r}"
+            )
         return expr
 
 
@@ -273,6 +266,9 @@ class _PathAlias(_BaseAlias):
     def __init__(self, origin: type[GelType], metadata: Path) -> None:
         super().__init__(origin)
         self.__gel_metadata__ = metadata
+
+    def __edgeql_qb_expr__(self) -> Expr:
+        return self.__gel_metadata__
 
     def __getattr__(self, attr: str) -> Any:
         if "__gel_origin__" in self.__dict__ and (
@@ -298,9 +294,6 @@ class _PathAlias(_BaseAlias):
         metadata = repr(self.__gel_metadata__)
         return f"gel.models.PathAlias[{origin}, {metadata}]"
 
-    def __edgeql__(self) -> str:
-        return self.__gel_metadata__.__edgeql__()
-
 
 def AnnotatedPath(origin: type, metadata: Path) -> _PathAlias:  # noqa: N802
     return _PathAlias(origin, metadata)
@@ -310,6 +303,9 @@ class _ExprAlias(_BaseAlias):
     def __init__(self, origin: type[GelType], metadata: Expr) -> None:
         super().__init__(origin)
         self.__gel_metadata__ = metadata
+
+    def __edgeql_qb_expr__(self) -> Expr:
+        return self.__gel_metadata__
 
     def __repr__(self) -> str:
         origin = _type_repr(self.__gel_origin__)
@@ -444,9 +440,96 @@ class Exclusive:
     pass
 
 
-class Symbol(abc.ABC):
+class GelModelMetadata:
+    class __reflection__:  # noqa: N801
+        id: ClassVar[uuid.UUID]
+        name: ClassVar[SchemaPath]
+
+
+class ExprCompatibleInstance(Protocol):
+    def __edgeql_qb_expr__(self) -> Expr: ...
+
+
+class ExprCompatibleType(Protocol):
+    @classmethod
+    def __edgeql__(cls) -> str: ...
+
+
+ExprCompatible = TypeAliasType(
+    "ExprCompatible",
+    ExprCompatibleInstance | type[ExprCompatibleType],
+)
+
+
+def edgeql(source: SupportsEdgeQL | ExprCompatible) -> str:
+    try:
+        __edgeql__ = source.__edgeql__  # type: ignore [union-attr]
+    except AttributeError:
+        try:
+            __edgeql_qb_expr__ = source.__edgeql_qb_expr__  # type: ignore [union-attr]
+        except AttributeError:
+            raise TypeError(
+                f"{type(source)} does not support __edgeql__ protocol"
+            ) from None
+        else:
+            expr = __edgeql_qb_expr__()
+            __edgeql__ = expr.__edgeql__
+
+    if not callable(__edgeql__):
+        raise TypeError(f"{type(source)}.__edgeql__ is not callable")
+
+    value = __edgeql__()
+    if not isinstance(value, str):
+        raise ValueError("{type(source)}.__edgeql__()")
+    return value
+
+
+def _as_expr(x: ExprCompatible) -> Expr:
+    if isinstance(x, Expr):
+        return x
+
+    as_expr = getattr(x, "__edgeql_qb_expr__", None)
+    if as_expr is None:
+        raise TypeError(
+            f"{_type_repr(type(x))} cannot be converted to an Expr"
+        )
+    expr = as_expr()
+    if not isinstance(expr, Expr):
+        raise ValueError(
+            f"{_type_repr(type(x))}.__edgeql_qb_expr__ did not "
+            f"return an Expr instance"
+        )
+    return expr
+
+
+class Expr(abc.ABC):
+    @abc.abstractproperty
+    def precedence(self) -> _edgeql.Precedence: ...
+
     @abc.abstractmethod
     def __edgeql__(self) -> str: ...
+
+    def __edgeql_qb_expr__(self) -> Self:
+        return self
+
+
+class ExprPlaceholder(Expr):
+    @property
+    def precedence(self) -> _edgeql.Precedence:
+        raise TypeError("unreplaced ExprPlaceholder")
+
+    def __edgeql__(self) -> str:
+        raise TypeError("unreplaced ExprPlaceholder")
+
+
+class IdentLikeExpr(Expr):
+    @property
+    def precedence(self) -> _edgeql.Precedence:
+        return _edgeql.PRECEDENCE[_edgeql.Token.IDENT]
+
+
+class Symbol(IdentLikeExpr):
+    pass
 
 
 class PathPrefix(Symbol):
@@ -454,22 +537,73 @@ class PathPrefix(Symbol):
         return ""
 
 
-class SchemaSet(NamedTuple):
+@dataclasses.dataclass(frozen=True)
+class SchemaSet(IdentLikeExpr):
     name: SchemaPath
 
     def __edgeql__(self) -> str:
         return "::".join(self.name.parts)
 
 
-class GelModelMetadata:
-    class __reflection__:  # noqa: N801
-        id: ClassVar[uuid.UUID]
-        name: ClassVar[SchemaPath]
+class Literal(IdentLikeExpr):
+    pass
 
 
-class Expr:
+@dataclasses.dataclass(frozen=True)
+class BoolLiteral(Literal):
+    val: bool
+
     def __edgeql__(self) -> str:
-        raise NotImplementedError(f"{type(self).__name__}.__edgeql__")
+        return "true" if self.val else "false"
+
+
+@dataclasses.dataclass(frozen=True)
+class IntLiteral(Literal):
+    val: int
+
+    def __edgeql__(self) -> str:
+        return str(self.val)
+
+
+@dataclasses.dataclass(frozen=True)
+class FloatLiteral(Literal):
+    val: float
+
+    def __edgeql__(self) -> str:
+        return str(self.val)
+
+
+@dataclasses.dataclass(frozen=True)
+class BigIntLiteral(Literal):
+    val: int
+
+    def __edgeql__(self) -> str:
+        return f"n{self.val}"
+
+
+@dataclasses.dataclass(frozen=True)
+class DecimalLiteral(Literal):
+    val: decimal.Decimal
+
+    def __edgeql__(self) -> str:
+        return f"n{self.val}"
+
+
+@dataclasses.dataclass(frozen=True)
+class BytesLiteral(Literal):
+    val: bytes
+
+    def __edgeql__(self) -> str:
+        v = _edgeql.quote_literal(repr(self.val)[2:-1])
+        return f"b{v}"
+
+
+@dataclasses.dataclass(frozen=True)
+class StringLiteral(Literal):
+    val: str
+
+    def __edgeql__(self) -> str:
+        return _edgeql.quote_literal(self.val)
 
 
 @dataclasses.dataclass(kw_only=True)
@@ -477,6 +611,10 @@ class Path(Expr):
     source: Symbol | SchemaSet | Path
     name: str
     is_lprop: bool
+
+    @property
+    def precedence(self) -> _edgeql.Precedence:
+        return _edgeql.PRECEDENCE[_edgeql.Operation.PATH]
 
     def __edgeql__(self) -> str:
         steps = []
@@ -495,29 +633,92 @@ class Path(Expr):
 
 
 @dataclasses.dataclass(kw_only=True)
-class PrefixOp(Expr):
-    op: str
-    expr: Any
+class Op(Expr):
+    op: _edgeql.Token
+
+    @property
+    def precedence(self) -> _edgeql.Precedence:
+        return _edgeql.PRECEDENCE[self.op]
+
+
+@dataclasses.dataclass(kw_only=True)
+class PrefixOp(Op):
+    expr: Expr
+
+    def __init__(
+        self,
+        *,
+        expr: ExprCompatible,
+        op: _edgeql.Token | str,
+    ) -> None:
+        self.expr = _as_expr(expr)
+        if isinstance(op, str):
+            op = _edgeql.Token.from_str(op)
+        self.op = op
 
     def __edgeql__(self) -> str:
         return f"{self.op} {edgeql(self.expr)}"
 
 
 @dataclasses.dataclass(kw_only=True)
-class InfixOp(Expr):
-    lexpr: Any
-    rexpr: Any
-    op: str
+class InfixOp(Op):
+    lexpr: Expr
+    rexpr: Expr
+
+    def __init__(
+        self,
+        *,
+        lexpr: ExprCompatible,
+        rexpr: ExprCompatible,
+        op: _edgeql.Token | str,
+    ) -> None:
+        self.lexpr = _as_expr(lexpr)
+        self.rexpr = _as_expr(rexpr)
+        if isinstance(op, str):
+            op = _edgeql.Token.from_str(op)
+        self.op = op
 
     def __edgeql__(self) -> str:
-        return f"{edgeql(self.lexpr)} {self.op} {edgeql(self.rexpr)}"
+        left = edgeql(self.lexpr)
+        if self._need_left_parens():
+            left = f"({left})"
+        right = edgeql(self.rexpr)
+        if self._need_right_parens():
+            right = f"({right})"
+        return f"{left} {self.op} {right}"
+
+    def _need_left_parens(self) -> bool:
+        lexpr = self.lexpr
+        left_prec = lexpr.precedence.value
+        self_prec = self.precedence.value
+        self_assoc = self.precedence.assoc
+
+        return left_prec < self_prec or (
+            left_prec == self_prec
+            and self_assoc is not _edgeql.Assoc.RIGHT
+            and (not isinstance(lexpr, InfixOp) or lexpr.op != self.op)
+        )
+
+    def _need_right_parens(self) -> bool:
+        rexpr = self.rexpr
+        right_prec = rexpr.precedence.value
+        self_prec = self.precedence.value
+        self_assoc = self.precedence.assoc
+
+        return right_prec < self_prec or (
+            right_prec == self_prec and self_assoc is _edgeql.Assoc.RIGHT
+        )
 
 
 @dataclasses.dataclass(frozen=True, kw_only=True)
 class FuncCall(Expr):
     fname: str
-    args: list[Any]
-    kwargs: dict[str, Any]
+    args: list[Expr]
+    kwargs: dict[str, Expr]
+
+    @property
+    def precedence(self) -> _edgeql.Precedence:
+        return _edgeql.PRECEDENCE[_edgeql.Operation.CALL]
 
     def __edgeql__(self) -> str:
         args = ", ".join(
@@ -533,17 +734,28 @@ class FuncCall(Expr):
 @dataclasses.dataclass(frozen=True, kw_only=True)
 class Filter(Expr):
     expr: Any
-    filters: list[Any]
+    filters: list[Expr]
+
+    @property
+    def precedence(self) -> _edgeql.Precedence:
+        return _edgeql.PRECEDENCE[_edgeql.Token.FILTER]
 
     def __edgeql__(self) -> str:
-        filter_expr = " AND ".join(edgeql(f) for f in self.filters)
-        return f"{edgeql(self.expr)} FILTER {filter_expr}"
+        fexpr = self.filters[0]
+        for item in self.filters[1:]:
+            fexpr = InfixOp(lexpr=fexpr, op=_edgeql.Token.AND, rexpr=item)
+        fexpr = InfixOp(lexpr=self.expr, op=_edgeql.Token.FILTER, rexpr=fexpr)
+        return edgeql(fexpr)
 
 
 @dataclasses.dataclass(frozen=True, kw_only=True)
 class Shape(Expr):
     expr: Any
-    elements: dict[str, Any]
+    elements: dict[str, Expr]
+
+    @property
+    def precedence(self) -> _edgeql.Precedence:
+        return _edgeql.PRECEDENCE[_edgeql.Token.LBRACE]
 
     def __edgeql__(self) -> str:
         els = (f"{n} := {edgeql(ex)}" for n, ex in self.elements.items())
@@ -554,28 +766,35 @@ class Shape(Expr):
 GelType_T = TypeVar("GelType_T", bound="GelType")
 
 
-class GelTypeMeta(type):
-    pass
+if TYPE_CHECKING:
 
+    class GelTypeMeta(type):
+        def __edgeql_qb_expr__(cls) -> Expr: ...
 
-class GelType(GelClassVar):
-    __type_meta_impl__: ClassVar[type]
+    class GelType(GelClassVar, metaclass=GelTypeMeta):
+        __type_meta_impl__: ClassVar[type]
 
-    if TYPE_CHECKING:
+        def __edgeql_qb_expr__(self) -> Expr: ...
 
         @staticmethod
         def __edgeql__() -> str: ...
-    else:
+else:
+    GelTypeMeta = type
+
+    class GelType(GelClassVar):
+        __type_meta_impl__: ClassVar[type]
 
         @hybridmethod
-        def __edgeql__(self) -> str:
+        def __edgeql_qb_expr__(self) -> Expr:
             if isinstance(self, type):
-                raise NotImplementedError(f"{self.__name__}.__edgeql__")
+                return ExprPlaceholder()
             else:
                 return self.__edgeql_literal__()
 
-    def __edgeql_literal__(self) -> str:
-        raise NotImplementedError(f"{type(self).__name__}.__edgeql_literal__")
+        def __edgeql_literal__(self) -> Literal:
+            raise NotImplementedError(
+                f"{type(self).__name__}.__edgeql_literal__"
+            )
 
 
 class GelPrimitiveType(GelType):
@@ -790,15 +1009,19 @@ class PyTypeScalar(parametric.SingleParametricType[T_co]):
             handler(cls.type),
         )
 
-    def __edgeql_literal__(self) -> str:
+    def __edgeql_literal__(self) -> Literal:
         cls = type(self)
         match cls.type:
             case builtins.bool:
-                return "true" if self else "false"
-            case builtins.int | builtins.float:
-                return str(self)
+                return BoolLiteral(bool(self))
+            case builtins.int:
+                return IntLiteral(self)  # type: ignore [arg-type]
+            case builtins.float:
+                return FloatLiteral(self)  # type: ignore [arg-type]
             case builtins.str:
-                return _edgeql.quote_literal(str(self))
+                return StringLiteral(self)  # type: ignore [arg-type]
+            case decimal.Decimal:
+                return DecimalLiteral(self)  # type: ignore [arg-type]
 
         raise NotImplementedError(f"{cls}.__edgeql_literal__")
 
@@ -917,9 +1140,11 @@ class GelModel(
         return hash(self._p__id)
 
     if TYPE_CHECKING:
+
         @classmethod
         def select(cls, /, **kwargs: bool | type[GelType]) -> type[Self]: ...
     else:
+
         @exprmethod
         @classmethod
         def select(
@@ -964,6 +1189,7 @@ class GelModel(
             )
 
     if TYPE_CHECKING:
+
         @classmethod
         def filter(
             cls,
@@ -972,6 +1198,7 @@ class GelModel(
             **properties: Any,
         ) -> type[Self]: ...
     else:
+
         @exprmethod
         @classmethod
         def filter(
