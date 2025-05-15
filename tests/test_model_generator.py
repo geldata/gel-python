@@ -84,3 +84,10 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(d.body, 'Hello')
         self.assertIsInstance(d.author, default.User)
         self.assertEqual(d.author.name, 'Alice')
+
+    def test_modelgen_data_unpack_2(self):
+        from models import default
+
+        q = default.Post.select().filter(body='Hello')
+        d = self.client.query(q)[0]
+        self.assertIsInstance(d, default.Post)
