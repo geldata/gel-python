@@ -1132,7 +1132,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                 "typing", "ClassVar", import_time=ImportTime.typecheck
             )
             with self._class_def(tname, runtime_parents):
-                self.write(f"__type_meta_impl__: {classvar}[type] = {tmeta}")
+                self.write(f"__gel_type_class__: {classvar}[type] = {tmeta}")
 
         self.write_section_break()
 
@@ -1724,7 +1724,8 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             return
 
         all_ptr_origins = self._get_all_pointer_origins(objtype)
-        lazydef_base = self.import_name(BASE_IMPL, "LazyLinkClassDef")
+        lazyclassprop = self.import_name(BASE_IMPL, "LazyClassProperty")
+        type_ = self.import_name("builtins", "type")
 
         with self.type_checking():
             for pointer in pointers:
@@ -1741,22 +1742,23 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             obj_class = type_name.name
             for pointer in pointers:
                 ptrname = pointer.name
-                lazydef = f"__define_{ptrname}__"
-                with self._class_def(lazydef, [lazydef_base]):
-                    with self._method_def("_define", ["name: str"], "type"):
-                        classname = self._write_object_type_link_variant(
-                            objtype,
-                            pointer=pointer,
-                            ptr_origins=all_ptr_origins[pointer.name],
-                            target_aspect=target_aspect,
-                            is_forward_decl=False,
-                        )
-                        self.write(f"{classname}.__name__ = {ptrname!r}")
-                        qualname = f"{obj_class}.{ptrname}"
-                        self.write(f"{classname}.__qualname__ = {qualname!r}")
-                        self.write(f"return {classname}")
-
-                self.write(f"{ptrname} = {lazydef}({ptrname!r})")
+                with self._classmethod_def(
+                    ptrname,
+                    [],
+                    "type",
+                    decorators=[f"{lazyclassprop}[{type_}]"]
+                ):
+                    classname = self._write_object_type_link_variant(
+                        objtype,
+                        pointer=pointer,
+                        ptr_origins=all_ptr_origins[pointer.name],
+                        target_aspect=target_aspect,
+                        is_forward_decl=False,
+                    )
+                    self.write(f"{classname}.__name__ = {ptrname!r}")
+                    qualname = f"{obj_class}.{ptrname}"
+                    self.write(f"{classname}.__qualname__ = {qualname!r}")
+                    self.write(f"return {classname}")
 
     def _write_object_type_link_variant(
         self,

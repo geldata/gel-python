@@ -120,7 +120,7 @@ class Generator:
         self,
         args: argparse.Namespace,
         *,
-        project_dir: pathlib.Path = None,
+        project_dir: pathlib.Path | None = None,
         client: gel.Client = None,
         interactive: bool = True,
     ):
