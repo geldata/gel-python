@@ -1,0 +1,229 @@
+# SPDX-PackageName: gel-python
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright Gel Data Inc. and the contributors.
+
+"""Pydantic implementation of the query builder model"""
+
+from __future__ import annotations
+
+from typing import (
+    Any,
+    ClassVar,
+    Generic,
+    TypeVar,
+    cast,
+    overload,
+)
+
+from typing_extensions import (
+    Self,
+)
+
+import uuid
+import warnings
+
+import pydantic
+import pydantic.fields
+import pydantic_core
+from pydantic_core import core_schema
+
+from pydantic._internal import _model_construction  # noqa: PLC2701
+
+from gel._internal import _qb
+from gel._internal import _typing_inspect
+from gel._internal import _unsetid
+
+from gel._internal._qbmodel import _abstract
+
+
+class GelModelMeta(_model_construction.ModelMetaclass, _abstract.GelModelMeta):
+    def __new__(  # noqa: PYI034
+        mcls,
+        name: str,
+        bases: tuple[type[Any], ...],
+        namespace: dict[str, Any],
+        *,
+        __gel_type_id__: uuid.UUID | None = None,
+        **kwargs: Any,
+    ) -> GelModelMeta:
+        with warnings.catch_warnings():
+            # Make pydantic shut up about attribute redefinition.
+            warnings.filterwarnings(
+                "ignore",
+                message=r".*shadows an attribute in parent.*",
+            )
+            cls = cast(
+                "type[GelModel]",
+                super().__new__(mcls, name, bases, namespace, **kwargs),
+            )
+
+        for fname, field in cls.__pydantic_fields__.items():
+            if fname in cls.__annotations__:
+                if field.annotation is None:
+                    raise AssertionError(
+                        f"unexpected unnannotated model field: {name}.{fname}"
+                    )
+                desc = _qb.field_descriptor(cls, fname, field.annotation)
+                setattr(cls, fname, desc)
+
+        if __gel_type_id__ is not None:
+            mcls.register_class(__gel_type_id__, cls)
+
+        return cls
+
+    def __setattr__(cls, name: str, value: Any, /) -> None:  # noqa: N805
+        if name == "__pydantic_fields__":
+            fields: dict[str, pydantic.fields.FieldInfo] = value
+            for field in fields.values():
+                fdef = field.default
+                if isinstance(
+                    fdef, (_qb.AbstractDescriptor, _qb.PathAlias)
+                ) or (
+                    _typing_inspect.is_annotated(fdef)
+                    and isinstance(fdef.__origin__, _qb.AbstractDescriptor)
+                ):
+                    field.default = pydantic_core.PydanticUndefined
+
+        super().__setattr__(name, value)
+
+
+class GelModel(
+    pydantic.BaseModel,
+    _abstract.GelModel,
+    metaclass=GelModelMeta,
+):
+    model_config = pydantic.ConfigDict(
+        json_encoders={uuid.UUID: str},
+        validate_assignment=True,
+        defer_build=True,
+    )
+
+    _p__id__: uuid.UUID = pydantic.PrivateAttr()
+
+    def __init__(self, /, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self._p__id: uuid.UUID = _unsetid.UNSET_UUID
+        self._p____type__ = None
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, GelModel):
+            return NotImplemented
+
+        if self._p__id is None or other._p__id is None:
+            return False
+        else:
+            return self._p__id == other._p__id
+
+    def __hash__(self) -> int:
+        if self._p__id is _unsetid.UNSET_UUID:
+            raise TypeError("Model instances without id value are unhashable")
+
+        return hash(self._p__id)
+
+
+_T_co = TypeVar("_T_co", covariant=True)
+
+
+class LinkPropsDescriptor(Generic[_T_co]):
+    @overload
+    def __get__(self, obj: None, owner: type[Any]) -> type[_T_co]: ...
+
+    @overload
+    def __get__(
+        self, obj: object, owner: type[Any] | None = None
+    ) -> _T_co: ...
+
+    def __get__(
+        self, obj: Any, owner: type[Any] | None = None
+    ) -> _T_co | type[_T_co]:
+        if obj is None:
+            assert owner is not None
+            return owner.__lprops__  # type: ignore [no-any-return]
+        else:
+            return obj._p__lprops__  # type: ignore [no-any-return]
+
+
+class GelLinkModel(pydantic.BaseModel, metaclass=GelModelMeta):
+    model_config = pydantic.ConfigDict(
+        validate_assignment=True,
+        defer_build=True,
+    )
+
+    @classmethod
+    def __descriptor__(cls) -> LinkPropsDescriptor[Self]:
+        return LinkPropsDescriptor()
+
+
+_MT_co = TypeVar("_MT_co", bound=GelModel, covariant=True)
+
+
+class ProxyModel(GelModel, Generic[_MT_co]):
+    __proxy_of__: ClassVar[type[_MT_co]]  # type: ignore [misc]
+    __gel_proxied_dunders__: ClassVar[frozenset[str]] = frozenset(
+        {
+            "__linkprops__",
+        }
+    )
+
+    _p__obj__: _MT_co
+
+    def __init__(self, obj: _MT_co, /) -> None:
+        object.__setattr__(self, "_p__obj__", obj)
+
+    def __getattribute__(self, name: str) -> Any:
+        model_fields = type(self).__proxy_of__.model_fields
+        if name in model_fields or name == "_p__id":
+            base = object.__getattribute__(self, "_p__obj__")
+            return getattr(base, name)
+        return super().__getattribute__(name)
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        model_fields = type(self).__proxy_of__.model_fields
+        if name in model_fields:
+            # writing to a field: mutate the  wrapped model
+            base = object.__getattribute__(self, "_p__obj__")
+            setattr(base, name, value)
+        else:
+            # writing anything else (including _proxied) is normal
+            super().__setattr__(name, value)
+
+    @classmethod
+    def __pydantic_init_subclass__(cls, **kwargs: Any) -> None:
+        super().__pydantic_init_subclass__(**kwargs)
+        generic_meta = cls.__pydantic_generic_metadata__
+        if generic_meta["origin"] is ProxyModel and generic_meta["args"]:
+            cls.__proxy_of__ = generic_meta["args"][0]
+
+    @classmethod
+    def __get_pydantic_core_schema__(
+        cls,
+        source_type: Any,
+        handler: pydantic.GetCoreSchemaHandler,
+    ) -> pydantic_core.CoreSchema:
+        if cls.__name__ == "ProxyModel" or cls.__name__.startswith(
+            "ProxyModel[",
+        ):
+            return handler(source_type)
+        else:
+            return core_schema.no_info_before_validator_function(
+                cls,
+                schema=handler.generate_schema(cls.__proxy_of__),
+            )
+
+
+#
+# Metaclass for type __links__ namespaces.  Facilitates
+# proper forward type resolution by raising a NameError
+# instead of AttributeError when resolving names in its
+# namespace, thus not confusing users of typing._eval_type
+#
+class LinkClassNamespaceMeta(type):
+    def __getattr__(cls, name: str) -> Any:
+        if name == "__isabstractmethod__":
+            return False
+
+        raise NameError(name)
+
+
+class LinkClassNamespace(metaclass=LinkClassNamespaceMeta):
+    pass

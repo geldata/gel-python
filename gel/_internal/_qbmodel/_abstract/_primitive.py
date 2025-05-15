@@ -97,15 +97,19 @@ else:
     _TupleMeta = type(tuple)
 
 
-Ts = TypeVarTuple("Ts")
+_Ts = TypeVarTuple("_Ts")
 
 
-class Tuple(tuple[Unpack[Ts]], GelPrimitiveType, metaclass=_TupleMeta):
+class Tuple(tuple[Unpack[_Ts]], GelPrimitiveType, metaclass=_TupleMeta):
     __slots__ = ()
 
     if TYPE_CHECKING:
 
-        def __set__(self, obj: Any, value: Tuple[T] | Sequence[T]) -> None: ...
+        def __set__(
+            self,
+            obj: Any,
+            value: Tuple[Unpack[_Ts]] | tuple[Unpack[_Ts]],
+        ) -> None: ...
 
 
 if TYPE_CHECKING:

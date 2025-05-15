@@ -5,6 +5,11 @@
 
 """API exported to generated Pydantic-based models."""
 
+from pydantic import (
+    PrivateAttr,
+    computed_field,
+)
+
 from gel._internal._lazyclassprop import LazyClassProperty
 from gel._internal._reflection import SchemaPath
 from gel._internal._typing_dispatch import dispatch_overload
@@ -41,11 +46,9 @@ from gel._internal._qbmodel._pydantic import (
     OptionalLink,
     OptionalLinkWithProps,
     OptionalProperty,
-    PrivateAttr,
     ProxyModel,
     PyTypeScalar,
     Range,
-    computed_field,
 )
 
 

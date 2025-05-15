@@ -1,0 +1,238 @@
+# SPDX-PackageName: gel-python
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright Gel Data Inc. and the contributors.
+
+"""Pydantic implementation of the query builder model"""
+
+from __future__ import annotations
+
+from typing import (
+    TYPE_CHECKING,
+    Annotated,
+    Any,
+    Generic,
+    TypeVar,
+    overload,
+)
+
+from typing_extensions import (
+    TypeAliasType,
+)
+
+import functools
+import typing
+
+import pydantic
+import pydantic.fields
+import pydantic_core
+from pydantic_core import core_schema
+
+
+from gel._internal import _dlist
+from gel._internal import _qb
+from gel._internal import _typing_inspect
+
+from gel._internal._qbmodel import _abstract
+
+from ._models import GelModel, ProxyModel
+
+if TYPE_CHECKING:
+    from collections.abc import (
+        Sequence,
+    )
+
+
+_BT_co = TypeVar("_BT_co", covariant=True)
+"""Base Python type"""
+
+_ST_co = TypeVar("_ST_co", bound=_abstract.GelPrimitiveType, covariant=True)
+"""Primitive Gel type"""
+
+_MT_co = TypeVar("_MT_co", bound=GelModel, covariant=True)
+"""Derived model type"""
+
+_BMT_co = TypeVar("_BMT_co", bound=GelModel, covariant=True)
+"""Base model type (which _MT_co is directly derived from)"""
+
+_PT_co = TypeVar("_PT_co", bound=ProxyModel[GelModel], covariant=True)
+"""Proxy model"""
+
+
+class _OptionalProperty(_qb.OptionalPointerDescriptor[_ST_co, _BT_co]):
+    @classmethod
+    def __get_pydantic_core_schema__(
+        cls,
+        source_type: Any,
+        handler: pydantic.GetCoreSchemaHandler,
+    ) -> pydantic_core.CoreSchema:
+        if _typing_inspect.is_generic_alias(source_type):
+            args = typing.get_args(source_type)
+            return core_schema.nullable_schema(
+                handler.generate_schema(args[0])
+            )
+        else:
+            return handler.generate_schema(source_type)
+
+
+OptionalProperty = TypeAliasType(
+    "OptionalProperty",
+    Annotated[_OptionalProperty[_ST_co, _BT_co], pydantic.Field(default=None)],
+    type_params=(_ST_co, _BT_co),
+)
+
+
+class _OptionalLink(_qb.OptionalPointerDescriptor[_MT_co, _BMT_co]):
+    @classmethod
+    def __get_pydantic_core_schema__(
+        cls,
+        source_type: Any,
+        handler: pydantic.GetCoreSchemaHandler,
+    ) -> pydantic_core.CoreSchema:
+        if _typing_inspect.is_generic_alias(source_type):
+            args = typing.get_args(source_type)
+            if issubclass(args[0], ProxyModel):
+                return core_schema.no_info_before_validator_function(
+                    functools.partial(cls._validate, generic_args=args),
+                    schema=handler.generate_schema(args[0]),
+                )
+            else:
+                return handler.generate_schema(args[0])
+        else:
+            return handler.generate_schema(source_type)
+
+    @classmethod
+    def _validate(
+        cls,
+        value: Any,
+        generic_args: tuple[type[Any], type[Any]],
+    ) -> _MT_co:
+        mt, bmt = generic_args
+        if isinstance(value, mt):
+            return value  # type: ignore [no-any-return]
+        elif isinstance(value, bmt):
+            return mt(value)  # type: ignore [no-any-return]
+        else:
+            raise TypeError(
+                f"could not convert {type(value)} to {mt.__name__}"
+            )
+
+
+OptionalLink = TypeAliasType(
+    "OptionalLink",
+    Annotated[_OptionalLink[_MT_co, _MT_co], pydantic.Field(default=None)],
+    type_params=(_MT_co,),
+)
+
+OptionalLinkWithProps = TypeAliasType(
+    "OptionalLinkWithProps",
+    Annotated[_OptionalLink[_PT_co, _MT_co], pydantic.Field(default=None)],
+    type_params=(_PT_co, _MT_co),
+)
+
+
+class _UpcastingDistinctList(
+    _dlist.DistinctList[_MT_co], Generic[_MT_co, _BMT_co]
+):
+    @classmethod
+    def _check_value(cls, value: Any) -> _MT_co:
+        t = cls.type
+        if isinstance(value, t):
+            return value
+        elif issubclass(t, ProxyModel) and isinstance(value, t.__proxy_of__):
+            return t(value)  # type: ignore [return-value]
+
+        raise ValueError(
+            f"{cls!r} accepts only values of type {cls.type!r}, "
+            f"got {type(value)!r}",
+        )
+
+
+class _MultiLinkMeta(type):
+    _list_type: type[_dlist.DistinctList[GelModel | ProxyModel[GelModel]]]
+
+
+class _MultiLink(
+    _qb.PointerDescriptor[_MT_co, _BMT_co], metaclass=_MultiLinkMeta
+):
+    if TYPE_CHECKING:
+
+        @overload
+        def __get__(self, obj: None, objtype: type[Any]) -> type[_MT_co]: ...
+
+        @overload
+        def __get__(
+            self, obj: object, objtype: Any = None
+        ) -> _dlist.DistinctList[_MT_co]: ...
+
+        def __get__(
+            self,
+            obj: Any,
+            objtype: Any = None,
+        ) -> type[_MT_co] | _dlist.DistinctList[_MT_co] | None: ...
+
+        def __set__(
+            self, obj: Any, value: Sequence[_MT_co | _BMT_co]
+        ) -> None: ...
+
+    @classmethod
+    def __get_pydantic_core_schema__(
+        cls,
+        source_type: Any,
+        handler: pydantic.GetCoreSchemaHandler,
+    ) -> pydantic_core.CoreSchema:
+        if _typing_inspect.is_generic_alias(source_type):
+            args = typing.get_args(source_type)
+            item_type = args[0]
+            return core_schema.no_info_before_validator_function(
+                functools.partial(cls._validate, generic_args=args),
+                schema=core_schema.list_schema(
+                    items_schema=handler.generate_schema(item_type),
+                ),
+                serialization=core_schema.plain_serializer_function_ser_schema(
+                    list,
+                ),
+            )
+        else:
+            return handler.generate_schema(source_type)
+
+    @classmethod
+    def _validate(
+        cls,
+        value: Any,
+        generic_args: tuple[type[Any], type[Any]],
+    ) -> _dlist.DistinctList[_MT_co]:
+        lt: type[_UpcastingDistinctList[_MT_co, _BMT_co]] = (
+            _UpcastingDistinctList[
+                generic_args[0],  # type: ignore [valid-type]
+                generic_args[1],  # type: ignore [valid-type]
+            ]
+        )
+        if isinstance(value, lt):
+            return value
+        elif isinstance(value, (list, _dlist.DistinctList)):
+            return lt(value)
+        else:
+            raise TypeError(
+                f"could not convert {type(value)} to {cls.__name__}"
+            )
+
+
+MultiLink = TypeAliasType(
+    "MultiLink",
+    Annotated[
+        _MultiLink[_MT_co, _MT_co],
+        pydantic.Field(default_factory=_dlist.DistinctList[GelModel]),
+    ],
+    type_params=(_MT_co,),
+)
+
+MultiLinkWithProps = TypeAliasType(
+    "MultiLinkWithProps",
+    Annotated[
+        _MultiLink[_PT_co, _MT_co],
+        pydantic.Field(
+            default_factory=_dlist.DistinctList[ProxyModel[GelModel]]
+        ),
+    ],
+    type_params=(_PT_co, _MT_co),
+)
