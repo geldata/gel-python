@@ -49,6 +49,10 @@ class ModelFieldDescriptor(_qb.AbstractFieldDescriptor):
     def __set_name__(self, owner: Any, name: str) -> None:
         self.__gel_name__ = name
 
+    @property
+    def _fqname(self) -> str:
+        return f"{_utils.type_repr(self.__gel_origin__)}.{self.__gel_name__}"
+
     def _try_resolve_type(self) -> Any:
         origin = self.__gel_origin__
         globalns = _utils.module_ns_of(origin)
@@ -75,14 +79,12 @@ class ModelFieldDescriptor(_qb.AbstractFieldDescriptor):
         ):
             self.__gel_resolved_type_origin__ = typing.get_origin(t)
             t = typing.get_args(t)[0]
-            if not isinstance(
-                t, type
-            ) and not _typing_inspect.is_generic_alias(t):
-                raise AssertionError(
-                    f"BasePointer type argument is not a type: {t}"
-                )
 
         if t is not None:
+            if not isinstance(t, type) or not issubclass(t, GelType):
+                raise AssertionError(
+                    f"{self._fqname} type argument is not a GelType: {t}"
+                )
             self.__gel_resolved_type__ = t
 
         return t
@@ -92,10 +94,7 @@ class ModelFieldDescriptor(_qb.AbstractFieldDescriptor):
         if t is None:
             t = self._try_resolve_type()
         if t is None:
-            raise RuntimeError(
-                f"cannot resolve type of "
-                f"{self.__gel_origin__.__name__}.{self.__gel_name__}"
-            )
+            raise RuntimeError(f"cannot resolve type of {self._fqname}")
         else:
             return self.__gel_resolved_type_origin__
 
