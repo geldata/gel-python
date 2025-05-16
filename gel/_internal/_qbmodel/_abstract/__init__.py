@@ -10,12 +10,23 @@ from ._base import (
     GelType,
     GelType_T,
     GelTypeMeta,
+    GelTypeMetadata,
+)
+
+from ._descriptors import (
+    LinkDescriptor,
+    ModelFieldDescriptor,
+    OptionalLinkDescriptor,
+    OptionalPointerDescriptor,
+    OptionalPropertyDescriptor,
+    PointerDescriptor,
+    PropertyDescriptor,
+    field_descriptor,
 )
 
 from ._objects import (
     GelModel,
     GelModelMeta,
-    GelModelMetadata,
 )
 
 from ._primitive import (
@@ -38,13 +49,21 @@ __all__ = (
     "BaseScalar",
     "GelModel",
     "GelModelMeta",
-    "GelModelMetadata",
     "GelPrimitiveType",
     "GelType",
     "GelTypeMeta",
+    "GelTypeMetadata",
     "GelType_T",
+    "LinkDescriptor",
+    "ModelFieldDescriptor",
     "MultiRange",
+    "OptionalLinkDescriptor",
+    "OptionalPointerDescriptor",
+    "OptionalPropertyDescriptor",
+    "PointerDescriptor",
+    "PropertyDescriptor",
     "PyTypeScalar",
     "Range",
     "Tuple",
+    "field_descriptor",
 )

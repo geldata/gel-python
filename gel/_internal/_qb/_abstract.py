@@ -12,11 +12,15 @@ import abc
 
 if TYPE_CHECKING:
     from gel._internal import _edgeql
+    from gel._internal import _reflection
 
 
 class Expr(abc.ABC):
     @abc.abstractproperty
     def precedence(self) -> _edgeql.Precedence: ...
+
+    @abc.abstractproperty
+    def type(self) -> _reflection.SchemaPath: ...
 
     @abc.abstractmethod
     def __edgeql_expr__(self) -> str: ...
@@ -29,6 +33,6 @@ class AbstractDescriptor:
     pass
 
 
-class AbstractFieldDescriptor(abc.ABC, AbstractDescriptor):
-    @abc.abstractmethod
-    def get(self, owner: Any) -> Any: ...
+class AbstractFieldDescriptor(AbstractDescriptor):
+    def get(self, owner: Any) -> Any:
+        raise NotImplementedError(f"{type(self)}.get")

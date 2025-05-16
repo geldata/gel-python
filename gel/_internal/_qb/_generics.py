@@ -17,7 +17,6 @@ import functools
 
 from gel._internal import _typing_inspect
 from gel._internal import _utils
-from gel._internal._utils import Unspecified
 
 from ._abstract import AbstractFieldDescriptor
 from ._expressions import InfixOp, Path
@@ -165,7 +164,9 @@ class PathAlias(BaseAlias):
     def __getattr__(self, attr: str) -> Any:
         if not _utils.is_dunder(attr) or attr in self.__gel_proxied_dunders__:
             origin = self.__gel_origin__
-            descriptor = _get_field_descriptor(origin, attr)
+            descriptor = _utils.maybe_get_descriptor(
+                origin, attr, of_type=AbstractFieldDescriptor
+            )
             if descriptor is not None:
                 return descriptor.get(self)
             else:
@@ -191,17 +192,3 @@ class ExprAlias(BaseAlias):
 
 def AnnotatedExpr(origin: type[Any], metadata: Expr) -> ExprAlias:  # noqa: N802
     return ExprAlias(origin, metadata)
-
-
-def _get_field_descriptor(
-    cls: type,
-    name: str,
-) -> AbstractFieldDescriptor | None:
-    for ancestor in cls.__mro__:
-        desc = ancestor.__dict__.get(name, Unspecified)
-        if desc is not Unspecified and isinstance(
-            desc, AbstractFieldDescriptor
-        ):
-            return desc
-
-    return None

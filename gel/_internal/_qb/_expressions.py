@@ -16,6 +16,7 @@ import textwrap
 
 from gel._internal import _edgeql
 from gel._internal import _reflection
+from gel._internal._reflection import SchemaPath
 
 from ._abstract import Expr
 from ._protocols import ExprCompatible, edgeql, edgeql_qb_expr
@@ -29,11 +30,24 @@ class ExprPlaceholder(Expr):
     def precedence(self) -> _edgeql.Precedence:
         raise TypeError("unreplaced ExprPlaceholder")
 
+    @property
+    def type(self) -> SchemaPath:
+        raise TypeError("unreplaced ExprPlaceholder")
+
     def __edgeql_expr__(self) -> str:
         raise TypeError("unreplaced ExprPlaceholder")
 
 
-class IdentLikeExpr(Expr):
+@dataclasses.dataclass(kw_only=True)
+class TypedExpr(Expr):
+    type_: SchemaPath
+
+    @property
+    def type(self) -> SchemaPath:
+        return self.type_
+
+
+class IdentLikeExpr(TypedExpr):
     @property
     def precedence(self) -> _edgeql.Precedence:
         return _edgeql.PRECEDENCE[_edgeql.Token.IDENT]
@@ -48,9 +62,13 @@ class PathPrefix(Symbol):
         return ""
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclasses.dataclass
 class SchemaSet(IdentLikeExpr):
     name: _reflection.SchemaPath
+    type_: _reflection.SchemaPath = dataclasses.field(init=False)
+
+    def __post_init__(self) -> None:
+        self.type_ = self.name
 
     def __edgeql_expr__(self) -> str:
         return "::".join(self.name.parts)
@@ -60,65 +78,72 @@ class Literal(IdentLikeExpr):
     pass
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclasses.dataclass(kw_only=True)
 class BoolLiteral(Literal):
     val: bool
+    type_: SchemaPath = dataclasses.field(default=SchemaPath("std", "bool"))
 
     def __edgeql_expr__(self) -> str:
         return "true" if self.val else "false"
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclasses.dataclass(kw_only=True)
 class IntLiteral(Literal):
     val: int
+    type_: SchemaPath = dataclasses.field(default=SchemaPath("std", "int64"))
 
     def __edgeql_expr__(self) -> str:
         return str(self.val)
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclasses.dataclass(kw_only=True)
 class FloatLiteral(Literal):
     val: float
+    type_: SchemaPath = dataclasses.field(default=SchemaPath("std", "float64"))
 
     def __edgeql_expr__(self) -> str:
         return str(self.val)
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclasses.dataclass(kw_only=True)
 class BigIntLiteral(Literal):
     val: int
+    type_: SchemaPath = dataclasses.field(default=SchemaPath("std", "bigint"))
 
     def __edgeql_expr__(self) -> str:
         return f"n{self.val}"
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclasses.dataclass(kw_only=True)
 class DecimalLiteral(Literal):
     val: decimal.Decimal
+    type_: SchemaPath = dataclasses.field(default=SchemaPath("std", "decimal"))
 
     def __edgeql_expr__(self) -> str:
         return f"n{self.val}"
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclasses.dataclass(kw_only=True)
 class BytesLiteral(Literal):
     val: bytes
+    type_: SchemaPath = dataclasses.field(default=SchemaPath("std", "bytes"))
 
     def __edgeql_expr__(self) -> str:
         v = _edgeql.quote_literal(repr(self.val)[2:-1])
         return f"b{v}"
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclasses.dataclass(kw_only=True)
 class StringLiteral(Literal):
     val: str
+    type_: SchemaPath = dataclasses.field(default=SchemaPath("std", "str"))
 
     def __edgeql_expr__(self) -> str:
         return _edgeql.quote_literal(self.val)
 
 
 @dataclasses.dataclass(kw_only=True)
-class Path(Expr):
+class Path(TypedExpr):
     source: Expr
     name: str
     is_lprop: bool
@@ -134,18 +159,26 @@ class Path(Expr):
             steps.append(current.name)
             current = current.source
 
-        if not isinstance(current, (SchemaSet, Symbol)):
-            raise AssertionError(
-                "Path does not start with a SourceSet or a Symbol"
-            )
         steps.append(current.__edgeql_expr__())
 
         return ".".join(reversed(steps))
 
 
 @dataclasses.dataclass(kw_only=True)
-class Op(Expr):
+class Op(TypedExpr):
     op: _edgeql.Token
+
+    def __init__(
+        self,
+        /,
+        *,
+        op: _edgeql.Token | str,
+        type_: SchemaPath,
+    ) -> None:
+        super().__init__(type_=type_)
+        if isinstance(op, str):
+            op = _edgeql.Token.from_str(op)
+        self.op = op
 
     @property
     def precedence(self) -> _edgeql.Precedence:
@@ -161,11 +194,10 @@ class PrefixOp(Op):
         *,
         expr: ExprCompatible,
         op: _edgeql.Token | str,
+        type_: SchemaPath,
     ) -> None:
+        super().__init__(op=op, type_=type_)
         self.expr = edgeql_qb_expr(expr)
-        if isinstance(op, str):
-            op = _edgeql.Token.from_str(op)
-        self.op = op
 
     def __edgeql_expr__(self) -> str:
         return f"{self.op} {edgeql(self.expr)}"
@@ -182,12 +214,11 @@ class InfixOp(Op):
         lexpr: ExprCompatible,
         rexpr: ExprCompatible,
         op: _edgeql.Token | str,
+        type_: SchemaPath,
     ) -> None:
+        super().__init__(op=op, type_=type_)
         self.lexpr = edgeql_qb_expr(lexpr)
         self.rexpr = edgeql_qb_expr(rexpr)
-        if isinstance(op, str):
-            op = _edgeql.Token.from_str(op)
-        self.op = op
 
     def __edgeql_expr__(self) -> str:
         left = edgeql(self.lexpr)
@@ -225,8 +256,8 @@ class InfixOp(Op):
         )
 
 
-@dataclasses.dataclass(frozen=True, kw_only=True)
-class FuncCall(Expr):
+@dataclasses.dataclass(kw_only=True)
+class FuncCall(TypedExpr):
     fname: str
     args: list[Expr]
     kwargs: dict[str, Expr]
@@ -246,7 +277,7 @@ class FuncCall(Expr):
         return f"{self.fname}({args})"
 
 
-@dataclasses.dataclass(frozen=True, kw_only=True)
+@dataclasses.dataclass(kw_only=True)
 class Filter(Expr):
     expr: Any
     filters: list[Expr]
@@ -258,14 +289,24 @@ class Filter(Expr):
     def __edgeql_expr__(self) -> str:
         fexpr = self.filters[0]
         for item in self.filters[1:]:
-            fexpr = InfixOp(lexpr=fexpr, op=_edgeql.Token.AND, rexpr=item)
-        fexpr = InfixOp(lexpr=self.expr, op=_edgeql.Token.FILTER, rexpr=fexpr)
+            fexpr = InfixOp(
+                lexpr=fexpr,
+                op=_edgeql.Token.AND,
+                rexpr=item,
+                type_=SchemaPath("std", "bool"),
+            )
+        fexpr = InfixOp(
+            lexpr=self.expr,
+            op=_edgeql.Token.FILTER,
+            rexpr=fexpr,
+            type_=SchemaPath("std", "bool"),
+        )
         return edgeql(fexpr)
 
 
-@dataclasses.dataclass(frozen=True, kw_only=True)
-class Shape(Expr):
-    expr: Any
+@dataclasses.dataclass(kw_only=True)
+class Shape(TypedExpr):
+    expr: Expr
     elements: dict[str, Expr] = dataclasses.field(default_factory=dict)
     star_splat: bool = False
     doublestar_splat: bool = False

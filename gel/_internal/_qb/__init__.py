@@ -9,13 +9,8 @@ from __future__ import annotations
 
 from ._abstract import (
     AbstractDescriptor,
+    AbstractFieldDescriptor,
     Expr,
-)
-
-from ._descriptors import (
-    OptionalPointerDescriptor,
-    PointerDescriptor,
-    field_descriptor,
 )
 
 from ._expressions import (
@@ -29,6 +24,7 @@ from ._expressions import (
     InfixOp,
     IntLiteral,
     Literal,
+    Path,
     PathPrefix,
     PrefixOp,
     SchemaSet,
@@ -39,6 +35,7 @@ from ._expressions import (
 
 from ._generics import (
     AnnotatedExpr,
+    AnnotatedPath,
     ExprAlias,
     PathAlias,
 )
@@ -57,7 +54,9 @@ from ._render import (
 
 __all__ = (
     "AbstractDescriptor",
+    "AbstractFieldDescriptor",
     "AnnotatedExpr",
+    "AnnotatedPath",
     "BoolLiteral",
     "BytesLiteral",
     "DecimalLiteral",
@@ -71,10 +70,9 @@ __all__ = (
     "InfixOp",
     "IntLiteral",
     "Literal",
-    "OptionalPointerDescriptor",
+    "Path",
     "PathAlias",
     "PathPrefix",
-    "PointerDescriptor",
     "PrefixOp",
     "SchemaSet",
     "Shape",
@@ -83,6 +81,5 @@ __all__ = (
     "edgeql",
     "edgeql_qb_expr",
     "exprmethod",
-    "field_descriptor",
     "toplevel_edgeql",
 )

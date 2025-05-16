@@ -4,9 +4,10 @@
 
 """Miscellaneous utilities."""
 
-from typing import Any, final
+from typing import Any, TypeVar, final, overload
 
 import sys
+import types
 
 
 @final
@@ -40,3 +41,38 @@ def module_ns_of(obj: object) -> dict[str, Any]:
             return module.__dict__
 
     return {}
+
+
+_T = TypeVar("_T")
+
+
+@overload
+def maybe_get_descriptor(
+    cls: type,
+    name: str,
+    of_type: type[_T],
+) -> _T | None: ...
+
+
+@overload
+def maybe_get_descriptor(
+    cls: type,
+    name: str,
+    of_type: None = None,
+) -> Any | None: ...
+
+
+def maybe_get_descriptor(
+    cls: type,
+    name: str,
+    of_type: type | None = None,
+) -> Any | None:
+    if of_type is None:
+        of_type = types.MethodDescriptorType
+
+    for ancestor in cls.__mro__:
+        desc = ancestor.__dict__.get(name, Unspecified)
+        if desc is not Unspecified and isinstance(desc, of_type):
+            return desc
+
+    return None

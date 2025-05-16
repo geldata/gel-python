@@ -160,16 +160,16 @@ class PyTypeScalar(_typing_parametric.SingleParametricType[T_co]):
         cls = type(self)
         match cls.type:
             case builtins.bool:
-                return _qb.BoolLiteral(bool(self))
+                return _qb.BoolLiteral(val=bool(self))
             case builtins.int:
-                return _qb.IntLiteral(self)  # type: ignore [arg-type]
+                return _qb.IntLiteral(val=self)  # type: ignore [arg-type]
             case builtins.float:
-                return _qb.FloatLiteral(self)  # type: ignore [arg-type]
+                return _qb.FloatLiteral(val=self)  # type: ignore [arg-type]
             case builtins.str:
-                return _qb.StringLiteral(self)  # type: ignore [arg-type]
+                return _qb.StringLiteral(val=self)  # type: ignore [arg-type]
             case builtins.bytes:
-                return _qb.BytesLiteral(self)  # type: ignore [arg-type]
+                return _qb.BytesLiteral(val=self)  # type: ignore [arg-type]
             case decimal.Decimal:
-                return _qb.DecimalLiteral(self)  # type: ignore [arg-type]
+                return _qb.DecimalLiteral(val=self)  # type: ignore [arg-type]
 
         raise NotImplementedError(f"{cls}.__edgeql_literal__")

@@ -29,7 +29,6 @@ from pydantic_core import core_schema
 
 
 from gel._internal import _dlist
-from gel._internal import _qb
 from gel._internal import _typing_inspect
 
 from gel._internal._qbmodel import _abstract
@@ -58,7 +57,7 @@ _PT_co = TypeVar("_PT_co", bound=ProxyModel[GelModel], covariant=True)
 """Proxy model"""
 
 
-class _OptionalProperty(_qb.OptionalPointerDescriptor[_ST_co, _BT_co]):
+class _OptionalProperty(_abstract.OptionalPropertyDescriptor[_ST_co, _BT_co]):
     @classmethod
     def __get_pydantic_core_schema__(
         cls,
@@ -81,7 +80,7 @@ OptionalProperty = TypeAliasType(
 )
 
 
-class _OptionalLink(_qb.OptionalPointerDescriptor[_MT_co, _BMT_co]):
+class _OptionalLink(_abstract.OptionalLinkDescriptor[_MT_co, _BMT_co]):
     @classmethod
     def __get_pydantic_core_schema__(
         cls,
@@ -152,7 +151,7 @@ class _MultiLinkMeta(type):
 
 
 class _MultiLink(
-    _qb.PointerDescriptor[_MT_co, _BMT_co], metaclass=_MultiLinkMeta
+    _abstract.LinkDescriptor[_MT_co, _BMT_co], metaclass=_MultiLinkMeta
 ):
     if TYPE_CHECKING:
 

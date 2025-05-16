@@ -10,7 +10,7 @@ from pydantic import (
     computed_field,
 )
 
-from gel._internal._lazyclassprop import LazyClassProperty
+from gel._internal._lazyprop import LazyClassProperty
 from gel._internal._reflection import SchemaPath
 from gel._internal._typing_dispatch import dispatch_overload
 from gel._internal._utils import UnspecifiedType, Unspecified
@@ -29,7 +29,7 @@ from gel._internal._qbmodel._abstract import (
     GelType,
     GelType_T,
     GelTypeMeta,
-    GelModelMetadata,
+    GelTypeMetadata,
 )
 
 from gel._internal._qbmodel._pydantic import (
@@ -62,9 +62,9 @@ __all__ = (
     "GelLinkModel",
     "GelModel",
     "GelModelMeta",
-    "GelModelMetadata",
     "GelType",
     "GelTypeMeta",
+    "GelTypeMetadata",
     "GelType_T",
     "InfixOp",
     "LazyClassProperty",

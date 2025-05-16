@@ -32,7 +32,6 @@ from . import base
 from .base import C, MAX_LINE_LENGTH, ImportTime, CodeSection
 
 if TYPE_CHECKING:
-    import argparse
     import io
     import uuid
 
@@ -76,14 +75,14 @@ class ModelsGenerator(base.Generator):
             std_gen = SchemaGenerator(
                 self._client,
                 reflection.SchemaPart.STD,
-                self._project_dir / 'models',
+                self._project_dir / "models",
             )
             std_gen.run()
 
             usr_gen = SchemaGenerator(
                 self._client,
                 reflection.SchemaPart.USER,
-                self._project_dir / 'models',
+                self._project_dir / "models",
             )
             usr_gen.run()
 
@@ -1125,7 +1124,9 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             with self._class_def(
                 tname, typecheck_parents, class_kwargs={"metaclass": tmeta}
             ):
-                self.write("pass")
+                self._write_type_reflection(stype)
+
+        self.write()
 
         with self.not_type_checking():
             classvar = self.import_name(
@@ -1133,8 +1134,34 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             )
             with self._class_def(tname, runtime_parents):
                 self.write(f"__gel_type_class__: {classvar}[type] = {tmeta}")
+                self.write()
+                self._write_type_reflection(stype)
 
         self.write_section_break()
+
+    def _write_type_reflection(
+        self,
+        stype: reflection.AnyType,
+    ) -> None:
+        uuid = self.import_name("uuid", "UUID")
+        schemapath = self.import_name(BASE_IMPL, "SchemaPath")
+        type_name = reflection.parse_name(stype.name)
+        if isinstance(stype, reflection.InheritingType):
+            base_types = [
+                self.get_type(self._types[base.id]) for base in stype.bases
+            ]
+        else:
+            base_types = []
+        with self._class_def(
+            "__gel_reflection__",
+            _map_name(
+                lambda s: f"{s}.__gel_reflection__",
+                base_types,
+            ),
+        ):
+            self.write(f"id = {uuid}(int={stype.id.int})")
+            schema_path = ", ".join(repr(p) for p in type_name.parts)
+            self.write(f"name = {schemapath}({schema_path})")
 
     def render_callable_return_type(
         self,
@@ -1208,13 +1235,11 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                 raise AssertionError(f"expected {op} to have py_magic set")
             if op.operator_kind != reflection.OperatorKind.Prefix:
                 raise AssertionError(f"expected {op} to be a prefix operator")
+            ret_type = self._types[op.return_type.id]
             rtype = self.render_callable_return_type(
-                self._types[op.return_type.id], op.return_typemod
-            )
+                ret_type, op.return_typemod)
             rtype_rt = self.render_callable_runtime_return_type(
-                self._types[op.return_type.id],
-                op.return_typemod,
-            )
+                ret_type, op.return_typemod)
             with self._method_def(
                 op.py_magic,
                 ["cls"],
@@ -1222,7 +1247,12 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                 implicit_param=False,
             ):
                 name = reflection.parse_name(op.name)
-                opexpr = f'{pfxop}(expr=cls, op="{name.name}")'
+                args = [
+                    "expr=cls",
+                    f'op="{name.name}"',
+                    f"type_={self._render_obj_schema_path(ret_type)}"
+                ]
+                opexpr = self.format_list(f"{pfxop}({{list}})", args)
                 self.write(
                     self.format_list(
                         f"return {aexpr}({{list}})",
@@ -1232,13 +1262,25 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                 )
             self.write()
 
+    def _render_obj_schema_path(
+        self,
+        obj: reflection.AnyType,
+    ) -> str:
+        type_name = reflection.parse_name(obj.name)
+        type_path = ", ".join(repr(p) for p in type_name.parts)
+        schemapath = self.import_name(BASE_IMPL, "SchemaPath")
+        return f"{schemapath}({type_path})"
+
     def write_binary_operator_overloads(
         self,
         ops: list[reflection.Operator],
     ) -> None:
         opmap: defaultdict[
             tuple[str, str],
-            defaultdict[tuple[str, str], set[reflection.AnyType]],
+            defaultdict[
+                tuple[reflection.AnyType, reflection.TypeModifier],
+                set[reflection.AnyType],
+            ],
         ] = defaultdict(lambda: defaultdict(set))
 
         aexpr = self.import_name(BASE_IMPL, "AnnotatedExpr")
@@ -1248,14 +1290,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
 
         explicit_right_types = {op.params[1].type.id for op in ops}
         for op in ops:
-            rtype = self.render_callable_return_type(
-                self._types[op.return_type.id],
-                op.return_typemod,
-            )
-            rtype_rt = self.render_callable_runtime_return_type(
-                self._types[op.return_type.id],
-                op.return_typemod,
-            )
+            ret_type = self._types[op.return_type.id]
             right_param = op.params[1]
             right_type_id = right_param.type.id
             right_type = self._types[right_type_id]
@@ -1271,12 +1306,22 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             if op.operator_kind != reflection.OperatorKind.Infix:
                 raise AssertionError(f"expected {op} to be an infix operator")
             opname = reflection.parse_name(op.name).name
-            opmap[op.py_magic, opname][rtype, rtype_rt].update(union)
+            opmap[op.py_magic, opname][ret_type, op.return_typemod].update(
+                union
+            )
 
         for (meth, opname), overloads in opmap.items():
             overload = len(overloads) > 1
             all_other_types = set()
-            for (rtype, rtype_rt), other_types in overloads.items():
+            for (ret_type, ret_typemod), other_types in overloads.items():
+                rtype = self.render_callable_return_type(
+                    ret_type,
+                    ret_typemod,
+                )
+                rtype_rt = self.render_callable_runtime_return_type(
+                    ret_type,
+                    ret_typemod,
+                )
                 other_type_strs = [
                     self.get_type(m, import_time=ImportTime.typecheck)
                     for m in other_types
@@ -1296,10 +1341,18 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                     line_comment="type: ignore [override]",
                     implicit_param=False,
                 ):
-                    self.write(f"if not isinstance(other, ({type_}, {other_type_main})):")
+                    self.write(
+                        f"if not isinstance(other, ({type_}, {other_type_main})):"
+                    )
                     with self.indented():
                         self.write(f"other = {other_type_main}(other)")
-                    opexpr = f'{infxop}(lexpr=cls, op="{opname}", rexpr=other)'
+                    args = [
+                        "lexpr=cls",
+                        f'op="{opname}"',
+                        "rexpr=other",
+                        f"type_={self._render_obj_schema_path(ret_type)}"
+                    ]
+                    opexpr = self.format_list(f"{infxop}({{list}})", args)
                     self.write(
                         self.format_list(
                             f"return {aexpr}({{list}})",
@@ -1414,7 +1467,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         if base_types:
             typeof_bases = _map_name(_mangle_typeof, base_types)
         else:
-            gmm = self.import_name(BASE_IMPL, "GelModelMetadata")
+            gmm = self.import_name(BASE_IMPL, "GelTypeMetadata")
             typeof_bases = [gmm]
         pointers = objtype.pointers
         sp = self.import_name(BASE_IMPL, "SchemaPath")
@@ -1432,9 +1485,9 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         uuid = self.import_name("uuid", "UUID")
         with self._class_def(typeof_class, typeof_bases):
             with self._class_def(
-                "__reflection__",
+                "__gel_reflection__",
                 _map_name(
-                    lambda s: f"{_mangle_typeof(s)}.__reflection__",
+                    lambda s: f"{_mangle_typeof(s)}.__gel_reflection__",
                     base_types,
                 ),
             ):
@@ -1553,10 +1606,12 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                         cardinality=reflection.Cardinality.One,
                     )
                     with self._property_def(ptr.name, [], ptr_type):
-                        self.write("tid = self.__class__.__reflection__.id")
+                        self.write(
+                            "tid = self.__class__.__gel_reflection__.id"
+                        )
                         self.write(f"actualcls = {gmm}.get_class_by_id(tid)")
                         self.write(
-                            "return actualcls.__reflection__.object"
+                            "return actualcls.__gel_reflection__.object"
                             "  # type: ignore [attr-defined]"
                         )
                 elif ptr.name == "id":
@@ -1746,7 +1801,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                     ptrname,
                     [],
                     "type",
-                    decorators=[f"{lazyclassprop}[{type_}]"]
+                    decorators=[f"{lazyclassprop}[{type_}]"],
                 ):
                     classname = self._write_object_type_link_variant(
                         objtype,
@@ -2043,13 +2098,14 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             args.append("*")
         args.extend(kwargs)
 
+        ret_type = self._types[function.return_type.id]
         rtype = self.render_callable_return_type(
-            self._types[function.return_type.id],
+            ret_type,
             function.return_typemod,
         )
 
         rtype_rt = self.render_callable_runtime_return_type(
-            self._types[function.return_type.id],
+            ret_type,
             function.return_typemod,
         )
 
@@ -2100,6 +2156,9 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                     self.write(
                         f"kwargs={{n: v for n, v in kw.items() "
                         f"if v is not {unsp}}},"
+                    )
+                    self.write(
+                        f"type_={self._render_obj_schema_path(ret_type)},"
                     )
                 self.write(")")
             self.write(")")

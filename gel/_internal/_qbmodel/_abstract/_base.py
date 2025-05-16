@@ -9,10 +9,20 @@ from typing import TYPE_CHECKING, ClassVar, TypeVar
 from gel._internal import _qb
 from gel._internal._hybridmethod import hybridmethod
 
+if TYPE_CHECKING:
+    import uuid
+    from gel._internal import _reflection
+
 
 T = TypeVar("T")
 T_co = TypeVar("T_co", covariant=True)
 GelType_T = TypeVar("GelType_T", bound="GelType")
+
+
+class GelTypeMetadata:
+    class __gel_reflection__:  # noqa: N801
+        id: ClassVar[uuid.UUID]
+        name: ClassVar[_reflection.SchemaPath]
 
 
 if TYPE_CHECKING:
@@ -20,7 +30,11 @@ if TYPE_CHECKING:
     class GelTypeMeta(type):
         def __edgeql_qb_expr__(cls) -> _qb.Expr: ...
 
-    class GelType(_qb.AbstractDescriptor, metaclass=GelTypeMeta):
+    class GelType(
+        _qb.AbstractDescriptor,
+        GelTypeMetadata,
+        metaclass=GelTypeMeta,
+    ):
         __gel_type_class__: ClassVar[type]
 
         def __edgeql_qb_expr__(self) -> _qb.Expr: ...
@@ -34,7 +48,7 @@ if TYPE_CHECKING:
 else:
     GelTypeMeta = type
 
-    class GelType(_qb.AbstractDescriptor):
+    class GelType(_qb.AbstractDescriptor, GelTypeMetadata):
         __gel_type_class__: ClassVar[type]
 
         @hybridmethod

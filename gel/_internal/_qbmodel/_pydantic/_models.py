@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 from typing import (
+    TYPE_CHECKING,
     Any,
     ClassVar,
     Generic,
@@ -30,10 +31,15 @@ from pydantic_core import core_schema
 from pydantic._internal import _model_construction  # noqa: PLC2701
 
 from gel._internal import _qb
+from gel._internal import _lazyprop
 from gel._internal import _typing_inspect
 from gel._internal import _unsetid
+from gel._internal import _utils
 
 from gel._internal._qbmodel import _abstract
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 
 class GelModelMeta(_model_construction.ModelMetaclass, _abstract.GelModelMeta):
@@ -63,7 +69,7 @@ class GelModelMeta(_model_construction.ModelMetaclass, _abstract.GelModelMeta):
                     raise AssertionError(
                         f"unexpected unnannotated model field: {name}.{fname}"
                     )
-                desc = _qb.field_descriptor(cls, fname, field.annotation)
+                desc = _abstract.field_descriptor(cls, fname, field.annotation)
                 setattr(cls, fname, desc)
 
         if __gel_type_id__ is not None:
@@ -85,6 +91,32 @@ class GelModelMeta(_model_construction.ModelMetaclass, _abstract.GelModelMeta):
                     field.default = pydantic_core.PydanticUndefined
 
         super().__setattr__(name, value)
+
+    # Splat qb protocol
+    def __iter__(cls) -> Iterator[_qb.PathAlias]:  # noqa: N805
+        return iter(cls.__gel_eager_pointers__)
+
+    @_lazyprop.LazyProperty[tuple[_qb.PathAlias, ...]]
+    def __gel_eager_pointers__(cls) -> tuple[_qb.PathAlias, ...]:  # noqa: N805
+        cls = cast("type[GelModel]", cls)
+        ptrs = []
+        for fname in cls.__pydantic_fields__:
+            desc = _utils.maybe_get_descriptor(
+                cls,
+                fname,
+                of_type=_abstract.ModelFieldDescriptor,
+            )
+            if desc is None:
+                continue
+            fgeneric = desc.get_resolved_type_generic_origin()
+            if fgeneric is None or issubclass(
+                fgeneric,
+                _abstract.PropertyDescriptor
+                | _abstract.OptionalPropertyDescriptor,
+            ):
+                ptrs.append(getattr(cls, fname))
+
+        return tuple(ptrs)
 
 
 class GelModel(

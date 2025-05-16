@@ -11,7 +11,6 @@ from typing_extensions import Self
 import weakref
 
 from gel._internal import _qb
-from gel._internal import _reflection
 from gel._internal._utils import Unspecified
 
 from ._base import GelType, GelTypeMeta
@@ -53,15 +52,8 @@ class GelModelMeta(GelTypeMeta):
         cls.__gel_class_registry__[tid] = cls
 
 
-class GelModelMetadata:
-    class __reflection__:  # noqa: N801
-        id: ClassVar[uuid.UUID]
-        name: ClassVar[_reflection.SchemaPath]
-
-
 class GelModel(
     GelType,
-    GelModelMetadata,
     metaclass=GelModelMeta,
 ):
     if TYPE_CHECKING:
@@ -75,16 +67,24 @@ class GelModel(
         def select(
             cls,
             /,
+            *elements: _qb.PathAlias,
             __operand__: _qb.ExprAlias | None = None,
             **kwargs: bool | type[GelType],
         ) -> type[Self]:
             shape = {}
 
+            for elem in elements:
+                path = _qb.edgeql_qb_expr(elem)
+                if not isinstance(path, _qb.Path):
+                    raise TypeError(f"{elem} is not a valid path expression")
+
+                shape[path.name] = path
+
             for ptrname, kwarg in kwargs.items():
                 if isinstance(kwarg, bool):
                     ptr = getattr(cls, ptrname, Unspecified)
                     if ptr is Unspecified and isinstance(kwarg, bool):
-                        sn = cls.__reflection__.name.as_schema_name()
+                        sn = cls.__gel_reflection__.name.as_schema_name()
                         msg = f"{ptrname} is not a valid {sn} property"
                         raise AttributeError(msg)
                     if not isinstance(ptr, _qb.PathAlias):
@@ -96,11 +96,17 @@ class GelModel(
                     if kwarg:
                         ptr.__gel_metadata__.source = _qb.PathPrefix()
                         shape[ptrname] = ptr
+                    else:
+                        shape.pop(ptrname, None)
                 else:
                     shape[ptrname] = kwarg
 
             operand = cls if __operand__ is None else __operand__
-            expr = _qb.Shape(expr=operand, elements=shape)
+            expr = _qb.Shape(
+                type_=cls.__gel_reflection__.name,
+                expr=operand,
+                elements=shape,
+            )
 
             return _qb.AnnotatedExpr(  # type: ignore [return-value]
                 cls,
@@ -132,7 +138,7 @@ class GelModel(
             for propname, value in properties.items():
                 prop = getattr(cls, propname, Unspecified)
                 if prop is Unspecified:
-                    sn = cls.__reflection__.name.as_schema_name()
+                    sn = cls.__gel_reflection__.name.as_schema_name()
                     msg = f"{propname} is not a valid {sn} property"
                     raise AttributeError(msg)
                 if not isinstance(prop, _qb.PathAlias):
@@ -164,6 +170,7 @@ class GelModel(
     @classmethod
     def __edgeql_qb_expr__(cls) -> _qb.Expr:  # pyright: ignore [reportIncompatibleMethodOverride]
         return _qb.Shape(
-            expr=_qb.SchemaSet(name=cls.__reflection__.name),
+            type_=cls.__gel_reflection__.name,
+            expr=_qb.SchemaSet(name=cls.__gel_reflection__.name),
             star_splat=True,
         )
