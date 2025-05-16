@@ -11,9 +11,9 @@ from typing_extensions import Self
 import weakref
 
 from gel._internal import _qb
-from gel._internal._utils import Unspecified
 
 from ._base import GelType, GelTypeMeta
+from ._expressions import add_filter, select
 
 if TYPE_CHECKING:
     import uuid
@@ -71,46 +71,9 @@ class GelModel(
             __operand__: _qb.ExprAlias | None = None,
             **kwargs: bool | type[GelType],
         ) -> type[Self]:
-            shape = {}
-
-            for elem in elements:
-                path = _qb.edgeql_qb_expr(elem)
-                if not isinstance(path, _qb.Path):
-                    raise TypeError(f"{elem} is not a valid path expression")
-
-                shape[path.name] = path
-
-            for ptrname, kwarg in kwargs.items():
-                if isinstance(kwarg, bool):
-                    ptr = getattr(cls, ptrname, Unspecified)
-                    if ptr is Unspecified and isinstance(kwarg, bool):
-                        sn = cls.__gel_reflection__.name.as_schema_name()
-                        msg = f"{ptrname} is not a valid {sn} property"
-                        raise AttributeError(msg)
-                    if not isinstance(ptr, _qb.PathAlias):
-                        raise AssertionError(
-                            f"expected {cls.__name__}.{ptrname} "
-                            f"to be a PathAlias"
-                        )
-
-                    if kwarg:
-                        ptr.__gel_metadata__.source = _qb.PathPrefix()
-                        shape[ptrname] = ptr
-                    else:
-                        shape.pop(ptrname, None)
-                else:
-                    shape[ptrname] = kwarg
-
-            operand = cls if __operand__ is None else __operand__
-            expr = _qb.Shape(
-                type_=cls.__gel_reflection__.name,
-                expr=operand,
-                elements=shape,
-            )
-
             return _qb.AnnotatedExpr(  # type: ignore [return-value]
                 cls,
-                expr,
+                select(cls, *elements, __operand__=__operand__, **kwargs),
             )
 
     if TYPE_CHECKING:
@@ -133,44 +96,16 @@ class GelModel(
             __operand__: _qb.ExprAlias | None = None,
             **properties: Any,
         ) -> type[Self]:
-            all_exprs = list(exprs)
-
-            for propname, value in properties.items():
-                prop = getattr(cls, propname, Unspecified)
-                if prop is Unspecified:
-                    sn = cls.__gel_reflection__.name.as_schema_name()
-                    msg = f"{propname} is not a valid {sn} property"
-                    raise AttributeError(msg)
-                if not isinstance(prop, _qb.PathAlias):
-                    raise AssertionError(
-                        f"expected {cls.__name__}.{propname} to be a PathAlias"
-                    )
-                prop.__gel_metadata__.source = _qb.PathPrefix()
-                prop_comp = prop == value
-                if not isinstance(prop_comp, _qb.ExprAlias):
-                    raise AssertionError(
-                        f"comparing {prop} to {value} did not produce "
-                        "a Gel expression type"
-                    )
-                all_exprs.append(prop_comp)
-
-            operand = cls if __operand__ is None else __operand__
-            if isinstance(operand, _qb.Filter):
-                expr = _qb.Filter(
-                    expr=operand.expr, filters=operand.filters + all_exprs
-                )
-            else:
-                expr = _qb.Filter(expr=operand, filters=all_exprs)
-
             return _qb.AnnotatedExpr(  # type: ignore [return-value]
                 cls,
-                expr,
+                add_filter(cls, *exprs, __operand__=__operand__, **properties),
             )
 
     @classmethod
     def __edgeql_qb_expr__(cls) -> _qb.Expr:  # pyright: ignore [reportIncompatibleMethodOverride]
+        this_type = cls.__gel_reflection__.name
         return _qb.Shape(
-            type_=cls.__gel_reflection__.name,
-            expr=_qb.SchemaSet(name=cls.__gel_reflection__.name),
+            type_=this_type,
+            expr=_qb.SchemaSet(type_=this_type),
             star_splat=True,
         )

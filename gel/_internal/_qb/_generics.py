@@ -148,7 +148,7 @@ class BaseAlias(metaclass=BaseAliasMeta):
 
 
 class PathAlias(BaseAlias):
-    def __init__(self, origin: type, metadata: Expr) -> None:
+    def __init__(self, origin: type, metadata: Path) -> None:
         assert isinstance(origin, type)
         self.__gel_origin__ = origin
         self.__gel_metadata__ = metadata

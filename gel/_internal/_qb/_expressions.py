@@ -8,7 +8,6 @@ from __future__ import annotations
 
 from typing import (
     TYPE_CHECKING,
-    Any,
 )
 
 import dataclasses
@@ -47,16 +46,19 @@ class TypedExpr(Expr):
         return self.type_
 
 
+@dataclasses.dataclass(kw_only=True)
 class IdentLikeExpr(TypedExpr):
     @property
     def precedence(self) -> _edgeql.Precedence:
         return _edgeql.PRECEDENCE[_edgeql.Token.IDENT]
 
 
+@dataclasses.dataclass(kw_only=True)
 class Symbol(IdentLikeExpr):
     pass
 
 
+@dataclasses.dataclass(kw_only=True)
 class PathPrefix(Symbol):
     def __edgeql_expr__(self) -> str:
         return ""
@@ -64,16 +66,13 @@ class PathPrefix(Symbol):
 
 @dataclasses.dataclass
 class SchemaSet(IdentLikeExpr):
-    name: _reflection.SchemaPath
-    type_: _reflection.SchemaPath = dataclasses.field(init=False)
-
-    def __post_init__(self) -> None:
-        self.type_ = self.name
+    type_: _reflection.SchemaPath
 
     def __edgeql_expr__(self) -> str:
-        return "::".join(self.name.parts)
+        return "::".join(self.type.parts)
 
 
+@dataclasses.dataclass(kw_only=True)
 class Literal(IdentLikeExpr):
     pass
 
@@ -279,8 +278,12 @@ class FuncCall(TypedExpr):
 
 @dataclasses.dataclass(kw_only=True)
 class Filter(Expr):
-    expr: Any
+    expr: Expr
     filters: list[Expr]
+
+    @property
+    def type(self) -> _reflection.SchemaPath:
+        return self.expr.type
 
     @property
     def precedence(self) -> _edgeql.Precedence:
@@ -312,6 +315,10 @@ class Shape(TypedExpr):
     doublestar_splat: bool = False
 
     @property
+    def type(self) -> _reflection.SchemaPath:
+        return self.expr.type
+
+    @property
     def precedence(self) -> _edgeql.Precedence:
         return _edgeql.PRECEDENCE[_edgeql.Token.LBRACE]
 
@@ -321,7 +328,16 @@ class Shape(TypedExpr):
             els.append("*")
         if self.doublestar_splat:
             els.append("**")
-        els.extend(f"{n} := {edgeql(ex)}" for n, ex in self.elements.items())
+        for n, el in self.elements.items():
+            if (
+                isinstance(el, Path)
+                and isinstance(el.source, (SchemaSet, PathPrefix))
+                and el.source.type == self.expr.type
+                and el.name == n
+            ):
+                els.append(f"{n},")
+            else:
+                els.append(f"{n} := {edgeql(el)},")
         shape = "{\n" + textwrap.indent("\n".join(els), "  ") + "\n}"
         return f"{edgeql(self.expr)} {shape}"
 
