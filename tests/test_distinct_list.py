@@ -1,7 +1,7 @@
 from collections.abc import MutableSequence
 import unittest
 
-from gel.models.lists import DistinctList
+from gel._internal._dlist import DistinctList
 
 
 # A concrete DistinctList that accepts any object
