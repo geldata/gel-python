@@ -13,7 +13,7 @@ import weakref
 from gel._internal import _qb
 
 from ._base import GelType, GelTypeMeta
-from ._expressions import add_filter, select
+from ._expressions import add_filter, add_limit, add_offset, select
 
 if TYPE_CHECKING:
     import uuid
@@ -60,6 +60,15 @@ class GelModel(
 
         @classmethod
         def select(cls, /, **kwargs: bool | type[GelType]) -> type[Self]: ...
+
+        @classmethod
+        def filter(cls, /, *exprs: Any, **properties: Any) -> type[Self]: ...
+
+        @classmethod
+        def limit(cls, /, expr: Any) -> type[Self]: ...
+
+        @classmethod
+        def offset(cls, /, expr: Any) -> type[Self]: ...
     else:
 
         @_qb.exprmethod
@@ -76,17 +85,6 @@ class GelModel(
                 select(cls, *elements, __operand__=__operand__, **kwargs),
             )
 
-    if TYPE_CHECKING:
-
-        @classmethod
-        def filter(
-            cls,
-            /,
-            *exprs: Any,
-            **properties: Any,
-        ) -> type[Self]: ...
-    else:
-
         @_qb.exprmethod
         @classmethod
         def filter(
@@ -99,6 +97,32 @@ class GelModel(
             return _qb.AnnotatedExpr(  # type: ignore [return-value]
                 cls,
                 add_filter(cls, *exprs, __operand__=__operand__, **properties),
+            )
+
+        @_qb.exprmethod
+        @classmethod
+        def limit(
+            cls,
+            /,
+            value: Any,
+            __operand__: _qb.ExprAlias | None = None,
+        ) -> type[Self]:
+            return _qb.AnnotatedExpr(  # type: ignore [return-value]
+                cls,
+                add_limit(cls, value, __operand__=__operand__),
+            )
+
+        @_qb.exprmethod
+        @classmethod
+        def offset(
+            cls,
+            /,
+            value: Any,
+            __operand__: _qb.ExprAlias | None = None,
+        ) -> type[Self]:
+            return _qb.AnnotatedExpr(  # type: ignore [return-value]
+                cls,
+                add_offset(cls, value, __operand__=__operand__),
             )
 
     @classmethod

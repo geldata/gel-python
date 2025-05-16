@@ -268,7 +268,7 @@ class BaseGeneratedModule:
         super().__init__()
         self._modpath = modname
         self._types = all_types
-        self._types_by_name = {}
+        self._types_by_name: dict[str, reflection.AnyType] = {}
         self._casts = all_casts
         self._operators = all_operators
         schema_obj_type = None
@@ -1237,9 +1237,11 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                 raise AssertionError(f"expected {op} to be a prefix operator")
             ret_type = self._types[op.return_type.id]
             rtype = self.render_callable_return_type(
-                ret_type, op.return_typemod)
+                ret_type, op.return_typemod
+            )
             rtype_rt = self.render_callable_runtime_return_type(
-                ret_type, op.return_typemod)
+                ret_type, op.return_typemod
+            )
             with self._method_def(
                 op.py_magic,
                 ["cls"],
@@ -1250,7 +1252,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                 args = [
                     "expr=cls",
                     f'op="{name.name}"',
-                    f"type_={self._render_obj_schema_path(ret_type)}"
+                    f"type_={self._render_obj_schema_path(ret_type)}",
                 ]
                 opexpr = self.format_list(f"{pfxop}({{list}})", args)
                 self.write(
@@ -1350,7 +1352,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                         "lexpr=cls",
                         f'op="{opname}"',
                         "rexpr=other",
-                        f"type_={self._render_obj_schema_path(ret_type)}"
+                        f"type_={self._render_obj_schema_path(ret_type)}",
                     ]
                     opexpr = self.format_list(f"{infxop}({{list}})", args)
                     self.write(
@@ -1733,6 +1735,32 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                 self.write('"""')
                 self.write("...")
                 self.write()
+
+            if objtype.name == "std::BaseObject":
+                int64_t = self._types_by_name["std::int64"]
+                assert reflection.is_scalar_type(int64_t)
+                type_ = self.import_name("builtins", "type")
+                std_int = self.get_type(
+                    int64_t,
+                    import_time=ImportTime.typecheck,
+                )
+
+                builtins_int = self._get_pybase_for_primitive_type(int64_t)
+
+                splice_args = [f"value: {type_}[{std_int}] | {builtins_int}"]
+                with self._classmethod_def("limit", splice_args, "type[Self]"):
+                    self.write(
+                        '"""Limit selection to a set number of entries."""'
+                    )
+                    self.write("...")
+                    self.write()
+
+                with self._classmethod_def(
+                    "offset", splice_args, "type[Self]"
+                ):
+                    self.write('"""Start selection from a specific offset."""')
+                    self.write("...")
+                    self.write()
 
         if objtype.name == "schema::ObjectType":
             any_ = self.import_name("typing", "Any")

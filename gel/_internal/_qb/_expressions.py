@@ -308,6 +308,40 @@ class Filter(Expr):
 
 
 @dataclasses.dataclass(kw_only=True)
+class Limit(Expr):
+    expr: Expr
+    limit: Expr
+
+    @property
+    def type(self) -> _reflection.SchemaPath:
+        return self.expr.type
+
+    @property
+    def precedence(self) -> _edgeql.Precedence:
+        return _edgeql.PRECEDENCE[_edgeql.Token.LIMIT]
+
+    def __edgeql_expr__(self) -> str:
+        return f"{edgeql(self.expr)} LIMIT {edgeql(self.limit)}"
+
+
+@dataclasses.dataclass(kw_only=True)
+class Offset(Expr):
+    expr: Expr
+    offset: Expr
+
+    @property
+    def type(self) -> _reflection.SchemaPath:
+        return self.expr.type
+
+    @property
+    def precedence(self) -> _edgeql.Precedence:
+        return _edgeql.PRECEDENCE[_edgeql.Token.OFFSET]
+
+    def __edgeql_expr__(self) -> str:
+        return f"{edgeql(self.expr)} OFFSET {edgeql(self.offset)}"
+
+
+@dataclasses.dataclass(kw_only=True)
 class Shape(TypedExpr):
     expr: Expr
     elements: dict[str, Expr] = dataclasses.field(default_factory=dict)

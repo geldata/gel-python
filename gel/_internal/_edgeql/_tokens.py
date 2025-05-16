@@ -275,6 +275,8 @@ PRECEDENCE: dict[Token | tuple[Token, int] | Operation, Precedence] = {
     Token.INTERSECT: Precedence(0, Assoc.LEFT),
     Token.FILTER: Precedence(1, Assoc.NONASSOC),
     Token.ORDER_BY: Precedence(1, Assoc.NONASSOC),
+    Token.LIMIT: Precedence(1, Assoc.NONASSOC),
+    Token.OFFSET: Precedence(1, Assoc.NONASSOC),
     Token.IF: Precedence(2, Assoc.RIGHT),
     Token.ELSE: Precedence(2, Assoc.RIGHT),
     Token.OR: Precedence(3, Assoc.LEFT),

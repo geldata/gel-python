@@ -111,3 +111,31 @@ def add_filter(
         subject = _qb.edgeql_qb_expr(operand)
 
     return _qb.Filter(expr=subject, filters=all_exprs)
+
+
+def add_limit(
+    cls: type[GelType],
+    /,
+    expr: Any,
+    *,
+    __operand__: _qb.ExprAlias | None = None,
+) -> _qb.Limit:
+    if isinstance(expr, int):
+        expr = _qb.IntLiteral(val=expr)
+    operand = cls if __operand__ is None else __operand__
+    subject = _qb.edgeql_qb_expr(operand)
+    return _qb.Limit(expr=subject, limit=expr)
+
+
+def add_offset(
+    cls: type[GelType],
+    /,
+    expr: Any,
+    *,
+    __operand__: _qb.ExprAlias | None = None,
+) -> _qb.Offset:
+    if isinstance(expr, int):
+        expr = _qb.IntLiteral(val=expr)
+    operand = cls if __operand__ is None else __operand__
+    subject = _qb.edgeql_qb_expr(operand)
+    return _qb.Offset(expr=subject, offset=expr)
