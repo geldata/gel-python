@@ -16,13 +16,130 @@ if TYPE_CHECKING:
     from ._base import GelType
 
 
+def _get_prefixed_ptr(
+    cls: type[GelType],
+    ptrname: str,
+) -> tuple[_qb.PathAlias, _qb.Path]:
+    this_type = cls.__gel_reflection__.name
+
+    ptr = getattr(cls, ptrname, Unspecified)
+    if ptr is Unspecified:
+        sn = this_type.as_schema_name()
+        msg = f"{ptrname} is not a valid {sn} property"
+        raise AttributeError(msg)
+    if not isinstance(ptr, _qb.PathAlias):
+        raise AssertionError(
+            f"expected {cls.__name__}.{ptrname} to be a PathAlias"
+        )
+
+    expr = copy.copy(_qb.edgeql_qb_expr(ptr))
+    assert isinstance(expr, _qb.Path)
+    expr.source = _qb.PathPrefix(type_=this_type)
+    return ptr, expr
+
+
+def _fuse_filters(
+    expr: _qb.Expr,
+    filters: list[_qb.Expr],
+) -> _qb.Expr:
+    if not isinstance(expr, _qb.SelectStmt):
+        expr = _qb.SelectStmt(
+            expr=expr,
+            implicit=True,
+        )
+
+    if expr.filter is None:
+        expr.filter = _qb.Filter(filters=filters)
+    else:
+        expr.filter.filters.extend(filters)
+
+    return expr
+
+
+def _fuse_orderbys(
+    expr: _qb.Expr,
+    directions: list[_qb.Expr],
+) -> _qb.Expr:
+    if (
+        not isinstance(expr, _qb.SelectStmt)
+        or expr.limit is not None
+        or expr.offset is not None
+    ):
+        expr = _qb.SelectStmt(
+            expr=expr,
+            implicit=True,
+        )
+
+    expr.order_by = _qb.OrderBy(
+        directions=directions,
+    )
+
+    return expr
+
+
+def _fuse_limit(
+    expr: _qb.Expr,
+    limit: _qb.Expr,
+) -> _qb.Expr:
+    if not isinstance(expr, _qb.SelectStmt):
+        expr = _qb.SelectStmt(
+            expr=expr,
+            implicit=True,
+        )
+
+    if expr.limit is None:
+        expr.limit = _qb.Limit(limit=limit)
+    else:
+        expr.limit.limit = _qb.FuncCall(
+            fname="std::min",
+            args=[
+                _qb.SetLiteral(
+                    items=[expr.limit.limit, limit],
+                    type_=limit.type,
+                ),
+            ],
+            kwargs={},
+            type_=limit.type,
+        )
+
+    return expr
+
+
+def _fuse_offset(
+    expr: _qb.Expr,
+    offset: _qb.Expr,
+) -> _qb.Expr:
+    if not isinstance(expr, _qb.SelectStmt):
+        expr = _qb.SelectStmt(
+            expr=expr,
+            implicit=True,
+        )
+
+    if expr.offset is None:
+        expr.offset = _qb.Offset(offset=offset)
+    else:
+        expr.offset.offset = _qb.FuncCall(
+            fname="std::min",
+            args=[
+                _qb.SetLiteral(
+                    items=[expr.offset.offset, offset],
+                    type_=offset.type,
+                ),
+            ],
+            kwargs={},
+            type_=offset.type,
+        )
+
+    return expr
+
+
 def select(
     cls: type[GelType],
     /,
     *elements: _qb.PathAlias,
     __operand__: _qb.ExprAlias | None = None,
     **kwargs: bool | type[GelType],
-) -> _qb.Shape:
+) -> _qb.ShapeOp:
     shape: dict[str, _qb.Expr] = {}
 
     this_type = cls.__gel_reflection__.name
@@ -51,37 +168,15 @@ def select(
     if __operand__ is not None:
         operand = _qb.edgeql_qb_expr(__operand__)
         if (
-            isinstance(operand, _qb.Shape)
-            and not operand.elements
-            and operand.star_splat
+            isinstance(operand, _qb.ShapeOp)
+            and not operand.shape.elements
+            and operand.shape.star_splat
         ):
             operand = operand.expr
     else:
         operand = _qb.SchemaSet(type_=this_type)
 
-    return _qb.Shape(type_=this_type, expr=operand, elements=shape)
-
-
-def _get_prefixed_ptr(
-    cls: type[GelType],
-    ptrname: str,
-) -> tuple[_qb.PathAlias, _qb.Path]:
-    this_type = cls.__gel_reflection__.name
-
-    ptr = getattr(cls, ptrname, Unspecified)
-    if ptr is Unspecified:
-        sn = this_type.as_schema_name()
-        msg = f"{ptrname} is not a valid {sn} property"
-        raise AttributeError(msg)
-    if not isinstance(ptr, _qb.PathAlias):
-        raise AssertionError(
-            f"expected {cls.__name__}.{ptrname} to be a PathAlias"
-        )
-
-    expr = copy.copy(_qb.edgeql_qb_expr(ptr))
-    assert isinstance(expr, _qb.Path)
-    expr.source = _qb.PathPrefix(type_=this_type)
-    return ptr, expr
+    return _qb.ShapeOp(expr=operand, shape_=_qb.Shape(elements=shape))
 
 
 def add_filter(
@@ -90,7 +185,7 @@ def add_filter(
     *exprs: Any,
     __operand__: _qb.ExprAlias | None = None,
     **properties: Any,
-) -> _qb.Filter:
+) -> _qb.Expr:
     all_exprs = list(exprs)
 
     for ptrname, value in properties.items():
@@ -104,13 +199,41 @@ def add_filter(
         all_exprs.append(ptr_comp)
 
     operand = cls if __operand__ is None else __operand__
-    if isinstance(operand, _qb.Filter):
-        all_exprs = operand.filters + all_exprs
-        subject = operand.expr
-    else:
-        subject = _qb.edgeql_qb_expr(operand)
+    subject = _qb.edgeql_qb_expr(operand)
+    return _fuse_filters(subject, all_exprs)
 
-    return _qb.Filter(expr=subject, filters=all_exprs)
+
+def order_by(
+    cls: type[GelType],
+    /,
+    *elements: _qb.PathAlias,
+    __operand__: _qb.ExprAlias | None = None,
+    **kwargs: str,
+) -> _qb.Expr:
+    all_exprs: list[_qb.Expr] = []
+    this_type = cls.__gel_reflection__.name
+
+    for elem in elements:
+        path = _qb.edgeql_qb_expr(elem)
+        if not isinstance(path, _qb.Path):
+            raise TypeError(f"{elem} is not a valid path expression")
+
+        if path.source.type == this_type:
+            path = copy.copy(path)
+            path.source = _qb.PathPrefix(type_=this_type)
+
+        all_exprs.append(path)
+
+    for ptrname in kwargs:
+        _, ptr_expr = _get_prefixed_ptr(cls, ptrname)
+        all_exprs.append(ptr_expr)
+
+    if __operand__ is not None:
+        operand = _qb.edgeql_qb_expr(__operand__)
+    else:
+        operand = _qb.SchemaSet(type_=this_type)
+
+    return _fuse_orderbys(operand, all_exprs)
 
 
 def add_limit(
@@ -119,12 +242,12 @@ def add_limit(
     expr: Any,
     *,
     __operand__: _qb.ExprAlias | None = None,
-) -> _qb.Limit:
+) -> _qb.Expr:
     if isinstance(expr, int):
         expr = _qb.IntLiteral(val=expr)
     operand = cls if __operand__ is None else __operand__
     subject = _qb.edgeql_qb_expr(operand)
-    return _qb.Limit(expr=subject, limit=expr)
+    return _fuse_limit(subject, expr)
 
 
 def add_offset(
@@ -133,9 +256,9 @@ def add_offset(
     expr: Any,
     *,
     __operand__: _qb.ExprAlias | None = None,
-) -> _qb.Offset:
+) -> _qb.Expr:
     if isinstance(expr, int):
         expr = _qb.IntLiteral(val=expr)
     operand = cls if __operand__ is None else __operand__
     subject = _qb.edgeql_qb_expr(operand)
-    return _qb.Offset(expr=subject, offset=expr)
+    return _fuse_offset(subject, expr)

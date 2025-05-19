@@ -13,7 +13,7 @@ import weakref
 from gel._internal import _qb
 
 from ._base import GelType, GelTypeMeta
-from ._expressions import add_filter, add_limit, add_offset, select
+from ._expressions import add_filter, add_limit, add_offset, order_by, select
 
 if TYPE_CHECKING:
     import uuid
@@ -62,7 +62,14 @@ class GelModel(
         def select(cls, /, **kwargs: bool | type[GelType]) -> type[Self]: ...
 
         @classmethod
-        def filter(cls, /, *exprs: Any, **properties: Any) -> type[Self]: ...
+        def filter(
+            cls, /, *exprs: Any, **properties: Any
+        ) -> type[Self]: ...
+
+        @classmethod
+        def order_by(
+            cls, /, *exprs: type[GelType], **kwargs: bool | type[GelType]
+        ) -> type[Self]: ...
 
         @classmethod
         def limit(cls, /, expr: Any) -> type[Self]: ...
@@ -101,6 +108,20 @@ class GelModel(
 
         @_qb.exprmethod
         @classmethod
+        def order_by(
+            cls,
+            /,
+            *elements: _qb.PathAlias,
+            __operand__: _qb.ExprAlias | None = None,
+            **kwargs: bool | type[GelType],
+        ) -> type[Self]:
+            return _qb.AnnotatedExpr(  # type: ignore [return-value]
+                cls,
+                order_by(cls, *elements, __operand__=__operand__, **kwargs),
+            )
+
+        @_qb.exprmethod
+        @classmethod
         def limit(
             cls,
             /,
@@ -128,8 +149,4 @@ class GelModel(
     @classmethod
     def __edgeql_qb_expr__(cls) -> _qb.Expr:  # pyright: ignore [reportIncompatibleMethodOverride]
         this_type = cls.__gel_reflection__.name
-        return _qb.Shape(
-            type_=this_type,
-            expr=_qb.SchemaSet(type_=this_type),
-            star_splat=True,
-        )
+        return _qb.SchemaSet(type_=this_type)

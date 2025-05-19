@@ -25,13 +25,17 @@ from ._expressions import (
     IntLiteral,
     Limit,
     Literal,
+    OrderBy,
     Offset,
     Path,
     PathPrefix,
     PrefixOp,
     SchemaSet,
+    SetLiteral,
     Shape,
+    ShapeOp,
     Stmt,
+    SelectStmt,
     StringLiteral,
 )
 
@@ -40,6 +44,7 @@ from ._generics import (
     AnnotatedPath,
     ExprAlias,
     PathAlias,
+    SortAlias,
 )
 
 from ._protocols import (
@@ -74,12 +79,17 @@ __all__ = (
     "Limit",
     "Literal",
     "Offset",
+    "OrderBy",
     "Path",
     "PathAlias",
     "PathPrefix",
     "PrefixOp",
     "SchemaSet",
+    "SelectStmt",
+    "SetLiteral",
     "Shape",
+    "ShapeOp",
+    "SortAlias",
     "Stmt",
     "StringLiteral",
     "edgeql",

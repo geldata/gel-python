@@ -1666,8 +1666,15 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             import_time=ImportTime.typecheck,
         )
         builtin_bool = self.import_name("builtins", "bool", directly=False)
-        filter_args = ["/", f"*exprs: type[{std_bool}]"]
-        select_args = []
+        builtin_str = self.import_name("builtins", "str", directly=False)
+        type_ = self.import_name("builtins", "type")
+        pathalias = self.import_name(BASE_IMPL, "PathAlias", directly=False)
+        literal = self.import_name(
+            "typing", "Literal", import_time=ImportTime.typecheck
+        )
+        filter_args = ["/", f"*exprs: {type_}[{std_bool}]"]
+        select_args = ["/", f"*exprs: {pathalias}"]
+        order_args = ["/", f"*exprs: {pathalias}"]
         for ptr, _ in reg_pointers:
             target_t = self._types[ptr.target_id]
             if reflection.is_scalar_type(target_t):
@@ -1691,9 +1698,15 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                 filter_args.append(f"{ptr.name}: {ptr_t}")
                 select_ptr_t = f"{' | '.join(select_union)} = {unspec}"
                 select_args.append(f"{ptr.name}: {select_ptr_t}")
+                order_union = [
+                    f'{literal}["asc", "desc"]',
+                    builtin_str,
+                    unspec_t,
+                ]
+                order_ptr_t = f"{' | '.join(order_union)} = {unspec}"
+                order_args.append(f"{ptr.name}: {order_ptr_t}")
 
         gt = self.import_name(BASE_IMPL, "GelType")
-        select_args = ["/", "*", *select_args] if select_args else ["/"]
         select_args.append(f"**computed: type[{gt}]")
 
         with self.type_checking():
@@ -1733,6 +1746,16 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                     f'"""Fetch {objtype.name} instances from the database.'
                 )
                 self.write('"""')
+                self.write("...")
+                self.write()
+
+            with self._classmethod_def(
+                "order_by",
+                order_args,
+                "type[Self]",
+                line_comment="type: ignore [override]",
+            ):
+                self.write('"""Specify the sort order for the selection"""')
                 self.write("...")
                 self.write()
 

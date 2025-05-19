@@ -20,6 +20,7 @@ from gel._internal._qb import (
     InfixOp,
     PrefixOp,
     FuncCall,
+    PathAlias,
 )
 
 from gel._internal._qbmodel._abstract import (
@@ -76,6 +77,7 @@ __all__ = (
     "OptionalLink",
     "OptionalLinkWithProps",
     "OptionalProperty",
+    "PathAlias",
     "PrefixOp",
     "PrivateAttr",
     "ProxyModel",

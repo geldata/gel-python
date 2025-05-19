@@ -4,10 +4,10 @@
 
 """EdgeQL rendering helpers"""
 
-
 from __future__ import annotations
 
 from ._expressions import (
+    SelectStmt,
     Stmt,
 )
 
@@ -20,7 +20,8 @@ from ._protocols import (
 
 def toplevel_edgeql(x: ExprCompatible) -> str:
     expr = edgeql_qb_expr(x)
-    text = edgeql(expr)
     if not isinstance(expr, Stmt):
-        text = "SELECT " + text
-    return text
+        expr = SelectStmt(expr=expr, toplevel=True)
+    else:
+        expr.toplevel = True
+    return edgeql(expr)

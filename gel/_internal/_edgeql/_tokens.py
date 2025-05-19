@@ -270,6 +270,12 @@ class Precedence(NamedTuple):
 
 
 PRECEDENCE: dict[Token | tuple[Token, int] | Operation, Precedence] = {
+    Token.SELECT: Precedence(-3, Assoc.RIGHT),
+    Token.INSERT: Precedence(-3, Assoc.RIGHT),
+    Token.UPDATE: Precedence(-3, Assoc.RIGHT),
+    Token.DELETE: Precedence(-3, Assoc.RIGHT),
+    Token.WITH: Precedence(-3, Assoc.RIGHT),
+    Token.COMMA: Precedence(-2, Assoc.LEFT),
     Token.UNION: Precedence(-1, Assoc.LEFT),
     Token.EXCEPT: Precedence(-1, Assoc.LEFT),
     Token.INTERSECT: Precedence(0, Assoc.LEFT),

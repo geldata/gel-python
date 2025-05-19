@@ -10,6 +10,7 @@ from typing import (
     TYPE_CHECKING,
 )
 
+import abc
 import dataclasses
 import textwrap
 
@@ -44,6 +45,13 @@ class TypedExpr(Expr):
     @property
     def type(self) -> SchemaPath:
         return self.type_
+
+
+@dataclasses.dataclass(kw_only=True)
+class ShapedExpr(Expr):
+
+    @abc.abstractproperty
+    def shape(self) -> Shape | None: ...
 
 
 @dataclasses.dataclass(kw_only=True)
@@ -142,10 +150,42 @@ class StringLiteral(Literal):
 
 
 @dataclasses.dataclass(kw_only=True)
-class Path(TypedExpr):
+class SetLiteral(TypedExpr):
+    items: list[Expr]
+
+    @property
+    def precedence(self) -> _edgeql.Precedence:
+        return _edgeql.PRECEDENCE[_edgeql.Token.LBRACE]
+
+    def __edgeql_expr__(self) -> str:
+        exprs = []
+        for item in self.items:
+            item_edgeql = edgeql(item)
+            if self._need_parens(item):
+                item_edgeql = f"({item_edgeql})"
+            exprs.append(item_edgeql)
+
+        return "{" + ", ".join(exprs) + "}"
+
+    def _need_parens(self, item: Expr) -> bool:
+        if isinstance(item, IdentLikeExpr):
+            return False
+        comma_prec = _edgeql.PRECEDENCE[_edgeql.Token.COMMA]
+        return item.precedence.value < comma_prec.value
+
+
+@dataclasses.dataclass(kw_only=True)
+class Path(ShapedExpr, TypedExpr):
     source: Expr
     name: str
     is_lprop: bool
+
+    @property
+    def shape(self) -> Shape | None:
+        if isinstance(self.source, ShapedExpr):
+            return self.source.shape
+        else:
+            return None
 
     @property
     def precedence(self) -> _edgeql.Precedence:
@@ -221,38 +261,12 @@ class InfixOp(Op):
 
     def __edgeql_expr__(self) -> str:
         left = edgeql(self.lexpr)
-        if self._need_left_parens():
+        if _need_left_parens(self, self.lexpr):
             left = f"({left})"
         right = edgeql(self.rexpr)
-        if self._need_right_parens():
+        if _need_right_parens(self, self.rexpr):
             right = f"({right})"
         return f"{left} {self.op} {right}"
-
-    def _need_left_parens(self) -> bool:
-        lexpr = self.lexpr
-        if isinstance(lexpr, IdentLikeExpr):
-            return False
-        left_prec = lexpr.precedence.value
-        self_prec = self.precedence.value
-        self_assoc = self.precedence.assoc
-
-        return left_prec < self_prec or (
-            left_prec == self_prec
-            and self_assoc is not _edgeql.Assoc.RIGHT
-            and (not isinstance(lexpr, InfixOp) or lexpr.op != self.op)
-        )
-
-    def _need_right_parens(self) -> bool:
-        rexpr = self.rexpr
-        if isinstance(rexpr, IdentLikeExpr):
-            return False
-        right_prec = rexpr.precedence.value
-        self_prec = self.precedence.value
-        self_assoc = self.precedence.assoc
-
-        return right_prec < self_prec or (
-            right_prec == self_prec and self_assoc is _edgeql.Assoc.RIGHT
-        )
 
 
 @dataclasses.dataclass(kw_only=True)
@@ -277,13 +291,24 @@ class FuncCall(TypedExpr):
 
 
 @dataclasses.dataclass(kw_only=True)
-class Filter(Expr):
+class ClauseExpr(ShapedExpr):
     expr: Expr
-    filters: list[Expr]
 
     @property
     def type(self) -> _reflection.SchemaPath:
         return self.expr.type
+
+    @property
+    def shape(self) -> Shape | None:
+        if isinstance(self.expr, ShapedExpr):
+            return self.expr.shape
+        else:
+            return None
+
+
+@dataclasses.dataclass(kw_only=True)
+class Filter:
+    filters: list[Expr]
 
     @property
     def precedence(self) -> _edgeql.Precedence:
@@ -298,55 +323,112 @@ class Filter(Expr):
                 rexpr=item,
                 type_=SchemaPath("std", "bool"),
             )
-        fexpr = InfixOp(
-            lexpr=self.expr,
-            op=_edgeql.Token.FILTER,
-            rexpr=fexpr,
-            type_=SchemaPath("std", "bool"),
-        )
-        return edgeql(fexpr)
+        return f"LIMIT {edgeql(fexpr)}"
 
 
 @dataclasses.dataclass(kw_only=True)
-class Limit(Expr):
-    expr: Expr
-    limit: Expr
+class OrderBy:
+    directions: list[Expr]
 
     @property
-    def type(self) -> _reflection.SchemaPath:
-        return self.expr.type
+    def precedence(self) -> _edgeql.Precedence:
+        return _edgeql.PRECEDENCE[_edgeql.Token.ORDER_BY]
+
+    def __edgeql_expr__(self) -> str:
+        dexpr = self.directions[0]
+        for item in self.directions[1:]:
+            dexpr = InfixOp(
+                lexpr=dexpr,
+                op=_edgeql.Token.THEN,
+                rexpr=item,
+                type_=SchemaPath("std", "bool"),
+            )
+
+        return f"ORDER BY {edgeql(dexpr)}"
+
+
+@dataclasses.dataclass(kw_only=True)
+class Limit:
+    limit: Expr
 
     @property
     def precedence(self) -> _edgeql.Precedence:
         return _edgeql.PRECEDENCE[_edgeql.Token.LIMIT]
 
     def __edgeql_expr__(self) -> str:
-        return f"{edgeql(self.expr)} LIMIT {edgeql(self.limit)}"
+        return f"LIMIT {edgeql(self.limit)}"
 
 
 @dataclasses.dataclass(kw_only=True)
-class Offset(Expr):
-    expr: Expr
+class Offset:
     offset: Expr
-
-    @property
-    def type(self) -> _reflection.SchemaPath:
-        return self.expr.type
 
     @property
     def precedence(self) -> _edgeql.Precedence:
         return _edgeql.PRECEDENCE[_edgeql.Token.OFFSET]
 
     def __edgeql_expr__(self) -> str:
-        return f"{edgeql(self.expr)} OFFSET {edgeql(self.offset)}"
+        return f"OFFSET {edgeql(self.offset)}"
 
 
 @dataclasses.dataclass(kw_only=True)
-class Shape(TypedExpr):
-    expr: Expr
+class Stmt(ClauseExpr):
+    stmt: _edgeql.Token
+    toplevel: bool = False
+
+    @property
+    def precedence(self) -> _edgeql.Precedence:
+        return _edgeql.PRECEDENCE[self.stmt]
+
+
+@dataclasses.dataclass(kw_only=True)
+class SelectStmt(Stmt):
+    stmt: _edgeql.Token = _edgeql.Token.SELECT
+    implicit: bool = False
+    filter: Filter | None = None
+    order_by: OrderBy | None = None
+    limit: Limit | None = None
+    offset: Offset | None = None
+
+    def __edgeql_expr__(self) -> str:
+        shape = self.shape if self.toplevel else None
+        if shape is None:
+            expr = self.expr
+        else:
+            expr = ShapeOp(expr=self.expr, shape_=shape)
+        parts = [str(self.stmt)]
+        expr_text = edgeql(expr)
+        if _need_right_parens(self, expr):
+            expr_text = f"({expr})"
+        parts.append(expr_text)
+        if self.filter is not None:
+            parts.append(edgeql(self.filter))
+        if self.order_by is not None:
+            parts.append(edgeql(self.order_by))
+        if self.limit is not None:
+            parts.append(edgeql(self.limit))
+        if self.offset is not None:
+            parts.append(edgeql(self.offset))
+
+        return " ".join(parts)
+
+
+@dataclasses.dataclass(kw_only=True)
+class Shape:
     elements: dict[str, Expr] = dataclasses.field(default_factory=dict)
     star_splat: bool = False
     doublestar_splat: bool = False
+
+
+@dataclasses.dataclass(kw_only=True)
+class ShapeOp(ShapedExpr):
+    expr: Expr
+    shape_: Shape
+    inhibit_shape: bool = False
+
+    @property
+    def shape(self) -> Shape:
+        return self.shape_
 
     @property
     def type(self) -> _reflection.SchemaPath:
@@ -358,11 +440,12 @@ class Shape(TypedExpr):
 
     def __edgeql_expr__(self) -> str:
         els = []
-        if self.star_splat:
+        shape = self.shape
+        if shape.star_splat:
             els.append("*")
-        if self.doublestar_splat:
+        if shape.doublestar_splat:
             els.append("**")
-        for n, el in self.elements.items():
+        for n, el in shape.elements.items():
             if (
                 isinstance(el, Path)
                 and isinstance(el.source, (SchemaSet, PathPrefix))
@@ -372,9 +455,33 @@ class Shape(TypedExpr):
                 els.append(f"{n},")
             else:
                 els.append(f"{n} := {edgeql(el)},")
-        shape = "{\n" + textwrap.indent("\n".join(els), "  ") + "\n}"
-        return f"{edgeql(self.expr)} {shape}"
+        shape_text = "{\n" + textwrap.indent("\n".join(els), "  ") + "\n}"
+        subject = edgeql(self.expr)
+        if _need_left_parens(self, self.expr):
+            subject = f"({subject})"
+        return f"{subject} {shape_text}"
 
 
-class Stmt(Expr):
-    pass
+def _need_left_parens(prod: Expr, lexpr: Expr) -> bool:
+    if isinstance(lexpr, IdentLikeExpr):
+        return False
+    left_prec = lexpr.precedence.value
+    self_prec = prod.precedence.value
+    self_assoc = prod.precedence.assoc
+
+    return left_prec < self_prec or (
+        left_prec == self_prec
+        and self_assoc is not _edgeql.Assoc.RIGHT
+    )
+
+
+def _need_right_parens(prod: Expr, rexpr: Expr) -> bool:
+    if isinstance(rexpr, IdentLikeExpr):
+        return False
+    right_prec = rexpr.precedence.value
+    self_prec = prod.precedence.value
+    self_assoc = prod.precedence.assoc
+
+    return right_prec < self_prec or (
+        right_prec == self_prec and self_assoc is _edgeql.Assoc.RIGHT
+    )

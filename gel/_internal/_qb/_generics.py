@@ -192,3 +192,7 @@ class ExprAlias(BaseAlias):
 
 def AnnotatedExpr(origin: type[Any], metadata: Expr) -> ExprAlias:  # noqa: N802
     return ExprAlias(origin, metadata)
+
+
+class SortAlias(BaseAlias):
+    pass
