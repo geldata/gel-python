@@ -116,7 +116,7 @@ class ModelFieldDescriptor(_qb.AbstractFieldDescriptor):
             return self
         else:
             source: _qb.Expr
-            if isinstance(owner, _qb.PathAlias):
+            if isinstance(owner, _qb.BaseAlias):
                 source = owner.__gel_metadata__
             elif hasattr(owner, "__edgeql_qb_expr__"):
                 source = _qb.edgeql_qb_expr(owner)

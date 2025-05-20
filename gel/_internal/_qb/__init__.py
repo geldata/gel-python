@@ -21,6 +21,7 @@ from ._expressions import (
     ExprPlaceholder,
     Filter,
     FloatLiteral,
+    ForStmt,
     FuncCall,
     InfixOp,
     IntLiteral,
@@ -39,14 +40,18 @@ from ._expressions import (
     SelectStmt,
     StringLiteral,
     UpdateStmt,
+    Variable,
 )
 
 from ._generics import (
     AnnotatedExpr,
     AnnotatedPath,
+    AnnotatedVar,
+    BaseAlias,
     ExprAlias,
     PathAlias,
     SortAlias,
+    VarAlias,
 )
 
 from ._protocols import (
@@ -66,6 +71,8 @@ __all__ = (
     "AbstractFieldDescriptor",
     "AnnotatedExpr",
     "AnnotatedPath",
+    "AnnotatedVar",
+    "BaseAlias",
     "BoolLiteral",
     "BytesLiteral",
     "DecimalLiteral",
@@ -76,6 +83,7 @@ __all__ = (
     "ExprPlaceholder",
     "Filter",
     "FloatLiteral",
+    "ForStmt",
     "FuncCall",
     "InfixOp",
     "IntLiteral",
@@ -96,6 +104,8 @@ __all__ = (
     "Stmt",
     "StringLiteral",
     "UpdateStmt",
+    "VarAlias",
+    "Variable",
     "edgeql",
     "edgeql_qb_expr",
     "exprmethod",

@@ -19,7 +19,7 @@ from gel._internal import _typing_inspect
 from gel._internal import _utils
 
 from ._abstract import AbstractFieldDescriptor
-from ._expressions import InfixOp, Path
+from ._expressions import InfixOp, Path, Variable
 from ._protocols import TypeClassProto, edgeql_qb_expr, is_exprmethod
 from ._render import toplevel_edgeql
 
@@ -76,6 +76,14 @@ class BaseAlias(metaclass=BaseAliasMeta):
     def __init__(self, origin: type[TypeClassProto], metadata: Expr) -> None:
         self.__gel_origin__ = origin
         self.__gel_metadata__ = metadata
+        if _typing_inspect.is_generic_alias(origin):
+            real_origin = get_args(origin)[0]
+        else:
+            real_origin = origin
+        proxied_dunders: Iterable[str] = (
+            getattr(real_origin, "__gel_proxied_dunders__", ()) or ()
+        )
+        self.__gel_proxied_dunders__ = frozenset(proxied_dunders)
 
     def __call__(self, *args: Any, **kwargs: Any) -> Any:
         return self.__gel_origin__(*args, **kwargs)
@@ -98,17 +106,24 @@ class BaseAlias(metaclass=BaseAliasMeta):
         return f"{_utils.type_repr(type(self))}[{origin}, {metadata}]"
 
     def __getattr__(self, attr: str) -> Any:
-        if "__gel_origin__" in self.__dict__ and not _utils.is_dunder(attr):
-            attrval = getattr(self.__gel_origin__, attr)
-            if is_exprmethod(attrval):
-
-                @functools.wraps(attrval)
-                def wrapper(*args: Any, **kwargs: Any) -> Any:
-                    return attrval(*args, __operand__=self, **kwargs)
-
-                return wrapper
+        if not _utils.is_dunder(attr) or attr in self.__gel_proxied_dunders__:
+            origin = self.__gel_origin__
+            descriptor = _utils.maybe_get_descriptor(
+                origin, attr, of_type=AbstractFieldDescriptor
+            )
+            if descriptor is not None:
+                return descriptor.get(self)
             else:
-                return attrval
+                attrval = getattr(origin, attr)
+                if is_exprmethod(attrval):
+
+                    @functools.wraps(attrval)
+                    def wrapper(*args: Any, **kwargs: Any) -> Any:
+                        return attrval(*args, __operand__=self, **kwargs)
+
+                    return wrapper
+                else:
+                    return attrval
         else:
             raise AttributeError(attr)
 
@@ -148,37 +163,7 @@ class BaseAlias(metaclass=BaseAliasMeta):
 
 
 class PathAlias(BaseAlias):
-    def __init__(self, origin: type, metadata: Path) -> None:
-        assert isinstance(origin, type)
-        self.__gel_origin__ = origin
-        self.__gel_metadata__ = metadata
-        if _typing_inspect.is_generic_alias(origin):
-            real_origin = get_args(origin)[0]
-        else:
-            real_origin = origin
-        proxied_dunders: Iterable[str] = (
-            getattr(real_origin, "__gel_proxied_dunders__", ()) or ()
-        )
-        self.__gel_proxied_dunders__ = frozenset(proxied_dunders)
-
-    def __getattr__(self, attr: str) -> Any:
-        if not _utils.is_dunder(attr) or attr in self.__gel_proxied_dunders__:
-            origin = self.__gel_origin__
-            descriptor = _utils.maybe_get_descriptor(
-                origin, attr, of_type=AbstractFieldDescriptor
-            )
-            if descriptor is not None:
-                return descriptor.get(self)
-            else:
-                return super().__getattr__(attr)
-        else:
-            raise AttributeError(attr)
-
-    def __setattr__(self, attr: str, val: Any) -> None:
-        if _utils.is_dunder(attr):
-            super().__setattr__(attr, val)
-        else:
-            setattr(self.__gel_origin__, attr, val)
+    pass
 
 
 def AnnotatedPath(origin: type, metadata: Path) -> PathAlias:  # noqa: N802
@@ -196,3 +181,11 @@ def AnnotatedExpr(origin: type[Any], metadata: Expr) -> ExprAlias:  # noqa: N802
 
 class SortAlias(BaseAlias):
     pass
+
+
+class VarAlias(BaseAlias):
+    pass
+
+
+def AnnotatedVar(origin: type[Any], metadata: Variable) -> VarAlias:  # noqa: N802
+    return VarAlias(origin, metadata)

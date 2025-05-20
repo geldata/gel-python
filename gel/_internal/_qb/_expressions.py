@@ -79,6 +79,14 @@ class PathPrefix(Symbol):
         return ""
 
 
+@dataclasses.dataclass(kw_only=True)
+class Variable(Symbol):
+    name: str
+
+    def __edgeql_expr__(self) -> str:
+        return _edgeql.quote_ident(self.name)
+
+
 @dataclasses.dataclass
 class SchemaSet(IdentLikeExpr):
     type_: _reflection.SchemaPath
@@ -467,6 +475,19 @@ class DeleteStmt(Stmt, ClauseExpr):
         if _need_right_parens(self, expr):
             expr_text = f"({expr_text})"
         return f"{self.stmt} {expr_text}"
+
+
+@dataclasses.dataclass(kw_only=True)
+class ForStmt(Stmt, ClauseExpr):
+    stmt: _edgeql.Token = _edgeql.Token.FOR
+    iter_expr: Expr
+    var: Variable
+
+    def __edgeql_expr__(self) -> str:
+        return (
+            f"{self.stmt} {edgeql(self.var)} IN ({edgeql(self.iter_expr)})\n"
+            f"UNION ({edgeql(self.expr)})"
+        )
 
 
 @dataclasses.dataclass(kw_only=True)
