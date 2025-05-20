@@ -17,6 +17,7 @@ from ._expressions import (
     BoolLiteral,
     BytesLiteral,
     DecimalLiteral,
+    DeleteStmt,
     ExprPlaceholder,
     Filter,
     FloatLiteral,
@@ -37,6 +38,7 @@ from ._expressions import (
     Stmt,
     SelectStmt,
     StringLiteral,
+    UpdateStmt,
 )
 
 from ._generics import (
@@ -67,6 +69,7 @@ __all__ = (
     "BoolLiteral",
     "BytesLiteral",
     "DecimalLiteral",
+    "DeleteStmt",
     "Expr",
     "ExprAlias",
     "ExprCompatible",
@@ -92,6 +95,7 @@ __all__ = (
     "SortAlias",
     "Stmt",
     "StringLiteral",
+    "UpdateStmt",
     "edgeql",
     "edgeql_qb_expr",
     "exprmethod",

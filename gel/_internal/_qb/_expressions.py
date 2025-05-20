@@ -382,7 +382,7 @@ class Offset:
 
 
 @dataclasses.dataclass(kw_only=True)
-class Stmt(ClauseExpr):
+class Stmt(Expr):
     stmt: _edgeql.Token
 
     @property
@@ -391,7 +391,7 @@ class Stmt(ClauseExpr):
 
 
 @dataclasses.dataclass(kw_only=True)
-class SelectStmt(Stmt):
+class SelectStmt(ClauseExpr, Stmt):
     stmt: _edgeql.Token = _edgeql.Token.SELECT
     implicit: bool = False
     filter: Filter | None = None
@@ -419,10 +419,89 @@ class SelectStmt(Stmt):
 
 
 @dataclasses.dataclass(kw_only=True)
+class InsertStmt(Stmt, TypedExpr):
+    stmt: _edgeql.Token = _edgeql.Token.INSERT
+    shape_: Shape | None = None
+
+    @property
+    def shape(self) -> Shape | None:
+        return self.shape_
+
+    def __edgeql_expr__(self) -> str:
+        text = f"{self.stmt} {self.type.as_schema_name()}"
+        if self.shape_:
+            text = f"{text} {_render_shape(self.shape_, None)}"
+        return text
+
+
+@dataclasses.dataclass(kw_only=True)
+class UpdateStmt(Stmt, ClauseExpr):
+    stmt: _edgeql.Token = _edgeql.Token.UPDATE
+    filter: Filter | None = None
+    shape_: Shape
+
+    @property
+    def shape(self) -> Shape:
+        return self.shape_
+
+    def __edgeql_expr__(self) -> str:
+        expr = self.expr
+        parts = [str(self.stmt)]
+        expr_text = edgeql(expr)
+        if _need_right_parens(self, expr):
+            expr_text = f"({expr_text})"
+        parts.append(expr_text)
+        if self.filter is not None:
+            parts.append(edgeql(self.filter))
+        parts.extend((" SET ", _render_shape(self.shape_, self.expr)))
+        return " ".join(parts)
+
+
+@dataclasses.dataclass(kw_only=True)
+class DeleteStmt(Stmt, ClauseExpr):
+    stmt: _edgeql.Token = _edgeql.Token.DELETE
+
+    def __edgeql_expr__(self) -> str:
+        expr = self.expr
+        expr_text = edgeql(expr)
+        if _need_right_parens(self, expr):
+            expr_text = f"({expr_text})"
+        return f"{self.stmt} {expr_text}"
+
+
+@dataclasses.dataclass(kw_only=True)
 class Shape:
     elements: dict[str, Expr] = dataclasses.field(default_factory=dict)
     star_splat: bool = False
     doublestar_splat: bool = False
+
+
+def _render_shape(shape: Shape, source: Expr | None) -> str:
+    els = []
+    if shape.star_splat:
+        els.append("*")
+    if shape.doublestar_splat:
+        els.append("**")
+    for n, el in shape.elements.items():
+        if (
+            source is not None
+            and isinstance(el, Path)
+            and isinstance(el.source, (SchemaSet, PathPrefix))
+            and el.source.type == source.type
+            and el.name == n
+        ):
+            el_text = _edgeql.quote_ident(n)
+        else:
+            assign = InfixOp(
+                lexpr=Ident(name=n, type_=el.type),
+                op=_edgeql.Token.ASSIGN,
+                rexpr=el,
+                type_=el.type,
+            )
+            el_text = edgeql(assign)
+        els.append(f"{el_text},")
+    shape_text = "{\n" + textwrap.indent("\n".join(els), "  ") + "\n}"
+    return shape_text
 
 
 @dataclasses.dataclass(kw_only=True)
@@ -443,33 +522,10 @@ class ShapeOp(ShapedExpr):
         return _edgeql.PRECEDENCE[_edgeql.Token.LBRACE]
 
     def __edgeql_expr__(self) -> str:
-        els = []
-        shape = self.shape
-        if shape.star_splat:
-            els.append("*")
-        if shape.doublestar_splat:
-            els.append("**")
-        for n, el in shape.elements.items():
-            if (
-                isinstance(el, Path)
-                and isinstance(el.source, (SchemaSet, PathPrefix))
-                and el.source.type == self.expr.type
-                and el.name == n
-            ):
-                el_text = _edgeql.quote_ident(n)
-            else:
-                assign = InfixOp(
-                    lexpr=Ident(name=n, type_=el.type),
-                    op=_edgeql.Token.ASSIGN,
-                    rexpr=el,
-                    type_=el.type,
-                )
-                el_text = edgeql(assign)
-            els.append(f"{el_text},")
-        shape_text = "{\n" + textwrap.indent("\n".join(els), "  ") + "\n}"
         subject = edgeql(self.expr)
         if _need_left_parens(self, self.expr):
             subject = f"({subject})"
+        shape_text = _render_shape(self.shape, self.expr)
         return f"{subject} {shape_text}"
 
 

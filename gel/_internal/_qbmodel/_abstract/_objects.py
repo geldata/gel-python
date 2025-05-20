@@ -13,7 +13,15 @@ import weakref
 from gel._internal import _qb
 
 from ._base import GelType, GelTypeMeta
-from ._expressions import add_filter, add_limit, add_offset, order_by, select
+from ._expressions import (
+    add_filter,
+    add_limit,
+    add_offset,
+    delete,
+    order_by,
+    select,
+    update,
+)
 
 if TYPE_CHECKING:
     import uuid
@@ -62,9 +70,13 @@ class GelModel(
         def select(cls, /, **kwargs: bool | type[GelType]) -> type[Self]: ...
 
         @classmethod
-        def filter(
-            cls, /, *exprs: Any, **properties: Any
-        ) -> type[Self]: ...
+        def update(cls, /, **kwargs: type[GelType]) -> type[Self]: ...
+
+        @classmethod
+        def delete(cls, /) -> type[Self]: ...
+
+        @classmethod
+        def filter(cls, /, *exprs: Any, **properties: Any) -> type[Self]: ...
 
         @classmethod
         def order_by(
@@ -90,6 +102,31 @@ class GelModel(
             return _qb.AnnotatedExpr(  # type: ignore [return-value]
                 cls,
                 select(cls, *elements, __operand__=__operand__, **kwargs),
+            )
+
+        @_qb.exprmethod
+        @classmethod
+        def update(
+            cls,
+            /,
+            __operand__: _qb.ExprAlias | None = None,
+            **kwargs: type[GelType],
+        ) -> type[Self]:
+            return _qb.AnnotatedExpr(  # type: ignore [return-value]
+                cls,
+                update(cls, __operand__=__operand__, **kwargs),
+            )
+
+        @_qb.exprmethod
+        @classmethod
+        def delete(
+            cls,
+            /,
+            __operand__: _qb.ExprAlias | None = None,
+        ) -> type[Self]:
+            return _qb.AnnotatedExpr(  # type: ignore [return-value]
+                cls,
+                delete(cls, __operand__=__operand__),
             )
 
         @_qb.exprmethod

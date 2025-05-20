@@ -1674,6 +1674,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         )
         filter_args = ["/", f"*exprs: {type_}[{std_bool}]"]
         select_args = ["/", f"*exprs: {pathalias}"]
+        update_args = []
         order_args = ["/", f"*exprs: {pathalias}"]
         for ptr, _ in reg_pointers:
             target_t = self._types[ptr.target_id]
@@ -1695,6 +1696,8 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                 union.append(unspec_t)
                 select_union.append(unspec_t)
                 ptr_t = f"{' | '.join(union)} = {unspec}"
+                if not ptr.is_readonly:
+                    update_args.append(f"{ptr.name}: {ptr_t}")
                 filter_args.append(f"{ptr.name}: {ptr_t}")
                 select_ptr_t = f"{' | '.join(select_union)} = {unspec}"
                 select_args.append(f"{ptr.name}: {select_ptr_t}")
@@ -1709,6 +1712,9 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         gt = self.import_name(BASE_IMPL, "GelType")
         select_args.append(f"**computed: type[{gt}]")
 
+        if update_args:
+            update_args = ["/", "*", *update_args]
+
         with self.type_checking():
             with self._method_def("__init__", args):
                 self.write(
@@ -1719,6 +1725,23 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                 self.write(
                     "Call db.save() on the returned object to persist it "
                     "in the database."
+                )
+                self.write('"""')
+                self.write("...")
+                self.write()
+
+            self_ = self.import_name("typing_extensions", "Self")
+            with self._classmethod_def(
+                "update",
+                update_args,
+                f"type[{self_}]",
+                # Ignore override errors, because we type select **computed
+                # as type[GelType], which is incompatible with bool and
+                # UnspecifiedType.
+                line_comment="type: ignore [override]",
+            ):
+                self.write(
+                    f'"""Update {objtype.name} instances in the database.'
                 )
                 self.write('"""')
                 self.write("...")

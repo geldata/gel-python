@@ -5,15 +5,14 @@
 """Base object types used to implement class-based query builders"""
 
 from __future__ import annotations
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import copy
 
 from gel._internal import _qb
 from gel._internal._utils import Unspecified
 
-if TYPE_CHECKING:
-    from ._base import GelType
+from ._base import GelType
 
 
 def _get_prefixed_ptr(
@@ -177,6 +176,55 @@ def select(
         operand = _qb.SchemaSet(type_=this_type)
 
     return _qb.ShapeOp(expr=operand, shape_=_qb.Shape(elements=shape))
+
+
+def update(
+    cls: type[GelType],
+    /,
+    __operand__: _qb.ExprAlias | None = None,
+    **kwargs: bool | type[GelType],
+) -> _qb.UpdateStmt:
+    shape: dict[str, _qb.Expr] = {}
+
+    this_type = cls.__gel_reflection__.name
+
+    for ptrname, kwarg in kwargs.items():
+        if isinstance(kwarg, bool):
+            _, ptr_expr = _get_prefixed_ptr(cls, ptrname)
+            if kwarg:
+                shape[ptrname] = ptr_expr
+            else:
+                shape.pop(ptrname, None)
+        else:
+            if not isinstance(kwarg, GelType):
+                # Raw Python constant, convert to a literal
+                val = getattr(cls, ptrname)(kwarg)
+            else:
+                val = kwarg
+            shape[ptrname] = _qb.edgeql_qb_expr(val)
+
+    if __operand__ is not None:
+        operand = _qb.edgeql_qb_expr(__operand__)
+        if (
+            isinstance(operand, _qb.ShapeOp)
+            and not operand.shape.elements
+            and operand.shape.star_splat
+        ):
+            operand = operand.expr
+    else:
+        operand = _qb.SchemaSet(type_=this_type)
+
+    return _qb.UpdateStmt(expr=operand, shape_=_qb.Shape(elements=shape))
+
+
+def delete(
+    cls: type[GelType],
+    /,
+    __operand__: _qb.ExprAlias | None = None,
+) -> _qb.DeleteStmt:
+    operand = cls if __operand__ is None else __operand__
+    subject = _qb.edgeql_qb_expr(operand)
+    return _qb.DeleteStmt(expr=subject)
 
 
 def add_filter(
