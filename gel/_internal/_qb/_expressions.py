@@ -49,7 +49,6 @@ class TypedExpr(Expr):
 
 @dataclasses.dataclass(kw_only=True)
 class ShapedExpr(Expr):
-
     @abc.abstractproperty
     def shape(self) -> Shape | None: ...
 
@@ -64,6 +63,14 @@ class IdentLikeExpr(TypedExpr):
 @dataclasses.dataclass(kw_only=True)
 class Symbol(IdentLikeExpr):
     pass
+
+
+@dataclasses.dataclass(kw_only=True)
+class Ident(IdentLikeExpr):
+    name: str
+
+    def __edgeql_expr__(self) -> str:
+        return _edgeql.quote_ident(self.name)
 
 
 @dataclasses.dataclass(kw_only=True)
@@ -446,9 +453,16 @@ class ShapeOp(ShapedExpr):
                 and el.source.type == self.expr.type
                 and el.name == n
             ):
-                els.append(f"{n},")
+                el_text = _edgeql.quote_ident(n)
             else:
-                els.append(f"{n} := {edgeql(el)},")
+                assign = InfixOp(
+                    lexpr=Ident(name=n, type_=el.type),
+                    op=_edgeql.Token.ASSIGN,
+                    rexpr=el,
+                    type_=el.type,
+                )
+                el_text = edgeql(assign)
+            els.append(f"{el_text},")
         shape_text = "{\n" + textwrap.indent("\n".join(els), "  ") + "\n}"
         subject = edgeql(self.expr)
         if _need_left_parens(self, self.expr):
@@ -464,8 +478,7 @@ def _need_left_parens(prod: Expr, lexpr: Expr) -> bool:
     self_assoc = prod.precedence.assoc
 
     return left_prec < self_prec or (
-        left_prec == self_prec
-        and self_assoc is not _edgeql.Assoc.RIGHT
+        left_prec == self_prec and self_assoc is not _edgeql.Assoc.RIGHT
     )
 
 

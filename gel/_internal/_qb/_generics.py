@@ -170,7 +170,7 @@ class PathAlias(BaseAlias):
             if descriptor is not None:
                 return descriptor.get(self)
             else:
-                return getattr(origin, attr)
+                return super().__getattr__(attr)
         else:
             raise AttributeError(attr)
 
