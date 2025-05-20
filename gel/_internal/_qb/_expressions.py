@@ -246,7 +246,10 @@ class PrefixOp(Op):
         self.expr = edgeql_qb_expr(expr)
 
     def __edgeql_expr__(self) -> str:
-        return f"{self.op} {edgeql(self.expr)}"
+        left = edgeql(self.expr)
+        if _need_right_parens(self, self.expr):
+            left = f"({left})"
+        return f"{self.op} {left}"
 
 
 @dataclasses.dataclass(kw_only=True)
