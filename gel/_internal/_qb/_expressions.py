@@ -374,7 +374,6 @@ class Offset:
 @dataclasses.dataclass(kw_only=True)
 class Stmt(ClauseExpr):
     stmt: _edgeql.Token
-    toplevel: bool = False
 
     @property
     def precedence(self) -> _edgeql.Precedence:
@@ -391,15 +390,11 @@ class SelectStmt(Stmt):
     offset: Offset | None = None
 
     def __edgeql_expr__(self) -> str:
-        shape = self.shape if self.toplevel else None
-        if shape is None:
-            expr = self.expr
-        else:
-            expr = ShapeOp(expr=self.expr, shape_=shape)
+        expr = self.expr
         parts = [str(self.stmt)]
         expr_text = edgeql(expr)
         if _need_right_parens(self, expr):
-            expr_text = f"({expr})"
+            expr_text = f"({expr_text})"
         parts.append(expr_text)
         if self.filter is not None:
             parts.append(edgeql(self.filter))
@@ -424,7 +419,6 @@ class Shape:
 class ShapeOp(ShapedExpr):
     expr: Expr
     shape_: Shape
-    inhibit_shape: bool = False
 
     @property
     def shape(self) -> Shape:

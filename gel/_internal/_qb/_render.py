@@ -21,7 +21,5 @@ from ._protocols import (
 def toplevel_edgeql(x: ExprCompatible) -> str:
     expr = edgeql_qb_expr(x)
     if not isinstance(expr, Stmt):
-        expr = SelectStmt(expr=expr, toplevel=True)
-    else:
-        expr.toplevel = True
+        expr = SelectStmt(expr=expr)
     return edgeql(expr)
