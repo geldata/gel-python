@@ -13,6 +13,7 @@ from typing import (
 )
 
 
+import dataclasses
 import functools
 
 from gel._internal import _typing_inspect
@@ -152,9 +153,18 @@ class BaseAlias(metaclass=BaseAliasMeta):
         assert isinstance(expr, ExprAlias)
         metadata = expr.__gel_metadata__
         assert isinstance(metadata, InfixOp)
-        metadata.lexpr = self.__edgeql_qb_expr__()
+        self_expr = edgeql_qb_expr(self)
         if hasattr(operand, "__edgeql_qb_expr__"):
-            metadata.rexpr = edgeql_qb_expr(operand)
+            expr.__gel_metadata__ = dataclasses.replace(
+                metadata,
+                lexpr=self_expr,
+                rexpr=edgeql_qb_expr(operand),
+            )
+        else:
+            expr.__gel_metadata__ = dataclasses.replace(
+                metadata,
+                lexpr=self_expr,
+            )
 
         return expr
 

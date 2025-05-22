@@ -1667,12 +1667,19 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         )
         builtin_bool = self.import_name("builtins", "bool", directly=False)
         builtin_str = self.import_name("builtins", "str", directly=False)
+        callable_ = self.import_name(
+            "collections.abc", "Callable", directly=False
+        )
+        self_ = self.import_name("typing_extensions", "Self")
         type_ = self.import_name("builtins", "type")
         pathalias = self.import_name(BASE_IMPL, "PathAlias", directly=False)
         literal = self.import_name(
             "typing", "Literal", import_time=ImportTime.typecheck
         )
-        filter_args = ["/", f"*exprs: {type_}[{std_bool}]"]
+        filter_args = [
+            "/",
+            f"*exprs: {callable_}[[{type_}[{self_}]], {type_}[{std_bool}]]",
+        ]
         select_args = ["/", f"*exprs: {pathalias}"]
         update_args = []
         order_args = ["/", f"*exprs: {pathalias}"]
@@ -1710,7 +1717,9 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                 order_args.append(f"{ptr.name}: {order_ptr_t}")
 
         gt = self.import_name(BASE_IMPL, "GelType")
-        select_args.append(f"**computed: type[{gt}]")
+        select_args.append(
+            f"**computed: {callable_}[[{type_}[{self_}]], {type_}[{gt}]]"
+        )
 
         if update_args:
             update_args = ["/", "*", *update_args]

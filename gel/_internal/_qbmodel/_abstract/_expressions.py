@@ -5,19 +5,23 @@
 """Base object types used to implement class-based query builders"""
 
 from __future__ import annotations
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-import copy
+import dataclasses
 
 from gel._internal import _qb
 from gel._internal._utils import Unspecified
 
 from ._base import GelType
 
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
 
 def _get_prefixed_ptr(
     cls: type[GelType],
     ptrname: str,
+    scope: _qb.Scope,
 ) -> tuple[_qb.PathAlias, _qb.Path]:
     this_type = cls.__gel_reflection__.name
 
@@ -31,9 +35,9 @@ def _get_prefixed_ptr(
             f"expected {cls.__name__}.{ptrname} to be a PathAlias"
         )
 
-    expr = copy.copy(_qb.edgeql_qb_expr(ptr))
+    expr = _qb.edgeql_qb_expr(ptr)
     assert isinstance(expr, _qb.Path)
-    expr.source = _qb.PathPrefix(type_=this_type)
+    expr = dataclasses.replace(expr, source=_qb.PathPrefix(type_=this_type))
     return ptr, expr
 
 
@@ -69,11 +73,10 @@ def _fuse_orderbys(
             implicit=True,
         )
 
-    expr.order_by = _qb.OrderBy(
-        directions=directions,
+    return dataclasses.replace(
+        expr,
+        order_by=_qb.OrderBy(directions=directions),
     )
-
-    return expr
 
 
 def _fuse_limit(
@@ -86,10 +89,8 @@ def _fuse_limit(
             implicit=True,
         )
 
-    if expr.limit is None:
-        expr.limit = _qb.Limit(limit=limit)
-    else:
-        expr.limit.limit = _qb.FuncCall(
+    if expr.limit is not None:
+        limit = _qb.FuncCall(
             fname="std::min",
             args=[
                 _qb.SetLiteral(
@@ -101,7 +102,10 @@ def _fuse_limit(
             type_=limit.type,
         )
 
-    return expr
+    return dataclasses.replace(
+        expr,
+        limit=_qb.Limit(limit=limit),
+    )
 
 
 def _fuse_offset(
@@ -114,10 +118,8 @@ def _fuse_offset(
             implicit=True,
         )
 
-    if expr.offset is None:
-        expr.offset = _qb.Offset(offset=offset)
-    else:
-        expr.offset.offset = _qb.FuncCall(
+    if expr.offset is not None:
+        offset = _qb.FuncCall(
             fname="std::min",
             args=[
                 _qb.SetLiteral(
@@ -129,7 +131,10 @@ def _fuse_offset(
             type_=offset.type,
         )
 
-    return expr
+    return dataclasses.replace(
+        expr,
+        offset=_qb.Offset(offset=offset),
+    )
 
 
 def select(
@@ -137,32 +142,12 @@ def select(
     /,
     *elements: _qb.PathAlias,
     __operand__: _qb.ExprAlias | None = None,
-    **kwargs: bool | type[GelType],
+    **kwargs: bool | Callable[[type[GelType] | _qb.BaseAlias], type[GelType]],
 ) -> _qb.ShapeOp:
     shape: dict[str, _qb.Expr] = {}
 
     this_type = cls.__gel_reflection__.name
-
-    for elem in elements:
-        path = _qb.edgeql_qb_expr(elem)
-        if not isinstance(path, _qb.Path):
-            raise TypeError(f"{elem} is not a valid path expression")
-
-        if path.source.type == this_type:
-            path = copy.copy(path)
-            path.source = _qb.PathPrefix(type_=this_type)
-
-        shape[path.name] = path
-
-    for ptrname, kwarg in kwargs.items():
-        if isinstance(kwarg, bool):
-            _, ptr_expr = _get_prefixed_ptr(cls, ptrname)
-            if kwarg:
-                shape[ptrname] = ptr_expr
-            else:
-                shape.pop(ptrname, None)
-        else:
-            shape[ptrname] = _qb.edgeql_qb_expr(kwarg)
+    scope = _qb.Scope()
 
     if __operand__ is not None:
         operand = _qb.edgeql_qb_expr(__operand__)
@@ -175,7 +160,35 @@ def select(
     else:
         operand = _qb.SchemaSet(type_=this_type)
 
-    return _qb.ShapeOp(expr=operand, shape_=_qb.Shape(elements=shape))
+    subject = _qb.edgeql_qb_expr(operand)
+    prefix = _qb.PathPrefix(type_=subject.type, scope=scope)
+    prefix_alias = _qb.PathAlias(cls, prefix)
+
+    for elem in elements:
+        path = _qb.edgeql_qb_expr(elem)
+        if not isinstance(path, _qb.Path):
+            raise TypeError(f"{elem} is not a valid path expression")
+
+        if path.source.type == this_type:
+            path = dataclasses.replace(path, source=prefix)
+
+        shape[path.name] = path
+
+    for ptrname, kwarg in kwargs.items():
+        if isinstance(kwarg, bool):
+            _, ptr_expr = _get_prefixed_ptr(cls, ptrname, scope=scope)
+            if kwarg:
+                shape[ptrname] = ptr_expr
+            else:
+                shape.pop(ptrname, None)
+        else:
+            shape[ptrname] = _qb.edgeql_qb_expr(kwarg(prefix_alias))
+
+    return _qb.ShapeOp(
+        expr=operand,
+        shape_=_qb.Shape(elements=shape),
+        scope=scope,
+    )
 
 
 def update(
@@ -187,10 +200,11 @@ def update(
     shape: dict[str, _qb.Expr] = {}
 
     this_type = cls.__gel_reflection__.name
+    scope = _qb.Scope()
 
     for ptrname, kwarg in kwargs.items():
         if isinstance(kwarg, bool):
-            _, ptr_expr = _get_prefixed_ptr(cls, ptrname)
+            _, ptr_expr = _get_prefixed_ptr(cls, ptrname, scope=scope)
             if kwarg:
                 shape[ptrname] = ptr_expr
             else:
@@ -234,8 +248,11 @@ def add_filter(
     __operand__: _qb.ExprAlias | None = None,
     **properties: Any,
 ) -> _qb.Expr:
-    all_exprs = list(exprs)
+    operand = cls if __operand__ is None else __operand__
+    subject = _qb.edgeql_qb_expr(operand)
+    prefix = _qb.AnnotatedExpr(cls, _qb.PathPrefix(type_=subject.type))
 
+    all_exprs = [expr(prefix) for expr in exprs]
     for ptrname, value in properties.items():
         ptr, ptr_expr = _get_prefixed_ptr(cls, ptrname)
         ptr_comp = _qb.edgeql_qb_expr(ptr == value)
@@ -246,8 +263,6 @@ def add_filter(
         ptr_comp.lexpr = ptr_expr
         all_exprs.append(ptr_comp)
 
-    operand = cls if __operand__ is None else __operand__
-    subject = _qb.edgeql_qb_expr(operand)
     return _fuse_filters(subject, all_exprs)
 
 
