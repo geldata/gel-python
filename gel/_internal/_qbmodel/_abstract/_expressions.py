@@ -37,7 +37,8 @@ def _get_prefixed_ptr(
 
     expr = _qb.edgeql_qb_expr(ptr)
     assert isinstance(expr, _qb.Path)
-    expr = dataclasses.replace(expr, source=_qb.PathPrefix(type_=this_type))
+    prefix = _qb.PathPrefix(type_=this_type, scope=scope)
+    expr = dataclasses.replace(expr, source=prefix)
     return ptr, expr
 
 
@@ -52,11 +53,14 @@ def _fuse_filters(
         )
 
     if expr.filter is None:
-        expr.filter = _qb.Filter(filters=filters)
+        filter_ = _qb.Filter(filters=filters)
     else:
-        expr.filter.filters.extend(filters)
+        filter_ = _qb.Filter(filters=expr.filter.filters + filters)
 
-    return expr
+    return dataclasses.replace(
+        expr,
+        filter=filter_,
+    )
 
 
 def _fuse_orderbys(
@@ -250,17 +254,20 @@ def add_filter(
 ) -> _qb.Expr:
     operand = cls if __operand__ is None else __operand__
     subject = _qb.edgeql_qb_expr(operand)
-    prefix = _qb.AnnotatedExpr(cls, _qb.PathPrefix(type_=subject.type))
+    scope = _qb.Scope()
+    prefix = _qb.AnnotatedExpr(
+        cls, _qb.PathPrefix(type_=subject.type, scope=scope)
+    )
 
     all_exprs = [expr(prefix) for expr in exprs]
     for ptrname, value in properties.items():
-        ptr, ptr_expr = _get_prefixed_ptr(cls, ptrname)
+        ptr, ptr_expr = _get_prefixed_ptr(cls, ptrname, scope=scope)
         ptr_comp = _qb.edgeql_qb_expr(ptr == value)
         if not isinstance(ptr_comp, _qb.InfixOp):
             raise AssertionError(
                 f"comparing {ptrname} to {value} did not produce an infix op"
             )
-        ptr_comp.lexpr = ptr_expr
+        ptr_comp = dataclasses.replace(ptr_comp, lexpr=ptr_expr)
         all_exprs.append(ptr_comp)
 
     return _fuse_filters(subject, all_exprs)
@@ -275,6 +282,7 @@ def order_by(
 ) -> _qb.Expr:
     all_exprs: list[_qb.Expr] = []
     this_type = cls.__gel_reflection__.name
+    scope = _qb.Scope()
 
     for elem in elements:
         path = _qb.edgeql_qb_expr(elem)
@@ -282,13 +290,14 @@ def order_by(
             raise TypeError(f"{elem} is not a valid path expression")
 
         if path.source.type == this_type:
-            path = copy.copy(path)
-            path.source = _qb.PathPrefix(type_=this_type)
+            path = dataclasses.replace(
+                path, source=_qb.PathPrefix(type_=this_type, scope=scope)
+            )
 
         all_exprs.append(path)
 
     for ptrname in kwargs:
-        _, ptr_expr = _get_prefixed_ptr(cls, ptrname)
+        _, ptr_expr = _get_prefixed_ptr(cls, ptrname, scope=scope)
         all_exprs.append(ptr_expr)
 
     if __operand__ is not None:
