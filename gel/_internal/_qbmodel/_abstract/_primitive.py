@@ -9,10 +9,14 @@ from typing import TYPE_CHECKING, Any, Generic, TypeVar, overload
 from typing_extensions import Self, TypeVarTuple, Unpack
 
 import builtins
+import datetime
 import decimal
+import numbers
 import typing
+import uuid
 
 from gel.datatypes import range as _range
+from gel.datatypes.datatypes import CustomType
 
 from gel._internal import _qb
 from gel._internal import _typing_parametric
@@ -27,7 +31,6 @@ if TYPE_CHECKING:
 
 
 T = TypeVar("T")
-T_co = TypeVar("T_co", covariant=True)
 
 
 class GelPrimitiveType(GelType):
@@ -150,26 +153,57 @@ class MultiRange(
         ) -> None: ...
 
 
-class PyTypeScalar(_typing_parametric.SingleParametricType[T_co]):
+# The below is a straight Union and not a type alias because
+# we want isinstance/issubclass to work with it.
+PyConstType = (
+    builtins.bytes
+    | builtins.int
+    | builtins.float
+    | builtins.str
+    | datetime.date
+    | datetime.datetime
+    | datetime.time
+    | datetime.timedelta
+    | decimal.Decimal
+    | numbers.Number
+    | uuid.UUID
+    | CustomType
+)
+"""Types of raw Python values supported in query expressions"""
+
+
+_py_type_to_literal: dict[type[PyConstType], type[_qb.Literal]] = {
+    builtins.bool: _qb.BoolLiteral,
+    builtins.int: _qb.IntLiteral,
+    builtins.float: _qb.FloatLiteral,
+    builtins.str: _qb.StringLiteral,
+    builtins.bytes: _qb.BytesLiteral,
+    decimal.Decimal: _qb.DecimalLiteral,
+}
+
+
+_PT_co = TypeVar("_PT_co", bound=PyConstType, covariant=True)
+
+
+def get_literal_for_value(t: type[PyConstType], v: PyConstType) -> _qb.Literal:
+    if not isinstance(v, t):
+        raise ValueError(
+            f"get_literal_for_value: {v!r} is not an instance of {t}")
+    ltype = _py_type_to_literal.get(t)
+    if ltype is None:
+        raise NotImplementedError(f"unsupported Python raw value type: {t}")
+    else:
+        if t is builtins.bool:
+            v = builtins.bool(v)
+        return ltype(val=v)  # type: ignore [call-arg]
+
+
+class PyTypeScalar(_typing_parametric.SingleParametricType[_PT_co]):
     if TYPE_CHECKING:
 
         def __init__(self, val: Any) -> None: ...
-        def __set__(self, obj: Any, value: T_co) -> None: ...  # type: ignore [misc]
+        def __set__(self, obj: Any, value: _PT_co) -> None: ...  # type: ignore [misc]
 
     def __edgeql_literal__(self) -> _qb.Literal:
-        cls = type(self)
-        match cls.type:
-            case builtins.bool:
-                return _qb.BoolLiteral(val=bool(self))
-            case builtins.int:
-                return _qb.IntLiteral(val=self)  # type: ignore [arg-type]
-            case builtins.float:
-                return _qb.FloatLiteral(val=self)  # type: ignore [arg-type]
-            case builtins.str:
-                return _qb.StringLiteral(val=self)  # type: ignore [arg-type]
-            case builtins.bytes:
-                return _qb.BytesLiteral(val=self)  # type: ignore [arg-type]
-            case decimal.Decimal:
-                return _qb.DecimalLiteral(val=self)  # type: ignore [arg-type]
-
-        raise NotImplementedError(f"{cls}.__edgeql_literal__")
+        pytype = type(self).type
+        return get_literal_for_value(pytype, self)  # type: ignore [arg-type]

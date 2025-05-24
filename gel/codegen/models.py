@@ -1667,58 +1667,57 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         )
         builtin_bool = self.import_name("builtins", "bool", directly=False)
         builtin_str = self.import_name("builtins", "str", directly=False)
-        callable_ = self.import_name(
-            "collections.abc", "Callable", directly=False
-        )
+        callable_ = self.import_name("collections.abc", "Callable")
         self_ = self.import_name("typing_extensions", "Self")
         type_ = self.import_name("builtins", "type")
-        pathalias = self.import_name(BASE_IMPL, "PathAlias", directly=False)
+        type_self = f"{type_}[{self_}]"
+        expr_proto = self.import_name(BASE_IMPL, "ExprCompatible")
+        py_const = self.import_name(BASE_IMPL, "PyConstType")
+        self_expr_closure = f"{callable_}[[{type_self}], {expr_proto}]"
+        pathalias = self.import_name(BASE_IMPL, "PathAlias")
         literal = self.import_name(
             "typing", "Literal", import_time=ImportTime.typecheck
         )
         filter_args = [
             "/",
-            f"*exprs: {callable_}[[{type_}[{self_}]], {type_}[{std_bool}]]",
+            f"*exprs: {callable_}[[{type_self}], {type_}[{std_bool}]]",
         ]
         select_args = ["/", f"*exprs: {pathalias}"]
         update_args = []
-        order_args = ["/", f"*exprs: {pathalias}"]
-        for ptr, _ in reg_pointers:
-            target_t = self._types[ptr.target_id]
-            if reflection.is_scalar_type(target_t):
-                union = []
-                select_union = [builtin_bool]
-                if not target_t.enum_values:
-                    broad_ptr_t = self._get_pybase_for_scalar(target_t)
-                    union.append(broad_ptr_t)
+        order_args = ["/", f"*exprs: {self_expr_closure} | {expr_proto}"]
+        if reg_pointers:
+            unspec_t = self.import_name(BASE_IMPL, "UnspecifiedType")
+            unspec = self.import_name(BASE_IMPL, "Unspecified")
 
+            for ptr, _ in reg_pointers:
+                target_t = self._types[ptr.target_id]
                 narrow_ptr_t = self.get_type(
                     target_t,
                     import_time=ImportTime.typecheck,
                 )
-                union.append(f"type[{narrow_ptr_t}]")
-                select_union.append(f"type[{narrow_ptr_t}]")
-                unspec_t = self.import_name(BASE_IMPL, "UnspecifiedType")
-                unspec = self.import_name(BASE_IMPL, "Unspecified")
-                union.append(unspec_t)
-                select_union.append(unspec_t)
+                union = []
+                select_union = [builtin_bool, self_expr_closure, expr_proto]
+                if reflection.is_non_enum_scalar_type(target_t):
+                    broad_ptr_t = self._get_pybase_for_scalar(target_t)
+                    union.append(broad_ptr_t)
+                    order_union = [
+                        f'{literal}["asc", "desc"]',
+                        builtin_str,
+                        unspec_t,
+                    ]
+                    order_ptr_t = f"{' | '.join(order_union)} = {unspec}"
+                    order_args.append(f"{ptr.name}: {order_ptr_t}")
+                union.extend((f"type[{narrow_ptr_t}]", unspec_t))
+                select_union.extend((f"type[{narrow_ptr_t}]", unspec_t))
                 ptr_t = f"{' | '.join(union)} = {unspec}"
                 if not ptr.is_readonly:
                     update_args.append(f"{ptr.name}: {ptr_t}")
                 filter_args.append(f"{ptr.name}: {ptr_t}")
                 select_ptr_t = f"{' | '.join(select_union)} = {unspec}"
                 select_args.append(f"{ptr.name}: {select_ptr_t}")
-                order_union = [
-                    f'{literal}["asc", "desc"]',
-                    builtin_str,
-                    unspec_t,
-                ]
-                order_ptr_t = f"{' | '.join(order_union)} = {unspec}"
-                order_args.append(f"{ptr.name}: {order_ptr_t}")
 
-        gt = self.import_name(BASE_IMPL, "GelType")
         select_args.append(
-            f"**computed: {callable_}[[{type_}[{self_}]], {type_}[{gt}]]"
+            f"**computed: {self_expr_closure} | {expr_proto} | {py_const}"
         )
 
         if update_args:

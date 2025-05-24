@@ -19,7 +19,6 @@
 
 from libc.stdint cimport int64_t
 
-
 DEF KiB = 1024;
 DEF MiB = 1024 * KiB;
 DEF GiB = 1024 * MiB;
@@ -27,8 +26,7 @@ DEF TiB = 1024 * GiB;
 DEF PiB = 1024 * TiB;
 
 
-@cython.final
-cdef class ConfigMemory:
+cdef class ConfigMemory(CustomType):
 
     def __init__(self, int64_t bytes):
         self._bytes = bytes

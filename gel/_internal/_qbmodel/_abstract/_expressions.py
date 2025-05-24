@@ -6,16 +6,24 @@
 
 from __future__ import annotations
 from typing import TYPE_CHECKING, Any
+from typing_extensions import TypeAliasType
 
 import dataclasses
 
 from gel._internal import _qb
 from gel._internal._utils import Unspecified
 
-from ._base import GelType
+from ._primitive import (
+    GelPrimitiveType,
+    PyConstType,
+    PyTypeScalar,
+    get_literal_for_value,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+
+    from ._base import GelType
 
 
 def _get_prefixed_ptr(
@@ -42,103 +50,45 @@ def _get_prefixed_ptr(
     return ptr, expr
 
 
-def _fuse_filters(
-    expr: _qb.Expr,
-    filters: list[_qb.Expr],
-) -> _qb.Expr:
-    if not isinstance(expr, _qb.SelectStmt):
-        expr = _qb.SelectStmt(
-            expr=expr,
-            implicit=True,
-        )
-
-    if expr.filter is None:
-        filter_ = _qb.Filter(filters=filters)
-    else:
-        filter_ = _qb.Filter(filters=expr.filter.filters + filters)
-
-    return dataclasses.replace(
-        expr,
-        filter=filter_,
-    )
-
-
-def _fuse_orderbys(
-    expr: _qb.Expr,
-    directions: list[_qb.Expr],
-) -> _qb.Expr:
-    if (
-        not isinstance(expr, _qb.SelectStmt)
-        or expr.limit is not None
-        or expr.offset is not None
+def _select_stmt_context(
+    cls: type[GelType],
+    operand: _qb.ExprAlias | None = None,
+    *,
+    new_stmt_if: Callable[[_qb.SelectStmt], bool] | None = None,
+) -> tuple[_qb.SelectStmt, _qb.PathAlias]:
+    subject = _qb.edgeql_qb_expr(cls if operand is None else operand)
+    if not isinstance(subject, _qb.SelectStmt) or (
+        new_stmt_if is not None and new_stmt_if(subject)
     ):
-        expr = _qb.SelectStmt(
-            expr=expr,
-            implicit=True,
-        )
-
-    return dataclasses.replace(
-        expr,
-        order_by=_qb.OrderBy(directions=directions),
-    )
+        subject = _qb.SelectStmt(expr=subject, implicit=True)
+    this_type = cls.__gel_reflection__.name
+    prefix = _qb.PathPrefix(type_=this_type, scope=subject.scope)
+    prefix_alias = _qb.PathAlias(cls, prefix)
+    return subject, prefix_alias
 
 
-def _fuse_limit(
-    expr: _qb.Expr,
-    limit: _qb.Expr,
+_Value = TypeAliasType(
+    "_Value", _qb.ExprClosure | _qb.ExprCompatible | PyConstType
+)
+
+
+def _val_to_expr(
+    val: _Value,
+    scope_var: _qb.PathAlias,
+    conv: Callable[[PyConstType], GelPrimitiveType],
 ) -> _qb.Expr:
-    if not isinstance(expr, _qb.SelectStmt):
-        expr = _qb.SelectStmt(
-            expr=expr,
-            implicit=True,
-        )
-
-    if expr.limit is not None:
-        limit = _qb.FuncCall(
-            fname="std::min",
-            args=[
-                _qb.SetLiteral(
-                    items=[expr.limit.limit, limit],
-                    type_=limit.type,
-                ),
-            ],
-            kwargs={},
-            type_=limit.type,
-        )
-
-    return dataclasses.replace(
-        expr,
-        limit=_qb.Limit(limit=limit),
-    )
+    expr = conv(val) if isinstance(val, PyConstType) else val
+    return _qb.edgeql_qb_expr(expr, var=scope_var)
 
 
-def _fuse_offset(
-    expr: _qb.Expr,
-    offset: _qb.Expr,
-) -> _qb.Expr:
-    if not isinstance(expr, _qb.SelectStmt):
-        expr = _qb.SelectStmt(
-            expr=expr,
-            implicit=True,
-        )
-
-    if expr.offset is not None:
-        offset = _qb.FuncCall(
-            fname="std::min",
-            args=[
-                _qb.SetLiteral(
-                    items=[expr.offset.offset, offset],
-                    type_=offset.type,
-                ),
-            ],
-            kwargs={},
-            type_=offset.type,
-        )
-
-    return dataclasses.replace(
-        expr,
-        offset=_qb.Offset(offset=offset),
-    )
+def _const_to_expr(
+    cls: type[GelType],
+    pname: str,
+    val: Any,
+) -> _qb.Literal:
+    ptype: type[PyTypeScalar[PyConstType]] | None = getattr(cls, pname, None)
+    vtype = type(val) if ptype is None else ptype.type
+    return get_literal_for_value(vtype, val)
 
 
 def select(
@@ -146,7 +96,7 @@ def select(
     /,
     *elements: _qb.PathAlias,
     __operand__: _qb.ExprAlias | None = None,
-    **kwargs: bool | Callable[[type[GelType] | _qb.BaseAlias], type[GelType]],
+    **kwargs: bool | _Value,
 ) -> _qb.ShapeOp:
     shape: dict[str, _qb.Expr] = {}
 
@@ -185,8 +135,10 @@ def select(
                 shape[ptrname] = ptr_expr
             else:
                 shape.pop(ptrname, None)
+        elif isinstance(kwarg, PyConstType):
+            shape[ptrname] = _const_to_expr(cls, ptrname, kwarg)
         else:
-            shape[ptrname] = _qb.edgeql_qb_expr(kwarg(prefix_alias))
+            shape[ptrname] = _qb.edgeql_qb_expr(kwarg, var=prefix_alias)
 
     return _qb.ShapeOp(
         expr=operand,
@@ -199,40 +151,28 @@ def update(
     cls: type[GelType],
     /,
     __operand__: _qb.ExprAlias | None = None,
-    **kwargs: bool | type[GelType],
+    **kwargs: _Value,
 ) -> _qb.UpdateStmt:
     shape: dict[str, _qb.Expr] = {}
 
     this_type = cls.__gel_reflection__.name
     scope = _qb.Scope()
+    operand = _qb.edgeql_qb_expr(cls if __operand__ is None else __operand__)
+    this_type = cls.__gel_reflection__.name
+    prefix = _qb.PathPrefix(type_=this_type, scope=scope)
+    prefix_alias = _qb.PathAlias(cls, prefix)
 
     for ptrname, kwarg in kwargs.items():
-        if isinstance(kwarg, bool):
-            _, ptr_expr = _get_prefixed_ptr(cls, ptrname, scope=scope)
-            if kwarg:
-                shape[ptrname] = ptr_expr
-            else:
-                shape.pop(ptrname, None)
+        if isinstance(kwarg, PyConstType):
+            shape[ptrname] = _const_to_expr(cls, ptrname, kwarg)
         else:
-            if not isinstance(kwarg, GelType):
-                # Raw Python constant, convert to a literal
-                val = getattr(cls, ptrname)(kwarg)
-            else:
-                val = kwarg
-            shape[ptrname] = _qb.edgeql_qb_expr(val)
+            shape[ptrname] = _qb.edgeql_qb_expr(kwarg, var=prefix_alias)
 
-    if __operand__ is not None:
-        operand = _qb.edgeql_qb_expr(__operand__)
-        if (
-            isinstance(operand, _qb.ShapeOp)
-            and not operand.shape.elements
-            and operand.shape.star_splat
-        ):
-            operand = operand.expr
-    else:
-        operand = _qb.SchemaSet(type_=this_type)
-
-    return _qb.UpdateStmt(expr=operand, shape_=_qb.Shape(elements=shape))
+    return _qb.UpdateStmt(
+        expr=operand,
+        shape_=_qb.Shape(elements=shape),
+        scope=scope,
+    )
 
 
 def delete(
@@ -248,20 +188,14 @@ def delete(
 def add_filter(
     cls: type[GelType],
     /,
-    *exprs: Any,
+    *exprs: _qb.ExprClosure | _qb.ExprCompatible,
     __operand__: _qb.ExprAlias | None = None,
     **properties: Any,
 ) -> _qb.Expr:
-    operand = cls if __operand__ is None else __operand__
-    subject = _qb.edgeql_qb_expr(operand)
-    scope = _qb.Scope()
-    prefix = _qb.AnnotatedExpr(
-        cls, _qb.PathPrefix(type_=subject.type, scope=scope)
-    )
-
-    all_exprs = [expr(prefix) for expr in exprs]
+    stmt, prefix = _select_stmt_context(cls, __operand__)
+    all_exprs = [_qb.edgeql_qb_expr(expr, var=prefix) for expr in exprs]
     for ptrname, value in properties.items():
-        ptr, ptr_expr = _get_prefixed_ptr(cls, ptrname, scope=scope)
+        ptr, ptr_expr = _get_prefixed_ptr(cls, ptrname, scope=stmt.scope)
         ptr_comp = _qb.edgeql_qb_expr(ptr == value)
         if not isinstance(ptr_comp, _qb.InfixOp):
             raise AssertionError(
@@ -270,67 +204,89 @@ def add_filter(
         ptr_comp = dataclasses.replace(ptr_comp, lexpr=ptr_expr)
         all_exprs.append(ptr_comp)
 
-    return _fuse_filters(subject, all_exprs)
+    if stmt.filter is None:
+        filter_ = _qb.Filter(filters=all_exprs)
+    else:
+        filter_ = _qb.Filter(filters=stmt.filter.filters + all_exprs)
+
+    return dataclasses.replace(stmt, filter=filter_)
 
 
 def order_by(
     cls: type[GelType],
     /,
-    *elements: _qb.PathAlias,
+    *exprs: _qb.ExprClosure | _qb.ExprCompatible,
     __operand__: _qb.ExprAlias | None = None,
     **kwargs: str,
 ) -> _qb.Expr:
-    all_exprs: list[_qb.Expr] = []
-    this_type = cls.__gel_reflection__.name
-    scope = _qb.Scope()
-
-    for elem in elements:
-        path = _qb.edgeql_qb_expr(elem)
-        if not isinstance(path, _qb.Path):
-            raise TypeError(f"{elem} is not a valid path expression")
-
-        if path.source.type == this_type:
-            path = dataclasses.replace(
-                path, source=_qb.PathPrefix(type_=this_type, scope=scope)
-            )
-
-        all_exprs.append(path)
-
+    stmt, prefix = _select_stmt_context(
+        cls,
+        __operand__,
+        new_stmt_if=lambda s: s.limit is not None or s.offset is not None,
+    )
+    dirs = [_qb.edgeql_qb_expr(expr, var=prefix) for expr in exprs]
     for ptrname in kwargs:
-        _, ptr_expr = _get_prefixed_ptr(cls, ptrname, scope=scope)
-        all_exprs.append(ptr_expr)
+        _, ptr_expr = _get_prefixed_ptr(cls, ptrname, scope=stmt.scope)
+        dirs.append(ptr_expr)
 
-    if __operand__ is not None:
-        operand = _qb.edgeql_qb_expr(__operand__)
-    else:
-        operand = _qb.SchemaSet(type_=this_type)
-
-    return _fuse_orderbys(operand, all_exprs)
+    return dataclasses.replace(stmt, order_by=_qb.OrderBy(directions=dirs))
 
 
 def add_limit(
     cls: type[GelType],
     /,
-    expr: Any,
+    expr: _qb.ExprCompatible | int,
     *,
     __operand__: _qb.ExprAlias | None = None,
 ) -> _qb.Expr:
-    if isinstance(expr, int):
-        expr = _qb.IntLiteral(val=expr)
-    operand = cls if __operand__ is None else __operand__
-    subject = _qb.edgeql_qb_expr(operand)
-    return _fuse_limit(subject, expr)
+    stmt, _ = _select_stmt_context(cls, __operand__)
+
+    if not isinstance(expr, int):
+        limit = _qb.edgeql_qb_expr(expr)
+    else:
+        limit = _qb.IntLiteral(val=expr)
+
+    if stmt.limit is not None:
+        limit = _qb.FuncCall(
+            fname="std::min",
+            args=[
+                _qb.SetLiteral(
+                    items=[stmt.limit.limit, limit],
+                    type_=limit.type,
+                ),
+            ],
+            kwargs={},
+            type_=limit.type,
+        )
+
+    return dataclasses.replace(stmt, limit=_qb.Limit(limit=limit))
 
 
 def add_offset(
     cls: type[GelType],
     /,
-    expr: Any,
+    expr: _qb.ExprCompatible | int,
     *,
     __operand__: _qb.ExprAlias | None = None,
 ) -> _qb.Expr:
-    if isinstance(expr, int):
-        expr = _qb.IntLiteral(val=expr)
-    operand = cls if __operand__ is None else __operand__
-    subject = _qb.edgeql_qb_expr(operand)
-    return _fuse_offset(subject, expr)
+    stmt, _ = _select_stmt_context(cls, __operand__)
+
+    if not isinstance(expr, int):
+        offset = _qb.edgeql_qb_expr(expr)
+    else:
+        offset = _qb.IntLiteral(val=expr)
+
+    if stmt.offset is not None:
+        offset = _qb.FuncCall(
+            fname="std::min",
+            args=[
+                _qb.SetLiteral(
+                    items=[stmt.offset.offset, offset],
+                    type_=offset.type,
+                ),
+            ],
+            kwargs={},
+            type_=offset.type,
+        )
+
+    return dataclasses.replace(stmt, offset=_qb.Offset(offset=offset))

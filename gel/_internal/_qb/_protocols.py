@@ -7,36 +7,29 @@
 from __future__ import annotations
 
 from typing import (
-    TYPE_CHECKING,
     Any,
     ClassVar,
     ParamSpec,
     Protocol,
     TypeGuard,
     TypeVar,
-    runtime_checkable,
 )
 from typing_extensions import TypeAliasType
+from collections.abc import Callable
 
 from gel._internal import _utils
 
 from ._abstract import Expr
 
-if TYPE_CHECKING:
-    from collections.abc import Callable
 
-
-@runtime_checkable
 class TypeClassProto(Protocol):
     __gel_type_class__: ClassVar[type]
 
 
-@runtime_checkable
 class InstanceSupportsEdgeQLExpr(Protocol):
     def __edgeql_expr__(self) -> str: ...
 
 
-@runtime_checkable
 class TypeSupportsEdgeQLExpr(Protocol):
     @classmethod
     def __edgeql_expr__(cls) -> str: ...
@@ -48,21 +41,37 @@ SupportsEdgeQLExpr = TypeAliasType(
 )
 
 
-@runtime_checkable
+def supports_edgeql_expr(v: Any) -> TypeGuard[SupportsEdgeQLExpr]:
+    return callable(getattr(v, "__edgeql_expr__", None))
+
+
 class ExprCompatibleInstance(Protocol):
     def __edgeql_qb_expr__(self) -> Expr: ...
 
 
-@runtime_checkable
 class ExprCompatibleType(Protocol):
     @classmethod
-    def __edgeql_expr__(cls) -> str: ...
+    def __edgeql_qb_expr__(cls) -> Expr: ...
 
 
 ExprCompatible = TypeAliasType(
     "ExprCompatible",
     ExprCompatibleInstance | type[ExprCompatibleType],
 )
+
+
+def is_expr_compatible(v: Any) -> TypeGuard[ExprCompatible]:
+    return callable(getattr(v, "__edgeql_qb_expr__", None))
+
+
+ExprClosure = TypeAliasType(
+    "ExprClosure",
+    Callable[[ExprCompatible], ExprCompatible],
+)
+
+
+def is_expr_closure(v: Any) -> TypeGuard[ExprClosure]:
+    return callable(v)
 
 
 P = ParamSpec("P")
@@ -107,11 +116,29 @@ def edgeql(source: SupportsEdgeQLExpr | ExprCompatible) -> str:
     return value
 
 
-def edgeql_qb_expr(x: ExprCompatible) -> Expr:
+def edgeql_qb_expr(
+    x: ExprCompatible | ExprClosure,
+    *,
+    var: ExprCompatible | None = None,
+) -> Expr:
     if isinstance(x, Expr):
         return x
 
     as_expr = getattr(x, "__edgeql_qb_expr__", None)
+    if as_expr is None or not callable(as_expr):
+        if is_expr_closure(x):
+            if var is None:
+                raise ValueError(
+                    "edgeql_qb_expr: must specify *var* when evaluating "
+                    "expression closures"
+                )
+            x = x(var)
+            as_expr = getattr(x, "__edgeql_qb_expr__", None)
+            if as_expr is None or not callable(as_expr):
+                as_expr = None
+        else:
+            as_expr = None
+
     if as_expr is None:
         raise TypeError(
             f"{_utils.type_repr(type(x))} cannot be converted to an Expr"

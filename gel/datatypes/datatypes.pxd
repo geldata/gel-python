@@ -21,6 +21,7 @@ cimport cython
 cimport cpython
 
 
+include "./abstract.pxd"
 include "./relative_duration.pxd"
 include "./date_duration.pxd"
 include "./config_memory.pxd"

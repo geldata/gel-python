@@ -56,10 +56,12 @@ from ._generics import (
 )
 
 from ._protocols import (
+    ExprClosure,
     ExprCompatible,
     edgeql_qb_expr,
     edgeql,
     exprmethod,
+    is_expr_compatible,
 )
 
 from ._render import (
@@ -80,6 +82,7 @@ __all__ = (
     "DeleteStmt",
     "Expr",
     "ExprAlias",
+    "ExprClosure",
     "ExprCompatible",
     "ExprPlaceholder",
     "Filter",
@@ -111,5 +114,6 @@ __all__ = (
     "edgeql",
     "edgeql_qb_expr",
     "exprmethod",
+    "is_expr_compatible",
     "toplevel_edgeql",
 )

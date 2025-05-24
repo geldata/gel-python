@@ -23,7 +23,7 @@ from libc.stdint cimport int64_t, int32_t
 DEF MONTHS_PER_YEAR         = 12
 
 
-cdef class DateDuration:
+cdef class DateDuration(CustomType):
 
     def __init__(self, *, int32_t days=0, int32_t months=0):
         self.days = days

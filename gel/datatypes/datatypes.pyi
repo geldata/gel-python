@@ -1,0 +1,2 @@
+class CustomType:
+    pass

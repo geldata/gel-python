@@ -9,6 +9,7 @@ from typing import TypeVar
 from collections.abc import Callable
 
 from gel._internal import _qb
+from gel._internal._qb import edgeql
 from gel._internal._qbmodel import _abstract
 
 
@@ -32,3 +33,9 @@ def foreach(iter: type[_T], body: Callable[[type[_T]], type[_X]]) -> type[_X]:
             var=var,
         ),
     )
+
+
+__all__ = (
+    "edgeql",
+    "foreach",
+)

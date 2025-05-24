@@ -20,7 +20,7 @@
 from libc.stdint cimport int64_t, int32_t
 
 
-cdef class DateDuration:
+cdef class DateDuration(CustomType):
 
     cdef:
         readonly int32_t days

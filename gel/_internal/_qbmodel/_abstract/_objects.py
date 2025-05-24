@@ -7,7 +7,6 @@
 from __future__ import annotations
 from typing import TYPE_CHECKING, Any, ClassVar
 from typing_extensions import Self
-from collections.abc import Callable
 
 import weakref
 
@@ -68,10 +67,10 @@ class GelModel(
     if TYPE_CHECKING:
 
         @classmethod
-        def select(cls, /, **kwargs: bool | type[GelType]) -> type[Self]: ...
+        def select(cls, /, **kwargs: Any) -> type[Self]: ...
 
         @classmethod
-        def update(cls, /, **kwargs: type[GelType]) -> type[Self]: ...
+        def update(cls, /, **kwargs: Any) -> type[Self]: ...
 
         @classmethod
         def delete(cls, /) -> type[Self]: ...
@@ -98,7 +97,7 @@ class GelModel(
             /,
             *elements: _qb.PathAlias,
             __operand__: _qb.ExprAlias | None = None,
-            **kwargs: bool | type[GelType],
+            **kwargs: Any,
         ) -> type[Self]:
             return _qb.AnnotatedExpr(  # type: ignore [return-value]
                 cls,
@@ -111,7 +110,7 @@ class GelModel(
             cls,
             /,
             __operand__: _qb.ExprAlias | None = None,
-            **kwargs: type[GelType],
+            **kwargs: Any,
         ) -> type[Self]:
             return _qb.AnnotatedExpr(  # type: ignore [return-value]
                 cls,
@@ -149,9 +148,9 @@ class GelModel(
         def order_by(
             cls,
             /,
-            *elements: _qb.PathAlias,
+            *elements: Any,
             __operand__: _qb.ExprAlias | None = None,
-            **kwargs: bool | type[GelType],
+            **kwargs: bool,
         ) -> type[Self]:
             return _qb.AnnotatedExpr(  # type: ignore [return-value]
                 cls,

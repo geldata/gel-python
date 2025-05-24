@@ -17,6 +17,8 @@ from gel._internal._utils import UnspecifiedType, Unspecified
 
 from gel._internal._qb import (
     AnnotatedExpr,
+    ExprClosure,
+    ExprCompatible,
     InfixOp,
     PrefixOp,
     FuncCall,
@@ -31,6 +33,7 @@ from gel._internal._qbmodel._abstract import (
     GelType_T,
     GelTypeMeta,
     GelTypeMetadata,
+    PyConstType,
 )
 
 from gel._internal._qbmodel._pydantic import (
@@ -59,6 +62,8 @@ __all__ = (
     "AnyTuple",
     "Array",
     "BaseScalar",
+    "ExprClosure",
+    "ExprCompatible",
     "FuncCall",
     "GelLinkModel",
     "GelModel",
@@ -81,6 +86,7 @@ __all__ = (
     "PrefixOp",
     "PrivateAttr",
     "ProxyModel",
+    "PyConstType",
     "PyTypeScalar",
     "Range",
     "SchemaPath",

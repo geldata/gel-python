@@ -17,24 +17,29 @@ from typing_extensions import (
     Unpack,
 )
 
+import builtins
+import datetime
+import decimal
 import typing
+import uuid
 
 import pydantic
 import pydantic_core
 from pydantic_core import core_schema
 
 
+from gel.datatypes.datatypes import CustomType
 from gel._internal import _typing_inspect
-
 from gel._internal._qbmodel import _abstract
 
+
 if TYPE_CHECKING:
+    from collections.abc import Callable
 
     import pydantic.fields
 
 
 _T = TypeVar("_T")
-_T_co = TypeVar("_T_co", covariant=True)
 
 
 class Array(_abstract.Array[_T]):
@@ -129,14 +134,39 @@ class MultiRange(_abstract.MultiRange[_T]):
             return handler.generate_schema(source_type)
 
 
-class PyTypeScalar(_abstract.PyTypeScalar[_T_co]):
+_PT_co = TypeVar("_PT_co", bound=_abstract.PyConstType, covariant=True)
+
+
+_py_type_to_schema: dict[
+    type[_abstract.PyConstType],
+    Callable[[], pydantic_core.CoreSchema],
+] = {
+    builtins.bool: core_schema.bool_schema,
+    builtins.int: core_schema.int_schema,
+    builtins.float: core_schema.float_schema,
+    builtins.str: core_schema.str_schema,
+    datetime.date: core_schema.date_schema,
+    datetime.datetime: core_schema.datetime_schema,
+    datetime.timedelta: core_schema.timedelta_schema,
+    decimal.Decimal: core_schema.decimal_schema,
+    uuid.UUID: core_schema.uuid_schema,
+}
+
+
+class PyTypeScalar(_abstract.PyTypeScalar[_PT_co]):
     @classmethod
     def __get_pydantic_core_schema__(
         cls,
         source_type: Any,
         handler: pydantic.GetCoreSchemaHandler,
     ) -> pydantic_core.CoreSchema:
-        return pydantic_core.core_schema.no_info_after_validator_function(
-            cls.type,
-            handler(cls.type),
-        )
+        schema = _py_type_to_schema.get(cls.type)  # type: ignore [arg-type]
+        if schema is not None:
+            return schema()
+        elif issubclass(cls.type, CustomType):
+            return core_schema.no_info_after_validator_function(
+                cls.type,
+                handler(cls.type),
+            )
+        else:
+            return core_schema.invalid_schema()
