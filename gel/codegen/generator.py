@@ -125,8 +125,7 @@ def _get_conn_args(args: argparse.Namespace):
     if args.password_from_stdin:
         if args.password:
             print_error(
-                "--password and --password-from-stdin are "
-                "mutually exclusive",
+                "--password and --password-from-stdin are mutually exclusive",
             )
             sys.exit(22)
         if sys.stdin.isatty():
@@ -166,7 +165,10 @@ class Generator:
             )
             sys.exit(2)
         print_msg(f"Found EdgeDB project: {C.BOLD}{self._project_dir}{C.ENDC}")
-        self._client = gel.create_client(**_get_conn_args(args))
+        client = gel.create_client(**_get_conn_args(args))
+        if args.allow_user_specified_id:
+            client = client.with_config(allow_user_specified_id=True)
+        self._client = client
         self._single_mode_files = args.file
         self._search_dirs = []
         for search_dir in args.dir or []:
@@ -285,9 +287,7 @@ class Generator:
             with target.open("w") as f:
                 f.write(buf.getvalue())
 
-    def _write_comments(
-        self, f: io.TextIOBase, src: typing.List[pathlib.Path]
-    ):
+    def _write_comments(self, f: io.TextIOBase, src: typing.List[pathlib.Path]):
         src_str = map(
             lambda p: repr(p.relative_to(self._project_dir).as_posix()), src
         )
@@ -366,7 +366,7 @@ class Generator:
                         el_name,
                         el.cardinality,
                         keyword_argument=True,
-                        is_input=True
+                        is_input=True,
                     )
 
         if self._async:
@@ -399,9 +399,7 @@ class Generator:
             print(f"{INDENT}{rt}executor.{method}(", file=buf)
         print(f'{INDENT}{INDENT}"""\\', file=buf)
         print(
-            textwrap.indent(
-                textwrap.dedent(query).strip(), f"{INDENT}{INDENT}"
-            )
+            textwrap.indent(textwrap.dedent(query).strip(), f"{INDENT}{INDENT}")
             + "\\",
             file=buf,
         )
@@ -484,9 +482,9 @@ class Generator:
                 for el_name, el_code in link_props:
                     print(f"{INDENT}@typing.overload", file=buf)
                     print(
-                        f'{INDENT}def __getitem__'
+                        f"{INDENT}def __getitem__"
                         f'(self, key: {typing_literal}["{el_name}"]) '
-                        f'-> {el_code}:',
+                        f"-> {el_code}:",
                         file=buf,
                     )
                     print(f"{INDENT}{INDENT}...", file=buf)
@@ -495,9 +493,7 @@ class Generator:
                     f"{INDENT}def __getitem__(self, key: str) -> typing.Any:",
                     file=buf,
                 )
-                print(
-                    f"{INDENT}{INDENT}raise NotImplementedError", file=buf
-                )
+                print(f"{INDENT}{INDENT}raise NotImplementedError", file=buf)
 
             self._defs[rv] = buf.getvalue().strip()
 
