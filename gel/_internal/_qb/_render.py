@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from ._expressions import (
     SelectStmt,
+    ShapeOp,
     Stmt,
 )
 
@@ -21,5 +22,8 @@ from ._protocols import (
 def toplevel_edgeql(x: ExprCompatible) -> str:
     expr = edgeql_qb_expr(x)
     if not isinstance(expr, Stmt):
-        expr = SelectStmt(expr=expr)
+        kwargs = {}
+        if isinstance(expr, ShapeOp):
+            kwargs["scope"] = expr.scope
+        expr = SelectStmt(expr=expr, **kwargs)  # type: ignore [arg-type]
     return edgeql(expr)

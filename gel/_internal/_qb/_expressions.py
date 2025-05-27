@@ -8,6 +8,9 @@ from __future__ import annotations
 
 from typing import (
     TYPE_CHECKING,
+    Any,
+    TypeVar,
+    overload,
 )
 from typing_extensions import (
     Self,
@@ -16,6 +19,7 @@ from typing_extensions import (
 import abc
 import copy
 import textwrap
+import weakref
 from dataclasses import dataclass, field
 
 from gel._internal import _edgeql
@@ -365,13 +369,54 @@ class Offset:
 
 
 class Scope:
-    pass
+    stmt: weakref.ref[Stmt]
+
+    def __init__(self, stmt: Stmt | None = None) -> None:
+        if stmt is not None:
+            self.stmt = weakref.ref(stmt)
+
+
+_T = TypeVar("_T")
+
+
+class ScopeDescriptor:
+    def __set_name__(self, owner: type[Any], name: str) -> None:
+        self._name = "_" + name
+
+    @overload
+    def __get__(self, instance: None, owner: type[_T]) -> Self: ...
+
+    @overload
+    def __get__(self, instance: _T, owner: type[_T]) -> Scope: ...
+
+    def __get__(
+        self,
+        instance: object | None,
+        owner: type[Any] | None = None,
+    ) -> Scope | Self:
+        if instance is None:
+            return self
+        else:
+            scope = getattr(instance, self._name, None)
+            if scope is None:
+                stmt = instance if isinstance(instance, Stmt) else None
+                scope = Scope(stmt=stmt)
+                object.__setattr__(instance, self._name, scope)
+            return scope
+
+    def __set__(
+        self,
+        obj: Any,
+        value: Scope | Self,
+    ) -> None:
+        if isinstance(value, Scope):
+            object.__setattr__(obj, self._name, value)
 
 
 @dataclass(kw_only=True, frozen=True)
 class Stmt(Expr):
     stmt: _edgeql.Token
-    scope: Scope = field(default_factory=Scope)
+    scope: ScopeDescriptor = ScopeDescriptor()
     aliases: dict[str, Expr] = field(default_factory=dict)
 
     @property
