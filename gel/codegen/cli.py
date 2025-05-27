@@ -77,7 +77,6 @@ parser.add_argument(
 parser.add_argument(
     "--allow-user-specified-id",
     action=argparse.BooleanOptionalAction,
-    default=argparse.SUPPRESS,  # override the builtin help for default
     help="Allow user specified ids in .edgeql files (default is to disallow).",
 )
 
