@@ -287,7 +287,9 @@ class Generator:
             with target.open("w") as f:
                 f.write(buf.getvalue())
 
-    def _write_comments(self, f: io.TextIOBase, src: typing.List[pathlib.Path]):
+    def _write_comments(
+        self, f: io.TextIOBase, src: typing.List[pathlib.Path]
+    ):
         src_str = map(
             lambda p: repr(p.relative_to(self._project_dir).as_posix()), src
         )
@@ -399,7 +401,9 @@ class Generator:
             print(f"{INDENT}{rt}executor.{method}(", file=buf)
         print(f'{INDENT}{INDENT}"""\\', file=buf)
         print(
-            textwrap.indent(textwrap.dedent(query).strip(), f"{INDENT}{INDENT}")
+            textwrap.indent(
+                textwrap.dedent(query).strip(), f"{INDENT}{INDENT}"
+            )
             + "\\",
             file=buf,
         )
