@@ -142,7 +142,7 @@ def select(
 
     return _qb.ShapeOp(
         expr=operand,
-        shape_=_qb.Shape(elements=shape),
+        shape=_qb.Shape(elements=shape),
         scope=scope,
     )
 
@@ -170,7 +170,7 @@ def update(
 
     return _qb.UpdateStmt(
         expr=operand,
-        shape_=_qb.Shape(elements=shape),
+        shape=_qb.Shape(elements=shape),
         scope=scope,
     )
 

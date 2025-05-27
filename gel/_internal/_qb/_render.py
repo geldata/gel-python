@@ -6,10 +6,11 @@
 
 from __future__ import annotations
 
+from ._abstract import Stmt
+
 from ._expressions import (
     SelectStmt,
     ShapeOp,
-    Stmt,
 )
 
 from ._protocols import (

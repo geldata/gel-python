@@ -11,6 +11,8 @@ from ._abstract import (
     AbstractDescriptor,
     AbstractFieldDescriptor,
     Expr,
+    Scope,
+    Stmt,
 )
 
 from ._expressions import (
@@ -33,11 +35,9 @@ from ._expressions import (
     PathPrefix,
     PrefixOp,
     SchemaSet,
-    Scope,
     SetLiteral,
     Shape,
     ShapeOp,
-    Stmt,
     SelectStmt,
     StringLiteral,
     UpdateStmt,

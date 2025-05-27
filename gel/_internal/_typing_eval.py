@@ -4,17 +4,17 @@
 
 
 from typing import (
+    Annotated,
     Any,
-    Mapping,
+    ForwardRef,
     Union,
 )
 from typing_extensions import (
-    Annotated,
-    ForwardRef,
     TypeVar,
     TypeVarTuple,
     ParamSpec,
 )
+from collections.abc import Mapping
 
 from typing_extensions import evaluate_forward_ref  # type: ignore [attr-defined]
 
@@ -54,10 +54,7 @@ def resolve_type(
         module = sys.modules[value.__module__] if value.__module__ else None
         value = value.__value__
         if isinstance(value, str):
-            if module is not None:
-                globals = module.__dict__
-            else:
-                globals = {}
+            globals = module.__dict__ if module is not None else {}
             value = resolve_type(
                 ForwardRef(value),
                 globals=globals,
@@ -67,7 +64,7 @@ def resolve_type(
         origin = typing.get_origin(value)
 
         # typing.Annotated[...] -> drop metadata
-        if origin is Annotated:
+        if origin is Annotated:  # type: ignore [comparison-overlap]
             return resolve_type(
                 typing.get_args(value)[0],
                 owner=owner,
@@ -76,7 +73,7 @@ def resolve_type(
             )
 
         # typing.Union[...] -> rebuild as PEP 604 UnionType (int|str)
-        elif origin is Union:
+        elif origin is Union:  # type: ignore [comparison-overlap]
             args = typing.get_args(value)
             resolved = resolve_type(
                 args[0],

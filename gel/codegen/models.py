@@ -1772,7 +1772,12 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                 self.write("...")
                 self.write()
 
-            with self._classmethod_def("filter", filter_args, "type[Self]"):
+            with self._classmethod_def(
+                "filter",
+                filter_args,
+                "type[Self]",
+                line_comment="type: ignore [override]",
+            ):
                 self.write(
                     f'"""Fetch {objtype.name} instances from the database.'
                 )

@@ -23,7 +23,8 @@ def foreach(iter: type[_T], body: Callable[[type[_T]], type[_X]]) -> type[_X]:
     This is the Pythonic representation of the EdgeQL FOR expression."""
 
     iter_expr = _qb.edgeql_qb_expr(iter)
-    var = _qb.Variable(name="x", type_=iter_expr.type)
+    scope = _qb.Scope()
+    var = _qb.Variable(name="x", type_=iter_expr.type, scope=scope)
     type_ = body(_qb.AnnotatedVar(iter, var))  # type: ignore [arg-type]
     return _qb.AnnotatedExpr(  # type: ignore [return-type]
         type_,
@@ -31,6 +32,7 @@ def foreach(iter: type[_T], body: Callable[[type[_T]], type[_X]]) -> type[_X]:
             iter_expr=iter_expr,
             expr=_qb.edgeql_qb_expr(type_),
             var=var,
+            scope=scope,
         ),
     )
 
