@@ -19,7 +19,7 @@ from collections.abc import Callable
 
 from gel._internal import _utils
 
-from ._abstract import Expr
+from ._abstract import Expr, ScopeContext
 
 
 class TypeClassProto(Protocol):
@@ -27,12 +27,12 @@ class TypeClassProto(Protocol):
 
 
 class InstanceSupportsEdgeQLExpr(Protocol):
-    def __edgeql_expr__(self) -> str: ...
+    def __edgeql_expr__(self, *, ctx: ScopeContext | None) -> str: ...
 
 
 class TypeSupportsEdgeQLExpr(Protocol):
     @classmethod
-    def __edgeql_expr__(cls) -> str: ...
+    def __edgeql_expr__(cls, *, ctx: ScopeContext | None) -> str: ...
 
 
 SupportsEdgeQLExpr = TypeAliasType(
@@ -93,7 +93,11 @@ def is_exprmethod(obj: Any) -> TypeGuard[Callable[..., Any]]:
     return False
 
 
-def edgeql(source: SupportsEdgeQLExpr | ExprCompatible) -> str:
+def edgeql(
+    source: SupportsEdgeQLExpr | ExprCompatible,
+    *,
+    ctx: ScopeContext | None,
+) -> str:
     try:
         __edgeql_expr__ = source.__edgeql_expr__  # type: ignore [union-attr]
     except AttributeError:
@@ -110,7 +114,7 @@ def edgeql(source: SupportsEdgeQLExpr | ExprCompatible) -> str:
     if not callable(__edgeql_expr__):
         raise TypeError(f"{type(source)}.__edgeql_expr__ is not callable")
 
-    value = __edgeql_expr__()
+    value = __edgeql_expr__(ctx=ctx)
     if not isinstance(value, str):
         raise ValueError("{type(source)}.__edgeql_expr__()")
     return value

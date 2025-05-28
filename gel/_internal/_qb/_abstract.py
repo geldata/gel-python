@@ -9,6 +9,9 @@ from typing import TYPE_CHECKING, Any, TypeVar, overload
 from typing_extensions import Self
 
 import abc
+import collections
+import contextlib
+import itertools
 import weakref
 from dataclasses import dataclass, field
 
@@ -16,20 +19,41 @@ from gel._internal import _edgeql
 from gel._internal import _reflection
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable
+    from collections.abc import Iterable, Iterator, Mapping
 
 
 @dataclass(kw_only=True, frozen=True)
 class Node(abc.ABC):
-    symrefs: frozenset[Symbol] = field(
-        default_factory=frozenset, init=False, compare=False
-    )
+    symrefs: frozenset[Symbol] = field(init=False, compare=False)
+    outside_refs: frozenset[Symbol] = field(init=False, compare=False)
+
+    @property
+    def visible_refs(self) -> frozenset[Symbol]:
+        return self.symrefs
 
     @abc.abstractmethod
-    def compute_symrefs(self) -> frozenset[Symbol]: ...
+    def subnodes(self) -> Iterable[Node | None]: ...
+
+    def compute_symrefs(
+        self, subnodes: Iterable[Node | None]
+    ) -> Iterable[Symbol]:
+        return itertools.chain.from_iterable(
+            n.visible_refs for n in subnodes if n is not None
+        )
+
+    def compute_outside_refs(
+        self, subnodes: Iterable[Node | None]
+    ) -> Iterable[Symbol]:
+        return itertools.chain.from_iterable(
+            n.outside_refs for n in subnodes if n is not None
+        )
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "symrefs", self.compute_symrefs())
+        subnodes = list(self.subnodes())
+        symrefs = frozenset(self.compute_symrefs(subnodes))
+        object.__setattr__(self, "symrefs", symrefs)
+        outside_refs = frozenset(self.compute_outside_refs(subnodes))
+        object.__setattr__(self, "outside_refs", outside_refs)
 
 
 @dataclass(kw_only=True, frozen=True)
@@ -41,7 +65,7 @@ class Expr(Node):
     def type(self) -> _reflection.SchemaPath: ...
 
     @abc.abstractmethod
-    def __edgeql_expr__(self) -> str: ...
+    def __edgeql_expr__(self, *, ctx: ScopeContext | None) -> str: ...
 
     def __edgeql_qb_expr__(self) -> Self:
         return self
@@ -61,16 +85,23 @@ class IdentLikeExpr(TypedExpr):
     def precedence(self) -> _edgeql.Precedence:
         return _edgeql.PRECEDENCE[_edgeql.Token.IDENT]
 
-    def compute_symrefs(self) -> frozenset[Symbol]:
-        return frozenset()
+    def subnodes(self) -> Iterable[Node]:
+        return ()
 
 
 @dataclass(kw_only=True, frozen=True)
 class Symbol(IdentLikeExpr):
     scope: Scope
+    binding_stem: str = field(init=False, compare=False)
 
-    def compute_symrefs(self) -> frozenset[Symbol]:
-        return frozenset((self,))
+    def __post_init__(self) -> None:
+        super().__post_init__()
+        object.__setattr__(self, "binding_stem", self.type_.name.lower())
+
+    def compute_symrefs(
+        self, subnodes: Iterable[Node | None]
+    ) -> Iterable[Symbol]:
+        return (self,)
 
 
 class Scope:
@@ -84,7 +115,113 @@ class Scope:
         return f"<Scope at {id(self):0x}>"
 
 
-DEFAULT_SCOPE = Scope()
+_Bindings = collections.ChainMap[Symbol, str]
+_Counters = collections.ChainMap[str, int]
+
+
+class _Namespace:
+    def __init__(
+        self,
+        bindings: _Bindings | None = None,
+        names: list[set[str]] | None = None,
+        counters: _Counters | None = None,
+    ) -> None:
+        self._bindings = _Bindings() if bindings is None else bindings
+        self._names = [set()] if names is None else names
+        self._counters = (
+            _Counters(collections.defaultdict(int))
+            if counters is None
+            else counters
+        )
+
+    def new_child(self) -> Self:
+        return self.__class__(
+            self._bindings.new_child(),
+            [set(), *self._names],
+            self._counters.new_child(collections.defaultdict(int)),
+        )
+
+    @property
+    def bindings(self) -> _Bindings:
+        return self._bindings
+
+    def bind(self, sym: Symbol, stem: str) -> str:
+        if sym in self._bindings:
+            raise RuntimeError(f"symbol {sym} is already bound")
+
+        suf = self._counters[stem]
+        name = stem if suf == 0 else f"{stem}_{suf}"
+
+        while any(name in names for names in self._names):
+            suf += 1
+            name = f"{stem}_{suf}"
+
+        self._counters[stem] = suf
+        self._bindings[sym] = name
+        self._names[0].add(name)
+
+        return name
+
+
+class ScopeContext:
+    def __init__(self, scope: Scope) -> None:
+        self._ns = _Namespace()
+        self._scopes: dict[Scope, _Namespace] = {scope: self._ns}
+        self._scope = scope
+        self._path_scope: Scope | None = None
+
+    def has_scope(self, scope: Scope) -> bool:
+        return scope in self._scopes
+
+    def bind(self, sym: Symbol, stem: str | None = None) -> str:
+        ns = self._scopes.get(sym.scope)
+        if ns is None:
+            raise RuntimeError(
+                f"symbol {sym} is not found in current scope context"
+            )
+
+        if stem is None:
+            stem = sym.binding_stem
+
+        return ns.bind(sym, stem)
+
+    @contextlib.contextmanager
+    def push(
+        self,
+        scope: Scope,
+        *,
+        switch_path_scope: bool = False,
+    ) -> Iterator[Self]:
+        self._ns = self._ns.new_child()
+        if scope in self._scopes:
+            raise AssertionError(f"{scope} is already in the scope context")
+        self._scopes[scope] = self._ns
+        cur_path_scope = self._path_scope
+        if switch_path_scope:
+            self._path_scope = scope
+        try:
+            yield self
+        finally:
+            self._scope, self._ns = self._scopes.popitem()
+            self._path_scope = cur_path_scope
+
+    @property
+    def scope(self) -> Scope:
+        return self._scope
+
+    @property
+    def path_scope(self) -> Scope | None:
+        return self._path_scope
+
+    @property
+    def bindings(self) -> Mapping[Symbol, str]:
+        return self._ns.bindings
+
+    def upper_scope_bindings(self) -> Iterator[tuple[Symbol, str]]:
+        current_scope = self._scope
+        for symbol, var in self.bindings.items():
+            if symbol.scope is not current_scope:
+                yield symbol, var
 
 
 _T = TypeVar("_T")
@@ -130,18 +267,99 @@ class ScopeDescriptor:
 class ScopedExpr(Expr):
     scope: ScopeDescriptor = ScopeDescriptor()
 
-    def filter_refs(self, refs: Iterable[Symbol]) -> Iterable[Symbol]:
-        """Remove refs that are in scope of this expression."""
-        return (ref for ref in refs if ref.scope is not self.scope)
+    @property
+    def visible_refs(self) -> frozenset[Symbol]:
+        return self.outside_refs
 
-    def node_refs(self, node: Node | None) -> frozenset[Symbol]:
-        """Remove refs that are in scope of this expression."""
-        if node is None:
-            return frozenset()
+    def compute_outside_refs(
+        self, subnodes: Iterable[Node | None]
+    ) -> Iterable[Symbol]:
+        return (ref for ref in self.symrefs if ref.scope is not self.scope)
+
+    @contextlib.contextmanager
+    def context(
+        self,
+        parent: ScopeContext | None = None,
+    ) -> Iterator[ScopeContext]:
+        if parent is None:
+            yield ScopeContext(self.scope)
         else:
-            return frozenset(
-                ref for ref in node.symrefs if ref.scope is not self.scope
-            )
+            with parent.push(self.scope) as ctx:
+                yield ctx
+
+    @abc.abstractmethod
+    def _edgeql(self, ctx: ScopeContext) -> str: ...
+
+    def __edgeql_expr__(self, *, ctx: ScopeContext | None) -> str:
+        with self.context(parent=ctx) as myctx:
+            return self._edgeql(myctx)
+
+
+@dataclass(kw_only=True, frozen=True)
+class IteratorExpr(ScopedExpr):
+    iter_expr: Expr
+    body_scope: ScopeDescriptor = ScopeDescriptor()
+    self_ref: Symbol | None = field(init=False, compare=False)
+    self_ref_in_subscopes: bool = field(init=False, compare=False)
+
+    def __post_init__(self) -> None:
+        super().__post_init__()
+        object.__setattr__(self, "self_ref", self.compute_self_ref())
+        object.__setattr__(
+            self, "self_ref_in_subscopes", self.compute_self_ref_in_subscopes()
+        )
+
+    def compute_outside_refs(
+        self, subnodes: Iterable[Node | None]
+    ) -> Iterable[Symbol]:
+        return (
+            ref
+            for ref in self.symrefs
+            if ref.scope is not self.scope and ref.scope is not self.body_scope
+        )
+
+    def compute_self_ref(self) -> Symbol | None:
+        refs = {ref for ref in self.symrefs if ref.scope is self.body_scope}
+        ref_count = len(refs)
+        if ref_count > 1:
+            raise RuntimeError("more than one self-ref in an expression")
+        elif ref_count == 0:
+            return None
+        else:
+            return next(iter(refs))
+
+    def compute_self_ref_in_subscopes(self) -> bool:
+        return any(
+            ref.scope is self.body_scope
+            for node in self.subnodes()
+            if node is not None
+            for ref in node.outside_refs
+        )
+
+    def _edgeql_parts(self, ctx: ScopeContext) -> tuple[str, str]:
+        iterable = self._iteration_edgeql(ctx)
+
+        if ctx.has_scope(self.body_scope):
+            # SELECTs share scope with shapes, so make sure we don't
+            # try to re-enter the same scope twice.
+            body = self._body_edgeql(ctx)
+        else:
+            with ctx.push(self.body_scope, switch_path_scope=True) as body_ctx:
+                if self.self_ref is not None:
+                    body_ctx.bind(self.self_ref)
+                body = self._body_edgeql(body_ctx)
+
+        return (iterable, body)
+
+    def _edgeql(self, ctx: ScopeContext) -> str:
+        iterable, body = self._edgeql_parts(ctx)
+        return f"{iterable} {body}"
+
+    @abc.abstractmethod
+    def _iteration_edgeql(self, ctx: ScopeContext) -> str: ...
+
+    @abc.abstractmethod
+    def _body_edgeql(self, ctx: ScopeContext) -> str: ...
 
 
 @dataclass(kw_only=True, frozen=True)
@@ -152,6 +370,37 @@ class Stmt(ScopedExpr):
     @property
     def precedence(self) -> _edgeql.Precedence:
         return _edgeql.PRECEDENCE[self.stmt]
+
+
+@dataclass(kw_only=True, frozen=True)
+class PathPrefix(Symbol):
+    def __edgeql_expr__(self, *, ctx: ScopeContext | None) -> str:
+        if (
+            ctx is not None
+            and ctx.path_scope is not self.scope
+            and (var := ctx.bindings.get(self)) is not None
+        ):
+            return var
+        else:
+            return ""
+
+
+@dataclass(kw_only=True, frozen=True)
+class ImplicitIteratorStmt(IteratorExpr, Stmt):
+    """Base class for statements that are implicit iterators"""
+
+    @property
+    def type(self) -> _reflection.SchemaPath:
+        return self.iter_expr.type
+
+    @property
+    def path_prefix(self) -> PathPrefix:
+        prefix = getattr(self, "_path_prefix", None)
+        if prefix is None:
+            prefix = PathPrefix(type_=self.type, scope=self.body_scope)
+            object.__setattr__(self, "_path_prefix", prefix)  # noqa: PLC2801
+
+        return prefix
 
 
 class AbstractDescriptor:

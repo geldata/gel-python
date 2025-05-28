@@ -11,7 +11,9 @@ from ._abstract import (
     AbstractDescriptor,
     AbstractFieldDescriptor,
     Expr,
+    PathPrefix,
     Scope,
+    ScopeContext,
     Stmt,
 )
 
@@ -32,7 +34,6 @@ from ._expressions import (
     OrderBy,
     Offset,
     Path,
-    PathPrefix,
     PrefixOp,
     SchemaSet,
     SetLiteral,
@@ -42,6 +43,7 @@ from ._expressions import (
     StringLiteral,
     UpdateStmt,
     Variable,
+    toplevel_edgeql,
 )
 
 from ._generics import (
@@ -62,10 +64,6 @@ from ._protocols import (
     edgeql,
     exprmethod,
     is_expr_compatible,
-)
-
-from ._render import (
-    toplevel_edgeql,
 )
 
 
@@ -101,6 +99,7 @@ __all__ = (
     "PrefixOp",
     "SchemaSet",
     "Scope",
+    "ScopeContext",
     "SelectStmt",
     "SetLiteral",
     "Shape",

@@ -20,9 +20,8 @@ from gel._internal import _typing_inspect
 from gel._internal import _utils
 
 from ._abstract import AbstractFieldDescriptor
-from ._expressions import InfixOp, Path, Variable
+from ._expressions import InfixOp, Path, Variable, toplevel_edgeql
 from ._protocols import TypeClassProto, edgeql_qb_expr, is_exprmethod
-from ._render import toplevel_edgeql
 
 if TYPE_CHECKING:
     from collections.abc import Iterable

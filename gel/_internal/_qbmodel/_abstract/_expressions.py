@@ -56,15 +56,11 @@ def _select_stmt_context(
     *,
     new_stmt_if: Callable[[_qb.SelectStmt], bool] | None = None,
 ) -> tuple[_qb.SelectStmt, _qb.PathAlias]:
-    subject = _qb.edgeql_qb_expr(cls if operand is None else operand)
-    if not isinstance(subject, _qb.SelectStmt) or (
-        new_stmt_if is not None and new_stmt_if(subject)
-    ):
-        subject = _qb.SelectStmt(expr=subject, implicit=True)
-    this_type = cls.__gel_reflection__.name
-    prefix = _qb.PathPrefix(type_=this_type, scope=subject.scope)
-    prefix_alias = _qb.PathAlias(cls, prefix)
-    return subject, prefix_alias
+    stmt = _qb.SelectStmt.wrap(
+        _qb.edgeql_qb_expr(cls if operand is None else operand),
+        new_stmt_if=new_stmt_if,
+    )
+    return stmt, _qb.PathAlias(cls, stmt.path_prefix)
 
 
 _Value = TypeAliasType(
@@ -110,7 +106,7 @@ def select(
             and not operand.shape.elements
             and operand.shape.star_splat
         ):
-            operand = operand.expr
+            operand = operand.iter_expr
     else:
         operand = _qb.SchemaSet(type_=this_type)
 
@@ -141,9 +137,10 @@ def select(
             shape[ptrname] = _qb.edgeql_qb_expr(kwarg, var=prefix_alias)
 
     return _qb.ShapeOp(
-        expr=operand,
+        iter_expr=operand,
         shape=_qb.Shape(elements=shape),
         scope=scope,
+        body_scope=scope,
     )
 
 
@@ -169,9 +166,9 @@ def update(
             shape[ptrname] = _qb.edgeql_qb_expr(kwarg, var=prefix_alias)
 
     return _qb.UpdateStmt(
-        expr=operand,
+        iter_expr=operand,
         shape=_qb.Shape(elements=shape),
-        scope=scope,
+        body_scope=scope,
     )
 
 
@@ -182,7 +179,7 @@ def delete(
 ) -> _qb.DeleteStmt:
     operand = cls if __operand__ is None else __operand__
     subject = _qb.edgeql_qb_expr(operand)
-    return _qb.DeleteStmt(expr=subject)
+    return _qb.DeleteStmt(iter_expr=subject)
 
 
 def add_filter(

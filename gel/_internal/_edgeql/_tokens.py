@@ -274,6 +274,7 @@ PRECEDENCE: dict[Token | tuple[Token, int] | Operation, Precedence] = {
     Token.INSERT: Precedence(-4, Assoc.RIGHT),
     Token.UPDATE: Precedence(-4, Assoc.RIGHT),
     Token.DELETE: Precedence(-4, Assoc.RIGHT),
+    Token.FOR: Precedence(-4, Assoc.RIGHT),
     Token.WITH: Precedence(-4, Assoc.RIGHT),
     Token.ASSIGN: Precedence(-3, Assoc.NONASSOC),
     Token.ADDASSIGN: Precedence(-3, Assoc.NONASSOC),

@@ -30,8 +30,7 @@ def foreach(iter: type[_T], body: Callable[[type[_T]], type[_X]]) -> type[_X]:
         type_,
         _qb.ForStmt(
             iter_expr=iter_expr,
-            expr=_qb.edgeql_qb_expr(type_),
-            var=var,
+            body=_qb.edgeql_qb_expr(type_),
             scope=scope,
         ),
     )

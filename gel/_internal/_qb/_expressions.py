@@ -10,6 +10,7 @@ from typing import (
     TYPE_CHECKING,
 )
 
+import itertools
 import textwrap
 from dataclasses import dataclass, field
 
@@ -20,8 +21,11 @@ from gel._internal._reflection import SchemaPath
 from ._abstract import (
     Expr,
     IdentLikeExpr,
+    ImplicitIteratorStmt,
+    IteratorExpr,
     Node,
-    ScopedExpr,
+    PathPrefix,
+    ScopeContext,
     Stmt,
     Symbol,
     TypedExpr,
@@ -30,11 +34,12 @@ from ._protocols import ExprCompatible, edgeql, edgeql_qb_expr
 
 if TYPE_CHECKING:
     import decimal
+    from collections.abc import Callable, Iterable
 
 
 class ExprPlaceholder(Expr):
-    def compute_symrefs(self) -> frozenset[Symbol]:
-        return frozenset()
+    def subnodes(self) -> Iterable[Node]:
+        return ()
 
     @property
     def precedence(self) -> _edgeql.Precedence:
@@ -44,7 +49,7 @@ class ExprPlaceholder(Expr):
     def type(self) -> SchemaPath:
         raise TypeError("unreplaced ExprPlaceholder")
 
-    def __edgeql_expr__(self) -> str:
+    def __edgeql_expr__(self, *, ctx: ScopeContext | None) -> str:
         raise TypeError("unreplaced ExprPlaceholder")
 
 
@@ -52,23 +57,24 @@ class ExprPlaceholder(Expr):
 class Ident(IdentLikeExpr):
     name: str
 
-    def __edgeql_expr__(self) -> str:
+    def __edgeql_expr__(self, *, ctx: ScopeContext | None) -> str:
         return _edgeql.quote_ident(self.name)
 
 
 @dataclass(kw_only=True, frozen=True)
 class Variable(Symbol):
-    name: str
-
-    def __edgeql_expr__(self) -> str:
-        return _edgeql.quote_ident(self.name)
+    def __edgeql_expr__(self, *, ctx: ScopeContext | None) -> str:
+        name = ctx.bindings.get(self) if ctx is not None else None
+        if name is None:
+            raise RuntimeError(f"unbound {self}")
+        return _edgeql.quote_ident(name)
 
 
 @dataclass(kw_only=True, frozen=True)
 class SchemaSet(IdentLikeExpr):
     type_: _reflection.SchemaPath
 
-    def __edgeql_expr__(self) -> str:
+    def __edgeql_expr__(self, *, ctx: ScopeContext | None) -> str:
         return "::".join(self.type.parts)
 
 
@@ -81,7 +87,7 @@ class BoolLiteral(Literal):
     val: bool
     type_: SchemaPath = field(default=SchemaPath("std", "bool"))
 
-    def __edgeql_expr__(self) -> str:
+    def __edgeql_expr__(self, *, ctx: ScopeContext | None) -> str:
         return "true" if self.val else "false"
 
 
@@ -90,7 +96,7 @@ class IntLiteral(Literal):
     val: int
     type_: SchemaPath = field(default=SchemaPath("std", "int64"))
 
-    def __edgeql_expr__(self) -> str:
+    def __edgeql_expr__(self, *, ctx: ScopeContext | None) -> str:
         return str(self.val)
 
 
@@ -99,7 +105,7 @@ class FloatLiteral(Literal):
     val: float
     type_: SchemaPath = field(default=SchemaPath("std", "float64"))
 
-    def __edgeql_expr__(self) -> str:
+    def __edgeql_expr__(self, *, ctx: ScopeContext | None) -> str:
         return str(self.val)
 
 
@@ -108,7 +114,7 @@ class BigIntLiteral(Literal):
     val: int
     type_: SchemaPath = field(default=SchemaPath("std", "bigint"))
 
-    def __edgeql_expr__(self) -> str:
+    def __edgeql_expr__(self, *, ctx: ScopeContext | None) -> str:
         return f"n{self.val}"
 
 
@@ -117,7 +123,7 @@ class DecimalLiteral(Literal):
     val: decimal.Decimal
     type_: SchemaPath = field(default=SchemaPath("std", "decimal"))
 
-    def __edgeql_expr__(self) -> str:
+    def __edgeql_expr__(self, *, ctx: ScopeContext | None) -> str:
         return f"n{self.val}"
 
 
@@ -126,7 +132,7 @@ class BytesLiteral(Literal):
     val: bytes
     type_: SchemaPath = field(default=SchemaPath("std", "bytes"))
 
-    def __edgeql_expr__(self) -> str:
+    def __edgeql_expr__(self, *, ctx: ScopeContext | None) -> str:
         v = _edgeql.quote_literal(repr(self.val)[2:-1])
         return f"b{v}"
 
@@ -136,7 +142,7 @@ class StringLiteral(Literal):
     val: str
     type_: SchemaPath = field(default=SchemaPath("std", "str"))
 
-    def __edgeql_expr__(self) -> str:
+    def __edgeql_expr__(self, *, ctx: ScopeContext | None) -> str:
         return _edgeql.quote_literal(self.val)
 
 
@@ -144,20 +150,17 @@ class StringLiteral(Literal):
 class SetLiteral(TypedExpr):
     items: list[Expr]
 
-    def compute_symrefs(self) -> frozenset[Symbol]:
-        symrefs: set[Symbol] = set()
-        for item in self.items:
-            symrefs.update(item.symrefs)
-        return frozenset(symrefs)
+    def subnodes(self) -> Iterable[Node]:
+        return self.items
 
     @property
     def precedence(self) -> _edgeql.Precedence:
         return _edgeql.PRECEDENCE[_edgeql.Token.LBRACE]
 
-    def __edgeql_expr__(self) -> str:
+    def __edgeql_expr__(self, *, ctx: ScopeContext | None) -> str:
         exprs = []
         for item in self.items:
-            item_edgeql = edgeql(item)
+            item_edgeql = edgeql(item, ctx=ctx)
             if self._need_parens(item):
                 item_edgeql = f"({item_edgeql})"
             exprs.append(item_edgeql)
@@ -177,21 +180,21 @@ class Path(TypedExpr):
     name: str
     is_lprop: bool
 
-    def compute_symrefs(self) -> frozenset[Symbol]:
-        return self.source.symrefs
+    def subnodes(self) -> Iterable[Node]:
+        return (self.source,)
 
     @property
     def precedence(self) -> _edgeql.Precedence:
         return _edgeql.PRECEDENCE[_edgeql.Operation.PATH]
 
-    def __edgeql_expr__(self) -> str:
+    def __edgeql_expr__(self, *, ctx: ScopeContext | None) -> str:
         steps = []
         current: Expr = self
         while isinstance(current, Path):
             steps.append(current.name)
             current = current.source
 
-        steps.append(current.__edgeql_expr__())
+        steps.append(edgeql(current, ctx=ctx))
 
         return ".".join(reversed(steps))
 
@@ -231,11 +234,11 @@ class PrefixOp(Op):
         object.__setattr__(self, "expr", edgeql_qb_expr(expr))
         super().__init__(op=op, type_=type_)
 
-    def compute_symrefs(self) -> frozenset[Symbol]:
-        return self.expr.symrefs
+    def subnodes(self) -> Iterable[Node]:
+        return (self.expr,)
 
-    def __edgeql_expr__(self) -> str:
-        left = edgeql(self.expr)
+    def __edgeql_expr__(self, *, ctx: ScopeContext | None) -> str:
+        left = edgeql(self.expr, ctx=ctx)
         if _need_right_parens(self, self.expr):
             left = f"({left})"
         return f"{self.op} {left}"
@@ -258,14 +261,14 @@ class InfixOp(Op):
         object.__setattr__(self, "rexpr", edgeql_qb_expr(rexpr))
         super().__init__(op=op, type_=type_)
 
-    def compute_symrefs(self) -> frozenset[Symbol]:
-        return self.lexpr.symrefs | self.rexpr.symrefs
+    def subnodes(self) -> Iterable[Node]:
+        return (self.lexpr, self.rexpr)
 
-    def __edgeql_expr__(self) -> str:
-        left = edgeql(self.lexpr)
+    def __edgeql_expr__(self, *, ctx: ScopeContext | None) -> str:
+        left = edgeql(self.lexpr, ctx=ctx)
         if _need_left_parens(self, self.lexpr):
             left = f"({left})"
-        right = edgeql(self.rexpr)
+        right = edgeql(self.rexpr, ctx=ctx)
         if _need_right_parens(self, self.rexpr):
             right = f"({right})"
         return f"{left} {self.op} {right}"
@@ -277,36 +280,25 @@ class FuncCall(TypedExpr):
     args: list[Expr]
     kwargs: dict[str, Expr]
 
-    def compute_symrefs(self) -> frozenset[Symbol]:
-        symrefs: set[Symbol] = set()
-        for arg in self.args:
-            symrefs.update(arg.symrefs)
-        for kwarg in self.kwargs.values():
-            symrefs.update(kwarg.symrefs)
-        return frozenset(symrefs)
+    def subnodes(self) -> Iterable[Node]:
+        return itertools.chain(self.args, self.kwargs.values())
 
     @property
     def precedence(self) -> _edgeql.Precedence:
         return _edgeql.PRECEDENCE[_edgeql.Operation.CALL]
 
-    def __edgeql_expr__(self) -> str:
+    def __edgeql_expr__(self, *, ctx: ScopeContext | None) -> str:
         args = ", ".join(
             [
-                *(edgeql(arg) for arg in self.args),
-                *(f"{n} := {edgeql(v)}" for n, v in self.kwargs.items()),
+                *(edgeql(arg, ctx=ctx) for arg in self.args),
+                *(
+                    f"{n} := {edgeql(v, ctx=ctx)}"
+                    for n, v in self.kwargs.items()
+                ),
             ]
         )
 
         return f"{self.fname}({args})"
-
-
-@dataclass(kw_only=True, frozen=True)
-class ClauseExpr(Expr):
-    expr: Expr
-
-    @property
-    def type(self) -> _reflection.SchemaPath:
-        return self.expr.type
 
 
 class Clause(Node):
@@ -317,17 +309,14 @@ class Clause(Node):
 class Filter(Clause):
     filters: list[Expr]
 
-    def compute_symrefs(self) -> frozenset[Symbol]:
-        symrefs: set[Symbol] = set()
-        for f in self.filters:
-            symrefs.update(f.symrefs)
-        return frozenset(symrefs)
+    def subnodes(self) -> Iterable[Node]:
+        return self.filters
 
     @property
     def precedence(self) -> _edgeql.Precedence:
         return _edgeql.PRECEDENCE[_edgeql.Token.FILTER]
 
-    def __edgeql_expr__(self) -> str:
+    def __edgeql_expr__(self, *, ctx: ScopeContext | None) -> str:
         fexpr = self.filters[0]
         for item in self.filters[1:]:
             fexpr = InfixOp(
@@ -336,24 +325,21 @@ class Filter(Clause):
                 rexpr=item,
                 type_=SchemaPath("std", "bool"),
             )
-        return f"FILTER {edgeql(fexpr)}"
+        return f"FILTER {edgeql(fexpr, ctx=ctx)}"
 
 
 @dataclass(kw_only=True, frozen=True)
 class OrderBy(Clause):
     directions: list[Expr]
 
-    def compute_symrefs(self) -> frozenset[Symbol]:
-        symrefs: set[Symbol] = set()
-        for d in self.directions:
-            symrefs.update(d.symrefs)
-        return frozenset(symrefs)
+    def subnodes(self) -> Iterable[Node]:
+        return self.directions
 
     @property
     def precedence(self) -> _edgeql.Precedence:
         return _edgeql.PRECEDENCE[_edgeql.Token.ORDER_BY]
 
-    def __edgeql_expr__(self) -> str:
+    def __edgeql_expr__(self, *, ctx: ScopeContext | None) -> str:
         dexpr = self.directions[0]
         for item in self.directions[1:]:
             dexpr = InfixOp(
@@ -363,75 +349,37 @@ class OrderBy(Clause):
                 type_=SchemaPath("std", "bool"),
             )
 
-        return f"ORDER BY {edgeql(dexpr)}"
+        return f"ORDER BY {edgeql(dexpr, ctx=ctx)}"
 
 
 @dataclass(kw_only=True, frozen=True)
 class Limit(Clause):
     limit: Expr
 
-    def compute_symrefs(self) -> frozenset[Symbol]:
-        return self.limit.symrefs
+    def subnodes(self) -> Iterable[Node]:
+        return (self.limit,)
 
     @property
     def precedence(self) -> _edgeql.Precedence:
         return _edgeql.PRECEDENCE[_edgeql.Token.LIMIT]
 
-    def __edgeql_expr__(self) -> str:
-        return f"LIMIT {edgeql(self.limit)}"
+    def __edgeql_expr__(self, *, ctx: ScopeContext | None) -> str:
+        return f"LIMIT {edgeql(self.limit, ctx=ctx)}"
 
 
 @dataclass(kw_only=True, frozen=True)
 class Offset(Clause):
     offset: Expr
 
-    def compute_symrefs(self) -> frozenset[Symbol]:
-        return self.offset.symrefs
+    def subnodes(self) -> Iterable[Node]:
+        return (self.offset,)
 
     @property
     def precedence(self) -> _edgeql.Precedence:
         return _edgeql.PRECEDENCE[_edgeql.Token.OFFSET]
 
-    def __edgeql_expr__(self) -> str:
-        return f"OFFSET {edgeql(self.offset)}"
-
-
-@dataclass(kw_only=True, frozen=True)
-class SelectStmt(ClauseExpr, Stmt):
-    stmt: _edgeql.Token = _edgeql.Token.SELECT
-    var: str | None = None
-    implicit: bool = False
-    filter: Filter | None = None
-    order_by: OrderBy | None = None
-    limit: Limit | None = None
-    offset: Offset | None = None
-
-    def compute_symrefs(self) -> frozenset[Symbol]:
-        symrefs: set[Symbol] = set()
-        symrefs.update(self.node_refs(self.expr))
-        symrefs.update(self.node_refs(self.filter))
-        symrefs.update(self.node_refs(self.order_by))
-        symrefs.update(self.node_refs(self.limit))
-        symrefs.update(self.node_refs(self.offset))
-        return frozenset(symrefs)
-
-    def __edgeql_expr__(self) -> str:
-        expr = self.expr
-        parts = [str(self.stmt)]
-        expr_text = edgeql(expr)
-        if _need_right_parens(self, expr):
-            expr_text = f"({expr_text})"
-        parts.append(expr_text)
-        if self.filter is not None:
-            parts.append(edgeql(self.filter))
-        if self.order_by is not None:
-            parts.append(edgeql(self.order_by))
-        if self.limit is not None:
-            parts.append(edgeql(self.limit))
-        if self.offset is not None:
-            parts.append(edgeql(self.offset))
-
-        return " ".join(parts)
+    def __edgeql_expr__(self, *, ctx: ScopeContext | None) -> str:
+        return f"OFFSET {edgeql(self.offset, ctx=ctx)}"
 
 
 @dataclass(kw_only=True, frozen=True)
@@ -439,78 +387,169 @@ class InsertStmt(Stmt, TypedExpr):
     stmt: _edgeql.Token = _edgeql.Token.INSERT
     shape: Shape | None = None
 
-    def compute_symrefs(self) -> frozenset[Symbol]:
-        return self.node_refs(self.shape)
+    def subnodes(self) -> Iterable[Node | None]:
+        return (self.shape,)
 
-    def __edgeql_expr__(self) -> str:
+    def _edgeql(self, ctx: ScopeContext) -> str:
         text = f"{self.stmt} {self.type.as_schema_name()}"
         if self.shape is not None:
-            text = f"{text} {_render_shape(self.shape, None)}"
+            text = f"{text} {_render_shape(self.shape, None, ctx)}"
         return text
 
 
-@dataclass(kw_only=True, frozen=True)
-class UpdateStmt(Stmt, ClauseExpr):
-    stmt: _edgeql.Token = _edgeql.Token.UPDATE
-    filter: Filter | None = None
-    shape: Shape
+class IteratorStmt(ImplicitIteratorStmt):
+    @property
+    def precedence(self) -> _edgeql.Precedence:
+        token = _edgeql.Token.FOR if self.self_ref is not None else self.stmt
+        return _edgeql.PRECEDENCE[token]
 
-    def compute_symrefs(self) -> frozenset[Symbol]:
-        symrefs: set[Symbol] = set(self.node_refs(self.expr))
-        symrefs.update(self.node_refs(self.filter))
-        symrefs.update(self.node_refs(self.shape))
-        return frozenset(symrefs)
-
-    def __edgeql_expr__(self) -> str:
-        expr = self.expr
-        parts = [str(self.stmt)]
-        expr_text = edgeql(expr)
-        if _need_right_parens(self, expr):
+    def _iteration_edgeql(self, ctx: ScopeContext) -> str:
+        expr = self.iter_expr
+        if isinstance(expr, ShapeOp):
+            expr = expr.iter_expr
+        expr_text = edgeql(expr, ctx=ctx)
+        token = _edgeql.Token.IN if self.self_ref is not None else self.stmt
+        prec = _edgeql.PRECEDENCE[token]
+        if _need_right_parens(self, expr, rprec=prec):
             expr_text = f"({expr_text})"
-        parts.append(expr_text)
-        if self.filter is not None:
-            parts.append(edgeql(self.filter))
-        parts.extend((" SET ", _render_shape(self.shape, self.expr)))
+        return expr_text
+
+    def _edgeql(self, ctx: ScopeContext) -> str:
+        iterable, body = self._edgeql_parts(ctx)
+        if self.self_ref is not None and self.self_ref_in_subscopes:
+            var = ctx.bindings.get(self.self_ref)
+            if var is None:
+                raise AssertionError(f"{self.self_ref} in {self} is unbound")
+            parts = [
+                _edgeql.Token.FOR,
+                var,
+                _edgeql.Token.IN,
+                iterable,
+                self.stmt,
+                var,
+                body,
+            ]
+        else:
+            parts = [self.stmt, iterable, body]
+
         return " ".join(parts)
 
 
 @dataclass(kw_only=True, frozen=True)
-class DeleteStmt(Stmt, ClauseExpr):
-    stmt: _edgeql.Token = _edgeql.Token.DELETE
+class SelectStmt(IteratorStmt):
+    stmt: _edgeql.Token = _edgeql.Token.SELECT
+    implicit: bool = False
+    filter: Filter | None = None
+    order_by: OrderBy | None = None
+    limit: Limit | None = None
+    offset: Offset | None = None
 
-    def compute_symrefs(self) -> frozenset[Symbol]:
-        return self.node_refs(self.expr)
+    @classmethod
+    def wrap(
+        cls,
+        expr: Expr,
+        *,
+        new_stmt_if: Callable[[SelectStmt], bool] | None = None,
+    ) -> SelectStmt:
+        if not isinstance(expr, SelectStmt) or (
+            new_stmt_if is not None and new_stmt_if(expr)
+        ):
+            kwargs = {}
+            if isinstance(expr, ShapeOp):
+                kwargs["body_scope"] = expr.scope
+            expr = SelectStmt(iter_expr=expr, **kwargs)  # type: ignore [arg-type]
 
-    def __edgeql_expr__(self) -> str:
-        expr = self.expr
-        expr_text = edgeql(expr)
-        if _need_right_parens(self, expr):
-            expr_text = f"({expr_text})"
-        return f"{self.stmt} {expr_text}"
+        return expr
 
-
-@dataclass(kw_only=True, frozen=True)
-class ForStmt(Stmt, ClauseExpr):
-    stmt: _edgeql.Token = _edgeql.Token.FOR
-    iter_expr: Expr
-    var: Variable
-
-    def compute_symrefs(self) -> frozenset[Symbol]:
-        symrefs: set[Symbol] = set(self.node_refs(self.expr))
-        symrefs.update(self.node_refs(self.iter_expr))
-        return frozenset(symrefs)
-
-    def __edgeql_expr__(self) -> str:
+    def subnodes(self) -> Iterable[Node | None]:
+        expr = self.iter_expr
+        expr_nodes: tuple[Node, ...]
+        if isinstance(expr, ShapeOp):
+            expr_nodes = (expr.iter_expr, expr.shape)
+        else:
+            expr_nodes = (expr,)
         return (
-            f"{self.stmt} {edgeql(self.var)} IN ({edgeql(self.iter_expr)})\n"
-            f"UNION ({edgeql(self.expr)})"
+            *expr_nodes,
+            self.filter,
+            self.order_by,
+            self.limit,
+            self.offset,
         )
 
+    def _body_edgeql(self, ctx: ScopeContext) -> str:
+        parts = []
+        expr = self.iter_expr
+        if isinstance(expr, ShapeOp):
+            parts.append(_render_shape(expr.shape, expr.iter_expr, ctx))
+        if self.filter is not None:
+            parts.append(edgeql(self.filter, ctx=ctx))
+        if self.order_by is not None:
+            parts.append(edgeql(self.order_by, ctx=ctx))
+        if self.limit is not None:
+            parts.append(edgeql(self.limit, ctx=ctx))
+        if self.offset is not None:
+            parts.append(edgeql(self.offset, ctx=ctx))
+
+        return " ".join(parts)
+
 
 @dataclass(kw_only=True, frozen=True)
-class PathPrefix(Symbol):
-    def __edgeql_expr__(self) -> str:
+class UpdateStmt(IteratorStmt):
+    stmt: _edgeql.Token = _edgeql.Token.UPDATE
+    filter: Filter | None = None
+    shape: Shape
+
+    def subnodes(self) -> Iterable[Node | None]:
+        return (
+            self.iter_expr,
+            self.filter,
+            self.shape,
+        )
+
+    def _body_edgeql(self, ctx: ScopeContext) -> str:
+        parts = []
+        if self.filter is not None:
+            parts.append(edgeql(self.filter, ctx=ctx))
+        parts.extend((" SET ", _render_shape(self.shape, self.iter_expr, ctx)))
+        return " ".join(parts)
+
+
+@dataclass(kw_only=True, frozen=True)
+class DeleteStmt(IteratorStmt):
+    stmt: _edgeql.Token = _edgeql.Token.DELETE
+
+    def subnodes(self) -> Iterable[Node]:
+        return (self.iter_expr,)
+
+    def _body_edgeql(self, ctx: ScopeContext) -> str:
         return ""
+
+
+@dataclass(kw_only=True, frozen=True)
+class ForStmt(IteratorExpr):
+    stmt: _edgeql.Token = _edgeql.Token.FOR
+    iter_expr: Expr
+    body: Expr
+    var: Variable = field(init=False, compare=False)
+
+    def __post_init__(self) -> None:
+        super().__post_init__()
+        var = Variable(type_=self.iter_expr.type, scope=self.scope)
+        object.__setattr__(self, "var", var)
+
+    @property
+    def type(self) -> _reflection.SchemaPath:
+        return self.body.type
+
+    def subnodes(self) -> Iterable[Node]:
+        return (self.iter_expr, self.body)
+
+    def _edgeql(self, ctx: ScopeContext | None) -> str:
+        return (
+            f"{self.stmt} {edgeql(self.var, ctx=ctx)} IN "
+            f"({edgeql(self.iter_expr, ctx=ctx)})\n"
+            f"UNION ({edgeql(self.body, ctx=ctx)})"
+        )
 
 
 @dataclass(kw_only=True, frozen=True)
@@ -519,14 +558,15 @@ class Shape(Node):
     star_splat: bool = False
     doublestar_splat: bool = False
 
-    def compute_symrefs(self) -> frozenset[Symbol]:
-        symrefs: set[Symbol] = set()
-        for elem in self.elements.values():
-            symrefs.update(elem.symrefs)
-        return frozenset(symrefs)
+    def subnodes(self) -> Iterable[Node]:
+        return self.elements.values()
 
 
-def _render_shape(shape: Shape, source: Expr | None) -> str:
+def _render_shape(
+    shape: Shape,
+    source: Expr | None,
+    ctx: ScopeContext | None,
+) -> str:
     els = []
     if shape.star_splat:
         els.append("*")
@@ -548,40 +588,45 @@ def _render_shape(shape: Shape, source: Expr | None) -> str:
                 rexpr=el,
                 type_=el.type,
             )
-            el_text = edgeql(assign)
+            el_text = edgeql(assign, ctx=ctx)
         els.append(f"{el_text},")
     shape_text = "{\n" + textwrap.indent("\n".join(els), "  ") + "\n}"
     return shape_text
 
 
 @dataclass(kw_only=True, frozen=True)
-class ShapeOp(ScopedExpr):
-    expr: Expr
+class ShapeOp(IteratorExpr):
     shape: Shape
 
-    def compute_symrefs(self) -> frozenset[Symbol]:
-        return self.expr.symrefs | self.node_refs(self.shape)
+    def subnodes(self) -> Iterable[Node]:
+        return (self.iter_expr, self.shape)
 
     @property
     def type(self) -> _reflection.SchemaPath:
-        return self.expr.type
+        return self.iter_expr.type
 
     @property
     def precedence(self) -> _edgeql.Precedence:
         return _edgeql.PRECEDENCE[_edgeql.Token.LBRACE]
 
-    def __edgeql_expr__(self) -> str:
-        subject = edgeql(self.expr)
-        if _need_left_parens(self, self.expr):
-            subject = f"({subject})"
-        shape_text = _render_shape(self.shape, self.expr)
-        return f"{subject} {shape_text}"
+    def _iteration_edgeql(self, ctx: ScopeContext) -> str:
+        iteration = edgeql(self.iter_expr, ctx=ctx)
+        if _need_left_parens(self, self.iter_expr):
+            iteration = f"({iteration})"
+        return iteration
+
+    def _body_edgeql(self, ctx: ScopeContext) -> str:
+        return _render_shape(self.shape, self.iter_expr, ctx)
 
 
-def _need_left_parens(prod: Expr, lexpr: Expr) -> bool:
+def _need_left_parens(
+    prod: Expr,
+    lexpr: Expr,
+    lprec: _edgeql.Precedence | None = None,
+) -> bool:
     if isinstance(lexpr, IdentLikeExpr):
         return False
-    left_prec = lexpr.precedence.value
+    left_prec = lprec.value if lprec is not None else lexpr.precedence.value
     self_prec = prod.precedence.value
     self_assoc = prod.precedence.assoc
 
@@ -590,13 +635,24 @@ def _need_left_parens(prod: Expr, lexpr: Expr) -> bool:
     )
 
 
-def _need_right_parens(prod: Expr, rexpr: Expr) -> bool:
+def _need_right_parens(
+    prod: Expr,
+    rexpr: Expr,
+    rprec: _edgeql.Precedence | None = None,
+) -> bool:
     if isinstance(rexpr, IdentLikeExpr):
         return False
-    right_prec = rexpr.precedence.value
+    right_prec = rprec.value if rprec is not None else rexpr.precedence.value
     self_prec = prod.precedence.value
     self_assoc = prod.precedence.assoc
 
     return right_prec < self_prec or (
         right_prec == self_prec and self_assoc is _edgeql.Assoc.RIGHT
     )
+
+
+def toplevel_edgeql(x: ExprCompatible) -> str:
+    expr = edgeql_qb_expr(x)
+    if not isinstance(expr, Stmt):
+        expr = SelectStmt.wrap(expr)
+    return edgeql(expr, ctx=None)
