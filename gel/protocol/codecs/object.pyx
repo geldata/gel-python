@@ -163,6 +163,7 @@ cdef class ObjectCodec(BaseNamedRecordCodec):
             tuple fields_types
             tuple names
             tuple flags
+            dict tid_map
             object return_type_proxy
             Py_ssize_t fields_codecs_len = len(fields_codecs)
             descriptor = (<BaseNamedRecordCodec>self).descriptor
@@ -175,6 +176,7 @@ cdef class ObjectCodec(BaseNamedRecordCodec):
 
         if return_type is not self.cached_return_type:
             if return_type is None:
+                self.cached_tid_map = None
                 self.cached_return_type = None
                 self.cached_return_type_subcodecs = (None,) * fields_codecs_len
                 self.cached_return_type_proxy = None
@@ -202,6 +204,35 @@ cdef class ObjectCodec(BaseNamedRecordCodec):
                         subs.append(None)
                 self.cached_return_type_subcodecs = tuple(subs)
 
+                tid_map = {}
+                try:
+                    refl = return_type.__gel_reflection__
+                except AttributeError:
+                    pass
+                else:
+                    # Store base type's tid in the mapping *also* to exclude
+                    # subclasses of base type, e.g. if we have this:
+                    #
+                    #    class CustomContent(default.Content):
+                    #        pass
+                    #
+                    # then default.Content.__subclasses__() will contain
+                    # CustomContent, which we don't want to be there.
+
+                    tid_map[refl.id] = return_type
+
+                    for ch in return_type.__subclasses__():
+                        try:
+                            refl = ch.__gel_reflection__
+                        except AttributeError:
+                            pass
+                        else:
+                            if refl.id not in tid_map:
+                                tid_map[refl.id] = ch
+
+                self.cached_tid_map = tid_map
+
+        tid_map = self.cached_tid_map
         fields_types = self.cached_return_type_subcodecs
 
         return_type = self.cached_return_type
@@ -236,13 +267,38 @@ cdef class ObjectCodec(BaseNamedRecordCodec):
 
                 datatypes.object_set(result, i, elem)
         else:
-            result = return_type.model_construct()
+            if names[0] != '__tid__':
+                raise RuntimeError(
+                    f'the first field of object is expected to be __tid__, got {names[0]!r}')
+            frb_read(buf, 4)  # reserved
+            elem_len = hton.unpack_int32(frb_read(buf, 4))
+            if elem_len == -1:
+                raise RuntimeError('__tid__ is unexepectedly empty')
+
+            current_ret_type = return_type
+            if tid_map is not None and len(tid_map) > 1:
+                elem_codec = <BaseCodec>fields_codecs[0]
+                tid = elem_codec.decode(
+                    fields_types[0],
+                    frb_slice_from(&elem_buf, buf, elem_len)
+                )
+
+                try:
+                    current_ret_type = tid_map[tid]
+                except KeyError:
+                    pass
+            else:
+                # Don't bother with actually reading __tid__ if this isn't
+                # a polymorphic query scenario
+                frb_read(buf, elem_len)
+
+            result = current_ret_type.model_construct()
             if return_type_proxy is not None:
                 lprops = return_type_proxy.__lprops__.model_construct()
             else:
                 lprops = None
 
-            for i in range(elem_count):
+            for i in range(1, elem_count):
                 frb_read(buf, 4)  # reserved
                 elem_len = hton.unpack_int32(frb_read(buf, 4))
                 if elem_len == -1:

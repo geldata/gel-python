@@ -105,7 +105,7 @@ cdef class BaseArrayCodec(BaseCodec):
         buf.write_buffer(elem_data)
 
     cdef decode(self, object return_type, FRBuffer *buf):
-        return self._decode_array(False,return_type, buf)
+        return self._decode_array(False, return_type, buf)
 
     cdef inline _decode_array(self, bint is_set, object return_type, FRBuffer *buf):
         cdef:

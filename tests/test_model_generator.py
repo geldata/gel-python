@@ -37,71 +37,68 @@ class Q:
 
 
 class TestModelGenerator(tb.ModelTestCase):
-    SCHEMA = os.path.join(os.path.dirname(__file__), 'dbsetup',
-                          'base.esdl')
+    SCHEMA = os.path.join(os.path.dirname(__file__), "dbsetup", "base.esdl")
 
-    SETUP = os.path.join(os.path.dirname(__file__), 'dbsetup',
-                         'base.edgeql')
+    SETUP = os.path.join(os.path.dirname(__file__), "dbsetup", "base.edgeql")
 
     @unittest.expectedFailure
     @tb.typecheck
     def test_modelgen__smoke_test(self):
         from models import default
-        self.assertEqual(
-            reveal_type(default.User.groups),
-            'this must fail'
-        )
+
+        self.assertEqual(reveal_type(default.User.groups), "this must fail")
 
     @tb.typecheck
     def test_modelgen_1(self):
         from models import default
 
         self.assertEqual(
-            reveal_type(default.User.name),
-            'models.__variants__.std.str'
+            reveal_type(default.User.name), "models.__variants__.std.str"
         )
 
         self.assertEqual(
-            reveal_type(default.User.groups),
-            'models.default.UserGroup'
+            reveal_type(default.User.groups), "models.default.UserGroup"
         )
 
     def test_modelgen_data_unpack_1(self):
         from models import default
 
-        q = Q(default.Post, '''
+        q = Q(
+            default.Post,
+            """
             select Post {
               body,
               author: {
                 *
               }
             } filter .body = 'Hello' limit 1
-        ''')
+            """,
+        )
 
         d = self.client.query_single(q)
 
         self.assertIsInstance(d, default.Post)
-        self.assertEqual(d.body, 'Hello')
+        self.assertEqual(d.body, "Hello")
         self.assertIsInstance(d.author, default.User)
-        self.assertEqual(d.author.name, 'Alice')
+        self.assertEqual(d.author.name, "Alice")
 
     def test_modelgen_data_unpack_1b(self):
         from models import default
 
-        q = default.Post.select(
-            body=True,
-            author=lambda p: p.author.select(name=True),
-        ).filter(
-            lambda p: p.body == "Hello"
-        ).limit(
-            1
+        q = (
+            default.Post.select(
+                body=True,
+                author=lambda p: p.author.select(name=True),
+            )
+            .filter(lambda p: p.body == "Hello")
+            .limit(1)
         )
         d = self.client.query_single(q)
 
         self.assertIsInstance(d, default.Post)
-        self.assertEqual(d.body, 'Hello')
+        self.assertEqual(d.body, "Hello")
         self.assertIsInstance(d.author, default.User)
-        self.assertEqual(d.author.name, 'Alice')
+        self.assertEqual(d.author.name, "Alice")
 
     def test_modelgen_data_unpack_1c(self):
         from models import default, std
@@ -127,6 +124,6 @@ class TestModelGenerator(tb.ModelTestCase):
     def test_modelgen_data_unpack_2(self):
         from models import default
 
-        q = default.Post.select().filter(body='Hello')
+        q = default.Post.select().filter(body="Hello")
         d = self.client.query(q)[0]
         self.assertIsInstance(d, default.Post)
