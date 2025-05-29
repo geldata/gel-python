@@ -255,8 +255,8 @@ MultiLink = TypeAliasType(
     Annotated[
         _MultiLink[_MT_co, _MT_co],
         pydantic.Field(
-            default_factory=_dlist.DistinctList[GelModel],
-            # Force validate call to convert empty list
+            default_factory=list,
+            # Force validate call to convert the empty list
             # to a properly typed one.
             validate_default=True,
         ),
@@ -269,8 +269,8 @@ MultiLinkWithProps = TypeAliasType(
     Annotated[
         _MultiLink[_PT_co, _MT_co],
         pydantic.Field(
-            default_factory=_dlist.DistinctList[ProxyModel[GelModel]],
-            # Force validate call to convert empty list
+            default_factory=list,
+            # Force validate call to convert the empty list
             # to a properly typed one.
             validate_default=True,
         ),
