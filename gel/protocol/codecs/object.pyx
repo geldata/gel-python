@@ -163,8 +163,9 @@ cdef class ObjectCodec(BaseNamedRecordCodec):
             FRBuffer elem_buf
             tuple fields_codecs = (<BaseRecordCodec>self).fields_codecs
             tuple fields_types
-            tuple names
-            tuple flags
+            tuple names = self.names
+            tuple flags = self.flags
+            tuple dlists
             dict tid_map
             object return_type_proxy
             Py_ssize_t fields_codecs_len = len(fields_codecs)
@@ -173,91 +174,12 @@ cdef class ObjectCodec(BaseNamedRecordCodec):
         if self.is_sparse:
             raise NotImplementedError
 
-        names = self.names
-        flags = self.flags
-
-        if return_type is not self.cached_return_type:
-            if return_type is None:
-                self.cached_tid_map = None
-                self.cached_return_type = None
-                self.cached_return_type_subcodecs = (None,) * fields_codecs_len
-                self.cached_return_type_dlists = (None,) * fields_codecs_len
-                self.cached_return_type_proxy = None
-            else:
-                annos = return_type.__gel_annotations__()
-
-                lprops_type = None
-                proxy = getattr(return_type, '__proxy_of__', None)
-                if proxy is not None:
-                    self.cached_return_type_proxy = return_type
-                    self.cached_return_type = proxy
-                    lprops_type = self.cached_return_type_proxy.__lprops__
-                else:
-                    self.cached_return_type = return_type
-                    self.cached_return_type_proxy = None
-
-                subs = []
-                dlists = []
-                for i, name in enumerate(names):
-                    if flags[i] & datatypes._EDGE_POINTER_IS_LINK:
-                        if flags[i] & datatypes._EDGE_POINTER_IS_LINKPROP:
-                            sub = getattr(lprops_type, name)
-                            subs.append(sub.__gel_origin__)
-                            dlists.append(None)
-                        else:
-                            sub = getattr(return_type, name)
-                            subs.append(sub.__gel_origin__)
-
-                            dlist_factory = None
-                            desc = inspect.getattr_static(return_type, name, None)
-                            if desc is not None and hasattr(desc, '__gel_resolved_type__'):
-                                target = desc.get_resolved_type_generic_origin()
-                                if hasattr(target, '__gel_resolve_dlist__'):
-                                    dlist_factory = target.__gel_resolve_dlist__(
-                                        desc.get_resolved_type()
-                                    )
-
-                            dlists.append(dlist_factory)
-                    else:
-                        subs.append(None)
-                        dlists.append(None)
-
-                self.cached_return_type_subcodecs = tuple(subs)
-                self.cached_return_type_dlists = tuple(dlists)
-
-                tid_map = {}
-                try:
-                    refl = return_type.__gel_reflection__
-                except AttributeError:
-                    pass
-                else:
-                    # Store base type's tid in the mapping *also* to exclude
-                    # subclasses of base type, e.g. if we have this:
-                    #
-                    #    class CustomContent(default.Content):
-                    #        pass
-                    #
-                    # then default.Content.__subclasses__() will contain
-                    # CustomContent, which we don't want to be there.
-
-                    tid_map[refl.id] = return_type
-
-                    for ch in return_type.__subclasses__():
-                        try:
-                            refl = ch.__gel_reflection__
-                        except AttributeError:
-                            pass
-                        else:
-                            if refl.id not in tid_map:
-                                tid_map[refl.id] = ch
-
-                self.cached_tid_map = tid_map
-
+        self.adapt_to_return_type(return_type)
         tid_map = self.cached_tid_map
         fields_types = self.cached_return_type_subcodecs
-
         return_type = self.cached_return_type
         return_type_proxy = self.cached_return_type_proxy
+        dlists = self.cached_return_type_dlists
 
         elem_count = <Py_ssize_t><uint32_t>hton.unpack_int32(frb_read(buf, 4))
 
@@ -355,6 +277,96 @@ cdef class ObjectCodec(BaseNamedRecordCodec):
 
         return result
 
+    cdef adapt_to_return_type(self, object return_type):
+        cdef:
+            tuple names = self.names
+            tuple flags = self.flags
+            tuple fields_codecs = (<BaseRecordCodec>self).fields_codecs
+            Py_ssize_t fields_codecs_len = len(fields_codecs)
+
+        if return_type is None:
+            self.cached_tid_map = None
+            self.cached_return_type = None
+            self.cached_return_type_subcodecs = (None,) * fields_codecs_len
+            self.cached_return_type_dlists = (None,) * fields_codecs_len
+            self.cached_return_type_proxy = None
+            return
+
+        if return_type is self.cached_orig_return_type:
+            # return_type should always be the same in the overwhelming
+            # number of scenarios, so we should only do the expensive task
+            # of introspecting the return_type and tailoring to it once
+            # per Object codec's entire lifespan.
+            return
+
+        lprops_type = None
+        proxy = getattr(return_type, '__proxy_of__', None)
+        if proxy is not None:
+            self.cached_return_type_proxy = return_type
+            self.cached_return_type = proxy
+            lprops_type = self.cached_return_type_proxy.__lprops__
+        else:
+            self.cached_return_type = return_type
+            self.cached_return_type_proxy = None
+
+        subs = []
+        dlists = []
+        for i, name in enumerate(names):
+            if flags[i] & datatypes._EDGE_POINTER_IS_LINK:
+                if flags[i] & datatypes._EDGE_POINTER_IS_LINKPROP:
+                    sub = getattr(lprops_type, name)
+                    subs.append(sub.__gel_origin__)
+                    dlists.append(None)
+                else:
+                    sub = getattr(return_type, name)
+                    subs.append(sub.__gel_origin__)
+
+                    dlist_factory = None
+                    desc = inspect.getattr_static(return_type, name, None)
+                    if desc is not None and hasattr(desc, '__gel_resolved_type__'):
+                        target = desc.get_resolved_type_generic_origin()
+                        if hasattr(target, '__gel_resolve_dlist__'):
+                            dlist_factory = target.__gel_resolve_dlist__(
+                                desc.get_resolved_type()
+                            )
+
+                    dlists.append(dlist_factory)
+            else:
+                subs.append(None)
+                dlists.append(None)
+
+        self.cached_return_type_subcodecs = tuple(subs)
+        self.cached_return_type_dlists = tuple(dlists)
+
+        tid_map = {}
+        try:
+            refl = return_type.__gel_reflection__
+        except AttributeError:
+            pass
+        else:
+            # Store base type's tid in the mapping *also* to exclude
+            # subclasses of base type, e.g. if we have this:
+            #
+            #    class CustomContent(default.Content):
+            #        pass
+            #
+            # then default.Content.__subclasses__() will contain
+            # CustomContent, which we don't want to be there.
+
+            tid_map[refl.id] = return_type
+
+            for ch in return_type.__subclasses__():
+                try:
+                    refl = ch.__gel_reflection__
+                except AttributeError:
+                    pass
+                else:
+                    if refl.id not in tid_map:
+                        tid_map[refl.id] = ch
+
+        self.cached_tid_map = tid_map
+        self.cached_orig_return_type = return_type
+
     def get_dataclass_fields(self):
         cdef descriptor = (<BaseNamedRecordCodec>self).descriptor
 
@@ -384,9 +396,14 @@ cdef class ObjectCodec(BaseNamedRecordCodec):
             codec.name = 'SparseObject'
         else:
             codec.name = 'Object'
+
         codec.cached_return_type_proxy = None
         codec.cached_return_type = None
         codec.cached_return_type_subcodecs = (None,) * len(names)
+        codec.cached_orig_return_type = None
+        codec.cached_tid_map = None
+        codec.cached_return_type_dlists = None
+
         codec.flags = flags
         codec.is_sparse = is_sparse
         codec.descriptor = datatypes.record_desc_new(names, flags, cards)
