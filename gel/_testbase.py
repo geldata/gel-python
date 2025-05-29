@@ -25,7 +25,6 @@ import importlib.util
 import inspect
 import json
 import logging
-import pathlib
 import os
 import re
 import shutil
@@ -163,7 +162,7 @@ def _start_cluster(*, cleanup_atexit=True):
             f"--emit-server-status={status_file_unix}",
             "--port=auto",
             "--auto-shutdown",
-            f"--bootstrap-command=ALTER ROLE {role} {{SET password := 'test'}}",
+            f"--bootstrap-command=ALTER ROLE {role} {{SET password:='test'}}",
         ]
 
         help_args = [gel_server, "--help"]
