@@ -1620,7 +1620,8 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                     desc = self.import_name(BASE_IMPL, "IdProperty")
                     self.write(
                         f"id: {desc}[{ptr_type}, {priv_type}]"
-                        f" # type: ignore [assignment]")
+                        f" # type: ignore [assignment]"
+                    )
                 self.write()
 
         def _filter(
@@ -1994,8 +1995,6 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                 f" = {prop_desc_t}()"
             )
             self.write(f"_p__obj__: {target} = {priv_attr}()")
-            self.write(f"_p__lprops__: __lprops__ = {priv_attr}()")
-
             self.write()
             args = [f"obj: {target}", "/", "*", *lprops]
             with self._method_def("__init__", args):
@@ -2009,9 +2008,6 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                             "lprops = self.__class__.__lprops__({list})",
                             lprop_assign,
                         )
-                    )
-                    self.write(
-                        f'{obj}.__setattr__(self, "_p__lprops__", lprops)'
                     )
                     self.write(
                         f'{obj}.__setattr__(self, "__linkprops__", lprops)'

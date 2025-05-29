@@ -269,7 +269,6 @@ cdef class ObjectCodec(BaseNamedRecordCodec):
                 nested = result
                 result = return_type_proxy.model_construct()
                 object.__setattr__(result, '_p__obj__', nested)
-                object.__setattr__(result, '_p__lprops__', lprops)
                 object.__setattr__(result, '__linkprops__', lprops)
 
         return result

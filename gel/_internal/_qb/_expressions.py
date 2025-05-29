@@ -239,7 +239,7 @@ class PrefixOp(Op):
 
     def __edgeql_expr__(self, *, ctx: ScopeContext | None) -> str:
         left = edgeql(self.expr, ctx=ctx)
-        if _need_right_parens(self, self.expr):
+        if _need_right_parens(self.precedence, self.expr):
             left = f"({left})"
         return f"{self.op} {left}"
 
@@ -266,10 +266,10 @@ class InfixOp(Op):
 
     def __edgeql_expr__(self, *, ctx: ScopeContext | None) -> str:
         left = edgeql(self.lexpr, ctx=ctx)
-        if _need_left_parens(self, self.lexpr):
+        if _need_left_parens(self.precedence, self.lexpr):
             left = f"({left})"
         right = edgeql(self.rexpr, ctx=ctx)
-        if _need_right_parens(self, self.rexpr):
+        if _need_right_parens(self.precedence, self.rexpr):
             right = f"({right})"
         return f"{left} {self.op} {right}"
 
@@ -280,6 +280,21 @@ class FuncCall(TypedExpr):
     args: list[Expr]
     kwargs: dict[str, Expr]
 
+    def __init__(
+        self,
+        *,
+        fname: str,
+        args: list[ExprCompatible],
+        kwargs: dict[str, ExprCompatible],
+        type_: SchemaPath,
+    ) -> None:
+        object.__setattr__(self, "fname", fname)
+        object.__setattr__(self, "args", [edgeql_qb_expr(a) for a in args])
+        object.__setattr__(
+            self, "kwargs", {k: edgeql_qb_expr(v) for k, v in kwargs.items()}
+        )
+        super().__init__(type_=type_)
+
     def subnodes(self) -> Iterable[Node]:
         return itertools.chain(self.args, self.kwargs.values())
 
@@ -288,17 +303,20 @@ class FuncCall(TypedExpr):
         return _edgeql.PRECEDENCE[_edgeql.Operation.CALL]
 
     def __edgeql_expr__(self, *, ctx: ScopeContext | None) -> str:
-        args = ", ".join(
-            [
-                *(edgeql(arg, ctx=ctx) for arg in self.args),
-                *(
-                    f"{n} := {edgeql(v, ctx=ctx)}"
-                    for n, v in self.kwargs.items()
-                ),
-            ]
-        )
+        args = []
+        comma_prec = _edgeql.PRECEDENCE[_edgeql.Token.COMMA]
+        for arg in self.args:
+            arg_text = edgeql(arg, ctx=ctx)
+            if _need_left_parens(comma_prec, arg):
+                arg_text = f"({arg_text})"
+            args.append(arg_text)
+        for n, arg in self.kwargs.items():
+            arg_text = edgeql(arg, ctx=ctx)
+            if _need_left_parens(comma_prec, arg):
+                arg_text = f"({arg_text})"
+            args.append(f"{n} := {arg_text}")
 
-        return f"{self.fname}({args})"
+        return f"{self.fname}({' '.join(args)})"
 
 
 class Clause(Node):
@@ -410,7 +428,7 @@ class IteratorStmt(ImplicitIteratorStmt):
         expr_text = edgeql(expr, ctx=ctx)
         token = _edgeql.Token.IN if self.self_ref is not None else self.stmt
         prec = _edgeql.PRECEDENCE[token]
-        if _need_right_parens(self, expr, rprec=prec):
+        if _need_right_parens(self.precedence, expr, rprec=prec):
             expr_text = f"({expr_text})"
         return expr_text
 
@@ -618,7 +636,7 @@ class ShapeOp(IteratorExpr):
 
     def _iteration_edgeql(self, ctx: ScopeContext) -> str:
         iteration = edgeql(self.iter_expr, ctx=ctx)
-        if _need_left_parens(self, self.iter_expr):
+        if _need_left_parens(self.precedence, self.iter_expr):
             iteration = f"({iteration})"
         return iteration
 
@@ -627,15 +645,15 @@ class ShapeOp(IteratorExpr):
 
 
 def _need_left_parens(
-    prod: Expr,
+    prod_prec: _edgeql.Precedence,
     lexpr: Expr,
     lprec: _edgeql.Precedence | None = None,
 ) -> bool:
     if isinstance(lexpr, IdentLikeExpr):
         return False
     left_prec = lprec.value if lprec is not None else lexpr.precedence.value
-    self_prec = prod.precedence.value
-    self_assoc = prod.precedence.assoc
+    self_prec = prod_prec.value
+    self_assoc = prod_prec.assoc
 
     return left_prec < self_prec or (
         left_prec == self_prec and self_assoc is not _edgeql.Assoc.RIGHT
@@ -643,15 +661,15 @@ def _need_left_parens(
 
 
 def _need_right_parens(
-    prod: Expr,
+    prod_prec: _edgeql.Precedence,
     rexpr: Expr,
     rprec: _edgeql.Precedence | None = None,
 ) -> bool:
     if isinstance(rexpr, IdentLikeExpr):
         return False
     right_prec = rprec.value if rprec is not None else rexpr.precedence.value
-    self_prec = prod.precedence.value
-    self_assoc = prod.precedence.assoc
+    self_prec = prod_prec.value
+    self_assoc = prod_prec.assoc
 
     return right_prec < self_prec or (
         right_prec == self_prec and self_assoc is _edgeql.Assoc.RIGHT

@@ -170,7 +170,7 @@ class LinkPropsDescriptor(Generic[_T_co]):
             assert owner is not None
             return owner.__lprops__  # type: ignore [no-any-return]
         else:
-            return obj._p__lprops__  # type: ignore [no-any-return]
+            return obj.__linkprops__  # type: ignore [no-any-return]
 
 
 class GelLinkModel(pydantic.BaseModel, metaclass=GelModelMeta):
