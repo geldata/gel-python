@@ -135,6 +135,7 @@ class GelModel(
         json_encoders={uuid.UUID: str},
         validate_assignment=True,
         defer_build=True,
+        extra="forbid",
     )
 
     if TYPE_CHECKING:

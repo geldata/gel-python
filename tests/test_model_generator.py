@@ -110,9 +110,9 @@ class TestModelGenerator(tb.ModelTestCase):
         q = (
             MyUser.select(
                 name=True,
-                posts=lambda u: std.count(default.Post.filter(
-                    lambda p: p.author.id == u.id
-                )),
+                posts=lambda u: std.count(
+                    default.Post.filter(lambda p: p.author.id == u.id)
+                ),
             )
             .filter(name="Alice")
             .limit(1)
@@ -146,18 +146,36 @@ class TestModelGenerator(tb.ModelTestCase):
         d = self.client.query(q)[0]
 
         self.assertIsInstance(d, default.GameSession)
+
+        # Test that links are unpacked into a DistinctList, not a vanilla list
         self.assertIsInstance(d.players, DistinctList)
 
         post = default.Post(author=d.players[0], body="test")
+
+        # Check that validation is enabled for objects created by codecs
+
         with self.assertRaisesRegex(
             ValueError, r"accepts only values of type.*User.*, got.*Post"
         ):
             d.players.append(post)
 
+        with self.assertRaisesRegex(
+            ValueError, r"(?s)xxx.*Object has no attribute 'xxx'"
+        ):
+            post.xxx = 123
+
+    def test_modelgen_data_model_validation_1(self):
+        from models import default
+
         gs = default.GameSession(num=7)
         self.assertIsInstance(gs.players, DistinctList)
 
         with self.assertRaisesRegex(
-            ValueError, r"1 validation error for GameSession"
+            ValueError, r"(?s)players.*Input should be.*instance of User"
         ):
             default.GameSession(num=7, players=[1])
+
+        with self.assertRaisesRegex(
+            ValueError, r"(?s)prayers.*Extra inputs are not permitted"
+        ):
+            default.GameSession(num=7, prayers=[1])
