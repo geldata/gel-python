@@ -485,12 +485,19 @@ class SelectStmt(IteratorStmt):
             parts.append(edgeql(self.filter, ctx=ctx))
         if self.order_by is not None:
             parts.append(edgeql(self.order_by, ctx=ctx))
-        if self.limit is not None:
-            parts.append(edgeql(self.limit, ctx=ctx))
-        if self.offset is not None:
-            parts.append(edgeql(self.offset, ctx=ctx))
 
         return " ".join(parts)
+
+    def _edgeql(self, ctx: ScopeContext) -> str:
+        text = super()._edgeql(ctx)
+        if self.self_ref is not None and self.self_ref_in_subscopes:
+            text = f"SELECT ({text})"
+        if self.limit is not None:
+            text += "\n" + edgeql(self.limit, ctx=ctx)
+        if self.offset is not None:
+            text += "\n" + edgeql(self.offset, ctx=ctx)
+
+        return text
 
 
 @dataclass(kw_only=True, frozen=True)

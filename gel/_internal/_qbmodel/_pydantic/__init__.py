@@ -5,6 +5,8 @@
 """Pydantic implementation of the query builder model"""
 
 from ._fields import (
+    ComputedProperty,
+    IdProperty,
     MultiLink,
     MultiLinkWithProps,
     OptionalLink,
@@ -32,9 +34,11 @@ from ._types import (
 
 __all__ = (
     "Array",
+    "ComputedProperty",
     "GelLinkModel",
     "GelModel",
     "GelModelMeta",
+    "IdProperty",
     "LinkClassNamespace",
     "LinkPropsDescriptor",
     "MultiLink",

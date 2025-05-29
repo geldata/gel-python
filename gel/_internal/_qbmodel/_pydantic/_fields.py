@@ -30,6 +30,7 @@ from pydantic_core import core_schema
 
 from gel._internal import _dlist
 from gel._internal import _typing_inspect
+from gel._internal import _unsetid
 
 from gel._internal._qbmodel import _abstract
 
@@ -55,6 +56,30 @@ _BMT_co = TypeVar("_BMT_co", bound=GelModel, covariant=True)
 
 _PT_co = TypeVar("_PT_co", bound=ProxyModel[GelModel], covariant=True)
 """Proxy model"""
+
+
+class ComputedProperty(_abstract.ComputedPropertyDescriptor[_ST_co, _BT_co]):
+    @classmethod
+    def __get_pydantic_core_schema__(
+        cls,
+        source_type: Any,
+        handler: pydantic.GetCoreSchemaHandler,
+    ) -> pydantic_core.CoreSchema:
+        if _typing_inspect.is_generic_alias(source_type):
+            args = typing.get_args(source_type)
+            return handler.generate_schema(args[0])
+        else:
+            return handler.generate_schema(source_type)
+
+
+IdProperty = TypeAliasType(
+    "IdProperty",
+    Annotated[
+        ComputedProperty[_ST_co, _BT_co],
+        pydantic.Field(default=_unsetid.UNSET_UUID),
+    ],
+    type_params=(_ST_co, _BT_co),
+)
 
 
 class _OptionalProperty(_abstract.OptionalPropertyDescriptor[_ST_co, _BT_co]):

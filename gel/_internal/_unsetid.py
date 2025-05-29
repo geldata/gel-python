@@ -29,15 +29,26 @@ class _UnsetUUID(uuid.UUID):
         # Allow the few methods/properties needed to make printing work
         if name in {
             "__class__",
-            "__str__",
-            "__repr__",
             "__getattribute__",
-            "__reduce_ex__",
+            "__getstate__",
             "__reduce__",
+            "__reduce_ex__",
+            "__repr__",
+            "__setstate__",
+            "__str__",
+            "int",
         }:
             return object.__getattribute__(self, name)
+        elif name in {
+            "__copy__",
+            "__deepcopy__",
+        }:
+            raise AttributeError(name)
         else:
             raise ValueError(f"_UnsetUUID.{name}: id is not set")
+
+    def __getstate__(self) -> object:
+        return {"int": 0}
 
 
 # single shared sentinel

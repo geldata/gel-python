@@ -263,10 +263,7 @@ cdef class ObjectCodec(BaseNamedRecordCodec):
                     assert name[0] == '@' # XXX fix this
                     object.__setattr__(lprops, name[1:], elem)
                 else:
-                    if name == 'id':
-                        object.__setattr__(result, '_p__id', elem)
-                    else:
-                        object.__setattr__(result, name, elem)
+                    object.__setattr__(result, name, elem)
 
             if return_type_proxy is not None:
                 nested = result

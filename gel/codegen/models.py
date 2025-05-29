@@ -1596,9 +1596,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         typeof_class: str,
     ) -> None:
         if objtype.name == "std::BaseObject":
-            priv_attr = self.import_name(BASE_IMPL, "PrivateAttr")
             gmm = self.import_name(BASE_IMPL, "GelModelMeta")
-            comp_f = self.import_name(BASE_IMPL, "computed_field")
             for ptr in objtype.pointers:
                 if ptr.name == "__type__":
                     ptr_type = self.get_ptr_type(
@@ -1619,13 +1617,10 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                 elif ptr.name == "id":
                     priv_type = self.import_name("uuid", "UUID")
                     ptr_type = self.get_ptr_type(objtype, ptr)
-                    self.write(f"_p__{ptr.name}: {priv_type} = {priv_attr}()")
-                    self.write(f"@{comp_f}  # type: ignore [prop-decorator]")
-                    with self._property_def(ptr.name, [], ptr_type):
-                        self.write(
-                            f"return self._p__{ptr.name}  "
-                            "# type: ignore [return-value]"
-                        )
+                    desc = self.import_name(BASE_IMPL, "IdProperty")
+                    self.write(
+                        f"id: {desc}[{ptr_type}, {priv_type}]"
+                        f" # type: ignore [assignment]")
                 self.write()
 
         def _filter(
@@ -1829,7 +1824,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             ):
                 self.write('_id = kwargs.pop("id", None)')
                 self.write("super().__init__(**kwargs)")
-                self.write("self._p__id = _id")
+                self.write('object.__setattr__(self, "id", _id)')
             self.write()
 
     def _get_links_with_props(

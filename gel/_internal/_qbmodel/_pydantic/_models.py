@@ -110,9 +110,7 @@ class GelModelMeta(_model_construction.ModelMetaclass, _abstract.GelModelMeta):
                 continue
             fgeneric = desc.get_resolved_type_generic_origin()
             if fgeneric is None or issubclass(
-                fgeneric,
-                _abstract.PropertyDescriptor
-                | _abstract.OptionalPropertyDescriptor,
+                fgeneric, _abstract.AnyPropertyDescriptor
             ):
                 ptrs.append(getattr(cls, fname))
 
@@ -130,27 +128,27 @@ class GelModel(
         defer_build=True,
     )
 
-    _p__id__: uuid.UUID = pydantic.PrivateAttr()
+    if TYPE_CHECKING:
+        id: uuid.UUID
 
     def __init__(self, /, **kwargs: Any) -> None:
         super().__init__(**kwargs)
-        self._p__id: uuid.UUID = _unsetid.UNSET_UUID
         self._p____type__ = None
 
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, GelModel):
             return NotImplemented
 
-        if self._p__id is None or other._p__id is None:
+        if self.id is None or other.id is None:
             return False
         else:
-            return self._p__id == other._p__id
+            return self.id == other.id
 
     def __hash__(self) -> int:
-        if self._p__id is _unsetid.UNSET_UUID:
+        if self.id is _unsetid.UNSET_UUID:
             raise TypeError("Model instances without id value are unhashable")
 
-        return hash(self._p__id)
+        return hash(self.id)
 
 
 _T_co = TypeVar("_T_co", covariant=True)
@@ -204,7 +202,7 @@ class ProxyModel(GelModel, Generic[_MT_co]):
 
     def __getattribute__(self, name: str) -> Any:
         model_fields = type(self).__proxy_of__.model_fields
-        if name in model_fields or name == "_p__id":
+        if name in model_fields:
             base = object.__getattribute__(self, "_p__obj__")
             return getattr(base, name)
         return super().__getattribute__(name)

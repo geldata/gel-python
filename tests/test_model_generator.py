@@ -103,6 +103,25 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertIsInstance(d.author, default.User)
         self.assertEqual(d.author.name, 'Alice')
 
+    def test_modelgen_data_unpack_1c(self):
+        from models import default
+
+        q = (
+            default.User.select(
+                name=True,
+                posts=lambda u: default.Post.filter(
+                    lambda p: p.author.id == u.id
+                ).order_by(body="asc"),
+            )
+            .filter(name="Alice")
+            .limit(1)
+        )
+        print(q.__edgeql__())
+        d = self.client.query_single(q)
+
+        self.assertIsInstance(d, default.User)
+        self.assertEqual(len(d.posts), 2)
+
     def test_modelgen_data_unpack_2(self):
         from models import default
 

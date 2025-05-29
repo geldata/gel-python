@@ -38,10 +38,11 @@ from gel._internal._qbmodel._abstract import (
 
 from gel._internal._qbmodel._pydantic import (
     Array,
-    Tuple,
+    ComputedProperty,
     GelLinkModel,
     GelModel,
     GelModelMeta,
+    IdProperty,
     LinkClassNamespace,
     LinkPropsDescriptor,
     MultiLink,
@@ -53,6 +54,7 @@ from gel._internal._qbmodel._pydantic import (
     ProxyModel,
     PyTypeScalar,
     Range,
+    Tuple,
 )
 
 
@@ -62,6 +64,7 @@ __all__ = (
     "AnyTuple",
     "Array",
     "BaseScalar",
+    "ComputedProperty",
     "ExprClosure",
     "ExprCompatible",
     "FuncCall",
@@ -72,6 +75,7 @@ __all__ = (
     "GelTypeMeta",
     "GelTypeMetadata",
     "GelType_T",
+    "IdProperty",
     "InfixOp",
     "LazyClassProperty",
     "LinkClassNamespace",

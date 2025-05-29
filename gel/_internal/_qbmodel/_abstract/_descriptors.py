@@ -179,11 +179,25 @@ class OptionalPointerDescriptor(PointerDescriptor[T_co, BT_co]):
         def __set__(self, obj: Any, value: BT_co | None) -> None: ...
 
 
-class PropertyDescriptor(PointerDescriptor[T_co, BT_co]):
+class ComputedPointerDescriptor(PointerDescriptor[T_co, BT_co]):
     pass
 
 
-class OptionalPropertyDescriptor(OptionalPointerDescriptor[T_co, BT_co]):
+class AnyPropertyDescriptor(PointerDescriptor[T_co, BT_co]):
+    pass
+
+
+class ComputedPropertyDescriptor(
+    ComputedPointerDescriptor[T_co, BT_co],
+    AnyPropertyDescriptor[T_co, BT_co],
+):
+    pass
+
+
+class OptionalPropertyDescriptor(
+    OptionalPointerDescriptor[T_co, BT_co],
+    AnyPropertyDescriptor[T_co, BT_co],
+):
     pass
 
 
