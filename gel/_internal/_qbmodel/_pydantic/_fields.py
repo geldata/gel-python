@@ -200,12 +200,13 @@ class _MultiLink(
 
     @classmethod
     def __gel_resolve_dlist__(
-        cls, item_type: _MT_co
+        cls,
+        item_type: type[_MT_co],  # pyright: ignore [reportGeneralTypeIssues]
     ) -> _dlist.DistinctList[_MT_co]:
         if issubclass(item_type, ProxyModel):
-            return _UpcastingDistinctList[item_type, item_type.__bases__[0]]
+            return _UpcastingDistinctList[item_type, item_type.__bases__[0]]  # type: ignore [valid-type, name-defined, return-value]
         else:
-            return _dlist.DistinctList[item_type]
+            return _dlist.DistinctList[item_type]  # type: ignore [valid-type, return-value]
 
     @classmethod
     def __get_pydantic_core_schema__(

@@ -159,24 +159,9 @@ class GelModel(
 
         return hash(self.id)
 
-    def __repr_name__(self) -> str:
+    def __repr_name__(self) -> str:  # type: ignore [override]
         cls = type(self)
-        is_proxy = issubclass(cls, ProxyModel)
-
-        if is_proxy:
-            base_cls = cls.__bases__[0]
-            return f"Proxy[{base_cls.__module__}.{base_cls.__qualname__}]"
-        else:
-            return f"{cls.__module__}.{cls.__qualname__}"
-
-    def __repr_args__(self) -> Iterable[tuple[str | None, Any]]:
-        cls = type(self)
-        is_proxy = issubclass(cls, ProxyModel)
-        if is_proxy:
-            yield from self.__linkprops__.__repr_args__()
-            yield from self._p__obj__.__repr_args__()
-        else:
-            yield from super().__repr_args__()
+        return f"{cls.__module__}.{cls.__qualname__}"
 
 
 _T_co = TypeVar("_T_co", covariant=True)
@@ -267,6 +252,15 @@ class ProxyModel(GelModel, Generic[_MT_co]):
                 cls,
                 schema=handler.generate_schema(cls.__proxy_of__),
             )
+
+    def __repr_name__(self) -> str:  # type: ignore [override]
+        cls = type(self)
+        base_cls = cls.__bases__[0]
+        return f"Proxy[{base_cls.__module__}.{base_cls.__qualname__}]"
+
+    def __repr_args__(self) -> Iterable[tuple[str | None, Any]]:
+        yield from self.__linkprops__.__repr_args__()
+        yield from self._p__obj__.__repr_args__()
 
 
 #
