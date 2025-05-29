@@ -25,6 +25,7 @@ if typing.TYPE_CHECKING:
     from typing import reveal_type
 
 from gel import _testbase as tb
+from gel._internal._dlist import DistinctList
 
 
 @dataclasses.dataclass
@@ -127,3 +128,36 @@ class TestModelGenerator(tb.ModelTestCase):
         q = default.Post.select().filter(body="Hello")
         d = self.client.query(q)[0]
         self.assertIsInstance(d, default.Post)
+
+    def test_modelgen_data_unpack_3(self):
+        from models import default
+
+        q = (
+            default.GameSession.select(
+                num=True,
+                players=lambda s: s.players.select(
+                    name=True, groups=lambda p: p.groups.select(name=True)
+                ),
+            )
+            .filter(num=123)
+            .limit(1)
+        )
+
+        d = self.client.query(q)[0]
+
+        self.assertIsInstance(d, default.GameSession)
+        self.assertIsInstance(d.players, DistinctList)
+
+        post = default.Post(author=d.players[0], body="test")
+        with self.assertRaisesRegex(
+            ValueError, r"accepts only values of type.*User.*, got.*Post"
+        ):
+            d.players.append(post)
+
+        gs = default.GameSession(num=7)
+        self.assertIsInstance(gs.players, DistinctList)
+
+        with self.assertRaisesRegex(
+            ValueError, r"1 validation error for GameSession"
+        ):
+            default.GameSession(num=7, players=[1])

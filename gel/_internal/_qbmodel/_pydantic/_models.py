@@ -20,6 +20,7 @@ from typing_extensions import (
     Self,
 )
 
+import typing
 import uuid
 import warnings
 
@@ -43,6 +44,8 @@ if TYPE_CHECKING:
 
 
 class GelModelMeta(_model_construction.ModelMetaclass, _abstract.GelModelMeta):
+    __gel_annotations_cache__: dict[str, Any] | None = None
+
     def __new__(  # noqa: PYI034
         mcls,
         name: str,
@@ -115,6 +118,12 @@ class GelModelMeta(_model_construction.ModelMetaclass, _abstract.GelModelMeta):
                 ptrs.append(getattr(cls, fname))
 
         return tuple(ptrs)
+
+    def __gel_annotations__(cls) -> dict[str, Any]:  # noqa: N805
+        if cls.__gel_annotations_cache__ is not None:
+            return cls.__gel_annotations_cache__
+        cls.__gel_annotations_cache__ = typing.get_type_hints(cls)
+        return cls.__gel_annotations_cache__
 
 
 class GelModel(

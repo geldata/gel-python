@@ -215,7 +215,8 @@ class ParametricType:
     def __new__(cls, *args: Any, **kwargs: Any) -> Self:
         if cls.__parametric_forward_refs__:
             raise TypeError(
-                f"{cls.__qualname__} has unresolved type parameters")
+                f"{cls.__qualname__} has unresolved type parameters"
+            )
 
         if cls.__parametric_type_args__ is None:
             raise TypeError(

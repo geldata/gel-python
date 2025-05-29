@@ -172,7 +172,7 @@ class _UpcastingDistinctList(
 
 
 class _MultiLinkMeta(type):
-    _list_type: type[_dlist.DistinctList[GelModel | ProxyModel[GelModel]]]
+    pass
 
 
 class _MultiLink(
@@ -199,6 +199,15 @@ class _MultiLink(
         ) -> None: ...
 
     @classmethod
+    def __gel_resolve_dlist__(
+        cls, item_type: _MT_co
+    ) -> _dlist.DistinctList[_MT_co]:
+        if issubclass(item_type, ProxyModel):
+            return _UpcastingDistinctList[item_type, item_type.__bases__[0]]
+        else:
+            return _dlist.DistinctList[item_type]
+
+    @classmethod
     def __get_pydantic_core_schema__(
         cls,
         source_type: Any,
@@ -207,7 +216,7 @@ class _MultiLink(
         if _typing_inspect.is_generic_alias(source_type):
             args = typing.get_args(source_type)
             item_type = args[0]
-            return core_schema.no_info_before_validator_function(
+            return core_schema.no_info_after_validator_function(
                 functools.partial(cls._validate, generic_args=args),
                 schema=core_schema.list_schema(
                     items_schema=handler.generate_schema(item_type),
@@ -245,7 +254,12 @@ MultiLink = TypeAliasType(
     "MultiLink",
     Annotated[
         _MultiLink[_MT_co, _MT_co],
-        pydantic.Field(default_factory=_dlist.DistinctList[GelModel]),
+        pydantic.Field(
+            default_factory=_dlist.DistinctList[GelModel],
+            # Force validate call to convert empty list
+            # to a properly typed one.
+            validate_default=True,
+        ),
     ],
     type_params=(_MT_co,),
 )
@@ -255,7 +269,10 @@ MultiLinkWithProps = TypeAliasType(
     Annotated[
         _MultiLink[_PT_co, _MT_co],
         pydantic.Field(
-            default_factory=_dlist.DistinctList[ProxyModel[GelModel]]
+            default_factory=_dlist.DistinctList[ProxyModel[GelModel]],
+            # Force validate call to convert empty list
+            # to a properly typed one.
+            validate_default=True,
         ),
     ],
     type_params=(_PT_co, _MT_co),

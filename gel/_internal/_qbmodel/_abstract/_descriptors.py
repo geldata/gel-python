@@ -90,7 +90,7 @@ class ModelFieldDescriptor(_qb.AbstractFieldDescriptor):
         return t
 
     def get_resolved_type_generic_origin(self) -> type | None:
-        t = self.__gel_resolved_type__
+        t = self.__gel_resolved_type_origin__
         if t is None:
             t = self._try_resolve_type()
         if t is None:

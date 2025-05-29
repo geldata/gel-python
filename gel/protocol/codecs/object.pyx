@@ -17,8 +17,10 @@
 #
 
 import dataclasses
+import inspect
 
 from gel.datatypes import datatypes
+from gel._internal import _dlist
 
 
 cdef dict CARDS_MAP = {
@@ -179,8 +181,11 @@ cdef class ObjectCodec(BaseNamedRecordCodec):
                 self.cached_tid_map = None
                 self.cached_return_type = None
                 self.cached_return_type_subcodecs = (None,) * fields_codecs_len
+                self.cached_return_type_dlists = (None,) * fields_codecs_len
                 self.cached_return_type_proxy = None
             else:
+                annos = return_type.__gel_annotations__()
+
                 lprops_type = None
                 proxy = getattr(return_type, '__proxy_of__', None)
                 if proxy is not None:
@@ -192,17 +197,33 @@ cdef class ObjectCodec(BaseNamedRecordCodec):
                     self.cached_return_type_proxy = None
 
                 subs = []
+                dlists = []
                 for i, name in enumerate(names):
                     if flags[i] & datatypes._EDGE_POINTER_IS_LINK:
                         if flags[i] & datatypes._EDGE_POINTER_IS_LINKPROP:
                             sub = getattr(lprops_type, name)
                             subs.append(sub.__gel_origin__)
+                            dlists.append(None)
                         else:
                             sub = getattr(return_type, name)
                             subs.append(sub.__gel_origin__)
+
+                            dlist_factory = None
+                            desc = inspect.getattr_static(return_type, name, None)
+                            if desc is not None and hasattr(desc, '__gel_resolved_type__'):
+                                target = desc.get_resolved_type_generic_origin()
+                                if hasattr(target, '__gel_resolve_dlist__'):
+                                    dlist_factory = target.__gel_resolve_dlist__(
+                                        desc.get_resolved_type()
+                                    )
+
+                            dlists.append(dlist_factory)
                     else:
                         subs.append(None)
+                        dlists.append(None)
+
                 self.cached_return_type_subcodecs = tuple(subs)
+                self.cached_return_type_dlists = tuple(dlists)
 
                 tid_map = {}
                 try:
@@ -318,6 +339,11 @@ cdef class ObjectCodec(BaseNamedRecordCodec):
                 if flags[i] & datatypes._EDGE_POINTER_IS_LINKPROP:
                     assert name[0] == '@' # XXX fix this
                     object.__setattr__(lprops, name[1:], elem)
+                elif flags[i] & datatypes._EDGE_POINTER_IS_LINK:
+                    dlist_factory = self.cached_return_type_dlists[i]
+                    if dlist_factory is not None:
+                        elem = dlist_factory(elem)
+                    object.__setattr__(result, name, elem)
                 else:
                     object.__setattr__(result, name, elem)
 

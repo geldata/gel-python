@@ -27,6 +27,7 @@ cdef class ObjectCodec(BaseNamedRecordCodec):
 
         dict cached_tid_map
         tuple cached_return_type_subcodecs
+        tuple cached_return_type_dlists
         object cached_return_type_proxy
         object cached_return_type
 
