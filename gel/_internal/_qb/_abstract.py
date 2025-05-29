@@ -96,7 +96,11 @@ class TypedExpr(Expr):
         return self.type_
 
 
-class IdentLikeExpr(TypedExpr):
+class AtomicExpr(TypedExpr):
+    pass
+
+
+class IdentLikeExpr(AtomicExpr):
     @property
     def precedence(self) -> _edgeql.Precedence:
         return _edgeql.PRECEDENCE[_edgeql.Token.IDENT]

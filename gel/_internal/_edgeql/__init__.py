@@ -15,6 +15,8 @@ from ._tokens import (
     Operation,
     Precedence,
     Token,
+    need_left_parens,
+    need_right_parens,
 )
 
 
@@ -24,6 +26,8 @@ __all__ = (
     "Operation",
     "Precedence",
     "Token",
+    "need_left_parens",
+    "need_right_parens",
     "needs_quoting",
     "quote_ident",
     "quote_literal",

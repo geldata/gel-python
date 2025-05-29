@@ -19,6 +19,7 @@ from gel._internal import _reflection
 from gel._internal._reflection import SchemaPath
 
 from ._abstract import (
+    AtomicExpr,
     Expr,
     IdentLikeExpr,
     ImplicitIteratorStmt,
@@ -147,7 +148,7 @@ class StringLiteral(Literal):
 
 
 @dataclass(kw_only=True, frozen=True)
-class SetLiteral(TypedExpr):
+class SetLiteral(AtomicExpr):
     items: list[Expr]
 
     def subnodes(self) -> Iterable[Node]:
@@ -168,14 +169,14 @@ class SetLiteral(TypedExpr):
         return "{" + ", ".join(exprs) + "}"
 
     def _need_parens(self, item: Expr) -> bool:
-        if isinstance(item, IdentLikeExpr):
+        if isinstance(item, AtomicExpr):
             return False
         comma_prec = _edgeql.PRECEDENCE[_edgeql.Token.COMMA]
         return item.precedence.value < comma_prec.value
 
 
 @dataclass(kw_only=True, frozen=True)
-class Path(TypedExpr):
+class Path(AtomicExpr):
     source: Expr
     name: str
     is_lprop: bool
@@ -658,15 +659,10 @@ def _need_left_parens(
     lexpr: Expr,
     lprec: _edgeql.Precedence | None = None,
 ) -> bool:
-    if isinstance(lexpr, IdentLikeExpr):
+    if isinstance(lexpr, AtomicExpr):
         return False
-    left_prec = lprec.value if lprec is not None else lexpr.precedence.value
-    self_prec = prod_prec.value
-    self_assoc = prod_prec.assoc
-
-    return left_prec < self_prec or (
-        left_prec == self_prec and self_assoc is not _edgeql.Assoc.RIGHT
-    )
+    left_prec = lprec if lprec is not None else lexpr.precedence
+    return _edgeql.need_left_parens(prod_prec, left_prec)
 
 
 def _need_right_parens(
@@ -674,15 +670,10 @@ def _need_right_parens(
     rexpr: Expr,
     rprec: _edgeql.Precedence | None = None,
 ) -> bool:
-    if isinstance(rexpr, IdentLikeExpr):
+    if isinstance(rexpr, AtomicExpr):
         return False
-    right_prec = rprec.value if rprec is not None else rexpr.precedence.value
-    self_prec = prod_prec.value
-    self_assoc = prod_prec.assoc
-
-    return right_prec < self_prec or (
-        right_prec == self_prec and self_assoc is _edgeql.Assoc.RIGHT
-    )
+    right_prec = rprec if rprec is not None else rexpr.precedence
+    return _edgeql.need_right_parens(prod_prec, right_prec)
 
 
 def toplevel_edgeql(x: ExprCompatible) -> str:

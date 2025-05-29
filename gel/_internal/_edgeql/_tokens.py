@@ -342,3 +342,29 @@ PRECEDENCE: dict[Token | tuple[Token, int] | Operation, Precedence] = {
     Token.MULTI: Precedence(28, Assoc.RIGHT),
     Token.SINGLE: Precedence(28, Assoc.RIGHT),
 }
+
+
+def need_left_parens(
+    prod_prec: Precedence,
+    left_prec: Precedence,
+) -> bool:
+    self_prec = prod_prec.value
+    self_assoc = prod_prec.assoc
+    lprec_value = left_prec.value
+
+    return lprec_value < self_prec or (
+        lprec_value == self_prec and self_assoc is not Assoc.RIGHT
+    )
+
+
+def need_right_parens(
+    prod_prec: Precedence,
+    right_prec: Precedence,
+) -> bool:
+    self_prec = prod_prec.value
+    self_assoc = prod_prec.assoc
+    rprec_value = right_prec.value
+
+    return rprec_value < self_prec or (
+        rprec_value == self_prec and self_assoc is Assoc.RIGHT
+    )
