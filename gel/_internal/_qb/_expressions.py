@@ -516,12 +516,13 @@ class SelectStmt(IteratorStmt):
 
     def _edgeql(self, ctx: ScopeContext) -> str:
         text = super()._edgeql(ctx)
-        if self.self_ref is not None and self.self_ref_must_bind:
-            text = f"SELECT ({text})"
-        if self.limit is not None:
-            text += "\n" + edgeql(self.limit, ctx=ctx)
-        if self.offset is not None:
-            text += "\n" + edgeql(self.offset, ctx=ctx)
+        if self.limit is not None or self.offset is not None:
+            if self.self_ref is not None and self.self_ref_must_bind:
+                text = f"SELECT ({text})"
+            if self.limit is not None:
+                text += "\n" + edgeql(self.limit, ctx=ctx)
+            if self.offset is not None:
+                text += "\n" + edgeql(self.offset, ctx=ctx)
 
         return text
 
