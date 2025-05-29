@@ -344,8 +344,6 @@ cdef class ObjectCodec(BaseNamedRecordCodec):
                     if dlist_factory is not None:
                         elem = dlist_factory(elem)
                     object.__setattr__(result, name, elem)
-                elif name == 'id':
-                    object.__setattr__(result, '_p__id', elem)
                 else:
                     object.__setattr__(result, name, elem)
 
