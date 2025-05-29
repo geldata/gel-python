@@ -32,3 +32,4 @@ cdef class AsyncIOProtocol(protocol.SansIOProtocolBackwardsCompatible):
 
         object loop
         object msg_waiter
+        object writable

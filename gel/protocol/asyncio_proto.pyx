@@ -37,6 +37,8 @@ cdef class AsyncIOProtocol(protocol.SansIOProtocolBackwardsCompatible):
         self.transport = None
         self.connected_fut = loop.create_future()
         self.disconnected_fut = None
+        self.writable = asyncio.Event()
+        self.writable.set()
 
         self.msg_waiter = None
 
@@ -123,10 +125,13 @@ cdef class AsyncIOProtocol(protocol.SansIOProtocolBackwardsCompatible):
             self.transport = None
 
     def pause_writing(self):
-        pass
+        self.writable.clear()
 
     def resume_writing(self):
-        pass
+        self.writable.set()
+
+    async def _backpressure(self):
+        await self.writable.wait()
 
     def data_received(self, data):
         self.buffer.feed_data(data)
