@@ -26,10 +26,15 @@ if TYPE_CHECKING:
 class Node(abc.ABC):
     symrefs: frozenset[Symbol] = field(init=False, compare=False)
     outside_refs: frozenset[Symbol] = field(init=False, compare=False)
+    must_bind_refs: frozenset[Symbol] = field(init=False, compare=False)
 
     @property
     def visible_refs(self) -> frozenset[Symbol]:
         return self.symrefs
+
+    @property
+    def visible_must_bind_refs(self) -> frozenset[Symbol]:
+        return self.must_bind_refs
 
     @abc.abstractmethod
     def subnodes(self) -> Iterable[Node | None]: ...
@@ -48,12 +53,23 @@ class Node(abc.ABC):
             n.outside_refs for n in subnodes if n is not None
         )
 
+    def compute_must_bind_refs(
+        self, subnodes: Iterable[Node | None]
+    ) -> Iterable[Symbol]:
+        return itertools.chain(
+            itertools.chain.from_iterable(
+                n.visible_must_bind_refs for n in subnodes if n is not None
+            ),
+        )
+
     def __post_init__(self) -> None:
         subnodes = list(self.subnodes())
         symrefs = frozenset(self.compute_symrefs(subnodes))
         object.__setattr__(self, "symrefs", symrefs)
         outside_refs = frozenset(self.compute_outside_refs(subnodes))
         object.__setattr__(self, "outside_refs", outside_refs)
+        must_bind_refs = frozenset(self.compute_must_bind_refs(subnodes))
+        object.__setattr__(self, "must_bind_refs", must_bind_refs)
 
 
 @dataclass(kw_only=True, frozen=True)
@@ -169,6 +185,7 @@ class ScopeContext:
         self._scopes: dict[Scope, _Namespace] = {scope: self._ns}
         self._scope = scope
         self._path_scope: Scope | None = None
+        self._path_prefix_must_bind: bool = False
 
     def has_scope(self, scope: Scope) -> bool:
         return scope in self._scopes
@@ -191,6 +208,7 @@ class ScopeContext:
         scope: Scope,
         *,
         switch_path_scope: bool = False,
+        path_prefix_must_bind: bool | None = None,
     ) -> Iterator[Self]:
         self._ns = self._ns.new_child()
         if scope in self._scopes:
@@ -199,11 +217,15 @@ class ScopeContext:
         cur_path_scope = self._path_scope
         if switch_path_scope:
             self._path_scope = scope
+        cur_path_prefix_must_bind = self._path_prefix_must_bind
+        if path_prefix_must_bind is not None:
+            self._path_prefix_must_bind = path_prefix_must_bind
         try:
             yield self
         finally:
             self._scope, self._ns = self._scopes.popitem()
             self._path_scope = cur_path_scope
+            self._path_prefix_must_bind = cur_path_prefix_must_bind
 
     @property
     def scope(self) -> Scope:
@@ -212,6 +234,10 @@ class ScopeContext:
     @property
     def path_scope(self) -> Scope | None:
         return self._path_scope
+
+    @property
+    def path_prefix_must_bind(self) -> bool:
+        return self._path_prefix_must_bind
 
     @property
     def bindings(self) -> Mapping[Symbol, str]:
@@ -271,6 +297,10 @@ class ScopedExpr(Expr):
     def visible_refs(self) -> frozenset[Symbol]:
         return self.outside_refs
 
+    @property
+    def visible_must_bind_refs(self) -> frozenset[Symbol]:
+        return frozenset()
+
     def compute_outside_refs(
         self, subnodes: Iterable[Node | None]
     ) -> Iterable[Symbol]:
@@ -300,14 +330,19 @@ class IteratorExpr(ScopedExpr):
     iter_expr: Expr
     body_scope: ScopeDescriptor = ScopeDescriptor()
     self_ref: Symbol | None = field(init=False, compare=False)
-    self_ref_in_subscopes: bool = field(init=False, compare=False)
+    self_ref_must_bind: bool = field(init=False, compare=False)
 
     def __post_init__(self) -> None:
         super().__post_init__()
-        object.__setattr__(self, "self_ref", self.compute_self_ref())
-        object.__setattr__(
-            self, "self_ref_in_subscopes", self.compute_self_ref_in_subscopes()
-        )
+        self_ref = self.compute_self_ref()
+        object.__setattr__(self, "self_ref", self_ref)
+        if self_ref is not None:
+            self_ref_must_bind = self_ref in self.must_bind_refs
+            if not self_ref_must_bind:
+                self_ref_must_bind = self.compute_self_ref_in_subscopes()
+        else:
+            self_ref_must_bind = False
+        object.__setattr__(self, "self_ref_must_bind", self_ref_must_bind)
 
     def compute_outside_refs(
         self, subnodes: Iterable[Node | None]
@@ -344,7 +379,11 @@ class IteratorExpr(ScopedExpr):
             # try to re-enter the same scope twice.
             body = self._body_edgeql(ctx)
         else:
-            with ctx.push(self.body_scope, switch_path_scope=True) as body_ctx:
+            with ctx.push(
+                self.body_scope,
+                switch_path_scope=True,
+                path_prefix_must_bind=self.self_ref_must_bind,
+            ) as body_ctx:
                 if self.self_ref is not None:
                     body_ctx.bind(self.self_ref)
                 body = self._body_edgeql(body_ctx)
@@ -377,12 +416,17 @@ class PathPrefix(Symbol):
     def __edgeql_expr__(self, *, ctx: ScopeContext | None) -> str:
         if (
             ctx is not None
-            and ctx.path_scope is not self.scope
+            and (ctx.path_scope is not self.scope or ctx.path_prefix_must_bind)
             and (var := ctx.bindings.get(self)) is not None
         ):
             return var
         else:
             return ""
+
+    def compute_must_bind_refs(
+        self, subnodes: Iterable[Node | None]
+    ) -> Iterable[Symbol]:
+        return (self,)
 
 
 @dataclass(kw_only=True, frozen=True)

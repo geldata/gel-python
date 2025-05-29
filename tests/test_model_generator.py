@@ -122,6 +122,21 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertIsInstance(d, default.User)
         self.assertEqual(d.posts, 2)
 
+        q = (
+            MyUser.select(
+                name=True,
+                posts=lambda u: std.count(default.Post.filter(
+                    lambda p: p.author == u
+                )),
+            )
+            .filter(name="Alice")
+            .limit(1)
+        )
+        d = self.client.query_single(q)
+
+        self.assertIsInstance(d, default.User)
+        self.assertEqual(d.posts, 2)
+
     def test_modelgen_data_unpack_2(self):
         from models import default
 

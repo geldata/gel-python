@@ -183,6 +183,14 @@ class Path(TypedExpr):
     def subnodes(self) -> Iterable[Node]:
         return (self.source,)
 
+    def compute_must_bind_refs(
+        self, subnodes: Iterable[Node | None]
+    ) -> Iterable[Symbol]:
+        if isinstance(self.source, PathPrefix):
+            return ()
+        else:
+            return self.source.visible_must_bind_refs
+
     @property
     def precedence(self) -> _edgeql.Precedence:
         return _edgeql.PRECEDENCE[_edgeql.Operation.PATH]
@@ -434,7 +442,7 @@ class IteratorStmt(ImplicitIteratorStmt):
 
     def _edgeql(self, ctx: ScopeContext) -> str:
         iterable, body = self._edgeql_parts(ctx)
-        if self.self_ref is not None and self.self_ref_in_subscopes:
+        if self.self_ref is not None and self.self_ref_must_bind:
             var = ctx.bindings.get(self.self_ref)
             if var is None:
                 raise AssertionError(f"{self.self_ref} in {self} is unbound")
@@ -508,7 +516,7 @@ class SelectStmt(IteratorStmt):
 
     def _edgeql(self, ctx: ScopeContext) -> str:
         text = super()._edgeql(ctx)
-        if self.self_ref is not None and self.self_ref_in_subscopes:
+        if self.self_ref is not None and self.self_ref_must_bind:
             text = f"SELECT ({text})"
         if self.limit is not None:
             text += "\n" + edgeql(self.limit, ctx=ctx)
