@@ -1314,7 +1314,6 @@ class GeneratedSchemaModule(BaseGeneratedModule):
 
         for (meth, opname), overloads in opmap.items():
             overload = len(overloads) > 1
-            all_other_types = set()
             for (ret_type, ret_typemod), other_types in overloads.items():
                 rtype = self.render_callable_return_type(
                     ret_type,
@@ -1324,16 +1323,18 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                     ret_type,
                     ret_typemod,
                 )
-                other_type_strs = [
-                    self.get_type(m, import_time=ImportTime.typecheck)
-                    for m in other_types
-                ]
-                other_type_main = other_type_strs[0]
-                other_type_strs.sort()
-                all_other_types.update(other_type_strs)
-                other_type = " | ".join(
-                    f"{type_}[{t}] | {t}" for t in other_type_strs
-                )
+                canon_type = None
+                other_type_union = []
+                for t in other_types:
+                    tstr = self.get_type(t, import_time=ImportTime.typecheck)
+                    other_type_union.append(f"{type_}[{tstr}]")
+                    if reflection.is_primitive_type(t):
+                        other_type_union.append(tstr)
+                        if canon_type is None:
+                            canon_type = tstr
+
+                other_type_union.sort()
+                other_type = " | ".join(other_type_union)
 
                 with self._method_def(
                     meth,
@@ -1343,22 +1344,26 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                     line_comment="type: ignore [override]",
                     implicit_param=False,
                 ):
-                    self.write(
-                        f"if not isinstance(other, ({type_}, {other_type_main})):"
-                    )
-                    with self.indented():
-                        self.write(f"other = {other_type_main}(other)")
+                    if canon_type is not None:
+                        self.write(
+                            f"if not isinstance(other, "
+                            f"({type_}, {canon_type})):"
+                        )
+                        with self.indented():
+                            self.write(f"other = {canon_type}(other)")
+
                     args = [
                         "lexpr=cls",
                         f'op="{opname}"',
                         "rexpr=other",
                         f"type_={self._render_obj_schema_path(ret_type)}",
                     ]
-                    opexpr = self.format_list(f"{infxop}({{list}})", args)
+                    self.write(
+                        self.format_list(f"op = {infxop}({{list}})", args))
                     self.write(
                         self.format_list(
                             f"return {aexpr}({{list}})",
-                            [rtype_rt, opexpr],
+                            [rtype_rt, "op"],
                             first_line_comment="type: ignore [return-value]",
                         )
                     )
@@ -1471,6 +1476,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         else:
             gmm = self.import_name(BASE_IMPL, "GelTypeMetadata")
             typeof_bases = [gmm]
+
         pointers = objtype.pointers
         sp = self.import_name(BASE_IMPL, "SchemaPath")
         lazyclassproperty = self.import_name(BASE_IMPL, "LazyClassProperty")
@@ -1535,17 +1541,37 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         self.write()
         self.write()
 
+        class_kwargs = {}
+        class_r_kwargs = {"__gel_type_id__": f"{uuid}(int={objtype.id.int})"}
         if not base_types:
             gel_model = self.import_name(BASE_IMPL, "GelModel")
             vbase_types = [gel_model]
+            bin_ops = self._operators.binary_ops.get(objtype.id, [])
+            un_ops = self._operators.unary_ops.get(objtype.id, [])
+            gel_model_meta = self.import_name(BASE_IMPL, "GelModelMeta")
+            metaclass = f"__{name}_ops__"
+            with self._class_def(metaclass, [gel_model_meta]):
+                if not bin_ops and not un_ops:
+                    self.write("pass")
+                else:
+                    self.write_unary_operator_overloads(un_ops)
+                    self.write_binary_operator_overloads(bin_ops)
+            with self.type_checking():
+                self.write(f"__{name}_meta__ = __{name}_ops__")
+            with self.not_type_checking():
+                self.write(f"__{name}_meta__ = {gel_model_meta}")
+            class_kwargs["metaclass"] = f"__{name}_meta__"
         else:
             vbase_types = base_types
-        class_kwargs = {"__gel_type_id__": f"{uuid}(int={objtype.id.int})"}
+
         with self._class_def(
             name,
             [typeof_class, *vbase_types],
-            class_kwargs=class_kwargs,
+            class_kwargs={**class_kwargs, **class_r_kwargs}
         ):
+            if not base_types:
+                with self.not_type_checking():
+                    self.write(f"__gel_type_class__ = __{name}_ops__")
             self._write_base_object_type_body(objtype, typeof_class)
             self.write()
 
@@ -1564,7 +1590,12 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                 else:
                     gel_model = self.import_name(BASE_IMPL, "GelModel")
                     base_bases.append(gel_model)
-                with self._class_def("Base", base_bases):
+
+                with self._class_def(
+                    "Base",
+                    base_bases,
+                    class_kwargs=class_kwargs,
+                ):
                     self._write_base_object_type_body(objtype, typeof_class)
 
                 self.write()
