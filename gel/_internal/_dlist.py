@@ -44,18 +44,51 @@ class DistinctList(
     a list and set.
     """
 
-    def __init__(self, iterable: Iterable[T] = ()) -> None:
-        # Current items in order.
-        self._items: list[T] = []
-        # Set of (hashable) items to maintain distinctness.
-        self._set: set[T] = set()
-        # Assuming unhashable items compare by object identity,
-        # the dict below is used as an extension for distinctness
-        # checks.
-        self._unhashables: dict[int, T] = {}
-        self._type: type | None = None
-        for item in iterable:
-            self.append(item)
+    # Current items in order.
+    _items: list[T]
+
+    # Set of (hashable) items to maintain distinctness.
+    _set_impl: set[T] | None
+
+    # Assuming unhashable items compare by object identity,
+    # the dict below is used as an extension for distinctness
+    # checks.
+    _unhashables_impl: dict[int, T] | None
+
+    def __init__(
+        self, iterable: Iterable[T] = (), *, __wrap_list__: bool = False
+    ) -> None:
+        self._set_impl = None
+        self._unhashables_impl = None
+
+        if __wrap_list__:
+            # __wrap_list__ is set to True inside the codecs pipeline
+            # because we can trust that the objects are of the correct
+            # type and can avoid the costly validation.
+
+            if type(iterable) is not list:
+                raise ValueError(
+                    "__wrap_list__ is True but iterable is not a list"
+                )
+
+            self._items = iterable
+        else:
+            self._items = []
+            for item in iterable:
+                self.append(item)
+
+    @property
+    def _set(self) -> set[T]:
+        if self._set_impl is None:
+            self._set_impl = set(self._items)
+            assert len(self._set_impl) == len(self._items)
+        return self._set_impl
+
+    @property
+    def _unhashables(self) -> dict[int, T]:
+        if self._unhashables_impl is None:
+            self._unhashables_impl = {}
+        return self._unhashables_impl
 
     @classmethod
     def _check_value(cls, value: Any) -> T:

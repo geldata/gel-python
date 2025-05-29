@@ -179,7 +179,7 @@ class TestDistinctList(unittest.TestCase):
         self.assertEqual(a, [1, 2])
         self.assertTrue(a < c)
         self.assertTrue(a < [1, 3])
-        self.assertEqual(repr(a), '[1, 2]')
+        self.assertEqual(repr(a), "[1, 2]")
         with self.assertRaises(TypeError):
             hash(a)
 
@@ -214,14 +214,18 @@ class TestDistinctList(unittest.TestCase):
     def test_dlist_type_enforcement(self):
         il = IntList()
         il.append(1)
-        with self.assertRaises(ValueError): il.append("a")
-        with self.assertRaises(ValueError): il.insert(0, "b")
-        with self.assertRaises(ValueError): il[0] = "c"
+        with self.assertRaises(ValueError):
+            il.append("a")
+        with self.assertRaises(ValueError):
+            il.insert(0, "b")
+        with self.assertRaises(ValueError):
+            il[0] = "c"
 
     # index missing element
     def test_dlist_index_missing(self):
         lst = AnyList([1, 2, 3])
-        with self.assertRaises(ValueError): lst.index(5)
+        with self.assertRaises(ValueError):
+            lst.index(5)
 
     # Additional tests for missing branches
     def test_dlist_remove_unhashable(self):
@@ -291,6 +295,18 @@ class TestDistinctList(unittest.TestCase):
         self.assertEqual(list(lst), [1, 2, 3])
         new = lst + [3, 4]
         self.assertEqual(list(new), [1, 2, 3, 4])
+
+    def test_dlist_wrap_list_reuse(self):
+        x = [1, 2, 3, 4]
+        lst = IntList(x, __wrap_list__=True)
+        x.append(6)
+        lst2 = list(lst)
+        self.assertEqual(lst2, [1, 2, 3, 4, 6])
+
+    def test_dlist_wrap_list_deferred_validation(self):
+        lst = IntList([1, 2, 3, 4], __wrap_list__=True)
+        lst.append(1)
+        self.assertEqual(lst, [1, 2, 3, 4])
 
 
 if __name__ == "__main__":

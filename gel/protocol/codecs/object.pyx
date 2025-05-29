@@ -264,7 +264,7 @@ cdef class ObjectCodec(BaseNamedRecordCodec):
                 elif flags[i] & datatypes._EDGE_POINTER_IS_LINK:
                     dlist_factory = self.cached_return_type_dlists[i]
                     if dlist_factory is not None:
-                        elem = dlist_factory(elem)
+                        elem = dlist_factory(elem, __wrap_list__=True)
                     object.__setattr__(result, name, elem)
                 else:
                     object.__setattr__(result, name, elem)
@@ -329,6 +329,14 @@ cdef class ObjectCodec(BaseNamedRecordCodec):
                             dlist_factory = target.__gel_resolve_dlist__(
                                 desc.get_resolved_type()
                             )
+                            if (
+                                not isinstance(dlist_factory, type) or
+                                not issubclass(dlist_factory, _dlist.DistinctList)
+                            ):
+                                raise RuntimeError(
+                                    f'invalid type returned from __gel_resolve_dlist__(), '
+                                    f'a DistinctList was expected, got {dlist_factory!r}'
+                                )
 
                     dlists.append(dlist_factory)
             else:
