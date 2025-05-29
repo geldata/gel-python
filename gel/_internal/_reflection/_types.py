@@ -5,18 +5,19 @@
 
 from __future__ import annotations
 from typing import (
+    TYPE_CHECKING,
     Literal,
-    Optional,
     TypeGuard,
-    Union,
 )
 
 import dataclasses
 import uuid
 
-from gel import abstract
 from . import _enums as enums
 from . import _query
+
+if TYPE_CHECKING:
+    from gel import abstract
 
 
 @dataclasses.dataclass(frozen=True, kw_only=True)
@@ -29,7 +30,7 @@ class Type:
     id: uuid.UUID
     kind: enums.TypeKind
     name: str
-    description: Optional[str]
+    description: str | None
     builtin: bool
     internal: bool
 
@@ -51,9 +52,9 @@ class PseudoType(Type):
 class ScalarType(InheritingType):
     kind: Literal[enums.TypeKind.Scalar]
     is_seq: bool
-    enum_values: Optional[list[str]] = None
-    material_id: Optional[uuid.UUID] = None
-    cast_type: Optional[uuid.UUID] = None
+    enum_values: list[str] | None = None
+    material_id: uuid.UUID | None = None
+    cast_type: uuid.UUID | None = None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -102,20 +103,20 @@ class NamedTupleType(Type):
     tuple_elements: list[TupleElement]
 
 
-PrimitiveType = Union[
-    ScalarType,
-    ArrayType,
-    TupleType,
-    NamedTupleType,
-    RangeType,
-    MultiRangeType,
-]
+PrimitiveType = (
+    ScalarType
+    | ArrayType
+    | TupleType
+    | NamedTupleType
+    | RangeType
+    | MultiRangeType
+)
 
-AnyType = Union[
-    PseudoType,
-    PrimitiveType,
-    ObjectType,
-]
+AnyType = (
+    PseudoType
+    | PrimitiveType
+    | ObjectType
+)
 
 Types = dict[uuid.UUID, AnyType]
 
@@ -170,7 +171,7 @@ class Pointer:
     is_computed: bool
     is_readonly: bool
     has_default: bool
-    pointers: Optional[list[Pointer]] = None
+    pointers: list[Pointer] | None = None
 
 
 def is_link(p: Pointer) -> bool:
