@@ -30,6 +30,7 @@ from gel.datatypes.range import Range, MultiRange
 from .abstract import (
     Executor, AsyncIOExecutor, ReadOnlyExecutor, AsyncIOReadOnlyExecutor,
 )
+from .base_client import ConnectionInfo
 
 from .asyncio_client import (
     create_async_client,
@@ -52,6 +53,7 @@ __all__ = [
     "Cardinality",
     "Client",
     "ConfigMemory",
+    "ConnectionInfo",
     "DateDuration",
     "EdgeDBError",
     "EdgeDBMessage",
