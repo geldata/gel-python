@@ -36,12 +36,17 @@ from ._primitive import (
     AnyTuple,
     Array,
     BaseScalar,
+    DateTimeLike,
     GelPrimitiveType,
     MultiRange,
     PyConstType,
     PyTypeScalar,
     Range,
     Tuple,
+    get_py_type_for_scalar,
+    get_py_type_for_scalar_hierarchy,
+    get_py_type_scalar_match_rank,
+    maybe_get_protocol_for_py_type,
 )
 
 
@@ -51,6 +56,7 @@ __all__ = (
     "AnyTuple",
     "Array",
     "BaseScalar",
+    "DateTimeLike",
     "GelModel",
     "GelModelMeta",
     "GelPrimitiveType",
@@ -72,4 +78,8 @@ __all__ = (
     "Range",
     "Tuple",
     "field_descriptor",
+    "get_py_type_for_scalar",
+    "get_py_type_for_scalar_hierarchy",
+    "get_py_type_scalar_match_rank",
+    "maybe_get_protocol_for_py_type",
 )

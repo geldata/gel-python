@@ -28,6 +28,7 @@ DEF MAX_INTERVAL_PRECISION  = 6
 
 
 cdef class RelativeDuration(CustomType):
+    __gel_type_name__: typing.ClassVar[str] = "std::cal::relative_duration"
 
     def __init__(self, *, int64_t microseconds=0,
                  int32_t days=0, int32_t months=0):

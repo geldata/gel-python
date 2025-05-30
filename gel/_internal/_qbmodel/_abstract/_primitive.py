@@ -5,18 +5,19 @@
 """Primitive (non-object) types used to implement class-based query builders"""
 
 from __future__ import annotations
-from typing import TYPE_CHECKING, Any, Generic, TypeVar, overload
+from typing import TYPE_CHECKING, Any, Generic, Protocol, TypeVar, overload
 from typing_extensions import Self, TypeVarTuple, Unpack
 
 import builtins
 import datetime
 import decimal
+import functools
 import numbers
 import typing
 import uuid
 
+from gel.datatypes import datatypes as _datatypes
 from gel.datatypes import range as _range
-from gel.datatypes.datatypes import CustomType
 
 from gel._internal import _qb
 from gel._internal import _typing_parametric
@@ -25,7 +26,7 @@ from gel._internal._polyfills import StrEnum
 from ._base import GelType, GelTypeMeta
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Iterable, Sequence
 
     import enum
 
@@ -167,9 +168,172 @@ PyConstType = (
     | decimal.Decimal
     | numbers.Number
     | uuid.UUID
-    | CustomType
+    | _datatypes.CustomType
 )
 """Types of raw Python values supported in query expressions"""
+
+
+class DateLike(Protocol):
+    year: int
+    month: int
+    day: int
+
+    def toordinal(self) -> int: ...
+
+
+class TimeDeltaLike(Protocol):
+    days: int
+    seconds: int
+    microseconds: int
+
+
+@typing.runtime_checkable
+class DateTimeLike(Protocol):
+    def astimezone(self, tz: datetime.tzinfo) -> Self: ...
+    def __sub__(self, other: datetime.datetime) -> TimeDeltaLike: ...
+
+
+_scalar_type_to_py_type: dict[str, str | tuple[str, str]] = {
+    "std::str": "str",
+    "std::float32": "float",
+    "std::float64": "float",
+    "std::int16": "int",
+    "std::int32": "int",
+    "std::int64": "int",
+    "std::bigint": "int",
+    "std::bool": "bool",
+    "std::uuid": ("uuid", "UUID"),
+    "std::bytes": "bytes",
+    "std::decimal": ("decimal", "Decimal"),
+    "std::datetime": ("datetime", "datetime"),
+    "std::duration": ("datetime", "timedelta"),
+    "std::json": "str",
+    "std::cal::local_date": ("datetime", "date"),
+    "std::cal::local_time": ("datetime", "time"),
+    "std::cal::local_datetime": ("datetime", "datetime"),
+    "std::cal::relative_duration": ("gel", "RelativeDuration"),
+    "std::cal::date_duration": ("gel", "DateDuration"),
+    "cfg::memory": ("gel", "ConfigMemory"),
+    "ext::pgvector::vector": ("array", "array"),
+}
+
+_abstract_scalar_type_to_py_type: dict[str, list[tuple[str, str] | str]] = {
+    "std::anyfloat": [("builtins", "float")],
+    "std::anyint": [("builtins", "int")],
+    "std::anynumeric": [("builtins", "int"), ("decimal", "Decimal")],
+    "std::anyreal": ["std::anyfloat", "std::anyint", "std::anynumeric"],
+    "std::anyenum": [("builtins", "str")],
+    "std::anydiscrete": [("builtins", "int")],
+    "std::anycontiguous": [
+        ("decimal", "Decimal"),
+        ("datetime", "datetime"),
+        ("datetime", "timedelta"),
+        "std::anyfloat",
+    ],
+    "std::anypoint": ["std::anydiscrete", "std::anycontiguous"],
+}
+
+
+_protocolized_py_types: dict[tuple[str, str], str] = {
+    ("datetime", "datetime"): "DateTimeLike",
+}
+
+
+@functools.cache
+def get_py_type_for_scalar(
+    typename: str,
+    *,
+    require_subclassable: bool = False,
+    consider_abstract: bool = True,
+) -> tuple[tuple[str, str], ...]:
+    base_type = _scalar_type_to_py_type.get(typename)
+    if base_type is not None:
+        if isinstance(base_type, str):
+            if require_subclassable and base_type == "bool":
+                base_type = "int"
+            base_type = ("builtins", base_type)
+
+        return (base_type,)
+    elif consider_abstract:
+        return tuple(sorted(_get_py_type_for_abstract_scalar(typename)))
+    else:
+        return ()
+
+
+def get_py_type_for_scalar_hierarchy(
+    typenames: Iterable[str],
+    *,
+    consider_abstract: bool = True,
+) -> tuple[tuple[str, str], ...]:
+    for typename in typenames:
+        py_type = get_py_type_for_scalar(
+            typename,
+            consider_abstract=consider_abstract,
+        )
+        if py_type:
+            return py_type
+
+    return ()
+
+
+def maybe_get_protocol_for_py_type(py_type: tuple[str, str]) -> str | None:
+    return _protocolized_py_types.get(py_type)
+
+
+def _get_py_type_for_abstract_scalar(typename: str) -> set[tuple[str, str]]:
+    types = _abstract_scalar_type_to_py_type.get(typename)
+    if types is None:
+        return set()
+
+    union = set()
+    for typespec in types:
+        if isinstance(typespec, str):
+            union.update(_get_py_type_for_abstract_scalar(typespec))
+        else:
+            union.add(typespec)
+
+    return union
+
+
+_py_type_to_scalar_type: dict[tuple[str, str], list[str]] = {
+    ("gel", "DateDuration"): ["std::cal::date_duration"],
+    ("gel", "RelativeDuration"): ["std::cal::relative_duration"],
+    ("gel", "ConfigMemory"): ["cfg::memory"],
+    ("builtins", "bool"): ["std::bool"],
+    ("builtins", "bytes"): ["std::bytes"],
+    ("builtins", "float"): [
+        "std::float64",
+        "std::float32",
+    ],
+    ("builtins", "int"): [
+        "std::bigint",
+        "std::int64",
+        "std::int32",
+        "std::int16",
+    ],
+    ("builtins", "str"): ["std::str", "std::json"],
+    ("datetime", "datetime"): ["std::datetime"],
+    ("datetime", "timedelta"): ["std::duration"],
+    ("datetime", "date"): ["std::cal::local_date"],
+    ("datetime", "time"): ["std::cal::local_time"],
+    ("decimal", "Decimal"): ["std::decimal"],
+    ("uuid", "UUID"): ["std::uuid"],
+}
+
+
+@functools.cache
+def get_py_type_scalar_match_rank(
+    py_type: tuple[str, str],
+    scalar_name: str,
+) -> int | None:
+    scalars = _py_type_to_scalar_type.get(py_type)
+    if scalars is None:
+        return None
+
+    try:
+        return scalars.index(scalar_name)
+    except ValueError:
+        return None
 
 
 _py_type_to_literal: dict[type[PyConstType], type[_qb.Literal]] = {
@@ -188,7 +352,8 @@ _PT_co = TypeVar("_PT_co", bound=PyConstType, covariant=True)
 def get_literal_for_value(t: type[PyConstType], v: PyConstType) -> _qb.Literal:
     if not isinstance(v, t):
         raise ValueError(
-            f"get_literal_for_value: {v!r} is not an instance of {t}")
+            f"get_literal_for_value: {v!r} is not an instance of {t}"
+        )
     ltype = _py_type_to_literal.get(t)
     if ltype is None:
         raise NotImplementedError(f"unsupported Python raw value type: {t}")

@@ -16,13 +16,14 @@
 # limitations under the License.
 #
 
+from __future__ import annotations
 from typing import (
+    TYPE_CHECKING,
     Any,
     TypeAlias,
+    TextIO,
 )
-from collections.abc import Iterator, Mapping
 
-import argparse
 import collections
 import collections.abc
 import contextlib
@@ -40,6 +41,11 @@ from collections import defaultdict
 import gel
 from gel.con_utils import find_gel_project_dir
 from gel.color import get_color
+
+if TYPE_CHECKING:
+    import argparse
+    from collections.abc import Iterator, Mapping
+    from collections.abc import Set as AbstractSet
 
 
 C = get_color()
@@ -69,22 +75,18 @@ TYPE_MAPPING: dict[str, str | tuple[str, str]] = {
     "std::datetime": ("datetime", "datetime"),
     "std::duration": ("datetime", "timedelta"),
     "std::json": "str",
-
     "cal::local_date": ("datetime", "date"),
     "cal::local_time": ("datetime", "time"),
     "cal::local_datetime": ("datetime", "datetime"),
     "cal::relative_duration": ("gel", "RelativeDuration"),
     "cal::date_duration": ("gel", "DateDuration"),
-
     "std::cal::local_date": ("datetime", "date"),
     "std::cal::local_time": ("datetime", "time"),
     "std::cal::local_datetime": ("datetime", "datetime"),
     "std::cal::relative_duration": ("gel", "RelativeDuration"),
     "std::cal::date_duration": ("gel", "DateDuration"),
-
     "cfg::memory": ("gel", "ConfigMemory"),
     "std::cfg::memory": ("gel", "ConfigMemory"),
-
     "ext::pgvector::vector": ("array", "array"),
 }
 
@@ -121,13 +123,14 @@ class Generator:
         args: argparse.Namespace,
         *,
         project_dir: pathlib.Path | None = None,
-        client: gel.Client = None,
+        client: gel.Client | None = None,
         interactive: bool = True,
     ):
         self._default_module = "default"
         self._async = False
 
         self._interactive = interactive
+        self._stderr: TextIO
         if not interactive:
             self._stderr = io.StringIO()
         else:
@@ -167,7 +170,7 @@ class Generator:
             sys.exit(code)
 
     def print_msg(self, msg: str) -> None:
-        print(msg, file=self._stderr)  # noqa: T201
+        print(msg, file=self._stderr)
 
     def print_error(self, msg: str) -> None:
         print(
@@ -179,7 +182,8 @@ class Generator:
         if args.password_from_stdin:
             if args.password:
                 self.print_error(
-                    "--password and --password-from-stdin are mutually exclusive",
+                    "--password and --password-from-stdin "
+                    "are mutually exclusive",
                 )
                 self.abort(22)
             if sys.stdin.isatty():
@@ -238,6 +242,14 @@ def _new_imports_map() -> _Imports:
 
 def _is_all_dots(s: str) -> bool:
     return bool(s) and all(c == "." for c in s)
+
+
+def _in_ns(imported: str, ns: AbstractSet[str] | None) -> bool:
+    if ns is None:
+        return False
+    else:
+        modname, _, attrname = imported.partition(".")
+        return (modname or attrname) in ns
 
 
 class GeneratedModule:
@@ -359,6 +371,7 @@ class GeneratedModule:
         *,
         suggested_module_alias: str | None = None,
         import_maps: _Imports,
+        localns: frozenset[str] | None = None,
     ) -> tuple[str, str]:
         imported_names: tuple[str, ...] = ()
         imported_aliases = {}
@@ -368,7 +381,11 @@ class GeneratedModule:
                 f"import_name: bare relative imports are "
                 f"not supported: {module!r}"
             )
-        if name != "." and name not in self._globals:
+        if (
+            name != "."
+            and not _in_ns(name, self._globals)
+            and not _in_ns(name, localns)
+        ):
             imported = name
             new_global = imported
             imported_names += (name,)
@@ -411,11 +428,16 @@ class GeneratedModule:
         *,
         suggested_module_alias: str | None = None,
         import_time: ImportTime = ImportTime.runtime,
+        localns: frozenset[str] | None = None,
     ) -> str:
         key = (module, name, import_time)
         imported = self._imported_names.get(key)
+        cache_it = True
         if imported is not None:
-            return imported
+            if not _in_ns(imported, localns):
+                return imported
+            else:
+                cache_it = False
 
         if import_time is ImportTime.late_runtime:
             # See if there was a previous eager import for same name
@@ -430,10 +452,13 @@ class GeneratedModule:
             name,
             suggested_module_alias=suggested_module_alias,
             import_maps=self._imports[import_time],
+            localns=localns,
         )
 
         self._globals.add(new_global)
-        self._imported_names[key] = imported
+
+        if cache_it:
+            self._imported_names[key] = imported
 
         return imported
 
@@ -445,6 +470,7 @@ class GeneratedModule:
         suggested_module_alias: str | None = None,
         import_time: ImportTime = ImportTime.runtime,
         directly: bool = True,
+        localns: frozenset[str] | None = None,
     ) -> str:
         if directly:
             return self._do_import_name(
@@ -452,6 +478,7 @@ class GeneratedModule:
                 name,
                 suggested_module_alias=suggested_module_alias,
                 import_time=import_time,
+                localns=localns,
             )
         else:
             mod = self._do_import_name(
@@ -459,6 +486,7 @@ class GeneratedModule:
                 ".",
                 suggested_module_alias=suggested_module_alias,
                 import_time=import_time,
+                localns=localns,
             )
             return f"{mod}.{name}"
 

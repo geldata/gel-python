@@ -14,11 +14,10 @@ from typing import (
 import base64
 import collections
 import enum
-import graphlib
 import functools
+import graphlib
 import keyword
 import logging
-import pathlib
 import textwrap
 
 from collections import defaultdict
@@ -27,12 +26,14 @@ from contextlib import contextmanager
 import gel
 from gel import abstract
 from gel._internal import _reflection as reflection
+from gel._internal._qbmodel import _abstract as _qbmodel
 
 from . import base
 from .base import C, MAX_LINE_LENGTH, ImportTime, CodeSection
 
 if TYPE_CHECKING:
     import io
+    import pathlib
     import uuid
 
     from collections.abc import (
@@ -237,22 +238,6 @@ CORE_OBJECTS = {
     "std::FreeObject",
 }
 
-ABSTRACT_SCALAR_MAPPING: dict[str, list[tuple[str, str] | str]] = {
-    "std::anyfloat": [("builtins", "float")],
-    "std::anyint": [("builtins", "int")],
-    "std::anynumeric": [("builtins", "int"), ("decimal", "Decimal")],
-    "std::anyreal": ["std::anyfloat", "std::anyint", "std::anynumeric"],
-    "std::anyenum": [("builtins", "str")],
-    "std::anydiscrete": [("builtins", "int")],
-    "std::anycontiguous": [
-        ("decimal", "Decimal"),
-        ("datetime", "datetime"),
-        ("datetime", "timedelta"),
-        "std::anyfloat",
-    ],
-    "std::anypoint": ["std::anydiscrete", "std::anycontiguous"],
-}
-
 
 class BaseGeneratedModule:
     def __init__(
@@ -428,6 +413,7 @@ class BaseGeneratedModule:
         suggested_module_alias: str | None = None,
         import_time: ImportTime = ImportTime.runtime,
         directly: bool = True,
+        localns: frozenset[str] | None = None,
     ) -> str:
         return self.py_file.import_name(
             module,
@@ -435,6 +421,7 @@ class BaseGeneratedModule:
             suggested_module_alias=suggested_module_alias,
             import_time=import_time,
             directly=directly,
+            localns=localns,
         )
 
     def export(self, *name: str) -> None:
@@ -543,6 +530,7 @@ class BaseGeneratedModule:
         aspect: ModuleAspect = ModuleAspect.MAIN,
         import_directly: bool | None = None,
         allow_typevars: bool = True,
+        localns: frozenset[str] | None = None,
     ) -> str:
         if import_time is None:
             import_time = (
@@ -556,7 +544,9 @@ class BaseGeneratedModule:
             elem_type = self.get_type(
                 self._types[stype.array_element_id],
                 import_time=import_time,
+                import_directly=import_directly,
                 aspect=aspect,
+                localns=localns,
             )
             return f"{arr}[{elem_type}]"
 
@@ -566,7 +556,9 @@ class BaseGeneratedModule:
                 self.get_type(
                     self._types[elem.type_id],
                     import_time=import_time,
+                    import_directly=import_directly,
                     aspect=aspect,
+                    localns=localns,
                 )
                 for elem in stype.tuple_elements
             ]
@@ -577,7 +569,9 @@ class BaseGeneratedModule:
             elem_type = self.get_type(
                 self._types[stype.range_element_id],
                 import_time=import_time,
+                import_directly=import_directly,
                 aspect=aspect,
+                localns=localns,
             )
             return f"{rang}[{elem_type}]"
 
@@ -586,7 +580,9 @@ class BaseGeneratedModule:
             elem_type = self.get_type(
                 self._types[stype.multirange_element_id],
                 import_time=import_time,
+                import_directly=import_directly,
                 aspect=aspect,
+                localns=localns,
             )
             return f"{rang}[{elem_type}]"
 
@@ -890,90 +886,83 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             stype = self._types[tid]
             yield stype  # type: ignore [misc]
 
-    def _maybe_get_pybase_for_abstract_scalar(
-        self,
-        typename: str,
-    ) -> set[str]:
-        types = ABSTRACT_SCALAR_MAPPING.get(typename)
-        if types is None:
-            return set()
-
-        union = set()
-        for typespec in types:
-            if isinstance(typespec, str):
-                union.update(
-                    self._maybe_get_pybase_for_abstract_scalar(typespec)
-                )
-            else:
-                union.add(self.import_name(*typespec))
-
-        return union
-
     def _get_pybase_for_this_scalar(
         self,
         stype: reflection.ScalarType,
         *,
         require_subclassable: bool = False,
         consider_abstract: bool = True,
-    ) -> str | None:
-        base_type = base.TYPE_MAPPING.get(stype.name)
-        if base_type is not None:
-            if isinstance(base_type, str):
-                if require_subclassable and base_type == "bool":
-                    base_type = "int"
-                base_type = ("builtins", base_type)
+        import_time: ImportTime = ImportTime.runtime,
+    ) -> list[str] | None:
+        base_type = _qbmodel.get_py_type_for_scalar(
+            stype.name,
+            require_subclassable=require_subclassable,
+            consider_abstract=consider_abstract,
+        )
+        if not base_type:
+            return None
+        else:
+            return sorted(
+                self.import_name(*t, import_time=import_time)
+                for t in base_type
+            )
 
-            return self.import_name(*base_type)
-
-        if consider_abstract:
-            base_types = self._maybe_get_pybase_for_abstract_scalar(stype.name)
-            if base_types:
-                return " | ".join(sorted(base_types))
-
-        return None
+    def _get_scalar_hierarchy(
+        self,
+        stype: reflection.ScalarType,
+    ) -> list[str]:
+        return [
+            stype.name,
+            *(self._types[a.id].name for a in reversed(stype.ancestors)),
+        ]
 
     def _get_pybase_for_scalar(
         self,
         stype: reflection.ScalarType,
         *,
         consider_abstract: bool = True,
-    ) -> str:
-        for a_ref in stype.ancestors:
-            ancestor = self._types[a_ref.id]
-            assert reflection.is_scalar_type(ancestor)
-            pybase = self._get_pybase_for_this_scalar(
-                ancestor, consider_abstract=consider_abstract
+        import_time: ImportTime = ImportTime.runtime,
+        localns: frozenset[str] | None = None,
+    ) -> list[str]:
+        base_type = _qbmodel.get_py_type_for_scalar_hierarchy(
+            self._get_scalar_hierarchy(stype),
+            consider_abstract=consider_abstract,
+        )
+        if not base_type:
+            raise AssertionError(
+                f"could not find Python base type for scalar type {stype.name}"
             )
-            if pybase is not None:
-                break
         else:
-            pybase = self._get_pybase_for_this_scalar(
-                stype, consider_abstract=consider_abstract
+            return sorted(
+                self.import_name(*t, import_time=import_time, localns=localns)
+                for t in base_type
             )
-            if pybase is None:
-                raise AssertionError(
-                    f"could not find Python base type for "
-                    f"scalar type {stype.name}"
-                )
-
-        return pybase
 
     def _get_pybase_for_primitive_type(
         self,
         stype: reflection.PrimitiveType,
         *,
         import_time: ImportTime = ImportTime.runtime,
+        localns: frozenset[str] | None = None,
     ) -> str:
         if reflection.is_scalar_type(stype):
             if stype.enum_values:
                 return self.import_name("builtins", "str")
             else:
-                return self._get_pybase_for_scalar(stype)
+                return " | ".join(
+                    self._get_pybase_for_scalar(
+                        stype,
+                        import_time=import_time,
+                        localns=localns,
+                    )
+                )
         elif reflection.is_array_type(stype):
             el_type = self._types[stype.array_element_id]
             if reflection.is_primitive_type(el_type):
                 el = self._get_pybase_for_primitive_type(
-                    el_type, import_time=import_time
+                    el_type,
+                    import_time=import_time,
+                    localns=localns,
                 )
             else:
                 el = self.get_type(el_type, import_time=import_time)
@@ -983,7 +972,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             el_type = self._types[stype.range_element_id]
             if reflection.is_primitive_type(el_type):
                 el = self._get_pybase_for_primitive_type(
-                    el_type, import_time=import_time
+                    el_type, import_time=import_time, localns=localns
                 )
             else:
                 el = self.get_type(el_type, import_time=import_time)
@@ -993,7 +982,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             el_type = self._types[stype.multirange_element_id]
             if reflection.is_primitive_type(el_type):
                 el = self._get_pybase_for_primitive_type(
-                    el_type, import_time=import_time
+                    el_type, import_time=import_time, localns=localns
                 )
             else:
                 el = self.get_type(el_type, import_time=import_time)
@@ -1007,10 +996,12 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                 el_type = self._types[elem.type_id]
                 if reflection.is_primitive_type(el_type):
                     el = self._get_pybase_for_primitive_type(
-                        el_type, import_time=import_time
+                        el_type, import_time=import_time, localns=localns
                     )
                 else:
-                    el = self.get_type(el_type, import_time=import_time)
+                    el = self.get_type(
+                        el_type, import_time=import_time, localns=localns
+                    )
                 elems.append(el)
             tup = self.import_name("builtins", "tuple")
             tup_vars = self.format_list("[{list}]", elems)
@@ -1081,9 +1072,10 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                 consider_abstract=False,
             )
             assert real_pybase is not None
+            assert len(real_pybase) == 1
             pts = self.import_name(BASE_IMPL, "PyTypeScalar")
-            typecheck_parents = [f"{pts}[{real_pybase}]"]
-            runtime_parents = [pybase, *typecheck_parents]
+            typecheck_parents = [f"{pts}[{real_pybase[0]}]"]
+            runtime_parents = [*pybase, *typecheck_parents]
         else:
             typecheck_parents = []
             runtime_parents = []
@@ -1290,8 +1282,18 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         type_ = self.import_name("builtins", "type")
         any_ = self.import_name("typing", "Any")
 
-        explicit_right_types = {op.params[1].type.id for op in ops}
+        explicit_rparams: defaultdict[str, set[uuid.UUID]] = defaultdict(set)
         for op in ops:
+            opname = reflection.parse_name(op.name).name
+            explicit_rparams[opname].add(op.params[1].type.id)
+
+        for op in ops:
+            if op.py_magic is None:
+                raise AssertionError(f"expected {op} to have py_magic set")
+            if op.operator_kind != reflection.OperatorKind.Infix:
+                raise AssertionError(f"expected {op} to be an infix operator")
+
+            opname = reflection.parse_name(op.name).name
             ret_type = self._types[op.return_type.id]
             right_param = op.params[1]
             right_type_id = right_param.type.id
@@ -1301,20 +1303,70 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             if implicit_casts:
                 union.extend(
                     self._types[ic]
-                    for ic in set(implicit_casts) - explicit_right_types
+                    for ic in set(implicit_casts) - explicit_rparams[opname]
                 )
-            if op.py_magic is None:
-                raise AssertionError(f"expected {op} to have py_magic set")
-            if op.operator_kind != reflection.OperatorKind.Infix:
-                raise AssertionError(f"expected {op} to be an infix operator")
-            opname = reflection.parse_name(op.name).name
-            opmap[op.py_magic, opname][ret_type, op.return_typemod].update(
-                union
-            )
 
-        for (meth, opname), overloads in opmap.items():
+            op_key = op.py_magic, opname
+            r_key = ret_type, op.return_typemod
+            opmap[op_key][r_key].update(union)
+
+        py_cast_rankings: defaultdict[
+            tuple[str, str],
+            dict[
+                tuple[str, str],
+                tuple[tuple[int, int], int, reflection.ScalarType],
+            ],
+        ] = defaultdict(dict)
+
+        for op_key, overloads in opmap.items():
+            explicit = explicit_rparams[op_key[1]]
+            py_cast_ranking = py_cast_rankings[op_key]
+
+            for i, params in enumerate(overloads.values()):
+                for stype in params:
+                    if reflection.is_scalar_type(stype):
+                        py_types = _qbmodel.get_py_type_for_scalar_hierarchy(
+                            self._get_scalar_hierarchy(stype),
+                            consider_abstract=True,
+                        )
+                        cast_rank = int(stype.id not in explicit)
+
+                        for py_type in py_types:
+                            scalar_rank = (
+                                _qbmodel.get_py_type_scalar_match_rank(
+                                    py_type, stype.name
+                                )
+                            )
+                            if scalar_rank is None:
+                                # No unabiguous cast from py to db,
+                                # e.g `local_datetime -> datetime -> ?`
+                                continue
+                            assert scalar_rank is not None
+                            rank = (cast_rank, scalar_rank)
+                            prev = py_cast_ranking.get(py_type)
+                            if prev is None or prev[0] > rank:
+                                py_cast_ranking[py_type] = (rank, i, stype)
+
+        py_casts: defaultdict[
+            tuple[str, str],
+            defaultdict[int, dict[tuple[str, str], reflection.ScalarType]],
+        ] = defaultdict(lambda: defaultdict(dict))
+
+        for op_key, py_cast_ranking in py_cast_rankings.items():
+            for py_type, (
+                _,
+                overload_idx,
+                canon_type,
+            ) in py_cast_ranking.items():
+                py_casts[op_key][overload_idx][py_type] = canon_type
+
+        for op_key, overloads in opmap.items():
+            meth, opname = op_key
+            param_py_types_map = py_casts[op_key]
             overload = len(overloads) > 1
-            for (ret_type, ret_typemod), other_types in overloads.items():
+            for i, ((ret_type, ret_typemod), other_types) in enumerate(
+                overloads.items()
+            ):
                 rtype = self.render_callable_return_type(
                     ret_type,
                     ret_typemod,
@@ -1323,15 +1375,36 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                     ret_type,
                     ret_typemod,
                 )
-                canon_type = None
-                other_type_union = []
+                other_type_union: list[str] = []
+                param_py_types = param_py_types_map.get(i)
                 for t in other_types:
                     tstr = self.get_type(t, import_time=ImportTime.typecheck)
                     other_type_union.append(f"{type_}[{tstr}]")
                     if reflection.is_primitive_type(t):
                         other_type_union.append(tstr)
-                        if canon_type is None:
-                            canon_type = tstr
+
+                if param_py_types:
+                    py_coerce_map: dict[str, str] = {}
+                    for py_type, stype in param_py_types.items():
+                        if proto := _qbmodel.maybe_get_protocol_for_py_type(
+                            py_type
+                        ):
+                            ptype_sym = self.import_name(BASE_IMPL, proto)
+                        else:
+                            ptype_sym = self.import_name(
+                                *py_type, directly=False
+                            )
+
+                        py_coerce_map[ptype_sym] = self.get_type(
+                            stype, import_time=ImportTime.late_runtime
+                        )
+                    other_type_union.extend(py_coerce_map)
+                    coerce_cases = {
+                        f"{py_tname}()": f"other = {s_tname}(other)"
+                        for py_tname, s_tname in py_coerce_map.items()
+                    }
+                else:
+                    coerce_cases = None
 
                 other_type_union.sort()
                 other_type = " | ".join(other_type_union)
@@ -1341,16 +1414,16 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                     ["cls", f"other: {other_type}"],
                     rtype,
                     overload=overload,
-                    line_comment="type: ignore [override]",
+                    line_comment="type: ignore [override, unused-ignore]",
                     implicit_param=False,
                 ):
-                    if canon_type is not None:
-                        self.write(
-                            f"if not isinstance(other, "
-                            f"({type_}, {canon_type})):"
-                        )
+                    if coerce_cases:
+                        self.write("match other:")
                         with self.indented():
-                            self.write(f"other = {canon_type}(other)")
+                            for cond, code in coerce_cases.items():
+                                self.write(f"case {cond}:")
+                                with self.indented():
+                                    self.write(code)
 
                     args = [
                         "lexpr=cls",
@@ -1380,6 +1453,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                 ):
                     self.write(
                         f"return {dispatch}(cls.{meth}, *args, **kwargs)"
+                        f"  # type: ignore [no-any-return]"
                     )
                 self.write()
 
@@ -1644,7 +1718,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                         self.write(f"actualcls = {gmm}.get_class_by_id(tid)")
                         self.write(
                             "return actualcls.__gel_reflection__.object"
-                            "  # type: ignore [attr-defined]"
+                            "  # type: ignore [attr-defined, no-any-return]"
                         )
                 elif ptr.name == "id":
                     priv_type = self.import_name("uuid", "UUID")
@@ -1728,7 +1802,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                 select_union = [builtin_bool, self_expr_closure, expr_proto]
                 if reflection.is_non_enum_scalar_type(target_t):
                     broad_ptr_t = self._get_pybase_for_scalar(target_t)
-                    union.append(broad_ptr_t)
+                    union.extend(broad_ptr_t)
                     order_union = [
                         f'{literal}["asc", "desc"]',
                         builtin_str,
@@ -1775,7 +1849,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                 # Ignore override errors, because we type select **computed
                 # as type[GelType], which is incompatible with bool and
                 # UnspecifiedType.
-                line_comment="type: ignore [override]",
+                line_comment="type: ignore [override, unused-ignore]",
             ):
                 self.write(
                     f'"""Update {objtype.name} instances in the database.'
@@ -1792,7 +1866,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                 # Ignore override errors, because we type select **computed
                 # as type[GelType], which is incompatible with bool and
                 # UnspecifiedType.
-                line_comment="type: ignore [override]",
+                line_comment="type: ignore [override, unused-ignore]",
             ):
                 self.write(
                     f'"""Fetch {objtype.name} instances from the database.'
@@ -1805,7 +1879,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                 "filter",
                 filter_args,
                 "type[Self]",
-                line_comment="type: ignore [override]",
+                line_comment="type: ignore [override, unused-ignore]",
             ):
                 self.write(
                     f'"""Fetch {objtype.name} instances from the database.'
@@ -1818,7 +1892,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                 "order_by",
                 order_args,
                 "type[Self]",
-                line_comment="type: ignore [override]",
+                line_comment="type: ignore [override, unused-ignore]",
             ):
                 self.write('"""Specify the sort order for the selection"""')
                 self.write("...")
@@ -2010,7 +2084,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                     ttype = self._types[lprop.target_id]
                     assert reflection.is_scalar_type(ttype)
                     ptr_type = self.get_type(ttype, import_time=import_time)
-                    pytype = self._get_pybase_for_scalar(ttype)
+                    pytype = " | ".join(self._get_pybase_for_scalar(ttype))
                     py_anno = self._py_anno_for_ptr(
                         lprop,
                         ptr_type,
@@ -2101,11 +2175,13 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                 ]
 
             if pointers:
+                localns = frozenset(ptr.name for ptr in pointers)
                 for ptr in pointers:
                     ptr_type = self.get_ptr_type(
                         objtype,
                         ptr,
                         aspect=ModuleAspect.MAIN,
+                        localns=localns,
                     )
                     self.write(f"{ptr.name}: {ptr_type}")
             else:
@@ -2154,7 +2230,10 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                 [f"*args: {any_}", f"**kwargs: {any_}"],
                 f"{type_t}[{gel_type_t}]",
             ):
-                self.write(f"return {dispatch}({fname}, *args, **kwargs)")
+                self.write(
+                    f"return {dispatch}({fname}, *args, **kwargs)"
+                    f"  # type: ignore [no-any-return]"
+                )
             self.write()
         else:
             self._write_function_overload(
@@ -2225,7 +2304,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             fname += "_"
 
         if overload:
-            line_comment = "type: ignore [overload-cannot-match]"
+            line_comment = "type: ignore [overload-cannot-match, unused-ignore]"
         else:
             line_comment = None
 
@@ -2375,7 +2454,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         else:
             pytype = narrow_type
 
-        return pytype
+        return pytype  # pyright: ignore [reportPossiblyUnboundVariable]  # pyright match block no bueno
 
     def get_ptr_type(
         self,
@@ -2386,6 +2465,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         prefer_broad_target_type: bool = False,
         aspect: ModuleAspect | None = None,
         cardinality: reflection.Cardinality | None = None,
+        localns: frozenset[str] | None = None,
     ) -> str:
         if aspect is None:
             aspect = ModuleAspect.VARIANTS
@@ -2395,12 +2475,14 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             target_type,
             aspect=aspect,
             import_time=ImportTime.late_runtime,
+            localns=localns,
         )
 
         if reflection.is_primitive_type(target_type):
             bare_ptr_type = self._get_pybase_for_primitive_type(
                 target_type,
                 import_time=ImportTime.late_runtime,
+                localns=localns,
             )
             union = {bare_ptr_type}
             assn_casts = self._casts.assignment_casts_to.get(
@@ -2413,6 +2495,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                     assn_pytype = self._get_pybase_for_primitive_type(
                         assn_type,
                         import_time=ImportTime.late_runtime,
+                        localns=localns,
                     )
                     union.add(assn_pytype)
             bare_ptr_type = " | ".join(sorted(union))
