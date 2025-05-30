@@ -125,8 +125,7 @@ def _get_conn_args(args: argparse.Namespace):
     if args.password_from_stdin:
         if args.password:
             print_error(
-                "--password and --password-from-stdin are "
-                "mutually exclusive",
+                "--password and --password-from-stdin are mutually exclusive",
             )
             sys.exit(22)
         if sys.stdin.isatty():
@@ -166,7 +165,10 @@ class Generator:
             )
             sys.exit(2)
         print_msg(f"Found EdgeDB project: {C.BOLD}{self._project_dir}{C.ENDC}")
-        self._client = gel.create_client(**_get_conn_args(args))
+        client = gel.create_client(**_get_conn_args(args))
+        if args.allow_user_specified_id:
+            client = client.with_config(allow_user_specified_id=True)
+        self._client = client
         self._single_mode_files = args.file
         self._search_dirs = []
         for search_dir in args.dir or []:
@@ -341,11 +343,7 @@ class Generator:
         name_hint = f"{self._snake_to_camel(name)}Result"
         out_type = self._generate_code(dr.output_type, name_hint)
         if dr.output_cardinality.is_multi():
-            if SYS_VERSION_INFO >= (3, 9):
-                out_type = f"list[{out_type}]"
-            else:
-                self._imports.add("typing")
-                out_type = f"typing.List[{out_type}]"
+            out_type = f"list[{out_type}]"
         elif dr.output_cardinality == gel.Cardinality.AT_MOST_ONE:
             if SYS_VERSION_INFO >= (3, 10):
                 out_type = f"{out_type} | None"
@@ -370,7 +368,7 @@ class Generator:
                         el_name,
                         el.cardinality,
                         keyword_argument=True,
-                        is_input=True
+                        is_input=True,
                     )
 
         if self._async:
@@ -442,22 +440,14 @@ class Generator:
             el_type = self._generate_code(
                 type_.element_type, f"{name_hint}Item", is_input
             )
-            if SYS_VERSION_INFO >= (3, 9):
-                rv = f"list[{el_type}]"
-            else:
-                self._imports.add("typing")
-                rv = f"typing.List[{el_type}]"
+            rv = f"list[{el_type}]"
 
         elif isinstance(type_, describe.TupleType):
             elements = ", ".join(
                 self._generate_code(el_type, f"{name_hint}Item", is_input)
                 for el_type in type_.element_types
             )
-            if SYS_VERSION_INFO >= (3, 9):
-                rv = f"tuple[{elements}]"
-            else:
-                self._imports.add("typing")
-                rv = f"typing.Tuple[{elements}]"
+            rv = f"tuple[{elements}]"
 
         elif isinstance(type_, describe.ScalarType):
             rv = self._find_name(type_.name or name_hint)
@@ -496,9 +486,9 @@ class Generator:
                 for el_name, el_code in link_props:
                     print(f"{INDENT}@typing.overload", file=buf)
                     print(
-                        f'{INDENT}def __getitem__'
+                        f"{INDENT}def __getitem__"
                         f'(self, key: {typing_literal}["{el_name}"]) '
-                        f'-> {el_code}:',
+                        f"-> {el_code}:",
                         file=buf,
                     )
                     print(f"{INDENT}{INDENT}...", file=buf)
@@ -507,9 +497,7 @@ class Generator:
                     f"{INDENT}def __getitem__(self, key: str) -> typing.Any:",
                     file=buf,
                 )
-                print(
-                    f"{INDENT}{INDENT}raise NotImplementedError", file=buf
-                )
+                print(f"{INDENT}{INDENT}raise NotImplementedError", file=buf)
 
             self._defs[rv] = buf.getvalue().strip()
 

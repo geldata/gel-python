@@ -231,8 +231,6 @@ class BaseConnection(metaclass=abc.ABCMeta):
         if self.is_closed():
             await self.connect()
 
-        reconnect = False
-        i = 0
         if self._protocol.is_legacy:
             allow_capabilities = enums.Capability.LEGACY_EXECUTE
         else:
@@ -265,6 +263,7 @@ class BaseConnection(metaclass=abc.ABCMeta):
             ctx = execute_context.lower(
                 allow_capabilities=enums.Capability.EXECUTE
             )
+
             async def _inner():
                 res = await self._protocol.execute(ctx)
                 if ctx.warnings:
@@ -425,6 +424,7 @@ class BasePoolImpl(abc.ABC):
         "_connect_args",
         "_codecs_registry",
         "_query_cache",
+        "_tx_needs_serializable_cache",
         "_connection_factory",
         "_queue",
         "_user_max_concurrency",
@@ -454,6 +454,11 @@ class BasePoolImpl(abc.ABC):
         self._connect_args = connect_args
         self._codecs_registry = protocol.CodecsRegistry()
         self._query_cache = protocol.LRUMapping(maxsize=QUERY_CACHE_SIZE)
+        # Whether a transaction() call from a particular source location
+        # needs to use Serializable. See transaction.BaseRetry for details.
+        self._tx_needs_serializable_cache = (
+            protocol.LRUMapping(maxsize=QUERY_CACHE_SIZE)
+        )
 
         if max_concurrency is not None and max_concurrency <= 0:
             raise ValueError(
@@ -662,6 +667,13 @@ class BaseClient(abstract.BaseReadOnlyExecutor, _options._OptionsMixin):
     __slots__ = ("_impl", "_options")
     _impl_class = NotImplemented
 
+    # Number of stack frames that the Retry objects used by
+    # transaction() need to look up to find their caller from for
+    # caching purposes.  We define this in a variable on BaseClient
+    # basically to make it possible for a user to hackily override it
+    # if they always have some wrapper they need to skip past...
+    _TRANSACTION_FRAME_OFFSET = 2
+
     def __init__(
         self,
         *,
@@ -724,7 +736,17 @@ class BaseClient(abstract.BaseReadOnlyExecutor, _options._OptionsMixin):
         )
 
     def _get_retry_options(self) -> typing.Optional[_options.RetryOptions]:
+        # This is overloaded in transaction.py to return None, to prevent
+        # retrying *inside* a transaction.
         return self._options.retry_options
+
+    def _get_active_tx_options(self) -> typing.Optional[
+        _options.TransactionOptions
+    ]:
+        # This is overloaded in transaction.py to return None, since
+        # the tx options are applied at the *start* of transactions,
+        # not inside them.
+        return self._options.transaction_options
 
     def _get_state(self) -> _options.State:
         return self._options.state

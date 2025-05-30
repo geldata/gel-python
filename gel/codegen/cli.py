@@ -28,8 +28,7 @@ class ColoredArgumentParser(argparse.ArgumentParser):
         c = generator.C
         self.exit(
             2,
-            f"{c.BOLD}{c.FAIL}error:{c.ENDC} "
-            f"{c.BOLD}{message:s}{c.ENDC}\n",
+            f"{c.BOLD}{c.FAIL}error:{c.ENDC} {c.BOLD}{message:s}{c.ENDC}\n",
         )
 
 
@@ -66,30 +65,20 @@ parser.add_argument(
     choices=["blocking", "async"],
     nargs="*",
     default=["async"],
-    help="Choose one or more targets to generate code (default is async)."
+    help="Choose one or more targets to generate code (default is async).",
 )
-if sys.version_info[:2] >= (3, 9):
-    parser.add_argument(
-        "--skip-pydantic-validation",
-        action=argparse.BooleanOptionalAction,
-        default=argparse.SUPPRESS,  # override the builtin help for default
-        help="Add a mixin to generated dataclasses "
-        "to skip Pydantic validation (default is to add the mixin).",
-    )
-else:
-    parser.add_argument(
-        "--skip-pydantic-validation",
-        action="store_true",
-        default=True,
-    )
-    parser.add_argument(
-        "--no-skip-pydantic-validation",
-        dest="skip_pydantic_validation",
-        action="store_false",
-        default=False,
-        help="Add a mixin to generated dataclasses "
-             "to skip Pydantic validation (default is to add the mixin).",
-    )
+parser.add_argument(
+    "--skip-pydantic-validation",
+    action=argparse.BooleanOptionalAction,
+    default=argparse.SUPPRESS,  # override the builtin help for default
+    help="Add a mixin to generated dataclasses "
+    "to skip Pydantic validation (default is to add the mixin).",
+)
+parser.add_argument(
+    "--allow-user-specified-id",
+    action=argparse.BooleanOptionalAction,
+    help="Allow user specified ids in .edgeql files (default is to disallow).",
+)
 
 
 def main():

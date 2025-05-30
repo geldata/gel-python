@@ -39,11 +39,24 @@ class TestSyncQuery(tb.SyncQueryTestCase):
             CREATE REQUIRED PROPERTY tmp -> std::str;
         };
 
+        CREATE TYPE test::TmpConflict {
+            CREATE REQUIRED PROPERTY tmp -> std::str {
+                CREATE CONSTRAINT exclusive;
+            }
+        };
+
+        CREATE TYPE test::TmpConflictChild extending test::TmpConflict;
+
         CREATE SCALAR TYPE MyEnum EXTENDING enum<"A", "B">;
+
+        CREATE SCALAR TYPE test::MyType EXTENDING int32;
     '''
 
     TEARDOWN = '''
+        DROP SCALAR TYPE test::MyType;
         DROP TYPE test::Tmp;
+        DROP TYPE test::TmpConflictChild;
+        DROP TYPE test::TmpConflict;
     '''
 
     def test_sync_parse_error_recover_01(self):
@@ -793,6 +806,7 @@ class TestSyncQuery(tb.SyncQueryTestCase):
                     ),
                     retry_options=None,
                     state=None,
+                    transaction_options=None,
                     warning_handler=lambda _ex, _: None,
                     annotations={},
                 )
@@ -884,3 +898,145 @@ class TestSyncQuery(tb.SyncQueryTestCase):
                 tx.execute('''
                     INSERT test::Tmp { id := <uuid>$0, tmp := '' }
                 ''', uuid.uuid4())
+
+    def test_sync_default_isolation_01(self):
+        if (self.server_version.major, self.server_version.minor) < (6, 0):
+            self.skipTest("RepeatableRead not supported yet")
+
+        # Test the bug fixed in geldata/gel#8623
+        with self.client.with_config(
+            default_transaction_isolation=edgedb.IsolationLevel.RepeatableRead
+        ) as db2:
+            res = db2.query('''
+                select 1; select 2;
+            ''')
+
+    def test_sync_default_isolation_02(self):
+        if (self.server_version.major, self.server_version.minor) < (6, 0):
+            self.skipTest("RepeatableRead not supported yet")
+
+        with self.client.with_transaction_options(
+            edgedb.TransactionOptions(
+                isolation=edgedb.IsolationLevel.RepeatableRead
+            )
+        ) as db2:
+            res = db2.query_single('''
+                select sys::get_transaction_isolation()
+            ''')
+            self.assertEqual(str(res), 'RepeatableRead')
+
+        with self.client.with_transaction_options(
+            edgedb.TransactionOptions(
+                isolation=edgedb.IsolationLevel.PreferRepeatableRead
+            )
+        ) as db2:
+            res = db2.query_single('''
+                select sys::get_transaction_isolation()
+            ''')
+            self.assertEqual(str(res), 'RepeatableRead')
+
+        # transaction_options takes precedence over config
+        with self.client.with_config(
+            default_transaction_isolation=edgedb.IsolationLevel.RepeatableRead
+        ) as db1, db1.with_transaction_options(
+            edgedb.TransactionOptions(
+                isolation=edgedb.IsolationLevel.Serializable,
+            )
+        ) as db2:
+            res = db2.query_single('''
+                select sys::get_transaction_isolation()
+            ''')
+            self.assertEqual(str(res), 'Serializable')
+
+        with self.client.with_transaction_options(
+            edgedb.TransactionOptions(readonly=True)
+        ) as db2:
+            with self.assertRaises(edgedb.errors.TransactionError):
+                res = db2.execute('''
+                    insert test::Tmp { tmp := "test" }
+                ''')
+
+    def test_sync_prefer_rr_01(self):
+        if (
+            str(self.server_version.stage) != 'dev'
+            and (self.server_version.major, self.server_version.minor) < (6, 5)
+        ):
+            self.skipTest("DML in RepeatableRead not supported yet")
+
+        with self.client.with_config(
+            default_transaction_isolation=
+            edgedb.IsolationLevel.PreferRepeatableRead
+        ) as db2:
+            # This query can run in RepeatableRead mode
+            res = db2.query_single('''
+                select {
+                    ins := (insert test::Tmp { tmp := "test" }),
+                    level := sys::get_transaction_isolation(),
+                }
+            ''')
+            self.assertEqual(res.level, 'RepeatableRead')
+
+            # This one can't
+            res = db2.query_single('''
+                select {
+                    ins := (insert test::TmpConflict { tmp := "test" }),
+                    level := sys::get_transaction_isolation(),
+                }
+            ''')
+            self.assertEqual(str(res.level), 'Serializable')
+
+        with self.client.with_transaction_options(
+            edgedb.TransactionOptions(
+                isolation=edgedb.IsolationLevel.PreferRepeatableRead
+            )
+        ) as db2:
+            res = db2.query_single('''
+                select {
+                    level := sys::get_transaction_isolation(),
+                }
+            ''')
+            self.assertEqual(str(res.level), 'RepeatableRead')
+
+    def test_retry_mismatch_input_typedesc(self):
+        # Cache the input type descriptor first
+        val = self.client.query_single("SELECT <test::MyType>$0", 42)
+        self.assertEqual(val, 42)
+
+        # Modify the schema to outdate the previous type descriptor
+        self.client.execute("""
+            DROP SCALAR TYPE test::MyType;
+            CREATE SCALAR TYPE test::MyType EXTENDING std::int64;
+        """)
+
+        # Run again with the outdated type descriptor. The server shall send a
+        # ParameterTypeMismatchError following a CommandDataDescription message
+        # with an updated type descriptor. Because we can re-encode `42` as
+        # `int64`, the client should just retry and work fine.
+        val = self.client.query_single("SELECT <test::MyType>$0", 42)
+        self.assertEqual(val, 42)
+
+        # Modify the schema again to an incompatible type
+        self.client.execute("""
+            DROP SCALAR TYPE test::MyType;
+            CREATE SCALAR TYPE test::MyType EXTENDING std::str;
+        """)
+
+        # The cached codec doesn't know about the change, so the client cannot
+        # encode this string yet:
+        with self.assertRaisesRegex(
+            edgedb.InvalidArgumentError, 'expected an int'
+        ):
+            self.client.query_single("SELECT <test::MyType>$0", "foo")
+
+        # Try `42` again. The cached codec encodes properly, but the server
+        # sends a ParameterTypeMismatchError due to mismatching input type, and
+        # we shall receive the new string codec. Because we cannot re-encode
+        # `42` as str, the client shouldn't retry but raise a translated error.
+        with self.assertRaisesRegex(
+            edgedb.QueryArgumentError, 'expected str, got int'
+        ):
+            self.client.query_single("SELECT <test::MyType>$0", 42)
+
+        # At last, verify that a string gets encoded properly
+        val = self.client.query_single("SELECT <test::MyType>$0", "foo")
+        self.assertEqual(val, 'foo')

@@ -14,14 +14,14 @@ The Python driver for Gel
 **gel-python** is the official Gel driver for Python.
 It provides both blocking IO and asyncio implementations.
 
-The library requires Python 3.8 or later.
+The library requires Python 3.9 or later.
 
 
 Documentation
 -------------
 
 The project documentation can be found
-`here <https://www.geldata.com/docs/clients/00_python/index>`_.
+`here <https://docs.geldata.com/reference/clients/python#gel-python-intro>`_.
 
 
 Installation
@@ -74,7 +74,7 @@ Development
 -----------
 
 Instructions for installing Gel and gel-python locally can be found at
-`www.geldata.com/docs/reference/dev <https://www.geldata.com/docs/reference/dev>`_.
+`docs.geldata.com/resources/guides/contributing/code <https://docs.geldata.com/resources/guides/contributing/code>`_.
 
 To run the test suite, run ``$ python setup.py test``.
 

@@ -49,21 +49,23 @@ class BaseRAGClient:
         options: types.RAGOptions,
         **kwargs,
     ):
-        proto = "http" if info.params.tls_security == "insecure" else "https"
-        branch = info.params.branch
+        params = info.params
+
+        proto = "http" if params.tls_security == "insecure" else "https"
+        branch = params.branch
         self.options = options
         self.context = types.QueryContext(**kwargs)
         args = dict(
             base_url=(
                 f"{proto}://{info.host}:{info.port}/branch/{branch}/ext/ai"
             ),
-            verify=info.params.make_ssl_ctx(),
+            verify=params.make_ssl_ctx(),
         )
-        if info.params.password is not None:
-            args["auth"] = (info.params.user, info.params.password)
-        elif info.params.secret_key is not None:
+        if params.password is not None:
+            args["auth"] = (params.user, params.password)
+        elif params.secret_key is not None:
             args["headers"] = {
-                "Authorization": f"Bearer {info.params.secret_key}"
+                "Authorization": f"Bearer {params.secret_key}"
             }
         self._init_client(**args)
 
@@ -103,6 +105,35 @@ class BaseRAGClient:
             stream=stream,
         )
 
+    @staticmethod
+    def _parse_rag_response(
+        resp: typing.Any
+    )-> str:
+        data: dict[str, typing.Any] = resp.json()
+
+        if text := data.get("text"):
+            if isinstance(text, str):
+                return text
+            else:
+                raise RuntimeError(
+                    f"Expected data.text to be a string, but got "
+                    f"{type(text).__name__}: {text}"
+                )
+
+        elif response := data.get("response"):
+            if isinstance(text, str):
+                return text
+            else:
+                raise RuntimeError(
+                    f"Expected data.text to be a string, but got "
+                    f"{type(response).__name__}: {response}"
+                )
+
+        raise RuntimeError(
+            f"Expected response to include a non-empty string for either the "
+            f"'text' or 'response' key, but got: {data}"
+        )
+
 
 class RAGClient(BaseRAGClient):
     client: httpx.Client
@@ -121,7 +152,7 @@ class RAGClient(BaseRAGClient):
             ).to_httpx_request()
         )
         resp.raise_for_status()
-        return resp.json()["response"]
+        return BaseRAGClient._parse_rag_response(resp)
 
     def stream_rag(
         self, message: str, context: typing.Optional[types.QueryContext] = None
@@ -164,7 +195,7 @@ class AsyncRAGClient(BaseRAGClient):
             ).to_httpx_request()
         )
         resp.raise_for_status()
-        return resp.json()["response"]
+        return BaseRAGClient._parse_rag_response(resp)
 
     async def stream_rag(
         self, message: str, context: typing.Optional[types.QueryContext] = None

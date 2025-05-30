@@ -69,6 +69,7 @@ class QueryContext(typing.NamedTuple):
     state: typing.Optional[options.State]
     warning_handler: options.WarningHandler
     annotations: typing.Dict[str, str]
+    transaction_options: typing.Optional[options.TransactionOptions]
 
     def lower(
         self, *, allow_capabilities: enums.Capability
@@ -86,6 +87,7 @@ class QueryContext(typing.NamedTuple):
             allow_capabilities=allow_capabilities,
             state=self.state.as_dict() if self.state else None,
             annotations=self.annotations,
+            transaction_options=self.transaction_options,
         )
 
 
@@ -96,6 +98,7 @@ class ExecuteContext(typing.NamedTuple):
     state: typing.Optional[options.State]
     warning_handler: options.WarningHandler
     annotations: typing.Dict[str, str]
+    transaction_options: typing.Optional[options.TransactionOptions]
 
     def lower(
         self, *, allow_capabilities: enums.Capability
@@ -111,6 +114,7 @@ class ExecuteContext(typing.NamedTuple):
             allow_capabilities=allow_capabilities,
             state=self.state.as_dict() if self.state else None,
             annotations=self.annotations,
+            transaction_options=self.transaction_options,
         )
 
 
@@ -220,6 +224,7 @@ class ReadOnlyExecutor(BaseReadOnlyExecutor):
             query_options=_query_opts,
             retry_options=self._get_retry_options(),
             state=self._get_state(),
+            transaction_options=self._get_active_tx_options(),
             warning_handler=self._get_warning_handler(),
             annotations=self._get_annotations(),
         ))
@@ -233,6 +238,7 @@ class ReadOnlyExecutor(BaseReadOnlyExecutor):
             query_options=_query_single_opts,
             retry_options=self._get_retry_options(),
             state=self._get_state(),
+            transaction_options=self._get_active_tx_options(),
             warning_handler=self._get_warning_handler(),
             annotations=self._get_annotations(),
         ))
@@ -244,6 +250,7 @@ class ReadOnlyExecutor(BaseReadOnlyExecutor):
             query_options=_query_required_single_opts,
             retry_options=self._get_retry_options(),
             state=self._get_state(),
+            transaction_options=self._get_active_tx_options(),
             warning_handler=self._get_warning_handler(),
             annotations=self._get_annotations(),
         ))
@@ -255,6 +262,7 @@ class ReadOnlyExecutor(BaseReadOnlyExecutor):
             query_options=_query_json_opts,
             retry_options=self._get_retry_options(),
             state=self._get_state(),
+            transaction_options=self._get_active_tx_options(),
             warning_handler=self._get_warning_handler(),
             annotations=self._get_annotations(),
         ))
@@ -266,6 +274,7 @@ class ReadOnlyExecutor(BaseReadOnlyExecutor):
             query_options=_query_single_json_opts,
             retry_options=self._get_retry_options(),
             state=self._get_state(),
+            transaction_options=self._get_active_tx_options(),
             warning_handler=self._get_warning_handler(),
             annotations=self._get_annotations(),
         ))
@@ -277,6 +286,7 @@ class ReadOnlyExecutor(BaseReadOnlyExecutor):
             query_options=_query_required_single_json_opts,
             retry_options=self._get_retry_options(),
             state=self._get_state(),
+            transaction_options=self._get_active_tx_options(),
             warning_handler=self._get_warning_handler(),
             annotations=self._get_annotations(),
         ))
@@ -293,6 +303,7 @@ class ReadOnlyExecutor(BaseReadOnlyExecutor):
             query_options=_query_opts,
             retry_options=self._get_retry_options(),
             state=self._get_state(),
+            transaction_options=self._get_active_tx_options(),
             warning_handler=self._get_warning_handler(),
             annotations=self._get_annotations(),
         ))
@@ -307,6 +318,7 @@ class ReadOnlyExecutor(BaseReadOnlyExecutor):
             cache=self._get_query_cache(),
             retry_options=self._get_retry_options(),
             state=self._get_state(),
+            transaction_options=self._get_active_tx_options(),
             warning_handler=self._get_warning_handler(),
             annotations=self._get_annotations(),
         ))
@@ -322,6 +334,7 @@ class ReadOnlyExecutor(BaseReadOnlyExecutor):
             cache=self._get_query_cache(),
             retry_options=self._get_retry_options(),
             state=self._get_state(),
+            transaction_options=self._get_active_tx_options(),
             warning_handler=self._get_warning_handler(),
             annotations=self._get_annotations(),
         ))
@@ -349,6 +362,7 @@ class AsyncIOReadOnlyExecutor(BaseReadOnlyExecutor):
             query_options=_query_opts,
             retry_options=self._get_retry_options(),
             state=self._get_state(),
+            transaction_options=self._get_active_tx_options(),
             warning_handler=self._get_warning_handler(),
             annotations=self._get_annotations(),
         ))
@@ -360,6 +374,7 @@ class AsyncIOReadOnlyExecutor(BaseReadOnlyExecutor):
             query_options=_query_single_opts,
             retry_options=self._get_retry_options(),
             state=self._get_state(),
+            transaction_options=self._get_active_tx_options(),
             warning_handler=self._get_warning_handler(),
             annotations=self._get_annotations(),
         ))
@@ -376,6 +391,7 @@ class AsyncIOReadOnlyExecutor(BaseReadOnlyExecutor):
             query_options=_query_required_single_opts,
             retry_options=self._get_retry_options(),
             state=self._get_state(),
+            transaction_options=self._get_active_tx_options(),
             warning_handler=self._get_warning_handler(),
             annotations=self._get_annotations(),
         ))
@@ -387,6 +403,7 @@ class AsyncIOReadOnlyExecutor(BaseReadOnlyExecutor):
             query_options=_query_json_opts,
             retry_options=self._get_retry_options(),
             state=self._get_state(),
+            transaction_options=self._get_active_tx_options(),
             warning_handler=self._get_warning_handler(),
             annotations=self._get_annotations(),
         ))
@@ -398,6 +415,7 @@ class AsyncIOReadOnlyExecutor(BaseReadOnlyExecutor):
             query_options=_query_single_json_opts,
             retry_options=self._get_retry_options(),
             state=self._get_state(),
+            transaction_options=self._get_active_tx_options(),
             warning_handler=self._get_warning_handler(),
             annotations=self._get_annotations(),
         ))
@@ -414,6 +432,7 @@ class AsyncIOReadOnlyExecutor(BaseReadOnlyExecutor):
             query_options=_query_required_single_json_opts,
             retry_options=self._get_retry_options(),
             state=self._get_state(),
+            transaction_options=self._get_active_tx_options(),
             warning_handler=self._get_warning_handler(),
             annotations=self._get_annotations(),
         ))
@@ -430,6 +449,7 @@ class AsyncIOReadOnlyExecutor(BaseReadOnlyExecutor):
             query_options=_query_opts,
             retry_options=self._get_retry_options(),
             state=self._get_state(),
+            transaction_options=self._get_active_tx_options(),
             warning_handler=self._get_warning_handler(),
             annotations=self._get_annotations(),
         ))
@@ -444,6 +464,7 @@ class AsyncIOReadOnlyExecutor(BaseReadOnlyExecutor):
             cache=self._get_query_cache(),
             retry_options=self._get_retry_options(),
             state=self._get_state(),
+            transaction_options=self._get_active_tx_options(),
             warning_handler=self._get_warning_handler(),
             annotations=self._get_annotations(),
         ))
@@ -459,6 +480,7 @@ class AsyncIOReadOnlyExecutor(BaseReadOnlyExecutor):
             cache=self._get_query_cache(),
             retry_options=self._get_retry_options(),
             state=self._get_state(),
+            transaction_options=self._get_active_tx_options(),
             warning_handler=self._get_warning_handler(),
             annotations=self._get_annotations(),
         ))

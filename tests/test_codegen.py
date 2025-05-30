@@ -44,11 +44,7 @@ class TestCodegen(tb.AsyncQueryTestCase):
     def setUpClass(cls):
         super().setUpClass()
 
-        version = cls.loop.run_until_complete(
-            cls.client.query_required_single('''
-                select sys::get_version().major
-            ''')
-        )
+        version = cls.server_version.major
 
         if version >= 6:
             suffix = ''
@@ -111,7 +107,7 @@ class TestCodegen(tb.AsyncQueryTestCase):
 
         cmd = env.get("EDGEDB_PYTHON_TEST_CODEGEN_CMD", "gel-py")
         await run(
-            cmd, extra_env={"EDGEDB_PYTHON_CODEGEN_PY_VER": "3.8.5"}
+            cmd, extra_env={"EDGEDB_PYTHON_CODEGEN_PY_VER": "3.11.11"}
         )
         await run(
             cmd,

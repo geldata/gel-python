@@ -52,9 +52,27 @@ class RetryCondition:
 
 class IsolationLevel:
     """Isolation level for transaction"""
-    Serializable = "SERIALIZABLE"
-    RepeatableRead = "REPEATABLE READ"
+    Serializable = "Serializable"
+    RepeatableRead = "RepeatableRead"
+    PreferRepeatableRead = "PreferRepeatableRead"
 
+    @staticmethod
+    def _to_start_tx_str(v, optimistic_isolation):
+        if (
+            v == IsolationLevel.Serializable
+        ):
+            return 'SERIALIZABLE'
+        elif v == IsolationLevel.RepeatableRead:
+            return 'REPEATABLE READ'
+        elif v == IsolationLevel.PreferRepeatableRead:
+            if optimistic_isolation:
+                return 'REPEATABLE READ'
+            else:
+                return 'SERIALIZABLE'
+        else:
+            raise ValueError(
+                f"Invalid isolation_level value for transaction(): {self}"
+            )
 
 class RetryOptions:
     """An immutable class that contains rules for `transaction()`"""
@@ -105,9 +123,9 @@ class TransactionOptions:
 
     def __init__(
         self,
-        isolation: IsolationLevel=IsolationLevel.Serializable,
-        readonly: bool = False,
-        deferrable: bool = False,
+        isolation: typing.Optional[IsolationLevel] = None,
+        readonly: typing.Optional[bool] = None,
+        deferrable: typing.Optional[bool] = None,
     ):
         self._isolation = isolation
         self._readonly = readonly
@@ -117,19 +135,29 @@ class TransactionOptions:
     def defaults(cls):
         return cls()
 
-    def start_transaction_query(self):
-        isolation = str(self._isolation)
-        if self._readonly:
-            mode = 'READ ONLY'
-        else:
-            mode = 'READ WRITE'
+    def start_transaction_query(self, optimistic_isolation: bool):
+        options = []
+        if self._isolation is not None:
+            level = IsolationLevel._to_start_tx_str(
+                self._isolation, optimistic_isolation)
+            options.append(f'ISOLATION {level}')
 
-        if self._deferrable:
-            defer = 'DEFERRABLE'
-        else:
-            defer = 'NOT DEFERRABLE'
+        if self._readonly is not None:
+            if self._readonly:
+                mode = 'READ ONLY'
+            else:
+                mode = 'READ WRITE'
+            options.append(mode)
 
-        return f'START TRANSACTION ISOLATION {isolation}, {mode}, {defer};'
+        if self._deferrable is not None:
+            if self._deferrable:
+                defer = 'DEFERRABLE'
+            else:
+                defer = 'NOT DEFERRABLE'
+            options.append(defer)
+
+        opt_str = ', '.join(options)
+        return f'START TRANSACTION {opt_str};'
 
     def __repr__(self):
         return (

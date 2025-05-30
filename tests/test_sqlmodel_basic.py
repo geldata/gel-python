@@ -57,9 +57,7 @@ class TestSQLModelBasic(tb.SQLModelTestCase):
     def setUp(self):
         super().setUp()
 
-        if self.client.query_required_single('''
-            select sys::get_version().major < 6
-        '''):
+        if self.server_version.major < 6:
             self.skipTest("Test needs SQL DML queries")
 
         self.sess.begin()
@@ -333,6 +331,7 @@ class TestSQLModelBasic(tb.SQLModelTestCase):
         ).one()
 
         self.assertEqual(res.name, 'hello world')
+        self.assertEqual(res.vals, ['brown', 'fox'])
         self.assertEqual(res.bstr, b'word\x00\x0b')
         self.assertEqual(
             res.time,
@@ -632,7 +631,7 @@ class TestSQLModelBasic(tb.SQLModelTestCase):
         ).one()
 
         res.name = 'New Name'
-        # res.vals.append('jumped')
+        res.vals.append('jumped')
         res.bstr = b'\x01success\x02'
         res.time = dt.time(8, 23, 54, 999_000)
         res.date = dt.date(2020, 2, 14)
@@ -647,6 +646,7 @@ class TestSQLModelBasic(tb.SQLModelTestCase):
         ).one()
 
         self.assertEqual(upd.name, 'New Name')
+        self.assertEqual(upd.vals, ['brown', 'fox', 'jumped'])
         self.assertEqual(upd.bstr, b'\x01success\x02')
         self.assertEqual(
             upd.time,

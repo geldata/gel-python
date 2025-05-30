@@ -33,14 +33,22 @@ cdef class BaseArrayCodec(BaseCodec):
     cdef encode(self, WriteBuffer buf, object obj):
         cdef:
             WriteBuffer elem_data
+            WriteBuffer tuple_elem_data
             int32_t ndims = 1
             Py_ssize_t objlen
             Py_ssize_t i
 
         if not isinstance(
             self.sub_codec,
-            (ScalarCodec, TupleCodec, NamedTupleCodec, EnumCodec,
-             RangeCodec, MultiRangeCodec)
+            (
+                ScalarCodec,
+                TupleCodec,
+                NamedTupleCodec,
+                EnumCodec,
+                RangeCodec,
+                MultiRangeCodec,
+                ArrayCodec,
+            )
         ):
             raise TypeError(
                 'only arrays of scalars are supported (got type {!r})'.format(
@@ -67,7 +75,20 @@ cdef class BaseArrayCodec(BaseCodec):
                 )
             else:
                 try:
-                    self.sub_codec.encode(elem_data, item)
+                    if isinstance(self.sub_codec, ArrayCodec):
+                        # This is an array of array.
+                        # Wrap the inner array with a tuple.
+                        tuple_elem_data = WriteBuffer.new()
+                        self.sub_codec.encode(tuple_elem_data, item)
+
+                        elem_data.write_int32(4 + 4 + tuple_elem_data.len()) # buffer length
+                        elem_data.write_int32(1) # tuple_elem_count
+                        elem_data.write_int32(0) # reserved
+                        elem_data.write_buffer(tuple_elem_data)
+
+                    else:
+                        self.sub_codec.encode(elem_data, item)
+
                 except TypeError as e:
                     raise ValueError(
                         'invalid array element: {}'.format(
@@ -121,8 +142,27 @@ cdef class BaseArrayCodec(BaseCodec):
             if elem_len == -1:
                 elem = None
             else:
-                frb_slice_from(&elem_buf, buf, elem_len)
-                elem = self.sub_codec.decode(&elem_buf)
+
+                if isinstance(self.sub_codec, ArrayCodec):
+                    # This is an array of array
+                    # Unwrap the tuple from the inner array.
+                    tuple_elem_count = <Py_ssize_t><uint32_t>hton.unpack_int32(frb_read(buf, 4))
+                    if tuple_elem_count != 1:
+                        raise RuntimeError(
+                            f'cannot decode inner array: expected 1 '
+                            f'element, got {tuple_elem_count}')
+
+                    frb_read(buf, 4)  # reserved
+                    tuple_elem_len = hton.unpack_int32(frb_read(buf, 4))
+
+                    elem = self.sub_codec.decode(
+                        frb_slice_from(&elem_buf, buf, tuple_elem_len)
+                    )
+
+                else:
+                    frb_slice_from(&elem_buf, buf, elem_len)
+                    elem = self.sub_codec.decode(&elem_buf)
+
                 if frb_get_len(&elem_buf):
                     raise RuntimeError(
                         f'unexpected trailing data in buffer after '
