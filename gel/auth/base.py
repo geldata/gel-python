@@ -53,6 +53,8 @@ class BaseClient(Generic[C]):
             kwargs["base_url"] = base_url.join(
                 f"branch/{params.branch}/ext/auth"
             )
+        if "verify" not in kwargs:
+            kwargs["verify"] = connection_info.params.make_ssl_ctx()
         self._client = self._init_http_client(**kwargs)
 
     def _init_http_client(self, **kwargs) -> C:
