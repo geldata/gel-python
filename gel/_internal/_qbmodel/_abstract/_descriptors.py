@@ -7,11 +7,14 @@
 from __future__ import annotations
 from typing import TYPE_CHECKING, Any, Generic, TypeVar, overload
 
+import dataclasses
+import types
 import typing
 
 # XXX: get rid of this
 from pydantic._internal import _namespace_utils  # noqa: PLC2701
 
+from gel._internal import _edgeql
 from gel._internal import _qb
 from gel._internal import _typing_eval
 from gel._internal import _typing_inspect
@@ -26,7 +29,7 @@ class ModelFieldDescriptor(_qb.AbstractFieldDescriptor):
         "__gel_name__",
         "__gel_origin__",
         "__gel_resolved_type__",
-        "__gel_resolved_type_origin__",
+        "__gel_resolved_type_generic__",
     )
 
     def __init__(
@@ -39,7 +42,7 @@ class ModelFieldDescriptor(_qb.AbstractFieldDescriptor):
         self.__gel_name__ = name
         self.__gel_annotation__ = annotation
         self.__gel_resolved_type__: type[GelType] | None = None
-        self.__gel_resolved_type_origin__: type | None = None
+        self.__gel_resolved_type_generic__: types.GenericAlias | None = None
 
     def __repr__(self) -> str:
         qualname = f"{self.__gel_origin__.__qualname__}.{self.__gel_name__}"
@@ -77,7 +80,7 @@ class ModelFieldDescriptor(_qb.AbstractFieldDescriptor):
             and _typing_inspect.is_generic_alias(t)
             and issubclass(typing.get_origin(t), PointerDescriptor)
         ):
-            self.__gel_resolved_type_origin__ = typing.get_origin(t)
+            self.__gel_resolved_type_generic__ = t
             t = typing.get_args(t)[0]
 
         if t is not None:
@@ -89,14 +92,14 @@ class ModelFieldDescriptor(_qb.AbstractFieldDescriptor):
 
         return t
 
-    def get_resolved_type_generic_origin(self) -> type | None:
-        t = self.__gel_resolved_type_origin__
+    def get_resolved_type_generic(self) -> types.GenericAlias | None:
+        t = self.__gel_resolved_type_generic__
         if t is None:
             t = self._try_resolve_type()
         if t is None:
             raise RuntimeError(f"cannot resolve type of {self._fqname}")
         else:
-            return self.__gel_resolved_type_origin__
+            return self.__gel_resolved_type_generic__
 
     def get_resolved_type(self) -> type[GelType] | None:
         t = self.__gel_resolved_type__
@@ -179,18 +182,21 @@ class OptionalPointerDescriptor(PointerDescriptor[T_co, BT_co]):
         def __set__(self, obj: Any, value: BT_co | None) -> None: ...
 
 
-class ComputedPointerDescriptor(PointerDescriptor[T_co, BT_co]):
-    pass
+@dataclasses.dataclass(kw_only=True, frozen=True)
+class PointerInfo:
+    computed: bool = False
+    readonly: bool = False
+    has_props: bool = False
+    cardinality: _edgeql.Cardinality = _edgeql.Cardinality.One
+    annotation: type[Any] | None = None
+    kind: _edgeql.PointerKind | None = None
 
 
 class AnyPropertyDescriptor(PointerDescriptor[T_co, BT_co]):
     pass
 
 
-class ComputedPropertyDescriptor(
-    ComputedPointerDescriptor[T_co, BT_co],
-    AnyPropertyDescriptor[T_co, BT_co],
-):
+class PropertyDescriptor(AnyPropertyDescriptor[T_co, BT_co]):
     pass
 
 

@@ -20,6 +20,8 @@ from typing_extensions import (
     Self,
 )
 
+import dataclasses
+import inspect
 import typing
 import uuid
 import warnings
@@ -31,6 +33,7 @@ from pydantic_core import core_schema
 
 from pydantic._internal import _model_construction  # noqa: PLC2701
 
+from gel._internal import _edgeql
 from gel._internal import _qb
 from gel._internal import _lazyprop
 from gel._internal import _typing_inspect
@@ -43,9 +46,36 @@ if TYPE_CHECKING:
     from collections.abc import Iterator, Iterable
 
 
-class GelModelMeta(_model_construction.ModelMetaclass, _abstract.GelModelMeta):
-    __gel_annotations_cache__: dict[str, Any] | None = None
+@dataclasses.dataclass(kw_only=True, frozen=True)
+class Pointer:
+    cardinality: _edgeql.Cardinality
+    computed: bool
+    has_props: bool
+    kind: _edgeql.PointerKind
+    name: str
+    readonly: bool
+    type: type[Any]
 
+    @classmethod
+    def from_ptr_info(
+        cls,
+        name: str,
+        type_: type[Any],
+        kind: _edgeql.PointerKind,
+        ptrinfo: _abstract.PointerInfo,
+    ) -> Self:
+        return cls(
+            cardinality=ptrinfo.cardinality,
+            computed=ptrinfo.computed,
+            has_props=ptrinfo.has_props,
+            kind=kind,
+            name=name,
+            readonly=ptrinfo.readonly,
+            type=type_,
+        )
+
+
+class GelModelMeta(_model_construction.ModelMetaclass, _abstract.GelModelMeta):
     def __new__(  # noqa: PYI034
         mcls,
         name: str,
@@ -82,18 +112,11 @@ class GelModelMeta(_model_construction.ModelMetaclass, _abstract.GelModelMeta):
 
     def __setattr__(cls, name: str, value: Any, /) -> None:  # noqa: N805
         if name == "__pydantic_fields__":
-            fields: dict[str, pydantic.fields.FieldInfo] = value
-            for field in fields.values():
-                fdef = field.default
-                if isinstance(
-                    fdef, (_qb.AbstractDescriptor, _qb.PathAlias)
-                ) or (
-                    _typing_inspect.is_annotated(fdef)
-                    and isinstance(fdef.__origin__, _qb.AbstractDescriptor)
-                ):
-                    field.default = pydantic_core.PydanticUndefined
-
-        super().__setattr__(name, value)
+            fields, ptr_infos = _process_pydantic_fields(cls, value)  # type: ignore [arg-type]
+            super().__setattr__("__pydantic_fields__", fields)
+            super().__setattr__("__gel_pointer_infos__", ptr_infos)
+        else:
+            super().__setattr__(name, value)
 
     # Splat qb protocol
     def __iter__(cls) -> Iterator[_qb.PathAlias]:  # noqa: N805
@@ -111,19 +134,133 @@ class GelModelMeta(_model_construction.ModelMetaclass, _abstract.GelModelMeta):
             )
             if desc is None:
                 continue
-            fgeneric = desc.get_resolved_type_generic_origin()
+            fgeneric = desc.get_resolved_type_generic()
             if fgeneric is None or issubclass(
-                fgeneric, _abstract.AnyPropertyDescriptor
+                typing.get_origin(fgeneric), _abstract.AnyPropertyDescriptor
             ):
                 ptrs.append(getattr(cls, fname))
 
         return tuple(ptrs)
 
-    def __gel_annotations__(cls) -> dict[str, Any]:  # noqa: N805
-        if cls.__gel_annotations_cache__ is not None:
-            return cls.__gel_annotations_cache__
-        cls.__gel_annotations_cache__ = typing.get_type_hints(cls)
-        return cls.__gel_annotations_cache__
+    def __gel_pointers__(cls) -> dict[str, Pointer]:  # noqa: N805
+        return _resolve_pointers(cls)  # type: ignore [arg-type]
+
+
+def _resolve_pointers(cls: type[GelModel]) -> dict[str, Pointer]:
+    pointers = {}
+    for ptr_name, ptr_info in cls.__gel_pointer_infos__.items():
+        descriptor = inspect.getattr_static(cls, ptr_name)
+        if not isinstance(descriptor, _abstract.ModelFieldDescriptor):
+            raise AssertionError(
+                f"'{cls}.{ptr_name}' is not a ModelFieldDescriptor"
+            )
+        t = descriptor.get_resolved_type()
+        if t is None:
+            raise TypeError(
+                f"the type of '{cls}.{ptr_name}' has not been resolved"
+            )
+        tgeneric = descriptor.get_resolved_type_generic()
+        if tgeneric is not None:
+            torigin = typing.get_origin(tgeneric)
+            if (
+                issubclass(torigin, _abstract.PointerDescriptor)
+                and (
+                    resolve := getattr(torigin, "__gel_resolve_dlist__", None)
+                )
+                is not None
+            ):
+                args = typing.get_args(tgeneric)
+                t = resolve(args)
+
+        kind = (
+            _edgeql.PointerKind.Link
+            if isinstance(t, GelModelMeta)
+            else _edgeql.PointerKind.Property
+        )
+        pointers[ptr_name] = Pointer.from_ptr_info(
+            ptr_name,
+            t,
+            kind,
+            ptr_info,
+        )
+
+    return pointers
+
+
+def _process_pydantic_fields(
+    cls: type[GelModel],
+    fields: dict[str, pydantic.fields.FieldInfo],
+) -> tuple[
+    dict[str, pydantic.fields.FieldInfo],
+    dict[str, _abstract.PointerInfo],
+]:
+    ptr_infos_dict: dict[str, _abstract.PointerInfo] = {}
+
+    for fn, field in fields.items():
+        fdef = field.default
+        overrides: dict[str, Any] = {}
+
+        if isinstance(fdef, (_qb.AbstractDescriptor, _qb.PathAlias)) or (
+            _typing_inspect.is_annotated(fdef)
+            and isinstance(fdef.__origin__, _qb.AbstractDescriptor)
+        ):
+            field.default = pydantic_core.PydanticUndefined
+            field._attributes_set.pop("default", None)
+            overrides["default"] = ...
+
+        anno = _typing_inspect.inspect_annotation(
+            field.annotation,
+            annotation_source=_typing_inspect.AnnotationSource.CLASS,
+            unpack_type_aliases="lenient",
+        )
+
+        if _typing_inspect.is_generic_type_alias(field.annotation):
+            field_infos = [
+                a
+                for a in anno.metadata
+                if isinstance(a, pydantic.fields.FieldInfo)
+            ]
+            if field_infos:
+                overrides["annotation"] = field.annotation
+
+            ptr_infos = [
+                a
+                for a in anno.metadata
+                if isinstance(a, _abstract.PointerInfo)
+            ]
+        else:
+            field_infos = []
+            ptr_infos = []
+
+        num_ptr_infos = len(ptr_infos)
+        if num_ptr_infos == 0:
+            ptr_info = _abstract.PointerInfo()
+        elif num_ptr_infos == 1:
+            ptr_info = ptr_infos[0]
+        else:
+            ptr_info_kwargs: dict[str, Any] = {}
+            for entry in ptr_infos:
+                ptr_info_kwargs |= dataclasses.asdict(entry)
+            ptr_info = _abstract.PointerInfo(**ptr_info_kwargs)
+
+        ptr_infos_dict[fn] = ptr_info
+
+        if overrides:
+            if field_infos:
+                merged = pydantic.fields.FieldInfo.merge_field_infos(
+                    field,
+                    *field_infos,
+                    **overrides,
+                )
+            else:
+                merged = pydantic.fields.FieldInfo(
+                    **field._attributes_set,  # type: ignore [arg-type]
+                    **overrides,
+                )
+
+            fields[fn] = merged
+
+    return fields, ptr_infos_dict
 
 
 class GelModel(
@@ -137,6 +274,8 @@ class GelModel(
         defer_build=True,
         extra="forbid",
     )
+
+    __gel_pointer_infos__: ClassVar[dict[str, _abstract.PointerInfo]]
 
     if TYPE_CHECKING:
         id: uuid.UUID

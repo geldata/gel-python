@@ -5,13 +5,19 @@
 """Pydantic implementation of the query builder model"""
 
 from ._fields import (
+    ComputedMultiLink,
+    ComputedMultiLinkWithProps,
     ComputedProperty,
     IdProperty,
     MultiLink,
     MultiLinkWithProps,
+    OptionalComputedLink,
+    OptionalComputedLinkWithProps,
+    OptionalComputedProperty,
     OptionalLink,
     OptionalLinkWithProps,
     OptionalProperty,
+    Property,
 )
 
 from ._models import (
@@ -34,6 +40,8 @@ from ._types import (
 
 __all__ = (
     "Array",
+    "ComputedMultiLink",
+    "ComputedMultiLinkWithProps",
     "ComputedProperty",
     "GelLinkModel",
     "GelModel",
@@ -44,9 +52,13 @@ __all__ = (
     "MultiLink",
     "MultiLinkWithProps",
     "MultiRange",
+    "OptionalComputedLink",
+    "OptionalComputedLinkWithProps",
+    "OptionalComputedProperty",
     "OptionalLink",
     "OptionalLinkWithProps",
     "OptionalProperty",
+    "Property",
     "ProxyModel",
     "PyTypeScalar",
     "Range",

@@ -9,6 +9,11 @@ from ._quoting import (
     needs_quoting,
 )
 
+from ._schema import (
+    Cardinality,
+    PointerKind,
+)
+
 from ._tokens import (
     PRECEDENCE,
     Assoc,
@@ -23,7 +28,9 @@ from ._tokens import (
 __all__ = (
     "PRECEDENCE",
     "Assoc",
+    "Cardinality",
     "Operation",
+    "PointerKind",
     "Precedence",
     "Token",
     "need_left_parens",

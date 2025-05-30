@@ -15,13 +15,14 @@ from ._base import (
 
 from ._descriptors import (
     AnyPropertyDescriptor,
-    ComputedPropertyDescriptor,
     LinkDescriptor,
     ModelFieldDescriptor,
     OptionalLinkDescriptor,
     OptionalPointerDescriptor,
     OptionalPropertyDescriptor,
     PointerDescriptor,
+    PointerInfo,
+    PropertyDescriptor,
     field_descriptor,
 )
 
@@ -50,7 +51,6 @@ __all__ = (
     "AnyTuple",
     "Array",
     "BaseScalar",
-    "ComputedPropertyDescriptor",
     "GelModel",
     "GelModelMeta",
     "GelPrimitiveType",
@@ -65,6 +65,8 @@ __all__ = (
     "OptionalPointerDescriptor",
     "OptionalPropertyDescriptor",
     "PointerDescriptor",
+    "PointerInfo",
+    "PropertyDescriptor",
     "PyConstType",
     "PyTypeScalar",
     "Range",

@@ -18,6 +18,7 @@
 
 import dataclasses
 import inspect
+import typing
 
 from gel.datatypes import datatypes
 from gel._internal import _dlist
@@ -324,19 +325,21 @@ cdef class ObjectCodec(BaseNamedRecordCodec):
                     dlist_factory = None
                     desc = inspect.getattr_static(return_type, name, None)
                     if desc is not None and hasattr(desc, '__gel_resolved_type__'):
-                        target = desc.get_resolved_type_generic_origin()
-                        if hasattr(target, '__gel_resolve_dlist__'):
-                            dlist_factory = target.__gel_resolve_dlist__(
-                                desc.get_resolved_type()
-                            )
-                            if (
-                                not isinstance(dlist_factory, type) or
-                                not issubclass(dlist_factory, _dlist.DistinctList)
-                            ):
-                                raise RuntimeError(
-                                    f'invalid type returned from __gel_resolve_dlist__(), '
-                                    f'a DistinctList was expected, got {dlist_factory!r}'
+                        target = desc.get_resolved_type_generic()
+                        if target is not None:
+                            torigin = typing.get_origin(target)
+                            if hasattr(torigin, '__gel_resolve_dlist__'):
+                                dlist_factory = torigin.__gel_resolve_dlist__(
+                                    typing.get_args(target),
                                 )
+                                if (
+                                    not isinstance(dlist_factory, type) or
+                                    not issubclass(dlist_factory, _dlist.DistinctList)
+                                ):
+                                    raise RuntimeError(
+                                        f'invalid type returned from __gel_resolve_dlist__(), '
+                                        f'a DistinctList was expected, got {dlist_factory!r}'
+                                    )
 
                     dlists.append(dlist_factory)
             else:

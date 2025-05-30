@@ -17,6 +17,12 @@ from typing import _GenericAlias, _SpecialGenericAlias  # type: ignore [attr-def
 from typing_extensions import TypeAliasType
 from types import GenericAlias, UnionType
 
+from typing_inspection.introspection import (
+    AnnotationSource,
+    InspectedAnnotation,
+    inspect_annotation,
+)
+
 
 def is_classvar(t: Any) -> bool:
     return t is ClassVar or (is_generic_alias(t) and get_origin(t) is ClassVar)  # type: ignore [comparison-overlap]
@@ -28,6 +34,10 @@ def is_generic_alias(t: Any) -> TypeGuard[GenericAlias]:
 
 def is_type_alias(t: Any) -> TypeGuard[TypeAliasType]:
     return isinstance(t, TypeAliasType)
+
+
+def is_generic_type_alias(t: Any) -> TypeGuard[GenericAlias]:
+    return is_generic_alias(t) and isinstance(get_origin(t), TypeAliasType)
 
 
 def is_annotated(t: Any) -> TypeGuard[Annotated[Any, ...]]:
@@ -47,3 +57,18 @@ def is_union_type(t: Any) -> bool:
 
 def is_optional_type(t: Any) -> bool:
     return is_union_type(t) and type(None) in get_args(t)
+
+
+__all__ = (
+    "AnnotationSource",
+    "InspectedAnnotation",
+    "inspect_annotation",
+    "is_annotated",
+    "is_classvar",
+    "is_forward_ref",
+    "is_generic_alias",
+    "is_generic_type_alias",
+    "is_optional_type",
+    "is_type_alias",
+    "is_union_type",
+)
