@@ -44,9 +44,6 @@ C = TypeVar("C", bound=Union[httpx.Client, httpx.AsyncClient])
 
 
 class BaseBuiltinUI(BaseClient[C]):
-    def __init__(self, *, connection_info: gel.ConnectionInfo, **kwargs):
-        super().__init__(connection_info=connection_info, **kwargs)
-
     def start_sign_in(self) -> BuiltinUIResponse:
         logger.info("starting sign-in flow")
         pkce = self._generate_pkce()
