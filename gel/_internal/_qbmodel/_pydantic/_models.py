@@ -25,6 +25,7 @@ import inspect
 import typing
 import uuid
 import warnings
+import weakref
 
 import pydantic
 import pydantic.fields
@@ -75,6 +76,11 @@ class Pointer:
         )
 
 
+_model_pointers_cache: weakref.WeakKeyDictionary[
+    type[GelModel], dict[str, Pointer]
+] = weakref.WeakKeyDictionary()
+
+
 class GelModelMeta(_model_construction.ModelMetaclass, _abstract.GelModelMeta):
     def __new__(  # noqa: PYI034
         mcls,
@@ -115,6 +121,7 @@ class GelModelMeta(_model_construction.ModelMetaclass, _abstract.GelModelMeta):
             fields, ptr_infos = _process_pydantic_fields(cls, value)  # type: ignore [arg-type]
             super().__setattr__("__pydantic_fields__", fields)
             super().__setattr__("__gel_pointer_infos__", ptr_infos)
+            _model_pointers_cache.pop(cls, None)  # type: ignore [call-overload]
         else:
             super().__setattr__(name, value)
 
@@ -143,7 +150,13 @@ class GelModelMeta(_model_construction.ModelMetaclass, _abstract.GelModelMeta):
         return tuple(ptrs)
 
     def __gel_pointers__(cls) -> dict[str, Pointer]:  # noqa: N805
-        return _resolve_pointers(cls)  # type: ignore [arg-type]
+        cls = cast("type[GelModel]", cls)
+        result = _model_pointers_cache.get(cls)
+        if result is None:
+            result = _resolve_pointers(cls)
+            _model_pointers_cache[cls] = result
+
+        return result
 
 
 def _resolve_pointers(cls: type[GelModel]) -> dict[str, Pointer]:
