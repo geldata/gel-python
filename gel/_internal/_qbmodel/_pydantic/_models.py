@@ -44,6 +44,7 @@ from gel._internal import _utils
 from gel._internal._qbmodel import _abstract
 
 if TYPE_CHECKING:
+    from typing import Type  # noqa: UP035
     from collections.abc import Iterator, Iterable
 
 
@@ -61,7 +62,9 @@ class Pointer:
     def from_ptr_info(
         cls,
         name: str,
-        type_: type[Any],
+        # We're using `Type[Any]` below because `type` is bound
+        # to `type[Any]` a few lines above.
+        type: Type[Any],  # noqa: UP006, A002
         kind: _edgeql.PointerKind,
         ptrinfo: _abstract.PointerInfo,
     ) -> Self:
@@ -72,7 +75,7 @@ class Pointer:
             kind=kind,
             name=name,
             readonly=ptrinfo.readonly,
-            type=type_,
+            type=type,
         )
 
 
@@ -184,6 +187,10 @@ def _resolve_pointers(cls: type[GelModel]) -> dict[str, Pointer]:
             ):
                 args = typing.get_args(tgeneric)
                 t = resolve(args)
+                if t is None:
+                    raise TypeError(
+                        f"the type of '{cls}.{ptr_name}' has not been resolved"
+                    )
 
         kind = (
             _edgeql.PointerKind.Link
