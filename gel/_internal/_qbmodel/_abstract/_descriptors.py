@@ -139,7 +139,7 @@ class ModelFieldDescriptor(_qb.AbstractFieldDescriptor):
         owner: type[Any] | None = None,
     ) -> Any:
         if instance is not None:
-            return self
+            raise AttributeError(f"{self.__gel_name__!r} is not set")
         else:
             assert owner is not None
             return self.get(owner)

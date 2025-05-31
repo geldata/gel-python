@@ -256,6 +256,19 @@ class TestModelGenerator(tb.ModelTestCase):
         ):
             post.xxx = 123
 
+    @tb.typecheck
+    def test_modelgen_data_unpack_4(self):
+        from models import default
+
+        q = default.Post.select(
+            author=True,
+        ).limit(1)
+
+        d = self.client.query_required_single(q)
+
+        with self.assertRaisesRegex(AttributeError, r".body. is not set"):
+            print(d.body)
+
     def test_modelgen_data_model_validation_1(self):
         from models import default
 
