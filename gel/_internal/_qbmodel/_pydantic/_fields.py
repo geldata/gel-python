@@ -13,7 +13,6 @@ from typing import (
     Generic,
     SupportsIndex,
     TypeVar,
-    Tuple,
     overload,
 )
 
@@ -35,7 +34,6 @@ from gel._internal import _dlist
 from gel._internal import _edgeql
 from gel._internal import _typing_inspect
 from gel._internal import _unsetid
-from gel._internal import _typing_parametric as parametric
 
 from gel._internal._qbmodel import _abstract
 
@@ -62,6 +60,22 @@ _PT_co = TypeVar("_PT_co", bound=ProxyModel[GelModel], covariant=True)
 
 
 class Property(_abstract.PropertyDescriptor[_ST_co, _BT_co]):
+    if TYPE_CHECKING:
+
+        @overload
+        def __get__(self, obj: None, objtype: type[Any]) -> type[_ST_co]: ...
+
+        @overload
+        def __get__(self, obj: object, objtype: Any = None) -> _ST_co: ...
+
+        def __get__(
+            self,
+            obj: Any,
+            objtype: Any = None,
+        ) -> type[_ST_co] | _ST_co: ...
+
+        def __set__(self, obj: Any, value: _ST_co | _BT_co) -> None: ...
+
     @classmethod
     def __get_pydantic_core_schema__(
         cls,
@@ -75,10 +89,37 @@ class Property(_abstract.PropertyDescriptor[_ST_co, _BT_co]):
             return handler.generate_schema(source_type)
 
 
+class _ComputedProperty(_abstract.PropertyDescriptor[_ST_co, _BT_co]):
+    if TYPE_CHECKING:
+
+        @overload
+        def __get__(self, obj: None, objtype: type[Any]) -> type[_ST_co]: ...
+
+        @overload
+        def __get__(self, obj: object, objtype: Any = None) -> _ST_co: ...
+
+        def __get__(
+            self,
+            obj: Any,
+            objtype: Any = None,
+        ) -> type[_ST_co] | _ST_co: ...
+
+    @classmethod
+    def __get_pydantic_core_schema__(
+        cls,
+        source_type: Any,
+        handler: pydantic.GetCoreSchemaHandler,
+    ) -> pydantic_core.CoreSchema:
+        return core_schema.with_default_schema(
+            core_schema.any_schema(),
+            default=None,
+        )
+
+
 ComputedProperty = TypeAliasType(
     "ComputedProperty",
     Annotated[
-        Property[_ST_co, _BT_co],
+        _ComputedProperty[_ST_co, _BT_co],
         pydantic.Field(init=False, frozen=True),
         _abstract.PointerInfo(
             computed=True,

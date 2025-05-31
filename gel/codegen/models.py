@@ -1675,7 +1675,8 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         init_pointers = [
             (ptr, obj)
             for ptr, obj in reg_pointers
-            if ptr.name != "id" or objtype.name.startswith("schema::")
+            if (ptr.name != "id" and not ptr.is_computed)
+            or objtype.name.startswith("schema::")
         ]
         args = []
         if init_pointers:
@@ -1738,7 +1739,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                 union.extend((f"type[{narrow_ptr_t}]", unspec_t))
                 select_union.extend((f"type[{narrow_ptr_t}]", unspec_t))
                 ptr_t = f"{' | '.join(union)} = {unspec}"
-                if not ptr.is_readonly:
+                if not ptr.is_readonly and not ptr.is_computed:
                     update_args.append(f"{ptr.name}: {ptr_t}")
                 filter_args.append(f"{ptr.name}: {ptr_t}")
                 select_ptr_t = f"{' | '.join(select_union)} = {unspec}"
@@ -2363,7 +2364,13 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         elif cardinality.is_multi():
             pytype = f"list[{broad_type}]"  # XXX: this is wrong
         elif cardinality.is_optional():
-            desc = self.import_name(BASE_IMPL, "OptionalProperty")
+            if prop.is_computed:
+                desc = self.import_name(BASE_IMPL, "OptionalComputedProperty")
+            else:
+                desc = self.import_name(BASE_IMPL, "OptionalProperty")
+            pytype = f"{desc}[{narrow_type}, {broad_type}]"
+        elif prop.is_computed:
+            desc = self.import_name(BASE_IMPL, "ComputedProperty")
             pytype = f"{desc}[{narrow_type}, {broad_type}]"
         else:
             pytype = narrow_type

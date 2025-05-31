@@ -337,7 +337,9 @@ class TestModelGenerator(tb.ModelTestCase):
         with self.assertRaisesRegex(AttributeError, r".body. is not set"):
             d.body
 
+    @tb.typecheck
     def test_modelgen_data_model_validation_1(self):
+        from gel._internal._dlist import DistinctList
         from models import default
 
         gs = default.GameSession(num=7)
@@ -346,13 +348,72 @@ class TestModelGenerator(tb.ModelTestCase):
         with self.assertRaisesRegex(
             ValueError, r"(?s)only instances of User are allowed, got .*int"
         ):
-            default.GameSession.players(1)
+            default.GameSession.players(1)  # type: ignore
 
         p = default.Post(body="aaa")
         with self.assertRaisesRegex(
             ValueError, r"(?s)prayers.*Extra inputs are not permitted"
         ):
-            default.GameSession(num=7, prayers=[p])
+            default.GameSession(num=7, prayers=[p])  # type: ignore
+
+        # Check that `groups` is not an allowed keyword-arg for `User.__init__`
+        self.assertEqual(
+            reveal_type(default.User),
+            "def (*, name: builtins.str, nickname: Union[builtins.str, None] =) "
+            "-> models.default.User",
+        )
+
+        # This also tests that "required computeds" are not "required" as
+        # args to `__init__`, and this wasn't straightforward to fix.
+        u = default.User(name="aaaa")
+
+        # Check that `groups` is not an allowed keyword-arg for `User.update`
+        self.assertEqual(
+            reveal_type(u.update),
+            "def (*, "
+            "name: Union[builtins.str, type[models.__variants__.std.str], "
+            "gel._internal._utils.UnspecifiedType] =, "
+            "nickname: Union[builtins.str, type[models.__variants__.std.str], "
+            "gel._internal._utils.UnspecifiedType] =)"
+            " -> type[models.default.User]",
+        )
+
+        self.assertEqual(
+            reveal_type(u.id),
+            "models.__variants__.std.uuid",
+        )
+
+        self.assertEqual(
+            reveal_type(u.name),
+            "models.__variants__.std.str",
+        )
+
+        self.assertEqual(
+            reveal_type(u.nickname),
+            "Union[models.__variants__.std.str, None]",
+        )
+
+        self.assertEqual(
+            reveal_type(u.name_len),
+            "models.__variants__.std.int64",
+        )
+
+        self.assertEqual(
+            reveal_type(u.nickname_len),
+            "Union[models.__variants__.std.int64, None]",
+        )
+
+        # Let's test computed link as an arg
+        with self.assertRaisesRegex(
+            ValueError, r"(?s)cannot set field .groups. on User"
+        ):
+            default.User(groups=(1, 2, 3))  # type: ignore
+
+        # Let's test computed property as an arg
+        with self.assertRaisesRegex(
+            ValueError, r"(?s)cannot set field .name_len. on User"
+        ):
+            default.User(name_len=(1, 2, 3))  # type: ignore
 
     def test_modelgen_reflection_1(self):
         from models import default, std

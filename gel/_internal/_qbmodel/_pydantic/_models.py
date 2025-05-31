@@ -306,6 +306,16 @@ class GelModel(
         @classmethod
         def __edgeql__(cls) -> tuple[type[Self], str]: ...
 
+    def __init__(self, /, **kwargs: Any) -> None:
+        cls = type(self)
+        for field_name, field in cls.__pydantic_fields__.items():
+            # ignore `field.init=None` - unset, so we're fine with it.
+            if field.init is False and field_name in kwargs:
+                raise ValueError(
+                    f"cannot set field {field_name!r} on {cls.__name__}"
+                )
+        super().__init__(**kwargs)
+
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, GelModel):
             return NotImplemented
