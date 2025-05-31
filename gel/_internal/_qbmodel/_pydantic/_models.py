@@ -303,10 +303,6 @@ class GelModel(
         @classmethod
         def __edgeql__(cls) -> tuple[type[Self], str]: ...
 
-    def __init__(self, /, **kwargs: Any) -> None:
-        super().__init__(**kwargs)
-        self._p____type__ = None
-
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, GelModel):
             return NotImplemented
@@ -374,6 +370,25 @@ class ProxyModel(GelModel, Generic[_MT_co]):
     _p__obj__: _MT_co
 
     def __init__(self, obj: _MT_co, /) -> None:
+        if not isinstance(obj, self.__proxy_of__):
+            # A long time of debugging revealed that it's very important to
+            # check `obj` being of a correct type. Pydantic can instantiate
+            # a ProxyModel with an incorrect type, e.g. when you pass
+            # a list like `[1]` into a MultiLinkWithProps field --
+            # Pydantic will try to wrap `[1]` into a list of ProxyModels.
+            # And when it eventually fails to do so, everything is broken,
+            # even error reporting and repr().
+            #
+            # Codegen'ed ProxyModel subclasses explicitly call
+            # ProxyModel.__init__() in their __init__() methods to
+            # make sure that this check is always performed.
+            #
+            # If it ever has to be removed, make sure to at least check
+            # that `obj` is an instance of `GelModel`.
+            raise ValueError(
+                f"only instances of {self.__proxy_of__.__name__} are allowed, "
+                f"got {type(obj).__name__}",
+            )
         object.__setattr__(self, "_p__obj__", obj)
 
     def __getattribute__(self, name: str) -> Any:

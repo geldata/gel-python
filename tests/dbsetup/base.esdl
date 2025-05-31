@@ -12,6 +12,7 @@ type GameSession {
     # one-to-many
     multi link players: User {
         constraint exclusive;
+        property is_tall_enough: bool;
     };
 }
 

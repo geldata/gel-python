@@ -11,12 +11,14 @@ from typing import (
     Annotated,
     Any,
     Generic,
+    SupportsIndex,
     TypeVar,
     overload,
 )
 
 from typing_extensions import (
     TypeAliasType,
+    Self,
 )
 
 import functools
@@ -38,9 +40,7 @@ from gel._internal._qbmodel import _abstract
 from ._models import GelModel, ProxyModel
 
 if TYPE_CHECKING:
-    from collections.abc import (
-        Sequence,
-    )
+    from collections.abc import Sequence, Iterable
 
 
 _BT_co = TypeVar("_BT_co", covariant=True)
@@ -256,19 +256,79 @@ class _UpcastingDistinctList(
         elif issubclass(t, ProxyModel) and isinstance(value, t.__proxy_of__):
             return t(value)  # type: ignore [return-value]
 
-        raise ValueError(
-            f"{cls!r} accepts only values of type {cls.type!r}, "
-            f"got {type(value)!r}",
-        )
+        if issubclass(t, ProxyModel):
+            raise ValueError(
+                f"{cls!r} accepts only values of type {t.__name__} "
+                f"or {t.__proxy_of__.__name__}, got {type(value)!r}",
+            )
+        else:
+            raise ValueError(
+                f"{cls!r} accepts only values of type {t.__name__}, "
+                f"got {type(value)!r}",
+            )
+
+    if TYPE_CHECKING:
+
+        def append(self, value: _MT_co | _BMT_co) -> None: ...
+        def insert(
+            self, index: SupportsIndex, value: _MT_co | _BMT_co
+        ) -> None: ...
+        def __setitem__(
+            self,
+            index: SupportsIndex | slice,
+            value: _MT_co | _BMT_co | Iterable[_MT_co | _BMT_co],
+        ) -> None: ...
+        def extend(self, values: Iterable[_MT_co | _BMT_co]) -> None: ...
+        def remove(self, value: _MT_co | _BMT_co) -> None: ...
+        def index(
+            self,
+            value: _MT_co | _BMT_co,
+            start: SupportsIndex = 0,
+            stop: SupportsIndex | None = None,
+        ) -> int: ...
+        def count(self, value: _MT_co | _BMT_co) -> int: ...
+        def __add__(self, other: Iterable[_MT_co | _BMT_co]) -> Self: ...
+        def __iadd__(self, other: Iterable[_MT_co | _BMT_co]) -> Self: ...
 
 
 class _MultiLinkMeta(type):
     pass
 
 
-class _MultiLink(
+class _MultiLinkBase(
     _abstract.LinkDescriptor[_MT_co, _BMT_co], metaclass=_MultiLinkMeta
 ):
+    @classmethod
+    def _validate(
+        cls,
+        value: Any,
+        generic_args: tuple[type[Any], type[Any]],
+    ) -> Any:
+        raise NotImplementedError
+
+    @classmethod
+    def __get_pydantic_core_schema__(
+        cls,
+        source_type: Any,
+        handler: pydantic.GetCoreSchemaHandler,
+    ) -> pydantic_core.CoreSchema:
+        if _typing_inspect.is_generic_alias(source_type):
+            args = typing.get_args(source_type)
+            item_type = args[0]
+            return core_schema.no_info_after_validator_function(
+                functools.partial(cls._validate, generic_args=args),
+                schema=core_schema.list_schema(
+                    items_schema=handler.generate_schema(item_type),
+                ),
+                serialization=core_schema.plain_serializer_function_ser_schema(
+                    list,
+                ),
+            )
+        else:
+            return handler.generate_schema(source_type)
+
+
+class _MultiLink(_MultiLinkBase[_MT_co, _BMT_co]):
     if TYPE_CHECKING:
 
         @overload
@@ -294,31 +354,7 @@ class _MultiLink(
         cls,
         type_args: tuple[type[Any]] | tuple[type[Any], type[Any]],
     ) -> _dlist.DistinctList[_MT_co]:
-        if len(type_args) > 1:
-            return _UpcastingDistinctList[type_args[0], type_args[1]]  # type: ignore [return-value, valid-type]
-        else:
-            return _dlist.DistinctList[type_args[0]]  # type: ignore [return-value, valid-type]
-
-    @classmethod
-    def __get_pydantic_core_schema__(
-        cls,
-        source_type: Any,
-        handler: pydantic.GetCoreSchemaHandler,
-    ) -> pydantic_core.CoreSchema:
-        if _typing_inspect.is_generic_alias(source_type):
-            args = typing.get_args(source_type)
-            item_type = args[0]
-            return core_schema.no_info_after_validator_function(
-                functools.partial(cls._validate, generic_args=args),
-                schema=core_schema.list_schema(
-                    items_schema=handler.generate_schema(item_type),
-                ),
-                serialization=core_schema.plain_serializer_function_ser_schema(
-                    list,
-                ),
-            )
-        else:
-            return handler.generate_schema(source_type)
+        return _dlist.DistinctList[type_args[0]]  # type: ignore [return-value, valid-type]
 
     @classmethod
     def _validate(
@@ -326,6 +362,53 @@ class _MultiLink(
         value: Any,
         generic_args: tuple[type[Any], type[Any]],
     ) -> _dlist.DistinctList[_MT_co]:
+        lt: type[_dlist.DistinctList[_MT_co]] = _dlist.DistinctList[
+            generic_args[0],  # type: ignore [valid-type]
+        ]
+        if isinstance(value, lt):
+            return value
+        elif isinstance(value, (list, _dlist.DistinctList)):
+            return lt(value)
+        else:
+            raise TypeError(
+                f"could not convert {type(value)} to {cls.__name__}"
+            )
+
+
+class _MultiLinkWithProps(_MultiLinkBase[_MT_co, _BMT_co]):
+    if TYPE_CHECKING:
+
+        @overload
+        def __get__(self, obj: None, objtype: type[Any]) -> type[_MT_co]: ...
+
+        @overload
+        def __get__(
+            self, obj: object, objtype: Any = None
+        ) -> _UpcastingDistinctList[_MT_co, _BMT_co]: ...
+
+        def __get__(
+            self,
+            obj: Any,
+            objtype: Any = None,
+        ) -> type[_MT_co] | _UpcastingDistinctList[_MT_co, _BMT_co] | None: ...
+
+        def __set__(
+            self, obj: Any, value: Sequence[_MT_co | _BMT_co]
+        ) -> None: ...
+
+    @classmethod
+    def __gel_resolve_dlist__(
+        cls,
+        type_args: tuple[type[Any]] | tuple[type[Any], type[Any]],
+    ) -> _dlist.DistinctList[_MT_co]:
+        return _UpcastingDistinctList[type_args[0], type_args[1]]  # type: ignore [return-value, valid-type]
+
+    @classmethod
+    def _validate(
+        cls,
+        value: Any,
+        generic_args: tuple[type[Any], type[Any]],
+    ) -> _UpcastingDistinctList[_MT_co, _BMT_co]:
         lt: type[_UpcastingDistinctList[_MT_co, _BMT_co]] = (
             _UpcastingDistinctList[
                 generic_args[0],  # type: ignore [valid-type]
@@ -385,7 +468,7 @@ ComputedMultiLink = TypeAliasType(
 MultiLinkWithProps = TypeAliasType(
     "MultiLinkWithProps",
     Annotated[
-        _MultiLink[_PT_co, _MT_co],
+        _MultiLinkWithProps[_PT_co, _MT_co],
         pydantic.Field(
             default_factory=list,
             # Force validate call to convert the empty list
@@ -404,7 +487,7 @@ MultiLinkWithProps = TypeAliasType(
 ComputedMultiLinkWithProps = TypeAliasType(
     "ComputedMultiLinkWithProps",
     Annotated[
-        _MultiLink[_PT_co, _MT_co],
+        _MultiLinkWithProps[_PT_co, _MT_co],
         pydantic.Field(
             default_factory=list,
             # Force validate call to convert the empty list

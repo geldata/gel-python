@@ -29,6 +29,9 @@ from gel import _testbase as tb
 from gel._internal._qbmodel._pydantic._models import Pointer, GelModel
 from gel._internal._dlist import DistinctList
 from gel._internal._edgeql import Cardinality, PointerKind
+from gel._internal._qbmodel._pydantic._fields import (
+    _UpcastingDistinctList,
+)
 
 
 @dataclasses.dataclass
@@ -63,50 +66,73 @@ class TestModelGenerator(tb.ModelTestCase):
 
         expected.sort(key=lambda x: x.name)
 
-        with self.subTest(obj=obj):
-            for e, p in zip(expected, ptrs, strict=True):
-                with self.subTest(prop_name=p.name, test="eq_name"):
-                    self.assertEqual(
-                        e.name,
-                        p.name,
-                        f"{obj.__name__} name mismatch",
-                    )
-                with self.subTest(prop_name=p.name, test="eq_cardinality"):
-                    self.assertEqual(
-                        e.cardinality,
-                        p.cardinality,
-                        f"{obj.__name__}.{p.name} cardinality mismatch",
-                    )
-                with self.subTest(prop_name=p.name, test="eq_computed"):
-                    self.assertEqual(
-                        e.computed,
-                        p.computed,
-                        f"{obj.__name__}.{p.name} computed mismatch",
-                    )
-                with self.subTest(prop_name=p.name, test="eq_has_props"):
-                    self.assertEqual(
-                        e.has_props,
-                        p.has_props,
-                        f"{obj.__name__}.{p.name} has_props mismatch",
-                    )
-                with self.subTest(prop_name=p.name, test="eq_kind"):
-                    self.assertEqual(
-                        e.kind,
-                        p.kind,
-                        f"{obj.__name__}.{p.name} kind mismatch",
-                    )
-                with self.subTest(prop_name=p.name, test="eq_readonly"):
-                    self.assertEqual(
-                        e.readonly,
-                        p.readonly,
-                        f"{obj.__name__}.{p.name} readonly mismatch",
-                    )
-                with self.subTest(prop_name=p.name, test="eq_type"):
-                    self.assertTrue(
-                        issubclass(p.type, e.type),
+        for e, p in zip(expected, ptrs, strict=True):
+            self.assertEqual(
+                e.name,
+                p.name,
+                f"{obj.__name__} name mismatch",
+            )
+            self.assertEqual(
+                e.cardinality,
+                p.cardinality,
+                f"{obj.__name__}.{p.name} cardinality mismatch",
+            )
+            self.assertEqual(
+                e.computed,
+                p.computed,
+                f"{obj.__name__}.{p.name} computed mismatch",
+            )
+            self.assertEqual(
+                e.has_props,
+                p.has_props,
+                f"{obj.__name__}.{p.name} has_props mismatch",
+            )
+            self.assertEqual(
+                e.kind,
+                p.kind,
+                f"{obj.__name__}.{p.name} kind mismatch",
+            )
+            self.assertEqual(
+                e.readonly,
+                p.readonly,
+                f"{obj.__name__}.{p.name} readonly mismatch",
+            )
+
+            if issubclass(e.type, DistinctList):
+                if not issubclass(p.type, DistinctList):
+                    self.fail(
                         f"{obj.__name__}.{p.name} eq_type check failed: "
-                        f"issubclass({p.type!r}, {e.type!r}) is False",
+                        f"p.type is not a DistinctList, but expected "
+                        f"type is {e.type!r}",
                     )
+
+                if issubclass(p.type, _UpcastingDistinctList):
+                    if not issubclass(e.type, _UpcastingDistinctList):
+                        self.fail(
+                            f"{obj.__name__}.{p.name} eq_type check "
+                            f" failed: p.type is _UpcastingDistinctList, "
+                            f"but expected type is {e.type!r}",
+                        )
+                else:
+                    if issubclass(e.type, _UpcastingDistinctList):
+                        self.fail(
+                            f"{obj.__name__}.{p.name} eq_type check failed: "
+                            f"p.type is not a _UpcastingDistinctList, but "
+                            f"expected type is {e.type!r}",
+                        )
+
+                if not issubclass(p.type.type, e.type.type):
+                    self.fail(
+                        f"{obj.__name__}.{p.name} eq_type check failed: "
+                        f"p.type.type is not a {e.type.type!r} subclass"
+                    )
+
+            else:
+                self.assertTrue(
+                    issubclass(p.type, e.type),
+                    f"{obj.__name__}.{p.name} eq_type check failed: "
+                    f"issubclass({p.type!r}, {e.type!r}) is False",
+                )
 
     @tb.must_fail
     @tb.typecheck
@@ -288,7 +314,7 @@ class TestModelGenerator(tb.ModelTestCase):
         d = self.client.query_required_single(q)
 
         with self.assertRaisesRegex(AttributeError, r".body. is not set"):
-            print(d.body)
+            d.body
 
     def test_modelgen_data_model_validation_1(self):
         from models import default
@@ -297,22 +323,20 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertIsInstance(gs.players, DistinctList)
 
         with self.assertRaisesRegex(
-            ValueError, r"(?s)players.*Input should be.*instance of User"
+            ValueError, r"(?s)only instances of User are allowed, got .*int"
         ):
-            default.GameSession(num=7, players=[1])
+            default.GameSession.players(1)
 
+        p = default.Post(body="aaa")
         with self.assertRaisesRegex(
             ValueError, r"(?s)prayers.*Extra inputs are not permitted"
         ):
-            default.GameSession(num=7, prayers=[1])
+            default.GameSession(num=7, prayers=[p])
 
     def test_modelgen_reflection_1(self):
         from models import default, std
 
         from gel._internal._edgeql import Cardinality, PointerKind
-        from gel._internal._qbmodel._pydantic._fields import (
-            _UpcastingDistinctList,
-        )
 
         self.assert_pointers_match(
             default.User,
@@ -324,10 +348,7 @@ class TestModelGenerator(tb.ModelTestCase):
                     has_props=False,
                     kind=PointerKind.Link,
                     readonly=False,
-                    # XXX - there's no need for UpcastingDistinctList here
-                    type=_UpcastingDistinctList[
-                        default.UserGroup, default.UserGroup
-                    ],
+                    type=DistinctList[default.UserGroup],
                 ),
                 MockPointer(
                     name="id",
@@ -346,6 +367,41 @@ class TestModelGenerator(tb.ModelTestCase):
                     kind=PointerKind.Property,
                     readonly=False,
                     type=std.str,
+                ),
+            ],
+        )
+
+        self.assert_pointers_match(
+            default.GameSession,
+            [
+                MockPointer(
+                    name="num",
+                    cardinality=Cardinality.One,
+                    computed=False,
+                    has_props=False,
+                    kind=PointerKind.Property,
+                    readonly=False,
+                    type=std.int64,
+                ),
+                MockPointer(
+                    name="id",
+                    cardinality=Cardinality.One,
+                    computed=True,
+                    has_props=False,
+                    kind=PointerKind.Property,
+                    readonly=True,
+                    type=std.uuid,
+                ),
+                MockPointer(
+                    name="players",
+                    cardinality=Cardinality.Many,
+                    computed=False,
+                    has_props=True,
+                    kind=PointerKind.Link,
+                    readonly=False,
+                    type=_UpcastingDistinctList[
+                        default.GameSession.__links__.players, default.User
+                    ],
                 ),
             ],
         )

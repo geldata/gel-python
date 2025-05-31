@@ -2034,7 +2034,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                     self.write("...")
                 else:
                     obj = self.import_name("builtins", "object")
-                    self.write(f'{obj}.__setattr__(self, "_p__obj__", obj)')
+                    self.write(f"{proxymodel_t}.__init__(self, obj)")
                     self.write(
                         self.format_list(
                             "lprops = self.__class__.__lprops__({list})",
