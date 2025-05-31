@@ -163,6 +163,9 @@ class GelModelMeta(_model_construction.ModelMetaclass, _abstract.GelModelMeta):
 
 
 def _resolve_pointers(cls: type[GelModel]) -> dict[str, Pointer]:
+    if not cls.__pydantic_complete__ and cls.model_rebuild() is False:
+        raise TypeError(f"{cls} has unresolved fields")
+
     pointers = {}
     for ptr_name, ptr_info in cls.__gel_pointer_infos__.items():
         descriptor = inspect.getattr_static(cls, ptr_name)

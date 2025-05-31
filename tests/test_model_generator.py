@@ -343,11 +343,11 @@ class TestModelGenerator(tb.ModelTestCase):
             [
                 MockPointer(
                     name="groups",
-                    cardinality=Cardinality.One,
-                    computed=False,
+                    cardinality=Cardinality.Many,
+                    computed=True,
                     has_props=False,
                     kind=PointerKind.Link,
-                    readonly=False,
+                    readonly=True,
                     type=DistinctList[default.UserGroup],
                 ),
                 MockPointer(
