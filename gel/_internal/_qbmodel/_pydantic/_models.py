@@ -308,13 +308,40 @@ class GelModel(
 
     def __init__(self, /, **kwargs: Any) -> None:
         cls = type(self)
+
+        # Prohibit passing computed fields to the constructor.
+        # Unfortunately `init=False` doesn't work with BaseModel
+        # pydantic classes (the docs states it only works in
+        # dataclasses mode).
+        #
+        # We can potentially optimize this by caching a frozenset
+        # of field names that are computed.
+        has_computed_fields = False
+        cls.model_rebuild()
         for field_name, field in cls.__pydantic_fields__.items():
             # ignore `field.init=None` - unset, so we're fine with it.
-            if field.init is False and field_name in kwargs:
-                raise ValueError(
-                    f"cannot set field {field_name!r} on {cls.__name__}"
-                )
+            if field.init is False:
+                has_computed_fields = True
+                if field_name in kwargs:
+                    raise ValueError(
+                        f"cannot set field {field_name!r} on {cls.__name__}"
+                    )
+
         super().__init__(**kwargs)
+
+        # This might be a bit too aggressive, but we want to clear
+        # computed fields from the instance. Currently computed fields
+        # use a custom validator that forces pydantic to auto-set
+        # *required* computed fields to None, which in turn is what
+        # allows us to not pass them in constructors. But we don't
+        # want those None values to ever surface anywhere, be that
+        # attribute access or serialization or anything else that
+        # reads from __dict__.
+        if has_computed_fields:
+            for field_name, field in cls.__pydantic_fields__.items():
+                # ignore `field.init=None` - unset, so we're fine with it.
+                if field.init is False and field_name != "id":
+                    self.__dict__.pop(field_name, None)
 
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, GelModel):

@@ -339,8 +339,10 @@ class TestModelGenerator(tb.ModelTestCase):
 
     @tb.typecheck
     def test_modelgen_data_model_validation_1(self):
+        from typing import cast
         from gel._internal._dlist import DistinctList
         from models import default
+        from models import std
 
         gs = default.GameSession(num=7)
         self.assertIsInstance(gs.players, DistinctList)
@@ -365,7 +367,14 @@ class TestModelGenerator(tb.ModelTestCase):
 
         # This also tests that "required computeds" are not "required" as
         # args to `__init__`, and this wasn't straightforward to fix.
-        u = default.User(name="aaaa")
+        u = self.client.query_required_single(
+            default.User.select(
+                name=True,
+                nickname=True,
+                name_len=True,
+                nickname_len=True,
+            ).limit(1)
+        )
 
         # Check that `groups` is not an allowed keyword-arg for `User.update`
         self.assertEqual(
@@ -407,13 +416,26 @@ class TestModelGenerator(tb.ModelTestCase):
         with self.assertRaisesRegex(
             ValueError, r"(?s)cannot set field .groups. on User"
         ):
-            default.User(groups=(1, 2, 3))  # type: ignore
+            default.User(name="aaaa", groups=(1, 2, 3))  # type: ignore
 
         # Let's test computed property as an arg
         with self.assertRaisesRegex(
             ValueError, r"(?s)cannot set field .name_len. on User"
         ):
-            default.User(name_len=(1, 2, 3))  # type: ignore
+            default.User(name="aaaa", name_len=123)  # type: ignore
+
+        u = default.User(name="aaaa")
+        u.name = "aaaaaaa"
+
+        with self.assertRaisesRegex(
+            AttributeError, r"(?s).name_len. is not set"
+        ):
+            u.name_len
+
+        with self.assertRaisesRegex(
+            ValueError, r"(?s)name_len.*Field is frozen"
+        ):
+            u.name_len = cast(std.int64, 123)  # type: ignore[assignment]
 
     def test_modelgen_reflection_1(self):
         from models import default, std

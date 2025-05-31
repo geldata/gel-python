@@ -40,6 +40,7 @@ from gel._internal._qbmodel import _abstract
 from ._models import GelModel, ProxyModel
 
 if TYPE_CHECKING:
+    from typing_extensions import Never
     from collections.abc import Sequence, Iterable
 
 
@@ -103,6 +104,10 @@ class _ComputedProperty(_abstract.PropertyDescriptor[_ST_co, _BT_co]):
             obj: Any,
             objtype: Any = None,
         ) -> type[_ST_co] | _ST_co: ...
+
+        # XXX -- using Final[] would probably be better, but it's not clear
+        # how to wrap it in our aliases.
+        def __set__(self, obj: Any, value: Never) -> None: ...
 
     @classmethod
     def __get_pydantic_core_schema__(
@@ -369,6 +374,7 @@ class _MultiComputedLink(_abstract.LinkDescriptor[_MT_co, _BMT_co]):
             item_type = args[0]
             return core_schema.tuple_schema(
                 items_schema=[handler.generate_schema(item_type)],
+                variadic_item_index=0,
             )
         else:
             return handler.generate_schema(source_type)
