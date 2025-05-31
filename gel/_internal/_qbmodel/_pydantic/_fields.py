@@ -115,6 +115,10 @@ class _ComputedProperty(_abstract.PropertyDescriptor[_ST_co, _BT_co]):
         source_type: Any,
         handler: pydantic.GetCoreSchemaHandler,
     ) -> pydantic_core.CoreSchema:
+        # This is the only workaround I could find to make pydantic
+        # not require our *required computed fields* to be passed
+        # to __init__. See also the related workaround code in
+        # GelModel.__init__.
         return core_schema.with_default_schema(
             core_schema.any_schema(),
             default=None,
