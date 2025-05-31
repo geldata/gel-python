@@ -1359,7 +1359,8 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                         f"type_={self._render_obj_schema_path(ret_type)}",
                     ]
                     self.write(
-                        self.format_list(f"op = {infxop}({{list}})", args))
+                        self.format_list(f"op = {infxop}({{list}})", args)
+                    )
                     self.write(
                         self.format_list(
                             f"return {aexpr}({{list}})",
@@ -1567,7 +1568,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         with self._class_def(
             name,
             [typeof_class, *vbase_types],
-            class_kwargs={**class_kwargs, **class_r_kwargs}
+            class_kwargs={**class_kwargs, **class_r_kwargs},
         ):
             if not base_types:
                 with self.not_type_checking():
@@ -2317,23 +2318,47 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                 cardinality.is_multi(),
                 cardinality.is_optional(),
                 bool(prop.pointers),
+                prop.is_computed,
             ):
-                case True, _, True:
+                case True, _, True, False:
                     desc = self.import_name(BASE_IMPL, "MultiLinkWithProps")
                     pytype = f"{desc}[{narrow_type}, {broad_type}]"
-                case True, _, False:
+                case True, _, True, True:
+                    desc = self.import_name(
+                        BASE_IMPL, "ComputedMultiLinkWithProps"
+                    )
+                    pytype = f"{desc}[{narrow_type}, {broad_type}]"
+                case True, _, False, False:
                     desc = self.import_name(BASE_IMPL, "MultiLink")
                     pytype = f"{desc}[{narrow_type}]"
-                case False, True, True:
+                case True, _, False, True:
+                    desc = self.import_name(BASE_IMPL, "ComputedMultiLink")
+                    pytype = f"{desc}[{narrow_type}]"
+                case False, True, True, False:
                     desc = self.import_name(BASE_IMPL, "OptionalLinkWithProps")
                     pytype = f"{desc}[{narrow_type}, {broad_type}]"
-                case False, False, True:
+                case False, True, True, True:
+                    desc = self.import_name(
+                        BASE_IMPL, "OptionalComputedLinkWithProps"
+                    )
+                    pytype = f"{desc}[{narrow_type}, {broad_type}]"
+                case False, False, True, False:
+                    # XXX
                     desc = self.import_name(BASE_IMPL, "RequiredLinkWithProps")
                     pytype = f"{desc}[{narrow_type}, {broad_type}]"
-                case False, True, False:
+                case False, False, True, True:
+                    # XXX
+                    desc = self.import_name(
+                        BASE_IMPL, "RequiredComputedLinkWithProps"
+                    )
+                    pytype = f"{desc}[{narrow_type}, {broad_type}]"
+                case False, True, False, False:
                     desc = self.import_name(BASE_IMPL, "OptionalLink")
                     pytype = f"{desc}[{narrow_type}]"
-                case False, False, False:
+                case False, True, False, True:
+                    desc = self.import_name(BASE_IMPL, "OptionalComputedLink")
+                    pytype = f"{desc}[{narrow_type}]"
+                case False, False, False, False:
                     pytype = narrow_type
         elif cardinality.is_multi():
             pytype = f"list[{broad_type}]"  # XXX: this is wrong

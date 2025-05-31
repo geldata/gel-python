@@ -25,7 +25,10 @@ if typing.TYPE_CHECKING:
     from typing import reveal_type
 
 from gel import _testbase as tb
+
+from gel._internal._qbmodel._pydantic._models import Pointer, GelModel
 from gel._internal._dlist import DistinctList
+from gel._internal._edgeql import Cardinality, PointerKind
 
 
 @dataclasses.dataclass
@@ -37,10 +40,73 @@ class Q:
         return (self.type, self.query)
 
 
+class MockPointer(typing.NamedTuple):
+    name: str
+    cardinality: Cardinality
+    computed: bool
+    has_props: bool
+    kind: PointerKind
+    readonly: bool
+    type: type
+
+
 class TestModelGenerator(tb.ModelTestCase):
     SCHEMA = os.path.join(os.path.dirname(__file__), "dbsetup", "base.esdl")
 
     SETUP = os.path.join(os.path.dirname(__file__), "dbsetup", "base.edgeql")
+
+    def assert_pointers_match(
+        self, obj: type[GelModel], expected: list[MockPointer]
+    ):
+        ptrs = list(obj.__gel_pointers__().values())
+        ptrs.sort(key=lambda x: x.name)
+
+        expected.sort(key=lambda x: x.name)
+
+        with self.subTest(obj=obj):
+            for e, p in zip(expected, ptrs, strict=True):
+                with self.subTest(prop_name=p.name, test="eq_name"):
+                    self.assertEqual(
+                        e.name,
+                        p.name,
+                        f"{obj.__name__} name mismatch",
+                    )
+                with self.subTest(prop_name=p.name, test="eq_cardinality"):
+                    self.assertEqual(
+                        e.cardinality,
+                        p.cardinality,
+                        f"{obj.__name__}.{p.name} cardinality mismatch",
+                    )
+                with self.subTest(prop_name=p.name, test="eq_computed"):
+                    self.assertEqual(
+                        e.computed,
+                        p.computed,
+                        f"{obj.__name__}.{p.name} computed mismatch",
+                    )
+                with self.subTest(prop_name=p.name, test="eq_has_props"):
+                    self.assertEqual(
+                        e.has_props,
+                        p.has_props,
+                        f"{obj.__name__}.{p.name} has_props mismatch",
+                    )
+                with self.subTest(prop_name=p.name, test="eq_kind"):
+                    self.assertEqual(
+                        e.kind,
+                        p.kind,
+                        f"{obj.__name__}.{p.name} kind mismatch",
+                    )
+                with self.subTest(prop_name=p.name, test="eq_readonly"):
+                    self.assertEqual(
+                        e.readonly,
+                        p.readonly,
+                        f"{obj.__name__}.{p.name} readonly mismatch",
+                    )
+                with self.subTest(prop_name=p.name, test="eq_type"):
+                    self.assertTrue(
+                        issubclass(p.type, e.type),
+                        f"{obj.__name__}.{p.name} eq_type check failed: "
+                        f"issubclass({p.type!r}, {e.type!r}) is False",
+                    )
 
     @tb.must_fail
     @tb.typecheck
@@ -205,3 +271,47 @@ class TestModelGenerator(tb.ModelTestCase):
             ValueError, r"(?s)prayers.*Extra inputs are not permitted"
         ):
             default.GameSession(num=7, prayers=[1])
+
+    def test_modelgen_reflection_1(self):
+        from models import default, std
+
+        from gel._internal._edgeql import Cardinality, PointerKind
+        from gel._internal._qbmodel._pydantic._fields import (
+            _UpcastingDistinctList,
+        )
+
+        self.assert_pointers_match(
+            default.User,
+            [
+                MockPointer(
+                    name="groups",
+                    cardinality=Cardinality.One,
+                    computed=False,
+                    has_props=False,
+                    kind=PointerKind.Link,
+                    readonly=False,
+                    # XXX - there's no need for UpcastingDistinctList here
+                    type=_UpcastingDistinctList[
+                        default.UserGroup, default.UserGroup
+                    ],
+                ),
+                MockPointer(
+                    name="id",
+                    cardinality=Cardinality.One,
+                    computed=True,
+                    has_props=False,
+                    kind=PointerKind.Property,
+                    readonly=True,
+                    type=std.uuid,
+                ),
+                MockPointer(
+                    name="name",
+                    cardinality=Cardinality.One,
+                    computed=False,
+                    has_props=False,
+                    kind=PointerKind.Property,
+                    readonly=False,
+                    type=std.str,
+                ),
+            ],
+        )
