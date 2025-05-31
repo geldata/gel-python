@@ -101,6 +101,10 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(reveal_type(d), "Union[models.default.Post, None]")
         assert d is not None
 
+        self.assertEqual(
+            reveal_type(d.id), "type[models.__variants__.std.uuid]"
+        )
+
         self.assertIsInstance(d, default.Post)
         self.assertEqual(d.body, "Hello")
         self.assertIsInstance(d.author, default.User)

@@ -43,12 +43,12 @@ __all__ = (
 )
 
 
-class TypedEdgeQLQuery(typing.Protocol):
+T_ql = typing.TypeVar("T_ql", covariant=True)
+
+
+class TypedEdgeQLQuery(typing.Protocol[T_ql]):
     @classmethod
-    def __edgeql__(cls) -> typing.Tuple[type[typing.Self], str]: ...
-
-
-T_QueryBuilder = typing.TypeVar("T_QueryBuilder", bound="TypedEdgeQLQuery")
+    def __edgeql__(cls) -> typing.Tuple[type[T_ql], str]: ...
 
 
 AnyEdgeQLQuery = TypedEdgeQLQuery | str
@@ -248,8 +248,8 @@ class ReadOnlyExecutor(BaseReadOnlyExecutor):
 
     @typing.overload
     def query(
-        self, query: type[T_QueryBuilder], **kwargs: typing.Any
-    ) -> list[T_QueryBuilder]: ...
+        self, query: type[TypedEdgeQLQuery[T_ql]], **kwargs: typing.Any
+    ) -> list[T_ql]: ...
 
     @typing.overload
     def query(
@@ -274,8 +274,8 @@ class ReadOnlyExecutor(BaseReadOnlyExecutor):
 
     @typing.overload
     def query_single(
-        self, query: type[T_QueryBuilder], **kwargs: typing.Any
-    ) -> T_QueryBuilder | None: ...
+        self, query: type[TypedEdgeQLQuery[T_ql]], **kwargs: typing.Any
+    ) -> T_ql | None: ...
 
     @typing.overload
     def query_single(
@@ -300,8 +300,8 @@ class ReadOnlyExecutor(BaseReadOnlyExecutor):
 
     @typing.overload
     def query_required_single(
-        self, query: type[T_QueryBuilder], **kwargs: typing.Any
-    ) -> T_QueryBuilder: ...
+        self, query: type[TypedEdgeQLQuery[T_ql]], **kwargs: typing.Any
+    ) -> T_ql: ...
 
     @typing.overload
     def query_required_single(
@@ -445,8 +445,8 @@ class AsyncIOReadOnlyExecutor(BaseReadOnlyExecutor):
 
     @typing.overload
     async def query(
-        self, query: type[T_QueryBuilder], **kwargs: typing.Any
-    ) -> list[T_QueryBuilder]: ...
+        self, query: type[TypedEdgeQLQuery[T_ql]], **kwargs: typing.Any
+    ) -> list[T_ql]: ...
 
     @typing.overload
     async def query(
@@ -469,8 +469,8 @@ class AsyncIOReadOnlyExecutor(BaseReadOnlyExecutor):
 
     @typing.overload
     async def query_single(
-        self, query: type[T_QueryBuilder], **kwargs: typing.Any
-    ) -> T_QueryBuilder | None: ...
+        self, query: type[TypedEdgeQLQuery[T_ql]], **kwargs: typing.Any
+    ) -> T_ql | None: ...
 
     @typing.overload
     async def query_single(
@@ -495,8 +495,8 @@ class AsyncIOReadOnlyExecutor(BaseReadOnlyExecutor):
 
     @typing.overload
     async def query_required_single(
-        self, query: type[T_QueryBuilder], **kwargs: typing.Any
-    ) -> T_QueryBuilder: ...
+        self, query: type[TypedEdgeQLQuery[T_ql]], **kwargs: typing.Any
+    ) -> T_ql: ...
 
     @typing.overload
     async def query_required_single(
