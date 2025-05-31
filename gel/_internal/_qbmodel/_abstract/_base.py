@@ -69,3 +69,7 @@ else:
                 raise NotImplementedError(f"{type(self).__name__}.__edgeql__")
             else:
                 return type(self), _qb.toplevel_edgeql(self)
+
+
+class GelObjectType(GelType):
+    pass

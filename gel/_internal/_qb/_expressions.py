@@ -484,6 +484,14 @@ class SelectStmt(IteratorStmt):
             kwargs = {}
             if isinstance(expr, ShapeOp):
                 kwargs["body_scope"] = expr.scope
+            elif isinstance(expr, SchemaSet):
+                expr = ShapeOp(
+                    iter_expr=expr,
+                    shape=Shape(
+                        star_splat=True,
+                    ),
+                )
+                kwargs["body_scope"] = expr.scope
             expr = SelectStmt(iter_expr=expr, **kwargs)  # type: ignore [arg-type]
 
         return expr

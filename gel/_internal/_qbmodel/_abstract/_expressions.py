@@ -13,6 +13,8 @@ import dataclasses
 from gel._internal import _qb
 from gel._internal._utils import Unspecified
 
+from ._base import GelObjectType
+
 from ._primitive import (
     GelPrimitiveType,
     PyConstType,
@@ -126,8 +128,14 @@ def select(
 
     for ptrname, kwarg in kwargs.items():
         if isinstance(kwarg, bool):
-            _, ptr_expr = _get_prefixed_ptr(cls, ptrname, scope=scope)
+            ptr_expr: _qb.Expr
+            ptr, ptr_expr = _get_prefixed_ptr(cls, ptrname, scope=scope)
             if kwarg:
+                if issubclass(ptr.__gel_origin__, GelObjectType):
+                    ptr_expr = _qb.ShapeOp(
+                        iter_expr=ptr_expr,
+                        shape=_qb.Shape(star_splat=True),
+                    )
                 shape[ptrname] = ptr_expr
             else:
                 shape.pop(ptrname, None)

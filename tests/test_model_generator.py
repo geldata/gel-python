@@ -149,9 +149,30 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertIsInstance(d.author, default.User)
         self.assertEqual(d.author.name, "Alice")
 
+    def test_modelgen_data_unpack_1b(self):
+        from models import default
+
+        q = (
+            default.Post.select(
+                body=True,
+                author=True,
+            )
+            .filter(lambda p: p.body == "Hello")
+            .limit(1)
+        )
+        d = self.client.query_single(q)
+        assert d is not None
+
+        self.assertIsInstance(d, default.Post)
+        self.assertEqual(d.body, "Hello")
+        self.assertIsInstance(d.author, default.User)
+
+        assert d.author is not None
+        self.assertEqual(d.author.name, "Alice")
+
     @tb.to_be_fixed
     @tb.typecheck
-    def test_modelgen_data_unpack_1b(self):
+    def test_modelgen_data_unpack_1b_tc(self):
         from models import default
 
         q = (

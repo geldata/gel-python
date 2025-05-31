@@ -8,7 +8,6 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any, Generic, TypeVar, overload
 
 import dataclasses
-import types
 import typing
 
 # XXX: get rid of this
@@ -21,6 +20,10 @@ from gel._internal import _typing_inspect
 from gel._internal import _utils
 
 from ._base import GelType
+
+
+if TYPE_CHECKING:
+    import types
 
 
 class ModelFieldDescriptor(_qb.AbstractFieldDescriptor):

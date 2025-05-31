@@ -11,8 +11,9 @@ from typing_extensions import Self
 import weakref
 
 from gel._internal import _qb
+from gel._internal._hybridmethod import hybridmethod
 
-from ._base import GelType, GelTypeMeta
+from ._base import GelObjectType, GelType, GelTypeMeta
 from ._expressions import (
     add_filter,
     add_limit,
@@ -61,7 +62,7 @@ class GelModelMeta(GelTypeMeta):
 
 
 class GelModel(
-    GelType,
+    GelObjectType,
     metaclass=GelModelMeta,
 ):
     if TYPE_CHECKING:
@@ -182,6 +183,14 @@ class GelModel(
                 cls,
                 add_offset(cls, value, __operand__=__operand__),
             )
+
+        @hybridmethod
+        def __edgeql__(self) -> tuple[type, str]:
+            if isinstance(self, type):
+                return self, _qb.toplevel_edgeql(self)
+            else:
+                raise NotImplementedError(
+                    f"{type(self)} instances are not queryable")
 
     @classmethod
     def __edgeql_qb_expr__(cls) -> _qb.Expr:  # pyright: ignore [reportIncompatibleMethodOverride]
