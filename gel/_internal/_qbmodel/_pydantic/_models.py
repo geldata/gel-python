@@ -170,7 +170,7 @@ def _resolve_pointers(cls: type[GelModel]) -> dict[str, Pointer]:
             raise AssertionError(
                 f"'{cls}.{ptr_name}' is not a ModelFieldDescriptor"
             )
-        t = descriptor.get_resolved_type()
+        orig_t = t = descriptor.get_resolved_type()
         if t is None:
             raise TypeError(
                 f"the type of '{cls}.{ptr_name}' has not been resolved"
@@ -194,7 +194,7 @@ def _resolve_pointers(cls: type[GelModel]) -> dict[str, Pointer]:
 
         kind = (
             _edgeql.PointerKind.Link
-            if isinstance(t, GelModelMeta)
+            if isinstance(orig_t, GelModelMeta)
             else _edgeql.PointerKind.Property
         )
         pointers[ptr_name] = Pointer.from_ptr_info(
