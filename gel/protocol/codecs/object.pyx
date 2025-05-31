@@ -264,7 +264,9 @@ cdef class ObjectCodec(BaseNamedRecordCodec):
                     object.__setattr__(lprops, name[1:], elem)
                 elif flags[i] & datatypes._EDGE_POINTER_IS_LINK:
                     dlist_factory = self.cached_return_type_dlists[i]
-                    if dlist_factory is not None:
+                    if dlist_factory is tuple:
+                        elem = tuple(elem)
+                    elif dlist_factory is not None:
                         elem = dlist_factory(elem, __wrap_list__=True)
                     object.__setattr__(result, name, elem)
                 else:
@@ -332,10 +334,16 @@ cdef class ObjectCodec(BaseNamedRecordCodec):
                                 dlist_factory = torigin.__gel_resolve_dlist__(
                                     typing.get_args(target),
                                 )
-                                if (
-                                    not isinstance(dlist_factory, type) or
-                                    not issubclass(dlist_factory, _dlist.DistinctList)
-                                ):
+
+                                if isinstance(dlist_factory, typing.GenericAlias):
+                                    dlist_factory = typing.get_origin(dlist_factory)
+
+                                if (not (
+                                    isinstance(dlist_factory, type) and (
+                                        issubclass(dlist_factory, _dlist.DistinctList)
+                                        or issubclass(dlist_factory, tuple)
+                                    )
+                                )):
                                     raise RuntimeError(
                                         f'invalid type returned from __gel_resolve_dlist__(), '
                                         f'a DistinctList was expected, got {dlist_factory!r}'

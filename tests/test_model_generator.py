@@ -18,6 +18,7 @@
 
 import dataclasses
 import os
+import types
 import typing
 import unittest
 
@@ -98,13 +99,14 @@ class TestModelGenerator(tb.ModelTestCase):
                 f"{obj.__name__}.{p.name} readonly mismatch",
             )
 
-            if issubclass(e.type, DistinctList):
-                if not issubclass(p.type, DistinctList):
-                    self.fail(
-                        f"{obj.__name__}.{p.name} eq_type check failed: "
-                        f"p.type is not a DistinctList, but expected "
-                        f"type is {e.type!r}",
-                    )
+            if isinstance(p.type, type) and isinstance(e.type, type):
+                if issubclass(e.type, DistinctList):
+                    if not issubclass(p.type, DistinctList):
+                        self.fail(
+                            f"{obj.__name__}.{p.name} eq_type check failed: "
+                            f"p.type is not a DistinctList, but expected "
+                            f"type is {e.type!r}",
+                        )
 
                 if issubclass(p.type, _UpcastingDistinctList):
                     if not issubclass(e.type, _UpcastingDistinctList):
@@ -126,12 +128,18 @@ class TestModelGenerator(tb.ModelTestCase):
                         f"{obj.__name__}.{p.name} eq_type check failed: "
                         f"p.type.type is not a {e.type.type!r} subclass"
                     )
-
+                else:
+                    self.assertTrue(
+                        issubclass(p.type, e.type),
+                        f"{obj.__name__}.{p.name} eq_type check failed: "
+                        f"issubclass({p.type!r}, {e.type!r}) is False",
+                    )
             else:
-                self.assertTrue(
-                    issubclass(p.type, e.type),
+                self.assertEqual(
+                    e.type,
+                    p.type,
                     f"{obj.__name__}.{p.name} eq_type check failed: "
-                    f"issubclass({p.type!r}, {e.type!r}) is False",
+                    f"{p.type!r} != {e.type!r}",
                 )
 
     @tb.must_fail
@@ -151,6 +159,15 @@ class TestModelGenerator(tb.ModelTestCase):
 
         self.assertEqual(
             reveal_type(default.User.groups), "type[models.default.UserGroup]"
+        )
+
+        q = self.client.query_required_single(
+            default.User.select(groups=True).limit(1)
+        )
+
+        self.assertEqual(
+            reveal_type(q.groups),
+            "builtins.tuple[models.default.UserGroup, ...]",
         )
 
     def test_modelgen_data_unpack_1(self):
@@ -275,7 +292,10 @@ class TestModelGenerator(tb.ModelTestCase):
             default.GameSession.select(
                 num=True,
                 players=lambda s: s.players.select(
-                    name=True, groups=lambda p: p.groups.select(name=True)
+                    name=True,
+                    groups=lambda p: p.groups.select(name=True).order_by(
+                        name="asc"
+                    ),
                 ),
             )
             .filter(num=123)
@@ -288,6 +308,7 @@ class TestModelGenerator(tb.ModelTestCase):
 
         # Test that links are unpacked into a DistinctList, not a vanilla list
         self.assertIsInstance(d.players, DistinctList)
+        self.assertIsInstance(d.players[0].groups, tuple)
 
         post = default.Post(author=d.players[0], body="test")
 
@@ -348,7 +369,7 @@ class TestModelGenerator(tb.ModelTestCase):
                     has_props=False,
                     kind=PointerKind.Link,
                     readonly=True,
-                    type=DistinctList[default.UserGroup],
+                    type=tuple[default.UserGroup, ...],
                 ),
                 MockPointer(
                     name="id",

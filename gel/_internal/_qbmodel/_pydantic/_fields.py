@@ -13,6 +13,7 @@ from typing import (
     Generic,
     SupportsIndex,
     TypeVar,
+    Tuple,
     overload,
 )
 
@@ -34,6 +35,7 @@ from gel._internal import _dlist
 from gel._internal import _edgeql
 from gel._internal import _typing_inspect
 from gel._internal import _unsetid
+from gel._internal import _typing_parametric as parametric
 
 from gel._internal._qbmodel import _abstract
 
@@ -291,13 +293,47 @@ class _UpcastingDistinctList(
         def __iadd__(self, other: Iterable[_MT_co | _BMT_co]) -> Self: ...
 
 
-class _MultiLinkMeta(type):
-    pass
+class _MultiComputedLink(_abstract.LinkDescriptor[_MT_co, _BMT_co]):
+    if TYPE_CHECKING:
+
+        @overload
+        def __get__(self, obj: None, objtype: type[Any]) -> type[_MT_co]: ...
+
+        @overload
+        def __get__(
+            self, obj: object, objtype: Any = None
+        ) -> tuple[_MT_co, ...]: ...
+
+        def __get__(
+            self,
+            obj: Any,
+            objtype: Any = None,
+        ) -> type[_MT_co] | tuple[_MT_co, ...]: ...
+
+    @classmethod
+    def __gel_resolve_dlist__(
+        cls,
+        type_args: tuple[type[Any]] | tuple[type[Any], type[Any]],
+    ) -> tuple[_BMT_co, ...]:
+        return tuple[type_args[0], ...]  # type: ignore [return-value, valid-type]
+
+    @classmethod
+    def __get_pydantic_core_schema__(
+        cls,
+        source_type: Any,
+        handler: pydantic.GetCoreSchemaHandler,
+    ) -> pydantic_core.CoreSchema:
+        if _typing_inspect.is_generic_alias(source_type):
+            args = typing.get_args(source_type)
+            item_type = args[0]
+            return core_schema.tuple_schema(
+                items_schema=[handler.generate_schema(item_type)],
+            )
+        else:
+            return handler.generate_schema(source_type)
 
 
-class _MultiLinkBase(
-    _abstract.LinkDescriptor[_MT_co, _BMT_co], metaclass=_MultiLinkMeta
-):
+class _MultiLinkBase(_abstract.LinkDescriptor[_MT_co, _BMT_co]):
     @classmethod
     def _validate(
         cls,
@@ -446,12 +482,9 @@ MultiLink = TypeAliasType(
 ComputedMultiLink = TypeAliasType(
     "ComputedMultiLink",
     Annotated[
-        _MultiLink[_MT_co, _MT_co],
+        _MultiComputedLink[_MT_co, _MT_co],
         pydantic.Field(
-            default_factory=list,
-            # Force validate call to convert the empty list
-            # to a properly typed one.
-            validate_default=True,
+            default_factory=tuple,
             init=False,
             frozen=True,
         ),
@@ -487,12 +520,9 @@ MultiLinkWithProps = TypeAliasType(
 ComputedMultiLinkWithProps = TypeAliasType(
     "ComputedMultiLinkWithProps",
     Annotated[
-        _MultiLinkWithProps[_PT_co, _MT_co],
+        _MultiComputedLink[_PT_co, _MT_co],
         pydantic.Field(
-            default_factory=list,
-            # Force validate call to convert the empty list
-            # to a properly typed one.
-            validate_default=True,
+            default_factory=tuple,
             init=False,
             frozen=True,
         ),
