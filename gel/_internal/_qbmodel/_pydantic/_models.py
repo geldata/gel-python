@@ -300,6 +300,9 @@ class GelModel(
     if TYPE_CHECKING:
         id: uuid.UUID
 
+        @classmethod
+        def __edgeql__(cls) -> tuple[type[Self], str]: ...
+
     def __init__(self, /, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self._p____type__ = None

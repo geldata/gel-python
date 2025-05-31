@@ -26,7 +26,7 @@ from . import datatypes
 from . import describe
 from . import enums
 from . import options
-from .protocol import protocol
+from .protocol import protocol  # type: ignore
 
 __all__ = (
     "QueryWithArgs",
@@ -44,25 +44,26 @@ __all__ = (
 
 
 class TypedEdgeQLQuery(typing.Protocol):
+    @classmethod
+    def __edgeql__(cls) -> typing.Tuple[type[typing.Self], str]: ...
 
-    def __edgeql__(self) -> typing.Tuple[typing.Type, str]:
-        ...
+
+T_QueryBuilder = typing.TypeVar("T_QueryBuilder", bound="TypedEdgeQLQuery")
 
 
-EdgeQLQuery = TypedEdgeQLQuery | str
-# todo: add support for typing.Sequence[EdgeQLQuery]?
+AnyEdgeQLQuery = TypedEdgeQLQuery | str
 
 
 class QueryWithArgs(typing.NamedTuple):
     query: str
-    return_type: typing.Type
+    return_type: typing.Type | None
     args: typing.Tuple
     kwargs: typing.Dict[str, typing.Any]
     input_language: protocol.InputLanguage = protocol.InputLanguage.EDGEQL
 
     @classmethod
-    def from_query(cls, query: EdgeQLQuery, args, kwargs) -> QueryWithArgs:
-        if query.__class__ is str or isinstance(query, str):
+    def from_query(cls, query: AnyEdgeQLQuery, args, kwargs) -> QueryWithArgs:
+        if type(query) is str or isinstance(query, str):
             return cls(query, None, args, kwargs)
 
         try:
@@ -73,7 +74,7 @@ class QueryWithArgs(typing.NamedTuple):
             return_type, query = eql()
             return cls(query, return_type, args, kwargs)
 
-        raise ValueError('unsupported query type')
+        raise ValueError("unsupported query type")
 
 
 class QueryCache(typing.NamedTuple):
@@ -217,20 +218,16 @@ class BaseReadOnlyExecutor(abc.ABC):
     __slots__ = ()
 
     @abc.abstractmethod
-    def _get_query_cache(self) -> QueryCache:
-        ...
+    def _get_query_cache(self) -> QueryCache: ...
 
     @abc.abstractmethod
-    def _get_retry_options(self) -> typing.Optional[options.RetryOptions]:
-        ...
+    def _get_retry_options(self) -> typing.Optional[options.RetryOptions]: ...
 
     @abc.abstractmethod
-    def _get_state(self) -> options.State:
-        ...
+    def _get_state(self) -> options.State: ...
 
     @abc.abstractmethod
-    def _get_warning_handler(self) -> options.WarningHandler:
-        ...
+    def _get_warning_handler(self) -> options.WarningHandler: ...
 
     def _get_annotations(self) -> typing.Dict[str, str]:
         return {}
@@ -242,132 +239,189 @@ class ReadOnlyExecutor(BaseReadOnlyExecutor):
     __slots__ = ()
 
     @abc.abstractmethod
-    def _query(self, query_context: QueryContext):
-        ...
-
-    def query(self, query: EdgeQLQuery, *args, **kwargs) -> list:
-        return self._query(QueryContext(
-            query=QueryWithArgs.from_query(query, args, kwargs),
-            cache=self._get_query_cache(),
-            query_options=_query_opts,
-            retry_options=self._get_retry_options(),
-            state=self._get_state(),
-            transaction_options=self._get_active_tx_options(),
-            warning_handler=self._get_warning_handler(),
-            annotations=self._get_annotations(),
-        ))
-
-    def query_single(
-        self, query: EdgeQLQuery, *args, **kwargs
-    ) -> typing.Union[typing.Any, None]:
-        return self._query(QueryContext(
-            query=QueryWithArgs.from_query(query, args, kwargs),
-            cache=self._get_query_cache(),
-            query_options=_query_single_opts,
-            retry_options=self._get_retry_options(),
-            state=self._get_state(),
-            transaction_options=self._get_active_tx_options(),
-            warning_handler=self._get_warning_handler(),
-            annotations=self._get_annotations(),
-        ))
-
-    def query_required_single(self, query: EdgeQLQuery, *args, **kwargs) -> typing.Any:
-        return self._query(QueryContext(
-            query=QueryWithArgs.from_query(query, args, kwargs),
-            cache=self._get_query_cache(),
-            query_options=_query_required_single_opts,
-            retry_options=self._get_retry_options(),
-            state=self._get_state(),
-            transaction_options=self._get_active_tx_options(),
-            warning_handler=self._get_warning_handler(),
-            annotations=self._get_annotations(),
-        ))
-
-    def query_json(self, query: EdgeQLQuery, *args, **kwargs) -> str:
-        return self._query(QueryContext(
-            query=QueryWithArgs.from_query(query, args, kwargs),
-            cache=self._get_query_cache(),
-            query_options=_query_json_opts,
-            retry_options=self._get_retry_options(),
-            state=self._get_state(),
-            transaction_options=self._get_active_tx_options(),
-            warning_handler=self._get_warning_handler(),
-            annotations=self._get_annotations(),
-        ))
-
-    def query_single_json(self, query: EdgeQLQuery, *args, **kwargs) -> str:
-        return self._query(QueryContext(
-            query=QueryWithArgs.from_query(query, args, kwargs),
-            cache=self._get_query_cache(),
-            query_options=_query_single_json_opts,
-            retry_options=self._get_retry_options(),
-            state=self._get_state(),
-            transaction_options=self._get_active_tx_options(),
-            warning_handler=self._get_warning_handler(),
-            annotations=self._get_annotations(),
-        ))
-
-    def query_required_single_json(self, query: EdgeQLQuery, *args, **kwargs) -> str:
-        return self._query(QueryContext(
-            query=QueryWithArgs.from_query(query, args, kwargs),
-            cache=self._get_query_cache(),
-            query_options=_query_required_single_json_opts,
-            retry_options=self._get_retry_options(),
-            state=self._get_state(),
-            transaction_options=self._get_active_tx_options(),
-            warning_handler=self._get_warning_handler(),
-            annotations=self._get_annotations(),
-        ))
-
-    def query_sql(self, query: str, *args, **kwargs) -> list[datatypes.Record]:
-        return self._query(QueryContext(
-            query=QueryWithArgs(
-                query,
-                None,
-                args,
-                kwargs,
-                input_language=protocol.InputLanguage.SQL,
-            ),
-            cache=self._get_query_cache(),
-            query_options=_query_opts,
-            retry_options=self._get_retry_options(),
-            state=self._get_state(),
-            transaction_options=self._get_active_tx_options(),
-            warning_handler=self._get_warning_handler(),
-            annotations=self._get_annotations(),
-        ))
+    def _query(self, query_context: QueryContext) -> typing.Any: ...
 
     @abc.abstractmethod
-    def _execute(self, execute_context: ExecuteContext):
-        ...
+    def _get_active_tx_options(
+        self,
+    ) -> typing.Optional[options.TransactionOptions]: ...
+
+    @typing.overload
+    def query(
+        self, query: type[T_QueryBuilder], **kwargs: typing.Any
+    ) -> list[T_QueryBuilder]: ...
+
+    @typing.overload
+    def query(
+        self, query: str, *args: typing.Any, **kwargs: typing.Any
+    ) -> list[typing.Any]: ...
+
+    def query(
+        self, query: AnyEdgeQLQuery, *args: typing.Any, **kwargs: typing.Any
+    ) -> list[typing.Any]:
+        return self._query(
+            QueryContext(
+                query=QueryWithArgs.from_query(query, args, kwargs),
+                cache=self._get_query_cache(),
+                query_options=_query_opts,
+                retry_options=self._get_retry_options(),
+                state=self._get_state(),
+                transaction_options=self._get_active_tx_options(),
+                warning_handler=self._get_warning_handler(),
+                annotations=self._get_annotations(),
+            )
+        )
+
+    @typing.overload
+    def query_single(
+        self, query: type[T_QueryBuilder], **kwargs: typing.Any
+    ) -> T_QueryBuilder | None: ...
+
+    @typing.overload
+    def query_single(
+        self, query: str, *args: typing.Any, **kwargs: typing.Any
+    ) -> typing.Any | None: ...
+
+    def query_single(
+        self, query: AnyEdgeQLQuery, *args: typing.Any, **kwargs: typing.Any
+    ) -> typing.Any:
+        return self._query(
+            QueryContext(
+                query=QueryWithArgs.from_query(query, args, kwargs),
+                cache=self._get_query_cache(),
+                query_options=_query_single_opts,
+                retry_options=self._get_retry_options(),
+                state=self._get_state(),
+                transaction_options=self._get_active_tx_options(),
+                warning_handler=self._get_warning_handler(),
+                annotations=self._get_annotations(),
+            )
+        )
+
+    @typing.overload
+    def query_required_single(
+        self, query: type[T_QueryBuilder], **kwargs: typing.Any
+    ) -> T_QueryBuilder: ...
+
+    @typing.overload
+    def query_required_single(
+        self, query: str, *args: typing.Any, **kwargs: typing.Any
+    ) -> typing.Any: ...
+
+    def query_required_single(
+        self, query: AnyEdgeQLQuery, *args: typing.Any, **kwargs: typing.Any
+    ) -> typing.Any:
+        return self._query(
+            QueryContext(
+                query=QueryWithArgs.from_query(query, args, kwargs),
+                cache=self._get_query_cache(),
+                query_options=_query_required_single_opts,
+                retry_options=self._get_retry_options(),
+                state=self._get_state(),
+                transaction_options=self._get_active_tx_options(),
+                warning_handler=self._get_warning_handler(),
+                annotations=self._get_annotations(),
+            )
+        )
+
+    def query_json(self, query: AnyEdgeQLQuery, *args, **kwargs) -> str:
+        return self._query(
+            QueryContext(
+                query=QueryWithArgs.from_query(query, args, kwargs),
+                cache=self._get_query_cache(),
+                query_options=_query_json_opts,
+                retry_options=self._get_retry_options(),
+                state=self._get_state(),
+                transaction_options=self._get_active_tx_options(),
+                warning_handler=self._get_warning_handler(),
+                annotations=self._get_annotations(),
+            )
+        )
+
+    def query_single_json(self, query: AnyEdgeQLQuery, *args, **kwargs) -> str:
+        return self._query(
+            QueryContext(
+                query=QueryWithArgs.from_query(query, args, kwargs),
+                cache=self._get_query_cache(),
+                query_options=_query_single_json_opts,
+                retry_options=self._get_retry_options(),
+                state=self._get_state(),
+                transaction_options=self._get_active_tx_options(),
+                warning_handler=self._get_warning_handler(),
+                annotations=self._get_annotations(),
+            )
+        )
+
+    def query_required_single_json(
+        self, query: AnyEdgeQLQuery, *args, **kwargs
+    ) -> str:
+        return self._query(
+            QueryContext(
+                query=QueryWithArgs.from_query(query, args, kwargs),
+                cache=self._get_query_cache(),
+                query_options=_query_required_single_json_opts,
+                retry_options=self._get_retry_options(),
+                state=self._get_state(),
+                transaction_options=self._get_active_tx_options(),
+                warning_handler=self._get_warning_handler(),
+                annotations=self._get_annotations(),
+            )
+        )
+
+    def query_sql(self, query: str, *args, **kwargs) -> list[datatypes.Record]:
+        return self._query(
+            QueryContext(
+                query=QueryWithArgs(
+                    query,
+                    None,
+                    args,
+                    kwargs,
+                    input_language=protocol.InputLanguage.SQL,
+                ),
+                cache=self._get_query_cache(),
+                query_options=_query_opts,
+                retry_options=self._get_retry_options(),
+                state=self._get_state(),
+                transaction_options=self._get_active_tx_options(),
+                warning_handler=self._get_warning_handler(),
+                annotations=self._get_annotations(),
+            )
+        )
+
+    @abc.abstractmethod
+    def _execute(self, execute_context: ExecuteContext): ...
 
     def execute(self, commands: str, *args, **kwargs) -> None:
-        self._execute(ExecuteContext(
-            query=QueryWithArgs(commands, None, args, kwargs),
-            cache=self._get_query_cache(),
-            retry_options=self._get_retry_options(),
-            state=self._get_state(),
-            transaction_options=self._get_active_tx_options(),
-            warning_handler=self._get_warning_handler(),
-            annotations=self._get_annotations(),
-        ))
+        self._execute(
+            ExecuteContext(
+                query=QueryWithArgs(commands, None, args, kwargs),
+                cache=self._get_query_cache(),
+                retry_options=self._get_retry_options(),
+                state=self._get_state(),
+                transaction_options=self._get_active_tx_options(),
+                warning_handler=self._get_warning_handler(),
+                annotations=self._get_annotations(),
+            )
+        )
 
     def execute_sql(self, commands: str, *args, **kwargs) -> None:
-        self._execute(ExecuteContext(
-            query=QueryWithArgs(
-                commands,
-                None,
-                args,
-                kwargs,
-                input_language=protocol.InputLanguage.SQL,
-            ),
-            cache=self._get_query_cache(),
-            retry_options=self._get_retry_options(),
-            state=self._get_state(),
-            transaction_options=self._get_active_tx_options(),
-            warning_handler=self._get_warning_handler(),
-            annotations=self._get_annotations(),
-        ))
+        self._execute(
+            ExecuteContext(
+                query=QueryWithArgs(
+                    commands,
+                    None,
+                    args,
+                    kwargs,
+                    input_language=protocol.InputLanguage.SQL,
+                ),
+                cache=self._get_query_cache(),
+                retry_options=self._get_retry_options(),
+                state=self._get_state(),
+                transaction_options=self._get_active_tx_options(),
+                warning_handler=self._get_warning_handler(),
+                annotations=self._get_annotations(),
+            )
+        )
 
 
 class Executor(ReadOnlyExecutor):
@@ -382,140 +436,189 @@ class AsyncIOReadOnlyExecutor(BaseReadOnlyExecutor):
     __slots__ = ()
 
     @abc.abstractmethod
-    async def _query(self, query_context: QueryContext):
-        ...
-
-    async def query(self, query: EdgeQLQuery, *args, **kwargs) -> list:
-        return await self._query(QueryContext(
-            query=QueryWithArgs.from_query(query, args, kwargs),
-            cache=self._get_query_cache(),
-            query_options=_query_opts,
-            retry_options=self._get_retry_options(),
-            state=self._get_state(),
-            transaction_options=self._get_active_tx_options(),
-            warning_handler=self._get_warning_handler(),
-            annotations=self._get_annotations(),
-        ))
-
-    async def query_single(self, query: EdgeQLQuery, *args, **kwargs) -> typing.Any:
-        return await self._query(QueryContext(
-            query=QueryWithArgs.from_query(query, args, kwargs),
-            cache=self._get_query_cache(),
-            query_options=_query_single_opts,
-            retry_options=self._get_retry_options(),
-            state=self._get_state(),
-            transaction_options=self._get_active_tx_options(),
-            warning_handler=self._get_warning_handler(),
-            annotations=self._get_annotations(),
-        ))
-
-    async def query_required_single(
-        self,
-        query: EdgeQLQuery,
-        *args,
-        **kwargs
-    ) -> typing.Any:
-        return await self._query(QueryContext(
-            query=QueryWithArgs.from_query(query, args, kwargs),
-            cache=self._get_query_cache(),
-            query_options=_query_required_single_opts,
-            retry_options=self._get_retry_options(),
-            state=self._get_state(),
-            transaction_options=self._get_active_tx_options(),
-            warning_handler=self._get_warning_handler(),
-            annotations=self._get_annotations(),
-        ))
-
-    async def query_json(self, query: EdgeQLQuery, *args, **kwargs) -> str:
-        return await self._query(QueryContext(
-            query=QueryWithArgs.from_query(query, args, kwargs),
-            cache=self._get_query_cache(),
-            query_options=_query_json_opts,
-            retry_options=self._get_retry_options(),
-            state=self._get_state(),
-            transaction_options=self._get_active_tx_options(),
-            warning_handler=self._get_warning_handler(),
-            annotations=self._get_annotations(),
-        ))
-
-    async def query_single_json(self, query: EdgeQLQuery, *args, **kwargs) -> str:
-        return await self._query(QueryContext(
-            query=QueryWithArgs.from_query(query, args, kwargs),
-            cache=self._get_query_cache(),
-            query_options=_query_single_json_opts,
-            retry_options=self._get_retry_options(),
-            state=self._get_state(),
-            transaction_options=self._get_active_tx_options(),
-            warning_handler=self._get_warning_handler(),
-            annotations=self._get_annotations(),
-        ))
-
-    async def query_required_single_json(
-        self,
-        query: EdgeQLQuery,
-        *args,
-        **kwargs
-    ) -> str:
-        return await self._query(QueryContext(
-            query=QueryWithArgs.from_query(query, args, kwargs),
-            cache=self._get_query_cache(),
-            query_options=_query_required_single_json_opts,
-            retry_options=self._get_retry_options(),
-            state=self._get_state(),
-            transaction_options=self._get_active_tx_options(),
-            warning_handler=self._get_warning_handler(),
-            annotations=self._get_annotations(),
-        ))
-
-    async def query_sql(self, query: str, *args, **kwargs) -> typing.Any:
-        return await self._query(QueryContext(
-            query=QueryWithArgs(
-                query,
-                None,
-                args,
-                kwargs,
-                input_language=protocol.InputLanguage.SQL,
-            ),
-            cache=self._get_query_cache(),
-            query_options=_query_opts,
-            retry_options=self._get_retry_options(),
-            state=self._get_state(),
-            transaction_options=self._get_active_tx_options(),
-            warning_handler=self._get_warning_handler(),
-            annotations=self._get_annotations(),
-        ))
+    async def _query(self, query_context: QueryContext) -> typing.Any: ...
 
     @abc.abstractmethod
-    async def _execute(self, execute_context: ExecuteContext) -> None:
-        ...
+    def _get_active_tx_options(
+        self,
+    ) -> typing.Optional[options.TransactionOptions]: ...
+
+    @typing.overload
+    async def query(
+        self, query: type[T_QueryBuilder], **kwargs: typing.Any
+    ) -> list[T_QueryBuilder]: ...
+
+    @typing.overload
+    async def query(
+        self, query: str, *args: typing.Any, **kwargs: typing.Any
+    ) -> list[typing.Any]: ...
+
+    async def query(self, query: AnyEdgeQLQuery, *args, **kwargs) -> list:
+        return await self._query(
+            QueryContext(
+                query=QueryWithArgs.from_query(query, args, kwargs),
+                cache=self._get_query_cache(),
+                query_options=_query_opts,
+                retry_options=self._get_retry_options(),
+                state=self._get_state(),
+                transaction_options=self._get_active_tx_options(),
+                warning_handler=self._get_warning_handler(),
+                annotations=self._get_annotations(),
+            )
+        )
+
+    @typing.overload
+    async def query_single(
+        self, query: type[T_QueryBuilder], **kwargs: typing.Any
+    ) -> T_QueryBuilder | None: ...
+
+    @typing.overload
+    async def query_single(
+        self, query: str, *args: typing.Any, **kwargs: typing.Any
+    ) -> typing.Any | None: ...
+
+    async def query_single(
+        self, query: AnyEdgeQLQuery, *args, **kwargs
+    ) -> typing.Any:
+        return await self._query(
+            QueryContext(
+                query=QueryWithArgs.from_query(query, args, kwargs),
+                cache=self._get_query_cache(),
+                query_options=_query_single_opts,
+                retry_options=self._get_retry_options(),
+                state=self._get_state(),
+                transaction_options=self._get_active_tx_options(),
+                warning_handler=self._get_warning_handler(),
+                annotations=self._get_annotations(),
+            )
+        )
+
+    @typing.overload
+    async def query_required_single(
+        self, query: type[T_QueryBuilder], **kwargs: typing.Any
+    ) -> T_QueryBuilder: ...
+
+    @typing.overload
+    async def query_required_single(
+        self, query: str, *args: typing.Any, **kwargs: typing.Any
+    ) -> typing.Any: ...
+
+    async def query_required_single(
+        self, query: AnyEdgeQLQuery, *args, **kwargs
+    ) -> typing.Any:
+        return await self._query(
+            QueryContext(
+                query=QueryWithArgs.from_query(query, args, kwargs),
+                cache=self._get_query_cache(),
+                query_options=_query_required_single_opts,
+                retry_options=self._get_retry_options(),
+                state=self._get_state(),
+                transaction_options=self._get_active_tx_options(),
+                warning_handler=self._get_warning_handler(),
+                annotations=self._get_annotations(),
+            )
+        )
+
+    async def query_json(self, query: AnyEdgeQLQuery, *args, **kwargs) -> str:
+        return await self._query(
+            QueryContext(
+                query=QueryWithArgs.from_query(query, args, kwargs),
+                cache=self._get_query_cache(),
+                query_options=_query_json_opts,
+                retry_options=self._get_retry_options(),
+                state=self._get_state(),
+                transaction_options=self._get_active_tx_options(),
+                warning_handler=self._get_warning_handler(),
+                annotations=self._get_annotations(),
+            )
+        )
+
+    async def query_single_json(
+        self, query: AnyEdgeQLQuery, *args, **kwargs
+    ) -> str:
+        return await self._query(
+            QueryContext(
+                query=QueryWithArgs.from_query(query, args, kwargs),
+                cache=self._get_query_cache(),
+                query_options=_query_single_json_opts,
+                retry_options=self._get_retry_options(),
+                state=self._get_state(),
+                transaction_options=self._get_active_tx_options(),
+                warning_handler=self._get_warning_handler(),
+                annotations=self._get_annotations(),
+            )
+        )
+
+    async def query_required_single_json(
+        self, query: AnyEdgeQLQuery, *args, **kwargs
+    ) -> str:
+        return await self._query(
+            QueryContext(
+                query=QueryWithArgs.from_query(query, args, kwargs),
+                cache=self._get_query_cache(),
+                query_options=_query_required_single_json_opts,
+                retry_options=self._get_retry_options(),
+                state=self._get_state(),
+                transaction_options=self._get_active_tx_options(),
+                warning_handler=self._get_warning_handler(),
+                annotations=self._get_annotations(),
+            )
+        )
+
+    async def query_sql(self, query: str, *args, **kwargs) -> typing.Any:
+        return await self._query(
+            QueryContext(
+                query=QueryWithArgs(
+                    query,
+                    None,
+                    args,
+                    kwargs,
+                    input_language=protocol.InputLanguage.SQL,
+                ),
+                cache=self._get_query_cache(),
+                query_options=_query_opts,
+                retry_options=self._get_retry_options(),
+                state=self._get_state(),
+                transaction_options=self._get_active_tx_options(),
+                warning_handler=self._get_warning_handler(),
+                annotations=self._get_annotations(),
+            )
+        )
+
+    @abc.abstractmethod
+    async def _execute(self, execute_context: ExecuteContext) -> None: ...
 
     async def execute(self, commands: str, *args, **kwargs) -> None:
-        await self._execute(ExecuteContext(
-            query=QueryWithArgs(commands, None, args, kwargs),
-            cache=self._get_query_cache(),
-            retry_options=self._get_retry_options(),
-            state=self._get_state(),
-            transaction_options=self._get_active_tx_options(),
-            warning_handler=self._get_warning_handler(),
-            annotations=self._get_annotations(),
-        ))
+        await self._execute(
+            ExecuteContext(
+                query=QueryWithArgs(commands, None, args, kwargs),
+                cache=self._get_query_cache(),
+                retry_options=self._get_retry_options(),
+                state=self._get_state(),
+                transaction_options=self._get_active_tx_options(),
+                warning_handler=self._get_warning_handler(),
+                annotations=self._get_annotations(),
+            )
+        )
 
     async def execute_sql(self, commands: str, *args, **kwargs) -> None:
-        await self._execute(ExecuteContext(
-            query=QueryWithArgs(
-                commands,
-                None,
-                args,
-                kwargs,
-                input_language=protocol.InputLanguage.SQL,
-            ),
-            cache=self._get_query_cache(),
-            retry_options=self._get_retry_options(),
-            state=self._get_state(),
-            transaction_options=self._get_active_tx_options(),
-            warning_handler=self._get_warning_handler(),
-            annotations=self._get_annotations(),
-        ))
+        await self._execute(
+            ExecuteContext(
+                query=QueryWithArgs(
+                    commands,
+                    None,
+                    args,
+                    kwargs,
+                    input_language=protocol.InputLanguage.SQL,
+                ),
+                cache=self._get_query_cache(),
+                retry_options=self._get_retry_options(),
+                state=self._get_state(),
+                transaction_options=self._get_active_tx_options(),
+                warning_handler=self._get_warning_handler(),
+                annotations=self._get_annotations(),
+            )
+        )
 
 
 class AsyncIOExecutor(AsyncIOReadOnlyExecutor):

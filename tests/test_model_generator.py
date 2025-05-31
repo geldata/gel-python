@@ -42,7 +42,7 @@ class TestModelGenerator(tb.ModelTestCase):
 
     SETUP = os.path.join(os.path.dirname(__file__), "dbsetup", "base.edgeql")
 
-    @unittest.expectedFailure
+    @tb.must_fail
     @tb.typecheck
     def test_modelgen__smoke_test(self):
         from models import default
@@ -54,11 +54,11 @@ class TestModelGenerator(tb.ModelTestCase):
         from models import default
 
         self.assertEqual(
-            reveal_type(default.User.name), "models.__variants__.std.str"
+            reveal_type(default.User.name), "type[models.__variants__.std.str]"
         )
 
         self.assertEqual(
-            reveal_type(default.User.groups), "models.default.UserGroup"
+            reveal_type(default.User.groups), "type[models.default.UserGroup]"
         )
 
     def test_modelgen_data_unpack_1(self):
@@ -83,6 +83,8 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertIsInstance(d.author, default.User)
         self.assertEqual(d.author.name, "Alice")
 
+    @tb.to_be_fixed
+    @tb.typecheck
     def test_modelgen_data_unpack_1b(self):
         from models import default
 
@@ -96,9 +98,14 @@ class TestModelGenerator(tb.ModelTestCase):
         )
         d = self.client.query_single(q)
 
+        self.assertEqual(reveal_type(d), "Union[models.default.Post, None]")
+        assert d is not None
+
         self.assertIsInstance(d, default.Post)
         self.assertEqual(d.body, "Hello")
         self.assertIsInstance(d.author, default.User)
+
+        assert d.author is not None
         self.assertEqual(d.author.name, "Alice")
 
     def test_modelgen_data_unpack_1c(self):
@@ -125,9 +132,9 @@ class TestModelGenerator(tb.ModelTestCase):
         q = (
             MyUser.select(
                 name=True,
-                posts=lambda u: std.count(default.Post.filter(
-                    lambda p: p.author == u
-                )),
+                posts=lambda u: std.count(
+                    default.Post.filter(lambda p: p.author == u)
+                ),
             )
             .filter(name="Alice")
             .limit(1)
