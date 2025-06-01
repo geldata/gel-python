@@ -177,7 +177,7 @@ OptionalProperty = TypeAliasType(
         _OptionalProperty[_ST_co, _BT_co],
         pydantic.Field(default=None),
         _abstract.PointerInfo(
-            computed=True,
+            computed=False,
             cardinality=_edgeql.Cardinality.AtMostOne,
             kind=_edgeql.PointerKind.Property,
         ),

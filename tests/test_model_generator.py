@@ -472,6 +472,33 @@ class TestModelGenerator(tb.ModelTestCase):
                     readonly=False,
                     type=std.str,
                 ),
+                MockPointer(
+                    name="name_len",
+                    cardinality=Cardinality.One,
+                    computed=True,
+                    has_props=False,
+                    kind=PointerKind.Property,
+                    readonly=True,
+                    type=std.int64,
+                ),
+                MockPointer(
+                    name="nickname",
+                    cardinality=Cardinality.AtMostOne,
+                    computed=False,
+                    has_props=False,
+                    kind=PointerKind.Property,
+                    readonly=False,
+                    type=std.str,
+                ),
+                MockPointer(
+                    name="nickname_len",
+                    cardinality=Cardinality.AtMostOne,
+                    computed=True,
+                    has_props=False,
+                    kind=PointerKind.Property,
+                    readonly=True,
+                    type=std.int64,
+                ),
             ],
         )
 
