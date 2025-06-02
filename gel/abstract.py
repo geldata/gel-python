@@ -49,8 +49,7 @@ T_get = typing.TypeVar("T_get")
 
 
 class TypedEdgeQLQuery(typing.Protocol[T_ql]):
-    @classmethod
-    def __edgeql__(cls) -> typing.Tuple[type[T_ql], str]: ...
+    def __edgeql__(self) -> typing.Tuple[type[T_ql], str]: ...
 
 
 AnyEdgeQLQuery = TypedEdgeQLQuery | str
