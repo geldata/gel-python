@@ -6,8 +6,6 @@ from typing import Protocol, TypeVar
 from typing_extensions import TypeAliasType
 from collections.abc import Iterable, Set as AbstractSet
 
-import datetime
-
 
 _KT = TypeVar("_KT")
 _VT = TypeVar("_VT")

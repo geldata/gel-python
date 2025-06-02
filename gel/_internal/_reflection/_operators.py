@@ -4,6 +4,7 @@
 
 
 from __future__ import annotations
+from typing import TYPE_CHECKING
 from collections.abc import (
     MutableMapping,
 )
@@ -16,13 +17,15 @@ import dataclasses
 import uuid
 from collections import ChainMap, defaultdict
 
-from gel import abstract
 from gel._internal import _dataclass_extras
 
 from . import _enums
 from . import _query
 from . import _types
 from ._callables import Callable, CallableParam
+
+if TYPE_CHECKING:
+    from gel import abstract
 
 
 @dataclasses.dataclass(frozen=True, kw_only=True)
@@ -109,16 +112,18 @@ def fetch_operators(
             op.operator_kind == _enums.OperatorKind.Infix
             and op.name in INFIX_OPERATOR_MAP
         ):
-            op = _dataclass_extras.coerce_to_dataclass(Operator, op)
-            op = dataclasses.replace(op, py_magic=INFIX_OPERATOR_MAP[op.name])
-            binary_ops[op.params[0].type.id].append(op)
+            opv = _dataclass_extras.coerce_to_dataclass(Operator, op)
+            opv = dataclasses.replace(op, py_magic=INFIX_OPERATOR_MAP[op.name])
+            binary_ops[op.params[0].type.id].append(opv)
         elif (
             op.operator_kind == _enums.OperatorKind.Prefix
             and op.name in PREFIX_OPERATOR_MAP
         ):
-            op = _dataclass_extras.coerce_to_dataclass(Operator, op)
-            op = dataclasses.replace(op, py_magic=PREFIX_OPERATOR_MAP[op.name])
-            unary_ops[op.params[0].type.id].append(op)
+            opv = _dataclass_extras.coerce_to_dataclass(Operator, op)
+            opv = dataclasses.replace(
+                op, py_magic=PREFIX_OPERATOR_MAP[op.name]
+            )
+            unary_ops[op.params[0].type.id].append(opv)
         else:
             other_ops.append(op)
 

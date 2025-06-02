@@ -6,10 +6,13 @@
 from __future__ import annotations
 
 import dataclasses
-import uuid
 
-from . import _enums
-from . import _types
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from . import _types
+    from . import _enums
+    import uuid
 
 
 @dataclasses.dataclass(frozen=True, kw_only=True)

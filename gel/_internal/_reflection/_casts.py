@@ -4,6 +4,7 @@
 
 
 from __future__ import annotations
+from typing import TYPE_CHECKING
 from collections.abc import (
     MutableMapping,
 )
@@ -16,10 +17,12 @@ import dataclasses
 import uuid
 from collections import ChainMap, defaultdict
 
-from gel import abstract
 from . import _enums
 from . import _types
 from . import _query
+
+if TYPE_CHECKING:
+    from gel import abstract
 
 
 @dataclasses.dataclass(frozen=True)
@@ -127,18 +130,18 @@ def fetch_casts(
     all_assignment_casts_from: CastMap = {}
     all_assignment_casts_to: CastMap = {}
 
-    for type in types:
-        all_implicit_casts_from[type] = list(
-            _trace_all_casts(type, implicit_casts_from)
+    for type_ in types:
+        all_implicit_casts_from[type_] = list(
+            _trace_all_casts(type_, implicit_casts_from)
         )
-        all_implicit_casts_to[type] = list(
-            _trace_all_casts(type, implicit_casts_to)
+        all_implicit_casts_to[type_] = list(
+            _trace_all_casts(type_, implicit_casts_to)
         )
-        all_assignment_casts_from[type] = list(
-            _trace_all_casts(type, assignment_casts_from)
+        all_assignment_casts_from[type_] = list(
+            _trace_all_casts(type_, assignment_casts_from)
         )
-        all_assignment_casts_to[type] = list(
-            _trace_all_casts(type, assignment_casts_to)
+        all_assignment_casts_to[type_] = list(
+            _trace_all_casts(type_, assignment_casts_to)
         )
 
     return CastMatrix(

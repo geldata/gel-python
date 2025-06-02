@@ -313,9 +313,6 @@ class GelModel(
         __gel_changed_fields__: set[str] | None
         __gel_track_changes__: bool
 
-        @classmethod
-        def __edgeql__(cls) -> tuple[type[Self], str]: ...
-
     def __new__(cls, *_args: Any, **_kwargs: Any) -> Self:
         self = super().__new__(cls)
         object.__setattr__(self, "__gel_track_changes__", False)
@@ -384,8 +381,8 @@ class GelModel(
     def model_construct(cls, *args: Any, **values: Any) -> Self:
         self = super().model_construct(*args, **values)
         # Strictly speaking the way we instantiate models doesn't require
-        # this (we call `object.__setattr__` directly), but this is more futureproof
-        # and doesn't cost us much.
+        # this (we call `object.__setattr__` directly), but this is more
+        # futureproof and doesn't cost us much.
         object.__setattr__(self, "__gel_track_changes__", True)  # noqa: PLC2801
         return self
 

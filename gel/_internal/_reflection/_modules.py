@@ -4,11 +4,14 @@
 
 
 from __future__ import annotations
+from typing import TYPE_CHECKING
 
 
-from gel import abstract
 from . import _enums as enums
 from . import _query
+
+if TYPE_CHECKING:
+    from gel import abstract
 
 
 def fetch_modules(

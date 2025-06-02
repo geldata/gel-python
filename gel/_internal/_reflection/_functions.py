@@ -4,14 +4,17 @@
 
 
 from __future__ import annotations
+from typing import TYPE_CHECKING
 
 import dataclasses
 
-from gel import abstract
 
 from . import _enums
 from . import _query
 from ._callables import Callable
+
+if TYPE_CHECKING:
+    from gel import abstract
 
 
 @dataclasses.dataclass(frozen=True, kw_only=True)

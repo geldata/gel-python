@@ -4,12 +4,12 @@
 
 from typing import (
     Any,
-    Callable,
     Generic,
     TypeVar,
     ParamSpec,
     overload,
 )
+from collections.abc import Callable
 
 import functools
 import types
@@ -18,13 +18,14 @@ P = ParamSpec("P")
 R = TypeVar("R")
 
 
-class hybridmethod(Generic[P, R]):
+class hybridmethod(Generic[P, R]):  # noqa: N801
     """Transform a method in a hybrid class/instance method.
 
     A hybrid method would receive either the class or the instance
     as the first implicit argument depending on whether the method
     was called on a class or an instance of a class.
     """
+
     def __init__(self, func: Callable[P, R]) -> None:
         self.func = func
         # Copy __doc__, __name__, __qualname__, __annotations__,

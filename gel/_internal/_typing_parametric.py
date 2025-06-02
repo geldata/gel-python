@@ -7,10 +7,7 @@ from typing import (
     Any,
     ClassVar,
     Generic,
-    Tuple,
-    Type,
     TypeVar,
-    Dict,
     get_type_hints,
 )
 
@@ -93,6 +90,8 @@ class ParametricType:
     def _init_parametric_base(cls) -> None:
         """Initialize a direct subclass of ParametricType"""
 
+        # ruff: noqa: ERA001
+        #
         # Direct subclasses of ParametricType must declare
         # ClassVar attributes corresponding to the Generic type vars.
         # For example:
@@ -258,13 +257,13 @@ class ParametricType:
         params_str = ", ".join(_type_repr(a) for a in all_params)
         name = f"{cls.__name__}[{params_str}]"
         bases = (cls,)
-        type_dict: Dict[str, Any] = {
+        type_dict: dict[str, Any] = {
             "__parametric_type_args__": tuple(type_params),
             "__parametric_orig_args__": all_params,
             "__module__": cls.__module__,
         }
-        forward_refs: Dict[str, Tuple[int, str]] = {}
-        tuple_to_attr: Dict[int, str] = {}
+        forward_refs: dict[str, tuple[int, str]] = {}
+        tuple_to_attr: dict[int, str] = {}
 
         if cls._type_param_map:
             gen_params = getattr(cls, "__parameters__", ())
@@ -292,8 +291,8 @@ class ParametricType:
             ):
                 # All parameters are type variables: return the regular generic
                 # alias to allow proper subclassing.
-                generic = super(ParametricType, cls)
-                return generic.__class_getitem__(all_params)  # type: ignore
+                generic = super(ParametricType, cls)  # noqa: UP008
+                return generic.__class_getitem__(all_params)  # type: ignore [attr-defined, no-any-return]
             else:
                 forward_refs = {}
                 for i, param in enumerate(type_params):
@@ -360,14 +359,14 @@ class ParametricType:
     def is_anon_parametrized(cls) -> bool:
         return cls.__name__.endswith("]")
 
-    def __reduce__(self) -> Tuple[Any, ...]:
+    def __reduce__(self) -> tuple[Any, ...]:
         raise NotImplementedError(
             "must implement explicit __reduce__ for ParametricType subclass"
         )
 
 
 class SingleParametricType(ParametricType, Generic[T]):
-    type: ClassVar[Type[T]]  # type: ignore
+    type: ClassVar[type[T]]  # type: ignore [misc]
 
 
 def _type_repr(obj: Any) -> str:

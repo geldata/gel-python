@@ -244,7 +244,8 @@ def compute_ops(
         ]
         if not ready:
             raise RuntimeError(
-                f"Cannot resolve dependencies among objects: {remaining_to_make}"
+                f"Cannot resolve dependencies "
+                f"among objects: {remaining_to_make}"
             )
 
         batches.append(ready)

@@ -1,17 +1,9 @@
 from typing import (
     Any,
-    Callable,
-    Iterator,
-    List,
-    Mapping,
     Optional,
-    Sequence,
-    Tuple,
-    Type,
 )
 
-import builtins
-import functools
+import importlib.util
 import inspect
 import types
 
@@ -30,8 +22,10 @@ def _get_fastapi_cli_import_site() -> Optional[types.FrameType]:
 
 
 def _maybe_patch_fastapi_cli() -> None:
+    if importlib.util.find_spec("fastapi") is None:
+        return
+
     try:
-        import fastapi
         import uvicorn
     except ImportError:
         return
