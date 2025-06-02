@@ -944,11 +944,7 @@ class TestModel(unittest.TestCase):
                 [
                     "mypy",
                     "--strict",
-                    # XXX -- we should probably fix this, right? :)
-                    "--disable-error-code",
-                    "no-any-return",
-                    "--disable-error-code",
-                    "unused-ignore",
+                    "--no-strict-equality",
                     testfn,
                 ],
                 capture_output=True,

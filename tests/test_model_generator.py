@@ -192,30 +192,8 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertIsInstance(d.author, default.User)
         self.assertEqual(d.author.name, "Alice")
 
-    def test_modelgen_data_unpack_1b(self):
-        from models import default
-
-        q = (
-            default.Post.select(
-                body=True,
-                author=True,
-            )
-            .filter(lambda p: p.body == "Hello")
-            .limit(1)
-        )
-        d = self.client.query_single(q)
-        assert d is not None
-
-        self.assertIsInstance(d, default.Post)
-        self.assertEqual(d.body, "Hello")
-        self.assertIsInstance(d.author, default.User)
-
-        assert d.author is not None
-        self.assertEqual(d.author.name, "Alice")
-
-    @tb.to_be_fixed
     @tb.typecheck
-    def test_modelgen_data_unpack_1b_tc(self):
+    def test_modelgen_data_unpack_1b(self):
         from models import default
 
         q = (
@@ -231,9 +209,7 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(reveal_type(d), "Union[models.default.Post, None]")
         assert d is not None
 
-        self.assertEqual(
-            reveal_type(d.id), "type[models.__variants__.std.uuid]"
-        )
+        self.assertEqual(reveal_type(d.id), "models.__variants__.std.uuid")
 
         self.assertIsInstance(d, default.Post)
         self.assertEqual(d.body, "Hello")
@@ -242,6 +218,7 @@ class TestModelGenerator(tb.ModelTestCase):
         assert d.author is not None
         self.assertEqual(d.author.name, "Alice")
 
+    @tb.typecheck
     def test_modelgen_data_unpack_1c(self):
         from models import default, std
 
@@ -258,7 +235,7 @@ class TestModelGenerator(tb.ModelTestCase):
             .filter(name="Alice")
             .limit(1)
         )
-        d = self.client.query_single(q)
+        d = self.client.query_required_single(q)
 
         self.assertIsInstance(d, default.User)
         self.assertEqual(d.posts, 2)
@@ -273,11 +250,12 @@ class TestModelGenerator(tb.ModelTestCase):
             .filter(name="Alice")
             .limit(1)
         )
-        d = self.client.query_single(q)
+        d = self.client.query_required_single(q)
 
         self.assertIsInstance(d, default.User)
         self.assertEqual(d.posts, 2)
 
+    @tb.typecheck
     def test_modelgen_data_unpack_2(self):
         from models import default
 
@@ -285,8 +263,10 @@ class TestModelGenerator(tb.ModelTestCase):
         d = self.client.query(q)[0]
         self.assertIsInstance(d, default.Post)
 
+    @tb.typecheck
     def test_modelgen_data_unpack_3(self):
         from models import default
+        from gel._internal._dlist import DistinctList
 
         q = (
             default.GameSession.select(
@@ -317,7 +297,7 @@ class TestModelGenerator(tb.ModelTestCase):
         with self.assertRaisesRegex(
             ValueError, r"accepts only values of type.*User.*, got.*Post"
         ):
-            d.players.append(post)
+            d.players.append(post)  # type: ignore [arg-type]
 
         with self.assertRaisesRegex(
             ValueError, r"(?s)xxx.*Object has no attribute 'xxx'"
