@@ -23,6 +23,9 @@ from ._expressions import (
     select,
     update,
 )
+from ._functions import (
+    assert_single,
+)
 
 if TYPE_CHECKING:
     import uuid
@@ -89,6 +92,11 @@ class GelModel(
 
         @classmethod
         def offset(cls, /, expr: Any) -> type[Self]: ...
+
+        @classmethod
+        def __gel_assert_single__(
+            cls, /, *, message: str | None = None,
+        ) -> type[Self]: ...
     else:
 
         @_qb.exprmethod
@@ -184,13 +192,28 @@ class GelModel(
                 add_offset(cls, value, __operand__=__operand__),
             )
 
+        @_qb.exprmethod
+        @classmethod
+        def __gel_assert_single__(
+            cls,
+            /,
+            *,
+            message: str | None = None,
+            __operand__: _qb.ExprAlias | None = None,
+        ) -> type[Self]:
+            return _qb.AnnotatedExpr(  # type: ignore [return-value]
+                cls,
+                assert_single(cls, message=message, __operand__=__operand__),
+            )
+
         @hybridmethod
         def __edgeql__(self) -> tuple[type, str]:
             if isinstance(self, type):
                 return self, _qb.toplevel_edgeql(self)
             else:
                 raise NotImplementedError(
-                    f"{type(self)} instances are not queryable")
+                    f"{type(self)} instances are not queryable"
+                )
 
     @classmethod
     def __edgeql_qb_expr__(cls) -> _qb.Expr:  # pyright: ignore [reportIncompatibleMethodOverride]

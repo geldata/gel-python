@@ -56,6 +56,13 @@ OP_OVERLOADS = frozenset(
 """Operators that are overloaded on types"""
 
 
+SPECIAL_EXPR_METHODS = frozenset(
+    {
+        "__gel_assert_single__",
+    }
+)
+
+
 class BaseAliasMeta(type):
     def __new__(
         mcls,
@@ -106,7 +113,11 @@ class BaseAlias(metaclass=BaseAliasMeta):
         return f"{_utils.type_repr(type(self))}[{origin}, {metadata}]"
 
     def __getattr__(self, attr: str) -> Any:
-        if not _utils.is_dunder(attr) or attr in self.__gel_proxied_dunders__:
+        if (
+            not _utils.is_dunder(attr)
+            or attr in self.__gel_proxied_dunders__
+            or attr in SPECIAL_EXPR_METHODS
+        ):
             origin = self.__gel_origin__
             descriptor = _utils.maybe_get_descriptor(
                 origin, attr, of_type=AbstractFieldDescriptor

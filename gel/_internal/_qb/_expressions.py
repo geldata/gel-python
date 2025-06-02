@@ -325,7 +325,7 @@ class FuncCall(TypedExpr):
                 arg_text = f"({arg_text})"
             args.append(f"{n} := {arg_text}")
 
-        return f"{self.fname}({' '.join(args)})"
+        return f"{self.fname}({', '.join(args)})"
 
 
 class Clause(Node):

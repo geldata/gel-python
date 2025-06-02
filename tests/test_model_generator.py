@@ -18,16 +18,14 @@
 
 import dataclasses
 import os
-import types
 import typing
-import unittest
 
 if typing.TYPE_CHECKING:
     from typing import reveal_type
 
 from gel import _testbase as tb
 
-from gel._internal._qbmodel._pydantic._models import Pointer, GelModel
+from gel._internal._qbmodel._pydantic._models import GelModel
 from gel._internal._dlist import DistinctList
 from gel._internal._edgeql import Cardinality, PointerKind
 from gel._internal._qbmodel._pydantic._fields import (
@@ -316,6 +314,24 @@ class TestModelGenerator(tb.ModelTestCase):
 
         with self.assertRaisesRegex(AttributeError, r".body. is not set"):
             d.body
+
+    @tb.typecheck
+    def test_modelgen_assert_single(self):
+        from models import default
+        from gel import errors
+
+        q = default.Post.limit(1).__gel_assert_single__()
+        d = self.client.query(q)[0]
+        self.assertIsInstance(d, default.Post)
+
+        with self.assertRaisesRegex(
+            errors.CardinalityViolationError,
+            "Post is not single",
+        ):
+            q = default.Post.__gel_assert_single__(
+                message="Post is not single",
+            )
+            self.client.query(q)
 
     @tb.typecheck
     def test_modelgen_data_model_validation_1(self):

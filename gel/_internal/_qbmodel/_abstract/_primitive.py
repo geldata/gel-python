@@ -24,6 +24,8 @@ from gel._internal import _typing_parametric
 from gel._internal._polyfills import StrEnum
 
 from ._base import GelType, GelTypeMeta
+from ._functions import assert_single
+
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Sequence
@@ -48,6 +50,27 @@ class GelPrimitiveType(GelType):
             obj: Any,
             objtype: Any = None,
         ) -> type[Self] | Self: ...
+
+        @classmethod
+        def __gel_assert_single__(
+            cls, /, *, message: str | None = None,
+        ) -> type[Self]: ...
+
+    else:
+
+        @_qb.exprmethod
+        @classmethod
+        def __gel_assert_single__(
+            cls,
+            /,
+            *,
+            message: str | None = None,
+            __operand__: _qb.ExprAlias | None = None,
+        ) -> type[Self]:
+            return _qb.AnnotatedExpr(  # type: ignore [return-value]
+                cls,
+                assert_single(cls, message=message, __operand__=__operand__),
+            )
 
 
 class BaseScalar(GelPrimitiveType):
