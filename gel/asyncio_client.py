@@ -456,7 +456,7 @@ class AsyncIOBatch(transaction.BaseRetry):
 
     async def __anext__(self):
         # Note: when changing this code consider also
-        # updating Retry.__next__.
+        # updating Batch.__next__.
         if self._done:
             raise StopAsyncIteration
         if self._next_backoff:
