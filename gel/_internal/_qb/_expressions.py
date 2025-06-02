@@ -12,9 +12,11 @@ from typing import (
 
 import itertools
 import textwrap
+import typing
 from dataclasses import dataclass, field
 
 from gel._internal import _edgeql
+from gel._internal import _polyfills
 from gel._internal import _reflection
 from gel._internal._reflection import SchemaPath
 
@@ -355,9 +357,57 @@ class Filter(Clause):
         return f"FILTER {edgeql(fexpr, ctx=ctx)}"
 
 
+class OrderDirection(_polyfills.StrEnum):
+    asc = "asc"
+    desc = "desc"
+
+
+class OrderEmptyDirection(_polyfills.StrEnum):
+    empty_first = "empty first"
+    empty_last = "empty last"
+
+
+Direction = typing.Literal["asc", "desc"]
+EmptyDirection = typing.Literal["empty first", "empty last"]
+OrderByExpr = (
+    Expr
+    | tuple[Expr, Direction | str]
+    | tuple[Expr, Direction | str, EmptyDirection | str]
+)
+
+
+@dataclass(kw_only=True, frozen=True)
+class OrderByElem(Expr):
+    expr: Expr
+    direction: OrderDirection | None = None
+    empty_direction: OrderEmptyDirection | None = None
+
+    def subnodes(self) -> Iterable[Node]:
+        return (self.expr,)
+
+    @property
+    def type(self) -> _reflection.SchemaPath:
+        return self.expr.type
+
+    @property
+    def precedence(self) -> _edgeql.Precedence:
+        if self.direction is None:
+            return self.expr.precedence
+        else:
+            return _edgeql.PRECEDENCE[_edgeql.Token.ASC]
+
+    def __edgeql_expr__(self, *, ctx: ScopeContext | None) -> str:
+        text = f"{edgeql(self.expr, ctx=ctx)}"
+        if self.direction is not None:
+            text += f" {self.direction.upper()}"
+        if self.empty_direction is not None:
+            text += f" {self.empty_direction.upper()}"
+        return text
+
+
 @dataclass(kw_only=True, frozen=True)
 class OrderBy(Clause):
-    directions: list[Expr]
+    directions: list[OrderByElem]
 
     def subnodes(self) -> Iterable[Node]:
         return self.directions
@@ -367,7 +417,7 @@ class OrderBy(Clause):
         return _edgeql.PRECEDENCE[_edgeql.Token.ORDER_BY]
 
     def __edgeql_expr__(self, *, ctx: ScopeContext | None) -> str:
-        dexpr = self.directions[0]
+        dexpr: Expr = self.directions[0]
         for item in self.directions[1:]:
             dexpr = InfixOp(
                 lexpr=dexpr,

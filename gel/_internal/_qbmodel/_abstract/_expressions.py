@@ -220,21 +220,64 @@ def add_filter(
 def order_by(
     cls: type[GelType],
     /,
-    *exprs: _qb.ExprClosure | _qb.ExprCompatible,
+    *exprs: _qb.ExprClosure
+    | tuple[_qb.ExprClosure, str]
+    | tuple[_qb.ExprClosure, str, str],
     __operand__: _qb.ExprAlias | None = None,
-    **kwargs: str,
+    **kwargs: bool | str | tuple[str, str],
 ) -> _qb.Expr:
     stmt, prefix = _select_stmt_context(
         cls,
         __operand__,
         new_stmt_if=lambda s: s.limit is not None or s.offset is not None,
     )
-    dirs = [_qb.edgeql_qb_expr(expr, var=prefix) for expr in exprs]
-    for ptrname in kwargs:
-        _, ptr_expr = _get_prefixed_ptr(cls, ptrname, scope=stmt.scope)
-        dirs.append(ptr_expr)
+    elems: list[_qb.OrderByElem] = []
+    for expr in exprs:
+        match expr:
+            case (f, str(d), str(nd)):
+                elem = _qb.OrderByElem(
+                    expr=_qb.edgeql_qb_expr(f, var=prefix),  # type: ignore [arg-type]
+                    direction=_qb.OrderDirection(d),
+                    empty_direction=_qb.OrderEmptyDirection(nd),
+                )
+            case (f, str(d)):
+                elem = _qb.OrderByElem(
+                    expr=_qb.edgeql_qb_expr(f, var=prefix),  # type: ignore [arg-type]
+                    direction=_qb.OrderDirection(d),
+                )
+            case f:
+                elem = _qb.OrderByElem(
+                    expr=_qb.edgeql_qb_expr(f, var=prefix),  # type: ignore [arg-type]
+                )
 
-    return dataclasses.replace(stmt, order_by=_qb.OrderBy(directions=dirs))
+        elems.append(elem)
+
+    for ptrname, val in kwargs.items():
+        _, ptr_expr = _get_prefixed_ptr(cls, ptrname, scope=stmt.scope)
+        match val:
+            case (str(d), str(nd)):
+                elem = _qb.OrderByElem(
+                    expr=ptr_expr,
+                    direction=_qb.OrderDirection(d),
+                    empty_direction=_qb.OrderEmptyDirection(nd),
+                )
+            case str(d):
+                elem = _qb.OrderByElem(
+                    expr=ptr_expr,
+                    direction=_qb.OrderDirection(d),
+                )
+            case bool():
+                elem = _qb.OrderByElem(
+                    expr=ptr_expr,
+                )
+            case _:
+                raise ValueError(
+                    f"invalid order_by element, expected two to three "
+                    f"elements, got {_}"
+                )
+        elems.append(elem)
+
+    return dataclasses.replace(stmt, order_by=_qb.OrderBy(directions=elems))
 
 
 def add_limit(

@@ -276,6 +276,9 @@ PRECEDENCE: dict[Token | tuple[Token, int] | Operation, Precedence] = {
     Token.DELETE: Precedence(-4, Assoc.RIGHT),
     Token.FOR: Precedence(-4, Assoc.RIGHT),
     Token.WITH: Precedence(-4, Assoc.RIGHT),
+    Token.THEN: Precedence(-3, Assoc.NONASSOC),
+    Token.ASC: Precedence(-3, Assoc.NONASSOC),
+    Token.DESC: Precedence(-3, Assoc.NONASSOC),
     Token.ASSIGN: Precedence(-3, Assoc.NONASSOC),
     Token.ADDASSIGN: Precedence(-3, Assoc.NONASSOC),
     Token.REMASSIGN: Precedence(-3, Assoc.NONASSOC),
@@ -353,7 +356,7 @@ def need_left_parens(
     lprec_value = left_prec.value
 
     return lprec_value < self_prec or (
-        lprec_value == self_prec and self_assoc is not Assoc.RIGHT
+        lprec_value == self_prec and self_assoc is Assoc.LEFT
     )
 
 

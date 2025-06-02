@@ -17,6 +17,8 @@ from gel._internal._utils import UnspecifiedType, Unspecified
 
 from gel._internal._qb import (
     AnnotatedExpr,
+    EmptyDirection,
+    Direction,
     ExprClosure,
     ExprCompatible,
     InfixOp,
@@ -75,6 +77,8 @@ __all__ = (
     "ComputedMultiLinkWithProps",
     "ComputedProperty",
     "DateTimeLike",
+    "Direction",
+    "EmptyDirection",
     "ExprClosure",
     "ExprCompatible",
     "FuncCall",

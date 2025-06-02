@@ -1773,24 +1773,45 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         callable_ = self.import_name("collections.abc", "Callable")
         self_ = self.import_name("typing_extensions", "Self")
         type_ = self.import_name("builtins", "type")
+        tuple_ = self.import_name("builtins", "tuple")
         type_self = f"{type_}[{self_}]"
         expr_proto = self.import_name(BASE_IMPL, "ExprCompatible")
         py_const = self.import_name(BASE_IMPL, "PyConstType")
-        self_expr_closure = f"{callable_}[[{type_self}], {expr_proto}]"
+        expr_closure = f"{callable_}[[{type_self}], {expr_proto}]"
         pathalias = self.import_name(BASE_IMPL, "PathAlias")
-        literal = self.import_name(
-            "typing", "Literal", import_time=ImportTime.typecheck
-        )
         filter_args = [
             "/",
             f"*exprs: {callable_}[[{type_self}], {type_}[{std_bool}]]",
         ]
         select_args = ["/", f"*exprs: {pathalias}"]
         update_args = []
-        order_args = ["/", f"*exprs: {self_expr_closure} | {expr_proto}"]
+        direction = (
+            f"{self.import_name(BASE_IMPL, 'Direction')} | {builtin_str}"
+        )
+        empty_direction = (
+            f"{self.import_name(BASE_IMPL, 'EmptyDirection')} | {builtin_str}"
+        )
+        order_expr = " | ".join(
+            (
+                expr_closure,
+                f"{tuple_}[{expr_closure}, {direction}]",
+                f"{tuple_}[{expr_closure}, {direction}, {empty_direction}]",
+            )
+        )
+        order_args = ["/", f"*exprs: {order_expr}"]
         if reg_pointers:
             unspec_t = self.import_name(BASE_IMPL, "UnspecifiedType")
             unspec = self.import_name(BASE_IMPL, "Unspecified")
+
+            order_kwarg_t = " | ".join(
+                (
+                    direction,
+                    builtin_str,
+                    builtin_bool,
+                    f"{tuple_}[{direction}, {empty_direction}]",
+                    unspec_t,
+                )
+            )
 
             for ptr, _ in reg_pointers:
                 target_t = self._types[ptr.target_id]
@@ -1799,17 +1820,13 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                     import_time=ImportTime.typecheck,
                 )
                 union = []
-                select_union = [builtin_bool, self_expr_closure, expr_proto]
+                select_union = [builtin_bool, expr_closure, expr_proto]
                 if reflection.is_non_enum_scalar_type(target_t):
                     broad_ptr_t = self._get_pybase_for_scalar(target_t)
                     union.extend(broad_ptr_t)
-                    order_union = [
-                        f'{literal}["asc", "desc"]',
-                        builtin_str,
-                        unspec_t,
-                    ]
-                    order_ptr_t = f"{' | '.join(order_union)} = {unspec}"
-                    order_args.append(f"{ptr.name}: {order_ptr_t}")
+                    order_args.append(
+                        f"{ptr.name}: {order_kwarg_t} = {unspec}"
+                    )
                 union.extend((f"type[{narrow_ptr_t}]", unspec_t))
                 select_union.extend((f"type[{narrow_ptr_t}]", unspec_t))
                 ptr_t = f"{' | '.join(union)} = {unspec}"
@@ -1820,7 +1837,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                 select_args.append(f"{ptr.name}: {select_ptr_t}")
 
         select_args.append(
-            f"**computed: {self_expr_closure} | {expr_proto} | {py_const}"
+            f"**computed: {expr_closure} | {expr_proto} | {py_const}"
         )
 
         if update_args:
@@ -2304,7 +2321,9 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             fname += "_"
 
         if overload:
-            line_comment = "type: ignore [overload-cannot-match, unused-ignore]"
+            line_comment = (
+                "type: ignore [overload-cannot-match, unused-ignore]"
+            )
         else:
             line_comment = None
 

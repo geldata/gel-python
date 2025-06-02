@@ -13,7 +13,7 @@ import weakref
 from gel._internal import _qb
 from gel._internal._hybridmethod import hybridmethod
 
-from ._base import GelObjectType, GelType, GelTypeMeta
+from ._base import GelObjectType, GelTypeMeta
 from ._expressions import (
     add_filter,
     add_limit,
@@ -29,6 +29,7 @@ from ._functions import (
 
 if TYPE_CHECKING:
     import uuid
+    from collections.abc import Callable
 
 
 class GelModelMeta(GelTypeMeta):
@@ -84,7 +85,14 @@ class GelModel(
 
         @classmethod
         def order_by(
-            cls, /, *exprs: type[GelType], **kwargs: bool | type[GelType]
+            cls,
+            /,
+            *exprs: (
+                Callable[[type[Self]], _qb.ExprCompatible]
+                | tuple[Callable[[type[Self]], _qb.ExprCompatible], str]
+                | tuple[Callable[[type[Self]], _qb.ExprCompatible], str, str]
+            ),
+            **kwargs: bool | str | tuple[str, str],
         ) -> type[Self]: ...
 
         @classmethod
@@ -95,7 +103,10 @@ class GelModel(
 
         @classmethod
         def __gel_assert_single__(
-            cls, /, *, message: str | None = None,
+            cls,
+            /,
+            *,
+            message: str | None = None,
         ) -> type[Self]: ...
     else:
 
@@ -157,9 +168,13 @@ class GelModel(
         def order_by(
             cls,
             /,
-            *elements: Any,
+            *elements: (
+                Callable[[type[Self]], _qb.ExprCompatible]
+                | tuple[Callable[[type[Self]], _qb.ExprCompatible], str]
+                | tuple[Callable[[type[Self]], _qb.ExprCompatible], str, str]
+            ),
             __operand__: _qb.ExprAlias | None = None,
-            **kwargs: bool,
+            **kwargs: bool | str | tuple[str, str],
         ) -> type[Self]:
             return _qb.AnnotatedExpr(  # type: ignore [return-value]
                 cls,

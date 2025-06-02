@@ -271,7 +271,12 @@ class TestModelGenerator(tb.ModelTestCase):
                 players=lambda s: s.players.select(
                     name=True,
                     groups=lambda p: p.groups.select(name=True).order_by(
-                        name="asc"
+                        name="asc",
+                        id=("desc", "empty first"),
+                    ).order_by(
+                        lambda u: u.name,
+                        (lambda u: u.name, "asc"),
+                        (lambda u: u.name, "asc", "empty last"),
                     ),
                 ),
             )
