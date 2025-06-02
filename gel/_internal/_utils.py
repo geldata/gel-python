@@ -32,15 +32,21 @@ def is_dunder(attr: str) -> bool:
     return attr.startswith("__") and attr.endswith("__")
 
 
+def module_of(obj: object) -> types.ModuleType | None:
+    if isinstance(obj, types.ModuleType):
+        return obj
+    else:
+        module_name = getattr(obj, "__module__", None)
+        if module_name:
+            return sys.modules.get(module_name)
+        else:
+            return None
+
+
 def module_ns_of(obj: object) -> dict[str, Any]:
     """Return the namespace of the module where *obj* is defined."""
-    module_name = getattr(obj, "__module__", None)
-    if module_name:
-        module = sys.modules.get(module_name)
-        if module is not None:
-            return module.__dict__
-
-    return {}
+    module = module_of(obj)
+    return module.__dict__ if module is not None else {}
 
 
 _T = TypeVar("_T")

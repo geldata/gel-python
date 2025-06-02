@@ -8,6 +8,7 @@ import typing
 
 from . import _typing_eval
 from . import _typing_inspect
+from . import _utils
 
 T = TypeVar("T")
 
@@ -22,7 +23,9 @@ def coerce_to_dataclass(cls: type[T], obj: Any) -> T:
 
     new_kwargs = {}
     for field in dataclasses.fields(cls):
-        field_type = _typing_eval.resolve_type(field.type, owner=cls)
+        field_type = _typing_eval.resolve_type(
+            field.type, owner=_utils.module_of(cls)
+        )
         if _typing_inspect.is_optional_type(field_type):
             value = getattr(obj, field.name, None)
         else:

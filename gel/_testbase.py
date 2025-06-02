@@ -696,9 +696,9 @@ class ModelTestCase(SyncQueryTestCase):
         if cls.orm_debug:
             print(cls.tmp_model_dir.name)
 
-        from gel.codegen.models import ModelsGenerator
+        from gel._internal._codegen._models import PydanticModelsGenerator
 
-        cls.gen = ModelsGenerator(
+        cls.gen = PydanticModelsGenerator(
             argparse.Namespace(),
             project_dir=pathlib.Path(cls.tmp_model_dir.name),
             client=cls.client,

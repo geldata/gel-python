@@ -1,20 +1,7 @@
-#
-# This source file is part of the EdgeDB open source project.
-#
-# Copyright 2022-present MagicStack Inc. and the EdgeDB authors.
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-#
+# SPDX-PackageName: gel-python
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright Gel Data Inc. and the contributors.
+
 
 from __future__ import annotations
 from typing import (
@@ -25,7 +12,6 @@ from typing import (
 
 import getpass
 import io
-import os
 import pathlib
 import sys
 import typing
@@ -40,74 +26,8 @@ if TYPE_CHECKING:
 
 C = get_color()
 
-if pyver_env := os.environ.get("GEL_PYTHON_CODEGEN_PY_VER"):
-    try:
-        SYS_VERSION_INFO = tuple(map(int, pyver_env.split(".")))[:2]
-    except ValueError:
-        raise ValueError(
-            f"invalid version in GEL_PYTHON_CODEGEN_PY_VER: {pyver_env}"
-        ) from None
-else:
-    SYS_VERSION_INFO = sys.version_info[:2]
 
-TYPE_MAPPING: dict[str, str | tuple[str, str]] = {
-    "std::str": "str",
-    "std::float32": "float",
-    "std::float64": "float",
-    "std::int16": "int",
-    "std::int32": "int",
-    "std::int64": "int",
-    "std::bigint": "int",
-    "std::bool": "bool",
-    "std::uuid": ("uuid", "UUID"),
-    "std::bytes": "bytes",
-    "std::decimal": ("decimal", "Decimal"),
-    "std::datetime": ("datetime", "datetime"),
-    "std::duration": ("datetime", "timedelta"),
-    "std::json": "str",
-    "cal::local_date": ("datetime", "date"),
-    "cal::local_time": ("datetime", "time"),
-    "cal::local_datetime": ("datetime", "datetime"),
-    "cal::relative_duration": ("gel", "RelativeDuration"),
-    "cal::date_duration": ("gel", "DateDuration"),
-    "std::cal::local_date": ("datetime", "date"),
-    "std::cal::local_time": ("datetime", "time"),
-    "std::cal::local_datetime": ("datetime", "datetime"),
-    "std::cal::relative_duration": ("gel", "RelativeDuration"),
-    "std::cal::date_duration": ("gel", "DateDuration"),
-    "cfg::memory": ("gel", "ConfigMemory"),
-    "std::cfg::memory": ("gel", "ConfigMemory"),
-    "ext::pgvector::vector": ("array", "array"),
-}
-
-INPUT_TYPE_MAPPING = dict(TYPE_MAPPING)
-INPUT_TYPE_MAPPING.update(
-    {
-        "ext::pgvector::vector": ("typing", "Sequence[float]"),
-    }
-)
-
-PYDANTIC_MIXIN = """\
-class NoPydanticValidation:
-    @classmethod
-    def __get_pydantic_core_schema__(cls, _source_type, _handler):
-        # Pydantic 2.x
-        from pydantic_core.core_schema import any_schema
-        return any_schema()
-
-    @classmethod
-    def __get_validators__(cls):
-        # Pydantic 1.x
-        from pydantic.dataclasses import dataclass as pydantic_dataclass
-        _ = pydantic_dataclass(cls)
-        cls.__pydantic_model__.__get_validators__ = lambda: []
-        return []\
-"""
-
-MAX_LINE_LENGTH = 79
-
-
-class Generator:
+class AbstractCodeGenerator:
     def __init__(
         self,
         args: argparse.Namespace,

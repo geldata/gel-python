@@ -2,17 +2,17 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright Gel Data Inc. and the contributors.
 
+# Type annotations must be visible in coerce_to_dataclass()
+#
+# ruff: noqa: TC001, TC003
 
 from __future__ import annotations
 
+import uuid
 import dataclasses
 
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from . import _types
-    from . import _enums
-    import uuid
+from . import _types
+from . import _enums
 
 
 @dataclasses.dataclass(frozen=True, kw_only=True)

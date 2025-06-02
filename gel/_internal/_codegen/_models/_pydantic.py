@@ -28,8 +28,8 @@ from gel import abstract
 from gel._internal import _reflection as reflection
 from gel._internal._qbmodel import _abstract as _qbmodel
 
-from . import base
-from .base import C, MAX_LINE_LENGTH, ImportTime, CodeSection
+from .._generator import C, AbstractCodeGenerator
+from .._module import ImportTime, CodeSection, GeneratedModule
 
 if TYPE_CHECKING:
     import io
@@ -64,7 +64,7 @@ class IntrospectedModule(TypedDict):
     functions: list[reflection.Function]
 
 
-class ModelsGenerator(base.Generator):
+class PydanticModelsGenerator(AbstractCodeGenerator):
     def run(self) -> None:
         try:
             self._client.ensure_connected()
@@ -272,9 +272,9 @@ class BaseGeneratedModule:
         self._schema_part = schema_part
         self._is_package = self.mod_is_package(modname, schema_part)
         self._py_files = {
-            ModuleAspect.MAIN: base.GeneratedModule(COMMENT),
-            ModuleAspect.VARIANTS: base.GeneratedModule(COMMENT),
-            ModuleAspect.LATE: base.GeneratedModule(COMMENT),
+            ModuleAspect.MAIN: GeneratedModule(COMMENT),
+            ModuleAspect.VARIANTS: GeneratedModule(COMMENT),
+            ModuleAspect.LATE: GeneratedModule(COMMENT),
         }
         self._current_py_file = self._py_files[ModuleAspect.MAIN]
         self._current_aspect = ModuleAspect.MAIN
@@ -306,11 +306,11 @@ class BaseGeneratedModule:
         )
 
     @property
-    def py_file(self) -> base.GeneratedModule:
+    def py_file(self) -> GeneratedModule:
         return self._current_py_file
 
     @property
-    def py_files(self) -> Mapping[ModuleAspect, base.GeneratedModule]:
+    def py_files(self) -> Mapping[ModuleAspect, GeneratedModule]:
         return self._py_files
 
     @property
@@ -670,22 +670,11 @@ class BaseGeneratedModule:
         *,
         first_line_comment: str | None = None,
     ) -> str:
-        list_string = ", ".join(values)
-        output_string = tpl.format(list=list_string)
-        line_length = len(output_string) + len(self.current_indentation())
-        if line_length > MAX_LINE_LENGTH:
-            list_string = ",\n    ".join(values)
-            if list_string:
-                list_string += ","
-            if first_line_comment:
-                list_string = f"  # {first_line_comment}\n    {list_string}\n"
-            else:
-                list_string = f"\n    {list_string}\n"
-            output_string = tpl.format(list=list_string)
-        elif first_line_comment:
-            output_string += f"  # {first_line_comment}"
-
-        return output_string
+        return self.py_file.format_list(
+            tpl,
+            values,
+            first_line_comment=first_line_comment,
+        )
 
     def _format_class_line(
         self,

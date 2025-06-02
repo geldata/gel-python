@@ -22,8 +22,9 @@ from typing import (
 
 import argparse
 
+from gel._internal._codegen import _models
+
 from . import base
-from . import models
 from . import queries
 
 
@@ -91,7 +92,7 @@ def run_queries_generator(args: argparse.Namespace) -> None:
 
 
 def run_models_generator(args: argparse.Namespace) -> None:
-    models.ModelsGenerator(args).run()
+    _models.PydanticModelsGenerator(args).run()
 
 
 def main() -> None:

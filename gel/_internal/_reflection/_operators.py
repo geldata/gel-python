@@ -113,7 +113,9 @@ def fetch_operators(
             and op.name in INFIX_OPERATOR_MAP
         ):
             opv = _dataclass_extras.coerce_to_dataclass(Operator, op)
-            opv = dataclasses.replace(op, py_magic=INFIX_OPERATOR_MAP[op.name])
+            opv = dataclasses.replace(
+                opv, py_magic=INFIX_OPERATOR_MAP[op.name]
+            )
             binary_ops[op.params[0].type.id].append(opv)
         elif (
             op.operator_kind == _enums.OperatorKind.Prefix
@@ -121,7 +123,7 @@ def fetch_operators(
         ):
             opv = _dataclass_extras.coerce_to_dataclass(Operator, op)
             opv = dataclasses.replace(
-                op, py_magic=PREFIX_OPERATOR_MAP[op.name]
+                opv, py_magic=PREFIX_OPERATOR_MAP[op.name]
             )
             unary_ops[op.params[0].type.id].append(opv)
         else:
