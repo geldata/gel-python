@@ -961,10 +961,18 @@ class TestModel(unittest.TestCase):
             testfn.unlink()
 
         if res.returncode != 0:
+            lines = source_code.split("\n")
+            pad_width = max(2, len(str(len(lines))))
+            source_code_numbered = "\n".join(
+                f"{i + 1:0{pad_width}d}: {line}"
+                for i, line in enumerate(lines)
+            )
+
             raise RuntimeError(
                 f"mypy check failed for {func.__name__} "
-                f"\n\nmypy stdout: \n{res.stdout.decode()}"
-                f"\n\nmypy stderr: \n{res.stderr.decode()}"
+                f"\n\ntest code:\n{source_code_numbered}"
+                f"\n\nmypy stdout:\n{res.stdout.decode()}"
+                f"\n\nmypy stderr:\n{res.stderr.decode()}"
             )
 
         types = []
