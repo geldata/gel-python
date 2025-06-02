@@ -1,6 +1,8 @@
 abstract type Named {
     required name: str;
+    name_len := len(.name);
     nickname: str;
+    nickname_len := len(.nickname);
 }
 
 type UserGroup extending Named {

@@ -55,9 +55,9 @@ class MockPointer(typing.NamedTuple):
 
 
 class TestModelGenerator(tb.ModelTestCase):
-    SCHEMA = os.path.join(os.path.dirname(__file__), "dbsetup", "base.esdl")
+    SCHEMA = os.path.join(os.path.dirname(__file__), "dbsetup", "orm.gel")
 
-    SETUP = os.path.join(os.path.dirname(__file__), "dbsetup", "base.edgeql")
+    SETUP = os.path.join(os.path.dirname(__file__), "dbsetup", "orm.edgeql")
 
     def assert_pointers_match(
         self, obj: type[GelModel], expected: list[MockPointer]
@@ -170,7 +170,7 @@ class TestModelGenerator(tb.ModelTestCase):
             "builtins.tuple[models.default.UserGroup, ...]",
         )
 
-    def test_modelgen_data_unpack_1(self):
+    def test_modelgen_data_unpack_1a(self):
         from models import default
 
         q = Q(
