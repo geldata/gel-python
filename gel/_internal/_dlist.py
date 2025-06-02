@@ -55,11 +55,15 @@ class DistinctList(
     # checks.
     _unhashables_impl: dict[int, T] | None
 
+    # Initial snapshot for change tracking
+    _initial_items: list[T] | None
+
     def __init__(
         self, iterable: Iterable[T] = (), *, __wrap_list__: bool = False
     ) -> None:
         self._set_impl = None
         self._unhashables_impl = None
+        self._initial_items = None
 
         if __wrap_list__:
             # __wrap_list__ is set to True inside the codecs pipeline
@@ -76,6 +80,27 @@ class DistinctList(
             self._items = []
             for item in iterable:
                 self.append(item)
+
+    def _ensure_snapshot(self) -> None:
+        if self._initial_items is None:
+            self._initial_items = list(self._items)
+
+    def __gel_get_added__(self) -> Iterable[T]:
+        if self._initial_items is None:
+            return ()
+        return [
+            item for item in self._items if item not in self._initial_items
+        ]
+
+    def __gel_get_removed__(self) -> Iterable[T]:
+        if self._initial_items is None:
+            return ()
+        return [
+            item for item in self._initial_items if item not in self._items
+        ]
+
+    def __gel_commit__(self) -> None:
+        self._initial_items = None
 
     @property
     def _set(self) -> set[T]:
@@ -129,6 +154,7 @@ class DistinctList(
         value: T | Iterable[T],
     ) -> None:
         if isinstance(index, slice):
+            self._ensure_snapshot()
             start, stop, step = index.indices(len(self._items))
             if step != 1:
                 raise ValueError(
@@ -145,6 +171,7 @@ class DistinctList(
             old = self._items[index]
             if new_value is old or new_value == old:
                 return
+            self._ensure_snapshot()
             del self._items[index]
             vid = id(new_value)
             if self._unhashables.pop(vid, None) is None:
@@ -159,6 +186,7 @@ class DistinctList(
                 self._items.insert(index, new_value)
 
     def __delitem__(self, index: SupportsIndex | slice) -> None:
+        self._ensure_snapshot()
         if isinstance(index, slice):
             to_remove = type(self)(self._items[index])
             for item in to_remove:
@@ -193,6 +221,7 @@ class DistinctList(
             return
 
         self._check_value(value)
+        self._ensure_snapshot()
 
         # clamp index
         index = int(index)
@@ -219,6 +248,7 @@ class DistinctList(
 
     def append(self, value: T) -> None:  # type: ignore [misc]
         self._check_value(value)
+        self._ensure_snapshot()
         self._append_no_check(value)
 
     def _append_no_check(self, value: T) -> None:  # type: ignore[misc]
@@ -234,6 +264,7 @@ class DistinctList(
 
     def remove(self, value: T) -> None:  # type: ignore [misc]
         """Remove item; raise ValueError if missing."""
+        self._ensure_snapshot()
         if self._unhashables.pop(id(value), None) is None:
             try:
                 self._set.remove(value)
@@ -246,6 +277,7 @@ class DistinctList(
 
     def pop(self, index: SupportsIndex = -1) -> T:
         """Remove and return item at index (default last)."""
+        self._ensure_snapshot()
         item = self._items.pop(index)
         if self._unhashables.pop(id(item), None) is None:
             self._set.remove(item)
@@ -253,6 +285,7 @@ class DistinctList(
 
     def clear(self) -> None:
         """Remove all items but keep element-type enforcement."""
+        self._ensure_snapshot()
         self._items.clear()
         self._set.clear()
         self._unhashables.clear()
@@ -301,7 +334,7 @@ class DistinctList(
             else:
                 self._set.add(item)
 
-            # in either case, no longer “unhashable”
+            # in either case, no longer "unhashable"
             del self._unhashables[vid]
 
     __hash__ = None  # type: ignore [assignment]

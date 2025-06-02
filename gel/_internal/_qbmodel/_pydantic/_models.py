@@ -286,11 +286,19 @@ def _process_pydantic_fields(
     return fields, ptr_infos_dict
 
 
+_unset: object = object()
+
+
 class GelModel(
     pydantic.BaseModel,
     _abstract.GelModel,
     metaclass=GelModelMeta,
 ):
+    # We use slots because PyDantic overrides `__dict__`
+    # making state management for "special" properties like
+    # these hard.
+    __slots__ = "__gel_changed_fields__", "__gel_track_changes__"
+
     model_config = pydantic.ConfigDict(
         json_encoders={uuid.UUID: str},
         validate_assignment=True,
@@ -302,9 +310,17 @@ class GelModel(
 
     if TYPE_CHECKING:
         id: uuid.UUID
+        __gel_changed_fields__: set[str] | None
+        __gel_track_changes__: bool
 
         @classmethod
         def __edgeql__(cls) -> tuple[type[Self], str]: ...
+
+    def __new__(cls, *_args: Any, **_kwargs: Any) -> Self:
+        self = super().__new__(cls)
+        object.__setattr__(self, "__gel_track_changes__", False)
+        object.__setattr__(self, "__gel_changed_fields__", None)
+        return self
 
     def __init__(self, /, **kwargs: Any) -> None:
         cls = type(self)
@@ -342,6 +358,59 @@ class GelModel(
                 # ignore `field.init=None` - unset, so we're fine with it.
                 if field.init is False and field_name != "id":
                     self.__dict__.pop(field_name, None)
+
+        # enable change tracking after init
+        object.__setattr__(self, "__gel_track_changes__", True)
+
+    def __gel_get_changed_fields__(self) -> Iterable[str]:
+        dirty: set[str] | None = object.__getattribute__(
+            self, "__gel_changed_fields__"
+        )
+        if dirty is None:
+            return ()
+        return dirty
+
+    def __gel_commit__(self, new_id: uuid.UUID | None = None) -> None:
+        if new_id is not None:
+            if self.id is not _unsetid.UNSET_UUID:
+                raise ValueError(
+                    f"cannot set id on {self!r} after it has been set"
+                )
+            object.__setattr__(self, "id", new_id)
+
+        object.__setattr__(self, "__gel_changed_fields__", None)
+
+    @classmethod
+    def model_construct(cls, *args: Any, **values: Any) -> Self:
+        self = super().model_construct(*args, **values)
+        # Strictly speaking the way we instantiate models doesn't require
+        # this (we call `object.__setattr__` directly), but this is more futureproof
+        # and doesn't cost us much.
+        object.__setattr__(self, "__gel_track_changes__", True)  # noqa: PLC2801
+        return self
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        if not object.__getattribute__(self, "__gel_track_changes__"):
+            super().__setattr__(name, value)
+            return
+
+        if name not in self.__pydantic_fields__:
+            super().__setattr__(name, value)
+            return
+
+        current_value = getattr(self, name, _unset)
+        if value == current_value:
+            return
+
+        super().__setattr__(name, value)
+
+        dirty: set[str] | None = object.__getattribute__(
+            self, "__gel_changed_fields__"
+        )
+        if dirty is None:
+            dirty = set()
+            object.__setattr__(self, "__gel_changed_fields__", dirty)
+        dirty.add(name)
 
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, GelModel):

@@ -437,6 +437,70 @@ class TestModelGenerator(tb.ModelTestCase):
         ):
             u.name_len = cast(std.int64, 123)  # type: ignore[assignment]
 
+    def test_modelgen_save_1(self):
+        from models import default
+
+        pq = (
+            default.Post.select(
+                *default.Post,
+                author=True,
+            )
+            .filter(lambda p: p.body == "I'm Alice")
+            .limit(1)
+        )
+
+        p = self.client.query_required_single(pq)
+
+        self.assertEqual(p.author.name, "Alice")
+        self.assertEqual(p.body, "I'm Alice")
+
+        p.author.name = "Alice the 5th"
+        p.body = "I'm Alice the 5th"
+
+        self.client.save(p)
+        self.client.save(p)  # should be no op
+
+        p2 = self.client.query_required_single("""
+            select Post {body, author: {name}}
+            filter .author.name = 'Alice the 5th' and
+                    .body = "I'm Alice the 5th"
+            limit 1
+        """)
+
+        self.assertEqual(p2.body, "I'm Alice the 5th")
+        self.assertEqual(p2.author.name, "Alice the 5th")
+
+        a = default.User(name="New Alice")
+        p.author = a
+        self.client.save(p)
+        self.client.save(p)  # should be no op
+
+        p2 = self.client.query_required_single("""
+            with
+                post := assert_single((
+                    select Post
+                    filter .author.name = 'New Alice' and
+                            .body = "I'm Alice the 5th"
+                )),
+                alice := assert_single((
+                    select User {name} filter .name = 'Alice the 5th'
+                )),
+                new_alice := assert_single((
+                    select User {name} filter .name = 'New Alice'
+                ))
+
+            select {
+                post := post {body, author: {name}},
+                alice := alice {name},
+                new_alice := new_alice {name},
+            }
+        """)
+
+        self.assertEqual(p2.post.body, "I'm Alice the 5th")
+        self.assertEqual(p2.post.author.name, "New Alice")
+        self.assertEqual(p2.alice.name, "Alice the 5th")
+        self.assertEqual(p2.new_alice.name, "New Alice")
+
     def test_modelgen_reflection_1(self):
         from models import default, std
 

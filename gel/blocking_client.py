@@ -16,6 +16,7 @@
 # limitations under the License.
 #
 
+from __future__ import annotations
 
 import contextlib
 import datetime
@@ -33,6 +34,11 @@ from . import errors
 from . import transaction
 from .protocol import blocking_proto
 from .protocol.protocol import InputLanguage, OutputFormat
+
+from ._internal._save import make_save_executor_constructor
+
+if typing.TYPE_CHECKING:
+    from ._internal._qbmodel._pydantic import GelModel
 
 
 DEFAULT_PING_BEFORE_IDLE_TIMEOUT = datetime.timedelta(seconds=5)
@@ -391,6 +397,23 @@ class Client(base_client.BaseClient, abstract.Executor):
 
     __slots__ = ()
     _impl_class = _PoolImpl
+
+    def save(self, *objs: GelModel) -> None:
+        make_executor = make_save_executor_constructor(objs)
+
+        for tx in self.transaction():
+            with tx:
+                executor = make_executor()
+
+                for batch in executor:
+                    ids = []
+                    for query, args in batch:
+                        ids.append(
+                            self.query_required_single(query, **args).id
+                        )
+                    executor.feed_ids(ids)
+
+                executor.commit()
 
     def _iter_coroutine(self, coro):
         try:
