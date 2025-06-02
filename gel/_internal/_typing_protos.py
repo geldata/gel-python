@@ -49,10 +49,3 @@ MappingInput = TypeAliasType(
 
 class SupportsToOrdinal(Protocol):
     def toordinal(self) -> int: ...
-
-
-class DateTimeLike(Protocol):
-    def astimezone(self, tz: tzinfo)
-
-import datetime
-d = datetime.datetime().astimezone()
