@@ -44,6 +44,7 @@ __all__ = (
 
 
 T_ql = typing.TypeVar("T_ql", covariant=True)
+T_get = typing.TypeVar("T_get")
 
 
 class TypedEdgeQLQuery(typing.Protocol[T_ql]):
@@ -52,6 +53,9 @@ class TypedEdgeQLQuery(typing.Protocol[T_ql]):
 
 
 AnyEdgeQLQuery = TypedEdgeQLQuery | str
+
+
+_unset = object()
 
 
 class QueryWithArgs(typing.NamedTuple):
@@ -273,6 +277,45 @@ class ReadOnlyExecutor(BaseReadOnlyExecutor):
         )
 
     @typing.overload
+    def get(
+        self, query: type[TypedEdgeQLQuery[T_ql]], /, **kwargs: typing.Any
+    ) -> T_ql: ...
+
+    @typing.overload
+    def get(
+        self,
+        query: type[TypedEdgeQLQuery[T_ql]],
+        default: T_get,
+        /,
+        **kwargs: typing.Any,
+    ) -> T_ql | T_get: ...
+
+    @typing.overload
+    def get(self, query: str, /, **kwargs: typing.Any) -> typing.Any: ...
+
+    @typing.overload
+    def get(
+        self, query: str, default: T_get, /, **kwargs: typing.Any
+    ) -> typing.Any | T_get: ...
+
+    def get(
+        self,
+        query: AnyEdgeQLQuery,
+        default: typing.Any = _unset,
+        **kwargs: typing.Any,
+    ) -> typing.Any:
+        if hasattr(query, "__edgeql__"):
+            query = query.__gel_assert_single__()
+        if default is _unset:
+            return self.query_required_single(query, **kwargs)
+        else:
+            result = self.query_single(query, **kwargs)
+            if result is None:
+                return default
+            else:
+                return result
+
+    @typing.overload
     def query_single(
         self, query: type[TypedEdgeQLQuery[T_ql]], **kwargs: typing.Any
     ) -> T_ql | None: ...
@@ -466,6 +509,45 @@ class AsyncIOReadOnlyExecutor(BaseReadOnlyExecutor):
                 annotations=self._get_annotations(),
             )
         )
+
+    @typing.overload
+    async def get(
+        self, query: type[TypedEdgeQLQuery[T_ql]], /, **kwargs: typing.Any
+    ) -> T_ql: ...
+
+    @typing.overload
+    async def get(
+        self,
+        query: type[TypedEdgeQLQuery[T_ql]],
+        default: T_get,
+        /,
+        **kwargs: typing.Any,
+    ) -> T_ql | T_get: ...
+
+    @typing.overload
+    async def get(self, query: str, /, **kwargs: typing.Any) -> typing.Any: ...
+
+    @typing.overload
+    async def get(
+        self, query: str, default: T_get, /, **kwargs: typing.Any
+    ) -> typing.Any | T_get: ...
+
+    async def get(
+        self,
+        query: AnyEdgeQLQuery,
+        default: typing.Any = _unset,
+        **kwargs: typing.Any,
+    ) -> typing.Any:
+        if hasattr(query, "__edgeql__"):
+            query = query.__gel_assert_single__()
+        if default is _unset:
+            return await self.query_required_single(query, **kwargs)
+        else:
+            result = await self.query_single(query, **kwargs)
+            if result is None:
+                return default
+            else:
+                return result
 
     @typing.overload
     async def query_single(

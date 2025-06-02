@@ -202,10 +202,9 @@ class TestModelGenerator(tb.ModelTestCase):
             .filter(lambda p: p.body == "Hello")
             .limit(1)
         )
-        d = self.client.query_single(q)
+        d = self.client.get(q)
 
-        self.assertEqual(reveal_type(d), "Union[models.default.Post, None]")
-        assert d is not None
+        self.assertEqual(reveal_type(d), "models.default.Post")
 
         self.assertEqual(reveal_type(d.id), "models.__variants__.std.uuid")
 
