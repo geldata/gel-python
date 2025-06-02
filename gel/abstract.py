@@ -25,6 +25,7 @@ import typing
 from . import datatypes
 from . import describe
 from . import enums
+from . import errors
 from . import options
 from .protocol import protocol  # type: ignore
 
@@ -305,9 +306,20 @@ class ReadOnlyExecutor(BaseReadOnlyExecutor):
         **kwargs: typing.Any,
     ) -> typing.Any:
         if hasattr(query, "__edgeql__"):
-            query = query.__gel_assert_single__()
+            query = query.__gel_assert_single__(
+                message=(
+                    "client.get() requires 0 or 1 returned objects, "
+                    "got more than that"
+                )
+            )
         if default is _unset:
-            return self.query_required_single(query, **kwargs)
+            try:
+                return self.query_required_single(query, **kwargs)
+            except errors.NoDataError:
+                raise errors.NoDataError(
+                    "client.get() without a default expects exactly one result, "
+                    "got none"
+                ) from None
         else:
             result = self.query_single(query, **kwargs)
             if result is None:
@@ -539,9 +551,20 @@ class AsyncIOReadOnlyExecutor(BaseReadOnlyExecutor):
         **kwargs: typing.Any,
     ) -> typing.Any:
         if hasattr(query, "__edgeql__"):
-            query = query.__gel_assert_single__()
+            query = query.__gel_assert_single__(
+                message=(
+                    "client.get() requires 0 or 1 returned objects, "
+                    "got more than that"
+                )
+            )
         if default is _unset:
-            return await self.query_required_single(query, **kwargs)
+            try:
+                return await self.query_required_single(query, **kwargs)
+            except errors.NoDataError:
+                raise errors.NoDataError(
+                    "client.get() without a default expects exactly one result, "
+                    "got none"
+                ) from None
         else:
             result = await self.query_single(query, **kwargs)
             if result is None:
