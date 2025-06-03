@@ -28,7 +28,7 @@ from fastapi import responses
 
 from gel.auth import email_password as core
 
-from . import GelAuth
+from . import GelAuth, Installable
 
 
 logger = logging.getLogger("gel.auth")
@@ -101,7 +101,7 @@ OnResetPasswordFailed = Callable[
 ]
 
 
-class EmailPassword:
+class EmailPassword(Installable):
     redirect_class: Type[responses.RedirectResponse] = (
         responses.RedirectResponse
     )
@@ -647,7 +647,7 @@ class EmailPassword:
                     request, result
                 )
             elif isinstance(result, core.PasswordResetFailedResponse):
-                return await self.handle_reset_password_failed(result)
+                return await self.handle_reset_password_failed(request, result)
             else:
                 raise AssertionError("Invalid reset password response")
 
