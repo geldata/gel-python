@@ -47,6 +47,7 @@ from starlette import concurrency
 
 P = ParamSpec("P")
 Client_T = TypeVar("Client_T", bound=Union[gel.AsyncIOClient, gel.Client])
+Lifespan_T = TypeVar("Lifespan_T", bound="GelLifespan[Client_T]")
 
 
 class GelLifespan(Generic[Client_T]):
@@ -131,14 +132,14 @@ class AsyncIOLifespan(GelLifespan[gel.AsyncIOClient]):
 
 def make_gelify(
     client_creator: Callable[P, Client_T],
-    lifespan_class: Type[GelLifespan[Client_T]],
-) -> Callable[Concatenate[fastapi.FastAPI, P], GelLifespan[Client_T]]:
+    lifespan_class: Callable[[Client_T], Lifespan_T],
+) -> Callable[Concatenate[fastapi.FastAPI, P], Lifespan_T]:
     def gelify(
         app: fastapi.FastAPI,
         /,
         *args: P.args,
         **kwargs: P.kwargs,
-    ) -> GelLifespan[Client_T]:
+    ) -> Lifespan_T:
         lifespan = lifespan_class(client_creator(*args, **kwargs))
         lifespan.install(app)
         return lifespan

@@ -17,7 +17,7 @@
 #
 
 from __future__ import annotations
-from typing import Optional
+from typing import Optional, TYPE_CHECKING
 
 import datetime
 
@@ -28,6 +28,9 @@ from fastapi import security
 import gel
 
 from .. import client as client_mod
+
+if TYPE_CHECKING:
+    from .email_password import EmailPassword
 
 
 # def get_client_with_auth_token(client: C, *, auth_token: Optional[str]) -> C:
@@ -42,13 +45,15 @@ class GelAuth(client_mod.AsyncIOLifespan):
     auth_cookie_name: str = "gel_auth_token"
     verifier_cookie_name: str = "gel_verifier"
     secure_cookie: bool = True
-    email_password: Optional["EmailPassword"]
+    email_password: EmailPassword
 
     _pkce_verifier: Optional[security.APIKeyCookie] = None
 
     def __init__(self, client: gel.AsyncIOClient) -> None:
         super().__init__(client)
+
         from .email_password import EmailPassword
+
         self.email_password = EmailPassword(self)
 
     def get_unchecked_exp(self, token: str) -> Optional[datetime.datetime]:
