@@ -50,6 +50,7 @@ class GelAuth(client_mod.AsyncIOLifespan):
     auth_path_prefix: str = "/auth"
     auth_cookie_name: str = "gel_auth_token"
     verifier_cookie_name: str = "gel_verifier"
+    tags: list[str] = ["Gel Auth"]
     secure_cookie: bool = True
     email_password: EmailPassword
 
@@ -157,7 +158,7 @@ class GelAuth(client_mod.AsyncIOLifespan):
     def install(self, app: fastapi.FastAPI) -> None:
         router = fastapi.APIRouter(
             prefix=self.auth_path_prefix,
-            tags=["Gel Auth"],
+            tags=self.tags,
             lifespan=self,
         )
         self.email_password.install(router)

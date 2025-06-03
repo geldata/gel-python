@@ -117,6 +117,7 @@ class EmailPassword:
     # Sign-up
     sign_up_path: str = "/register"
     sign_up_name: str = "gel.auth.email_password.sign_up"
+    sign_up_summary: str = "Sign up with email and password"
     _on_sign_up_complete: Optional[OnSignUpComplete] = None
     _on_sign_up_verification_required: Optional[
         OnSignUpVerificationRequired
@@ -126,6 +127,7 @@ class EmailPassword:
     # Sign-in
     sign_in_path: str = "/authenticate"
     sign_in_name: str = "gel.auth.email_password.sign_in"
+    sign_in_summary: str = "Sign in with email and password"
     _on_sign_in_complete: Optional[OnSignInComplete] = None
     _on_sign_in_verification_required: Optional[
         OnSignInVerificationRequired
@@ -135,6 +137,7 @@ class EmailPassword:
     # Email verification
     email_verification_path: str = "/verify"
     email_verification_name: str = "gel.auth.email_password.email_verification"
+    email_verification_summary: str = "Verify the email address"
     _on_email_verification_complete: Optional[OnEmailVerificationComplete] = (
         None
     )
@@ -148,6 +151,7 @@ class EmailPassword:
     send_password_reset_email_name: str = (
         "gel.auth.email_password.send_password_reset"
     )
+    send_password_reset_email_summary: str = "Send a password reset email"
     _on_send_password_reset_email_complete: Optional[
         OnSendPasswordResetEmailComplete
     ] = None
@@ -158,6 +162,7 @@ class EmailPassword:
     # Reset password
     reset_password_path: str = "/reset-password"
     reset_password_name: str = "gel.auth.email_password.reset_password"
+    reset_password_summary: str = "Reset the password"
     _on_reset_password_complete: Optional[OnResetPasswordComplete] = None
     _on_reset_password_missing_proof: Optional[OnResetPasswordMissingProof] = (
         None
@@ -283,7 +288,11 @@ class EmailPassword:
         return response
 
     def install_sign_up(self, router: fastapi.APIRouter) -> None:
-        @router.post(self.sign_up_path, name=self.sign_up_name)
+        @router.post(
+            self.sign_up_path,
+            name=self.sign_up_name,
+            summary=self.sign_up_summary,
+        )
         async def sign_up(
             sign_up_body: Annotated[SignUpBody, fastapi.Form()],
             request: fastapi.Request,
@@ -363,7 +372,11 @@ class EmailPassword:
         return response
 
     def install_sign_in(self, router: fastapi.APIRouter) -> None:
-        @router.post(self.sign_in_path, name=self.sign_in_name)
+        @router.post(
+            self.sign_in_path,
+            name=self.sign_in_name,
+            summary=self.sign_in_summary,
+        )
         async def sign_in(
             sign_in_body: Annotated[SignInBody, fastapi.Form()],
             request: fastapi.Request,
@@ -444,6 +457,7 @@ class EmailPassword:
         @router.get(
             self.email_verification_path,
             name=self.email_verification_name,
+            summary=self.email_verification_summary,
         )
         async def verify(
             request: fastapi.Request,
@@ -524,6 +538,7 @@ class EmailPassword:
         @router.post(
             self.send_password_reset_email_path,
             name=self.send_password_reset_email_name,
+            summary=self.send_password_reset_email_summary,
         )
         async def send_password_reset(
             send_password_reset_body: Annotated[
@@ -605,7 +620,11 @@ class EmailPassword:
             return await self._on_reset_password_failed(result)
 
     def install_reset_password(self, router: fastapi.APIRouter) -> None:
-        @router.post(self.reset_password_path, name=self.reset_password_name)
+        @router.post(
+            self.reset_password_path,
+            name=self.reset_password_name,
+            summary=self.reset_password_summary,
+        )
         async def reset_password(
             request: fastapi.Request,
             reset_password_body: Annotated[ResetPasswordBody, fastapi.Form()],
