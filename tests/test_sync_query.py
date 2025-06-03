@@ -50,9 +50,13 @@ class TestSyncQuery(tb.SyncQueryTestCase):
         CREATE SCALAR TYPE MyEnum EXTENDING enum<"A", "B">;
 
         CREATE SCALAR TYPE test::MyType EXTENDING int32;
+        CREATE SCALAR TYPE test::MyType2 EXTENDING int64;
+        CREATE SCALAR TYPE test::MyType3 EXTENDING int16;
     '''
 
     TEARDOWN = '''
+        DROP SCALAR TYPE test::MyType3;
+        DROP SCALAR TYPE test::MyType2;
         DROP SCALAR TYPE test::MyType;
         DROP TYPE test::Tmp;
         DROP TYPE test::TmpConflictChild;
@@ -1040,3 +1044,122 @@ class TestSyncQuery(tb.SyncQueryTestCase):
         # At last, verify that a string gets encoded properly
         val = self.client.query_single("SELECT <test::MyType>$0", "foo")
         self.assertEqual(val, 'foo')
+
+    def test_batch_01(self):
+        for bx in self.client._batch():
+            with bx:
+                bx.send_query_single('SELECT 1')
+                bx.send_query_single('SELECT 2')
+                bx.send_query_single('SELECT 3')
+
+                self.assertEqual(bx.wait(), [1, 2, 3])
+
+                bx.send_query_single('SELECT 4')
+                bx.send_query_single('SELECT 5')
+                bx.send_query_single('SELECT 6')
+
+                self.assertEqual(bx.wait(), [4, 5, 6])
+
+    def test_batch_02(self):
+        for bx in self.client._batch():
+            with bx:
+                bx.send_query_required_single('''
+                    INSERT test::Tmp {
+                        tmp := 'Test Batch'
+                    };
+                ''')
+                bx.send_query('''
+                    SELECT
+                        test::Tmp
+                    FILTER
+                        .tmp = 'Test Batch';
+                ''')
+                inserted, selected = bx.wait()
+
+        self.assertEqual([inserted.id], [o.id for o in selected])
+
+    def test_batch_03(self):
+        for bx in self.client._batch():
+            with bx:
+                bx.send_execute('''
+                    INSERT test::Tmp {
+                        tmp := 'Test Auto Wait'
+                    };
+                ''')
+                # No explicit wait() - should auto-wait on scope exit
+
+        rv = self.client.query('''
+            SELECT
+                test::Tmp
+            FILTER
+                .tmp = 'Test Auto Wait';
+        ''')
+        self.assertEqual(len(rv), 1)
+
+    def test_batch_04(self):
+        with self.assertRaises(edgedb.TransactionError):
+            for bx in self.client._batch():
+                with bx:
+                    bx.send_execute('''
+                        INSERT test::Tmp {
+                            tmp := 'Test Atomic'
+                        };
+                    ''')
+                    bx.send_query_single('SELECT 1/0')
+                    bx.send_execute('''
+                        INSERT test::Tmp {
+                            tmp := 'Test Atomic'
+                        };
+                    ''')
+
+                    with self.assertRaises(edgedb.DivisionByZeroError):
+                        bx.wait()
+
+        rv = self.client.query('''
+            SELECT
+                test::Tmp
+            FILTER
+                .tmp = 'Test Atomic';
+        ''')
+        self.assertEqual(len(rv), 0)
+
+    def test_batch_05(self):
+        for bx in self.client._batch():
+            with bx:
+                # Test alternating queries that need Parse
+                bx.send_query_single('SELECT 1')
+                bx.send_query_single('SELECT <int16>$0', 2)
+                bx.send_query_single('SELECT 3')
+                bx.send_query_single('SELECT <int32>$0', 4)
+                bx.send_query_single('SELECT 5')
+                bx.send_query_single('SELECT <int64>$0', 6)
+                bx.send_query_single('SELECT 7')
+                self.assertEqual(bx.wait(), [1, 2, 3, 4, 5, 6, 7])
+
+    def test_batch_06(self):
+        # Cache the input type descriptors first
+        val = self.client.query_single("SELECT <test::MyType>$0", 42)
+        self.assertEqual(val, 42)
+        val = self.client.query_single("SELECT <test::MyType2>$0", 42)
+        self.assertEqual(val, 42)
+        val = self.client.query_single("SELECT <test::MyType3>$0", 42)
+        self.assertEqual(val, 42)
+
+        # Modify the schema to outdate the previous type descriptors
+        self.client.execute("""
+            DROP SCALAR TYPE test::MyType;
+            DROP SCALAR TYPE test::MyType2;
+            DROP SCALAR TYPE test::MyType3;
+            CREATE SCALAR TYPE test::MyType EXTENDING std::int64;
+            CREATE SCALAR TYPE test::MyType2 EXTENDING std::int16;
+            CREATE SCALAR TYPE test::MyType3 EXTENDING std::int32;
+        """)
+
+        # We should retry only once and succeed here
+        c = self.client.with_retry_options(edgedb.RetryOptions(attempts=2))
+        for bx in c._batch():
+            with bx:
+                bx.send_query_single('SELECT <test::MyType>$0', 42)
+                bx.send_query_single('SELECT <test::MyType2>$0', 42)
+                bx.send_query_single('SELECT <test::MyType3>$0', 42)
+                self.assertEqual(bx.wait(), [42, 42, 42])

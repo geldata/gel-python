@@ -49,9 +49,13 @@ class TestAsyncQuery(tb.AsyncQueryTestCase):
         CREATE SCALAR TYPE MyEnum EXTENDING enum<"A", "B">;
 
         CREATE SCALAR TYPE test::MyType EXTENDING int32;
+        CREATE SCALAR TYPE test::MyType2 EXTENDING int64;
+        CREATE SCALAR TYPE test::MyType3 EXTENDING int16;
     '''
 
     TEARDOWN = '''
+        DROP SCALAR TYPE test::MyType3;
+        DROP SCALAR TYPE test::MyType2;
         DROP SCALAR TYPE test::MyType;
         DROP TYPE test::Tmp;
     '''
@@ -1212,3 +1216,122 @@ class TestAsyncQuery(tb.AsyncQueryTestCase):
         # At last, verify that a string gets encoded properly
         val = await self.client.query_single("SELECT <test::MyType>$0", "foo")
         self.assertEqual(val, 'foo')
+
+    async def test_batch_01(self):
+        async for bx in self.client._batch():
+            async with bx:
+                await bx.send_query_single('SELECT 1')
+                await bx.send_query_single('SELECT 2')
+                await bx.send_query_single('SELECT 3')
+
+                self.assertEqual(await bx.wait(), [1, 2, 3])
+
+                await bx.send_query_single('SELECT 4')
+                await bx.send_query_single('SELECT 5')
+                await bx.send_query_single('SELECT 6')
+
+                self.assertEqual(await bx.wait(), [4, 5, 6])
+
+    async def test_batch_02(self):
+        async for bx in self.client._batch():
+            async with bx:
+                await bx.send_query_required_single('''
+                    INSERT test::Tmp {
+                        tmp := 'Test Batch'
+                    };
+                ''')
+                await bx.send_query('''
+                    SELECT
+                        test::Tmp
+                    FILTER
+                        .tmp = 'Test Batch';
+                ''')
+                inserted, selected = await bx.wait()
+
+        self.assertEqual([inserted.id], [o.id for o in selected])
+
+    async def test_batch_03(self):
+        async for bx in self.client._batch():
+            async with bx:
+                await bx.send_execute('''
+                    INSERT test::Tmp {
+                        tmp := 'Test Auto Wait'
+                    };
+                ''')
+                # No explicit wait() - should auto-wait on scope exit
+
+        rv = await self.client.query('''
+            SELECT
+                test::Tmp
+            FILTER
+                .tmp = 'Test Auto Wait';
+        ''')
+        self.assertEqual(len(rv), 1)
+
+    async def test_batch_04(self):
+        with self.assertRaises(edgedb.TransactionError):
+            async for bx in self.client._batch():
+                async with bx:
+                    await bx.send_execute('''
+                        INSERT test::Tmp {
+                            tmp := 'Test Atomic'
+                        };
+                    ''')
+                    await bx.send_query_single('SELECT 1/0')
+                    await bx.send_execute('''
+                        INSERT test::Tmp {
+                            tmp := 'Test Atomic'
+                        };
+                    ''')
+
+                    with self.assertRaises(edgedb.DivisionByZeroError):
+                        await bx.wait()
+
+        rv = await self.client.query('''
+            SELECT
+                test::Tmp
+            FILTER
+                .tmp = 'Test Atomic';
+        ''')
+        self.assertEqual(len(rv), 0)
+
+    async def test_batch_05(self):
+        async for bx in self.client._batch():
+            async with bx:
+                # Test alternating queries that need Parse
+                await bx.send_query_single('SELECT 1')
+                await bx.send_query_single('SELECT <int16>$0', 2)
+                await bx.send_query_single('SELECT 3')
+                await bx.send_query_single('SELECT <int32>$0', 4)
+                await bx.send_query_single('SELECT 5')
+                await bx.send_query_single('SELECT <int64>$0', 6)
+                await bx.send_query_single('SELECT 7')
+                self.assertEqual(await bx.wait(), [1, 2, 3, 4, 5, 6, 7])
+
+    async def test_batch_06(self):
+        # Cache the input type descriptors first
+        val = await self.client.query_single("SELECT <test::MyType>$0", 42)
+        self.assertEqual(val, 42)
+        val = await self.client.query_single("SELECT <test::MyType2>$0", 42)
+        self.assertEqual(val, 42)
+        val = await self.client.query_single("SELECT <test::MyType3>$0", 42)
+        self.assertEqual(val, 42)
+
+        # Modify the schema to outdate the previous type descriptors
+        await self.client.execute("""
+            DROP SCALAR TYPE test::MyType;
+            DROP SCALAR TYPE test::MyType2;
+            DROP SCALAR TYPE test::MyType3;
+            CREATE SCALAR TYPE test::MyType EXTENDING std::int64;
+            CREATE SCALAR TYPE test::MyType2 EXTENDING std::int16;
+            CREATE SCALAR TYPE test::MyType3 EXTENDING std::int32;
+        """)
+
+        # We should retry only once and succeed here
+        c = self.client.with_retry_options(edgedb.RetryOptions(attempts=2))
+        async for bx in c._batch():
+            async with bx:
+                await bx.send_query_single('SELECT <test::MyType>$0', 42)
+                await bx.send_query_single('SELECT <test::MyType2>$0', 42)
+                await bx.send_query_single('SELECT <test::MyType3>$0', 42)
+                self.assertEqual(await bx.wait(), [42, 42, 42])

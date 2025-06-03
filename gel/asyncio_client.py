@@ -17,6 +17,9 @@
 #
 
 
+from __future__ import annotations
+from typing import Any
+
 import asyncio
 import contextlib
 import logging
@@ -346,6 +349,124 @@ class AsyncIORetry(transaction.BaseRetry):
         return iteration
 
 
+class AsyncIOBatchIteration(transaction.BaseTransaction):
+
+    __slots__ = ("_managed", "_locked", "_batched_ops")
+
+    def __init__(self, retry, client, iteration):
+        super().__init__(retry, client, iteration)
+        self._managed = False
+        self._locked = False
+        self._batched_ops = []
+
+    async def __aenter__(self):
+        if self._managed:
+            raise errors.InterfaceError(
+                'cannot enter context: already in an `async with` block')
+        self._managed = True
+        return self
+
+    async def __aexit__(self, extype, ex, tb):
+        await self.wait()
+        with self._exclusive():
+            self._managed = False
+            return await self._exit(extype, ex)
+
+    async def _ensure_transaction(self):
+        if not self._managed:
+            raise errors.InterfaceError(
+                "Only managed retriable transactions are supported. "
+                "Use `async with transaction:`"
+            )
+        await super()._ensure_transaction()
+
+    @contextlib.contextmanager
+    def _exclusive(self):
+        if self._locked:
+            raise errors.InterfaceError(
+                "concurrent queries within the same transaction "
+                "are not allowed"
+            )
+        self._locked = True
+        try:
+            yield
+        finally:
+            self._locked = False
+
+    async def send_query(self, query: str, *args, **kwargs) -> None:
+        self._batched_ops.append(abstract.QueryContext(
+            query=abstract.QueryWithArgs(query, args, kwargs),
+            cache=self._client._get_query_cache(),
+            query_options=abstract._query_opts,
+            retry_options=None,
+            state=self._client._get_state(),
+            transaction_options=None,
+            warning_handler=self._client._get_warning_handler(),
+            annotations=self._client._get_annotations(),
+        ))
+
+    async def send_query_single(self, query: str, *args, **kwargs) -> None:
+        self._batched_ops.append(abstract.QueryContext(
+            query=abstract.QueryWithArgs(query, args, kwargs),
+            cache=self._client._get_query_cache(),
+            query_options=abstract._query_single_opts,
+            retry_options=None,
+            state=self._client._get_state(),
+            transaction_options=None,
+            warning_handler=self._client._get_warning_handler(),
+            annotations=self._client._get_annotations(),
+        ))
+
+    async def send_query_required_single(
+        self, query: str, *args, **kwargs
+    ) -> None:
+        self._batched_ops.append(abstract.QueryContext(
+            query=abstract.QueryWithArgs(query, args, kwargs),
+            cache=self._client._get_query_cache(),
+            query_options=abstract._query_required_single_opts,
+            retry_options=None,
+            state=self._client._get_state(),
+            transaction_options=None,
+            warning_handler=self._client._get_warning_handler(),
+            annotations=self._client._get_annotations(),
+        ))
+
+    async def send_execute(self, commands: str, *args, **kwargs) -> None:
+        self._batched_ops.append(abstract.ExecuteContext(
+            query=abstract.QueryWithArgs(commands, args, kwargs),
+            cache=self._client._get_query_cache(),
+            retry_options=None,
+            state=self._client._get_state(),
+            transaction_options=None,
+            warning_handler=self._client._get_warning_handler(),
+            annotations=self._client._get_annotations(),
+        ))
+
+    async def wait(self) -> list[Any]:
+        with self._exclusive():
+            await self._ensure_transaction()
+            ops, self._batched_ops[:] = self._batched_ops[:], []
+            return await self._connection.batch_query(ops)
+
+
+class AsyncIOBatch(transaction.BaseRetry):
+
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self):
+        # Note: when changing this code consider also
+        # updating Batch.__next__.
+        if self._done:
+            raise StopAsyncIteration
+        if self._next_backoff:
+            await asyncio.sleep(self._next_backoff)
+        self._done = True
+        iteration = AsyncIOBatchIteration(self, self._owner, self._iteration)
+        self._iteration += 1
+        return iteration
+
+
 class AsyncIOClient(base_client.BaseClient, abstract.AsyncIOExecutor):
     """A lazy connection pool.
 
@@ -383,6 +504,9 @@ class AsyncIOClient(base_client.BaseClient, abstract.AsyncIOExecutor):
 
     def transaction(self) -> AsyncIORetry:
         return AsyncIORetry(self)
+
+    def _batch(self) -> AsyncIOBatch:
+        return AsyncIOBatch(self)
 
     async def __aenter__(self):
         return await self.ensure_connected()
