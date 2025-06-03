@@ -5,6 +5,65 @@ insert User {name := 'Dana'};
 insert User {name := 'Elsa'};
 insert User {name := 'Zoe'};
 
+with U := User
+update User
+filter .name = 'Alice'
+set {
+    friends := assert_distinct((
+        for t in {('Billie', 1), ('Zoe', 100)}
+        select U {@weight := t.1} filter .name = t.0
+    ))
+};
+with U := User
+update User
+filter .name = 'Billie'
+set {
+    friends := assert_distinct((
+        for t in {
+            ('Cameron', 1),
+            ('Dana', 2),
+            ('Elsa', 3),
+            ('Zoe', 4),
+        }
+        select U {@weight := t.1} filter .name = t.0
+    ))
+};
+with U := User
+update User
+filter .name = 'Cameron'
+set {
+    friends := assert_distinct((
+        for t in {
+            ('Alice', 1),
+            ('Billie', 1),
+            ('Dana', 1),
+            ('Elsa', 1),
+            ('Zoe', 1),
+        }
+        select U {@weight := t.1} filter .name = t.0
+    ))
+};
+with U := User
+update User
+filter .name = 'Elsa'
+set {
+    friends := assert_distinct((
+        for t in {
+            ('Zoe', 10),
+        }
+        select U {@weight := t.1} filter .name = t.0
+    ))
+};
+with U := User
+update User
+filter .name = 'Zoe'
+set {
+    friends := assert_distinct((
+        for t in {('Elsa', 5), ('Alice', 100)}
+        select U {@weight := t.1} filter .name = t.0
+    ))
+};
+
 insert UserGroup {
     name := 'red',
     users := (select User filter .name not in {'Elsa', 'Zoe'}),
@@ -24,6 +83,10 @@ insert GameSession {
 insert GameSession {
     num := 456,
     players := (select User filter .name in {'Dana'}),
+};
+update GameSession
+set {
+    players := .players{@is_tall_enough := not contains('AEIOU', .name[0])}
 };
 
 insert Post {

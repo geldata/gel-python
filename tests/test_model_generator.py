@@ -501,6 +501,107 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(p2.alice.name, "Alice the 5th")
         self.assertEqual(p2.new_alice.name, "New Alice")
 
+    @tb.to_be_fixed
+    def test_modelgen_linkprops_1(self):
+        from models import default
+
+        # Create a new GameSession and add a player
+        u = self.client.get(default.User.filter(name='Zoe'))
+        gs = default.GameSession(
+            num=1001,
+            players=[
+                default.GameSession.players.link(
+                    u, is_tall_enough=True)
+            ]
+        )
+        self.client.save(gs)
+
+        # Now fetch it again
+        res = self.client.get(
+            default.GameSession.select(
+                num=True,
+                players=True,
+            ).filter(num=1001)
+        )
+        self.assertEqual(res.num, 1001)
+        self.assertEqual(len(res.players), 1)
+        p = res.players[0]
+
+        self.assertEqual(p.name, 'Zoe')
+        self.assertEqual(p.__linkprops__.is_tall_enough, True)
+
+    @tb.to_be_fixed
+    def test_modelgen_linkprops_2(self):
+        from models import default
+
+        # Create a new GameSession and add a player
+        u = self.client.get(default.User.filter(name='Elsa'))
+        gs = default.GameSession(num=1002)
+        gs.players.append(u)
+        self.client.save(gs)
+
+        # Now fetch it again snd update
+        gs = self.client.get(
+            default.GameSession.select(
+                num=True,
+                players=True,
+            ).filter(num=1002)
+        )
+        self.assertEqual(gs.num, 1002)
+        self.assertEqual(len(gs.players), 1)
+        self.assertEqual(gs.players[0].__linkprops__.is_tall_enough, None)
+        gs.players[0].__linkprops__.is_tall_enough = False
+        self.client.save(gs)
+
+        # Now fetch after update
+        res = self.client.get(
+            default.GameSession.select(
+                num=True,
+                players=True,
+            ).filter(num=1002)
+        )
+        self.assertEqual(res.num, 1002)
+        self.assertEqual(len(res.players), 1)
+        p = res.players[0]
+
+        self.assertEqual(p.name, 'Elsa')
+        self.assertEqual(p.__linkprops__.is_tall_enough, False)
+
+    @tb.to_be_fixed
+    def test_modelgen_linkprops_3(self):
+        from models import default
+
+        # This one only has a single player
+        q = default.GameSession.select(
+            num=True,
+            players=True,
+        ).filter(num=456)
+        res = self.client.get(q)
+
+        self.assertEqual(res.num, 456)
+        self.assertEqual(len(res.players), 1)
+        p0 = res.players[0]
+
+        self.assertEqual(p0.name, 'Dana')
+        self.assertEqual(p0.nickname, None)
+        self.assertEqual(p0.__linkprops__.is_tall_enough, True)
+
+        p0.name = 'Dana?'
+        p0.nickname = 'HACKED'
+        p0.__linkprops__.is_tall_enough = False
+
+        self.client.save(res)
+
+        # Now fetch it again
+        upd = self.client.get(q)
+        self.assertEqual(upd.num, 456)
+        self.assertEqual(len(upd.players), 1)
+        p1 = upd.players[0]
+
+        self.assertEqual(p1.name, 'Dana?')
+        self.assertEqual(p1.nickname, 'HACKED')
+        self.assertEqual(p1.__linkprops__.is_tall_enough, False)
+
     def test_modelgen_reflection_1(self):
         from models import default, std
 
@@ -509,6 +610,17 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assert_pointers_match(
             default.User,
             [
+                MockPointer(
+                    name="friends",
+                    cardinality=Cardinality.Many,
+                    computed=False,
+                    has_props=True,
+                    kind=PointerKind.Link,
+                    readonly=False,
+                    type=_UpcastingDistinctList[
+                        default.User.__links__.friends, default.User
+                    ],
+                ),
                 MockPointer(
                     name="groups",
                     cardinality=Cardinality.Many,

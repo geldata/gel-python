@@ -22,6 +22,10 @@ type GameSession {
 type User extending Named {
     # test computed backlink
     groups := .<users[is UserGroup];
+    # Link to same type as self
+    multi friends: User {
+        weight: int64;
+    }
 }
 
 type Post {
@@ -38,4 +42,16 @@ type AssortedScalars {
     ts: datetime;
     lts: cal::local_datetime;
     bstr: bytes;
+}
+
+type LinearPath {
+    required label: str {
+        constraint exclusive;
+    }
+    next: LinearPath {
+        constraint exclusive;
+        steps: int64 {
+            default := 1
+        }
+    }
 }
