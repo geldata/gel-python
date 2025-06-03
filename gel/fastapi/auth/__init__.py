@@ -17,21 +17,27 @@
 #
 
 from __future__ import annotations
-from typing import Optional, TYPE_CHECKING
+from typing import Awaitable, Callable, Optional, TYPE_CHECKING
 
 import datetime
+import uuid
 
 import fastapi
 import jwt
 from fastapi import security
 
 import gel
+from gel import auth as core
 
 from .. import client as client_mod
 
 if TYPE_CHECKING:
     from .email_password import EmailPassword
 
+OnNewIdentity = Callable[
+    [gel.AsyncIOClient, uuid.UUID, Optional[core.TokenData]],
+    Awaitable[Optional[fastapi.Response]],
+]
 
 # def get_client_with_auth_token(client: C, *, auth_token: Optional[str]) -> C:
 #     if auth_token:
@@ -48,6 +54,9 @@ class GelAuth(client_mod.AsyncIOLifespan):
     email_password: EmailPassword
 
     _pkce_verifier: Optional[security.APIKeyCookie] = None
+    _maybe_auth_token: Optional[security.APIKeyCookie] = None
+    _auth_token: Optional[security.APIKeyCookie] = None
+    _on_new_identity: Optional[OnNewIdentity] = None
 
     def __init__(self, client: gel.AsyncIOClient) -> None:
         super().__init__(client)
@@ -96,6 +105,54 @@ class GelAuth(client_mod.AsyncIOLifespan):
                 auto_error=False,
             )
         return self._pkce_verifier
+
+    def client_with_auth_token(
+        self, auth_token: Optional[str]
+    ) -> gel.AsyncIOClient:
+        if auth_token:
+            return self._client.with_globals(
+                {"ext::auth::client_token": auth_token}
+            )
+        else:
+            return self._client
+
+    @property
+    def maybe_auth_token_cookie(self) -> security.APIKeyCookie:
+        if self._maybe_auth_token is None:
+            self._maybe_auth_token = security.APIKeyCookie(
+                name=self.auth_cookie_name,
+                description="The cookie as the authentication token",
+                auto_error=False,
+            )
+        return self._maybe_auth_token
+
+    @property
+    def auth_token_cookie(self) -> security.APIKeyCookie:
+        if self._auth_token is None:
+            self._auth_token = security.APIKeyCookie(
+                name=self.auth_cookie_name,
+                description="The cookie as the authentication token",
+                auto_error=True,
+            )
+        return self._auth_token
+
+    def on_new_identity(self, func: OnNewIdentity) -> OnNewIdentity:
+        self._on_new_identity = func
+        return func
+
+    async def handle_new_identity(
+        self, identity_id: uuid.UUID, token_data: Optional[core.TokenData]
+    ) -> Optional[fastapi.Response]:
+        if self._on_new_identity is None:
+            return None
+        else:
+            return await self._on_new_identity(
+                self.client_with_auth_token(
+                    None if token_data is None else token_data.auth_token
+                ),
+                identity_id,
+                token_data,
+            )
 
     def install(self, app: fastapi.FastAPI) -> None:
         router = fastapi.APIRouter(

@@ -224,10 +224,16 @@ class EmailPassword:
         request: fastapi.Request,
         result: core.SignUpCompleteResponse,
     ) -> fastapi.Response:
-        if self._on_sign_up_complete is None:
-            return self._redirect_success(request, "on_sign_up_complete")
-
-        response = await self._on_sign_up_complete(result)
+        response = await self._auth.handle_new_identity(
+            result.identity_id, result.token_data
+        )
+        if response is None:
+            if self._on_sign_up_complete is None:
+                response = self._redirect_success(
+                    request, "on_sign_up_complete"
+                )
+            else:
+                response = await self._on_sign_up_complete(result)
         self._auth.set_auth_cookie(result.token_data.auth_token, response)
         return response
 
@@ -242,12 +248,16 @@ class EmailPassword:
         request: fastapi.Request,
         result: core.SignUpVerificationRequiredResponse,
     ) -> fastapi.Response:
-        if self._on_sign_up_verification_required is None:
-            response = self._redirect_sign_in(
-                request, incomplete="verification_required"
-            )
-        else:
-            response = await self._on_sign_up_verification_required(result)
+        response = await self._auth.handle_new_identity(
+            result.identity_id, None
+        )
+        if response is None:
+            if self._on_sign_up_verification_required is None:
+                response = self._redirect_sign_in(
+                    request, incomplete="verification_required"
+                )
+            else:
+                response = await self._on_sign_up_verification_required(result)
         self._auth.set_verifier_cookie(result.verifier, response)
         return response
 
@@ -305,9 +315,9 @@ class EmailPassword:
         result: core.SignInCompleteResponse,
     ) -> fastapi.Response:
         if self._on_sign_in_complete is None:
-            return self._redirect_success(request, "on_sign_in_complete")
-
-        response = await self._on_sign_in_complete(result)
+            response = self._redirect_success(request, "on_sign_in_complete")
+        else:
+            response = await self._on_sign_in_complete(result)
         self._auth.set_auth_cookie(result.token_data.auth_token, response)
         return response
 
@@ -388,8 +398,8 @@ class EmailPassword:
             return self._redirect_success(
                 request, "on_email_verification_complete"
             )
-
-        return await self._on_email_verification_complete(result)
+        else:
+            return await self._on_email_verification_complete(result)
 
     def on_email_verification_missing_proof(
         self, func: OnEmailVerificationMissingProof
@@ -404,8 +414,8 @@ class EmailPassword:
     ) -> fastapi.Response:
         if self._on_email_verification_missing_proof is None:
             return self._redirect_sign_in(request, incomplete="verify")
-
-        return await self._on_email_verification_missing_proof(result)
+        else:
+            return await self._on_email_verification_missing_proof(result)
 
     def on_email_verification_failed(
         self, func: OnEmailVerificationFailed
@@ -427,8 +437,8 @@ class EmailPassword:
 
         if self._on_email_verification_failed is None:
             return self._redirect_error(request, error=result.message)
-
-        return await self._on_email_verification_failed(result)
+        else:
+            return await self._on_email_verification_failed(result)
 
     def install_email_verification(self, router: fastapi.APIRouter) -> None:
         @router.get(
@@ -479,7 +489,9 @@ class EmailPassword:
                 request, incomplete="password_reset_sent"
             )
         else:
-            response = await self._on_send_password_reset_email_complete(result)
+            response = await self._on_send_password_reset_email_complete(
+                result
+            )
         self._auth.set_verifier_cookie(result.verifier, response)
         return response
 
@@ -550,8 +562,8 @@ class EmailPassword:
             return self._redirect_success(
                 request, "on_reset_password_complete"
             )
-
-        return await self._on_reset_password_complete(result)
+        else:
+            return await self._on_reset_password_complete(result)
 
     def on_reset_password_missing_proof(
         self, func: OnResetPasswordMissingProof
@@ -566,8 +578,8 @@ class EmailPassword:
     ) -> fastapi.Response:
         if self._on_reset_password_missing_proof is None:
             return self._redirect_sign_in(request, incomplete="reset_password")
-
-        return await self._on_reset_password_missing_proof(result)
+        else:
+            return await self._on_reset_password_missing_proof(result)
 
     def on_reset_password_failed(
         self, func: OnResetPasswordFailed
@@ -589,8 +601,8 @@ class EmailPassword:
 
         if self._on_reset_password_failed is None:
             return self._redirect_error(request, error=result.message)
-
-        return await self._on_reset_password_failed(result)
+        else:
+            return await self._on_reset_password_failed(result)
 
     def install_reset_password(self, router: fastapi.APIRouter) -> None:
         @router.post(self.reset_password_path, name=self.reset_password_name)
