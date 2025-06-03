@@ -16,6 +16,7 @@
 # limitations under the License.
 #
 
+from __future__ import annotations
 
 from __future__ import annotations
 from typing import Any
@@ -36,6 +37,11 @@ from . import errors
 from . import transaction
 from .protocol import blocking_proto
 from .protocol.protocol import InputLanguage, OutputFormat
+
+from ._internal._save import make_save_executor_constructor
+
+if typing.TYPE_CHECKING:
+    from ._internal._qbmodel._pydantic import GelModel
 
 
 DEFAULT_PING_BEFORE_IDLE_TIMEOUT = datetime.timedelta(seconds=5)
@@ -426,7 +432,7 @@ class BatchIteration(transaction.BaseTransaction):
 
     def send_query(self, query: str, *args, **kwargs) -> None:
         self._batched_ops.append(abstract.QueryContext(
-            query=abstract.QueryWithArgs(query, args, kwargs),
+            query=abstract.QueryWithArgs(query, None, args, kwargs),
             cache=self._client._get_query_cache(),
             query_options=abstract._query_opts,
             retry_options=None,
@@ -438,7 +444,7 @@ class BatchIteration(transaction.BaseTransaction):
 
     def send_query_single(self, query: str, *args, **kwargs) -> None:
         self._batched_ops.append(abstract.QueryContext(
-            query=abstract.QueryWithArgs(query, args, kwargs),
+            query=abstract.QueryWithArgs(query, None, args, kwargs),
             cache=self._client._get_query_cache(),
             query_options=abstract._query_single_opts,
             retry_options=None,
@@ -452,7 +458,7 @@ class BatchIteration(transaction.BaseTransaction):
         self, query: str, *args, **kwargs
     ) -> None:
         self._batched_ops.append(abstract.QueryContext(
-            query=abstract.QueryWithArgs(query, args, kwargs),
+            query=abstract.QueryWithArgs(query, None, args, kwargs),
             cache=self._client._get_query_cache(),
             query_options=abstract._query_required_single_opts,
             retry_options=None,
@@ -464,7 +470,7 @@ class BatchIteration(transaction.BaseTransaction):
 
     def send_execute(self, commands: str, *args, **kwargs) -> None:
         self._batched_ops.append(abstract.ExecuteContext(
-            query=abstract.QueryWithArgs(commands, args, kwargs),
+            query=abstract.QueryWithArgs(commands, None, args, kwargs),
             cache=self._client._get_query_cache(),
             retry_options=None,
             state=self._client._get_state(),
@@ -514,6 +520,23 @@ class Client(base_client.BaseClient, abstract.Executor):
 
     __slots__ = ()
     _impl_class = _PoolImpl
+
+    def save(self, *objs: GelModel) -> None:
+        make_executor = make_save_executor_constructor(objs)
+
+        for tx in self.transaction():
+            with tx:
+                executor = make_executor()
+
+                for batch in executor:
+                    ids = []
+                    for query, args in batch:
+                        ids.append(
+                            self.query_required_single(query, **args).id
+                        )
+                    executor.feed_ids(ids)
+
+                executor.commit()
 
     def _iter_coroutine(self, coro):
         try:

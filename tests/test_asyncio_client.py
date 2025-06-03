@@ -19,11 +19,11 @@
 import asyncio
 import random
 
-import edgedb
+import gel
 
 from gel import _testbase as tb
-from edgedb import errors
-from edgedb import asyncio_client
+from gel import errors
+from gel import asyncio_client
 
 
 class TestAsyncIOClient(tb.AsyncQueryTestCase):
@@ -94,9 +94,9 @@ class TestAsyncIOClient(tb.AsyncQueryTestCase):
         client = self.create_client(max_concurrency=1)
 
         client.with_transaction_options(
-            edgedb.TransactionOptions(readonly=True))
+            gel.TransactionOptions(readonly=True))
         client.with_retry_options(
-            edgedb.RetryOptions(attempts=1, backoff=edgedb.default_backoff))
+            gel.RetryOptions(attempts=1, backoff=gel.default_backoff))
         async for tx in client.transaction():
             async with tx:
                 self.assertEqual(await tx.query_single("SELECT 7*8"), 56)
@@ -453,7 +453,7 @@ class TestAsyncIOClient(tb.AsyncQueryTestCase):
         conargs["database"] = self.get_database_name()
         conargs["timeout"] = 120
 
-        client = edgedb.create_async_client(**conargs)
+        client = gel.create_async_client(**conargs)
 
         self.assertEqual(client.max_concurrency, 1)
 
@@ -462,7 +462,7 @@ class TestAsyncIOClient(tb.AsyncQueryTestCase):
 
         await client.aclose()
 
-        client = edgedb.create_async_client(**conargs, max_concurrency=5)
+        client = gel.create_async_client(**conargs, max_concurrency=5)
 
         self.assertEqual(client.max_concurrency, 5)
 
@@ -473,7 +473,7 @@ class TestAsyncIOClient(tb.AsyncQueryTestCase):
 
     def test_client_with_different_loop(self):
         conargs = self.get_connect_args()
-        client = edgedb.create_async_client(**conargs)
+        client = gel.create_async_client(**conargs)
 
         async def test():
             self.assertIsNot(asyncio.get_event_loop(), self.loop)

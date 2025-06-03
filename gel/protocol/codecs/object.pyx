@@ -17,6 +17,11 @@
 #
 
 import dataclasses
+import inspect
+import typing
+
+from gel.datatypes import datatypes
+from gel._internal import _dlist
 
 
 cdef dict CARDS_MAP = {
@@ -149,47 +154,237 @@ cdef class ObjectCodec(BaseNamedRecordCodec):
 
         return errors.QueryArgumentError(error_message)
 
-    cdef decode(self, FRBuffer *buf):
+    cdef decode(self, object return_type, FRBuffer *buf):
         cdef:
-            object result
+            object result, lprops
             Py_ssize_t elem_count
             Py_ssize_t i
             int32_t elem_len
             BaseCodec elem_codec
             FRBuffer elem_buf
             tuple fields_codecs = (<BaseRecordCodec>self).fields_codecs
+            tuple fields_types
+            tuple names = self.names
+            tuple flags = self.flags
+            tuple dlists
+            dict tid_map
+            object return_type_proxy
+            Py_ssize_t fields_codecs_len = len(fields_codecs)
             descriptor = (<BaseNamedRecordCodec>self).descriptor
 
         if self.is_sparse:
             raise NotImplementedError
 
+        self.adapt_to_return_type(return_type)
+        tid_map = self.cached_tid_map
+        fields_types = self.cached_return_type_subcodecs
+        return_type = self.cached_return_type
+        return_type_proxy = self.cached_return_type_proxy
+        dlists = self.cached_return_type_dlists
+
         elem_count = <Py_ssize_t><uint32_t>hton.unpack_int32(frb_read(buf, 4))
 
-        if elem_count != len(fields_codecs):
+        if elem_count != fields_codecs_len:
             raise RuntimeError(
-                f'cannot decode Object: expected {len(fields_codecs)} '
+                f'cannot decode Object: expected {fields_codecs_len} '
                 f'elements, got {elem_count}')
 
-        result = datatypes.object_new(descriptor)
+        if return_type is None:
+            result = datatypes.object_new(descriptor)
 
-        for i in range(elem_count):
+            for i in range(elem_count):
+                frb_read(buf, 4)  # reserved
+                elem_len = hton.unpack_int32(frb_read(buf, 4))
+
+                if elem_len == -1:
+                    elem = None
+                else:
+                    elem_codec = <BaseCodec>fields_codecs[i]
+                    elem = elem_codec.decode(
+                        fields_types[i],
+                        frb_slice_from(&elem_buf, buf, elem_len)
+                    )
+                    if frb_get_len(&elem_buf):
+                        raise RuntimeError(
+                            f'unexpected trailing data in buffer after '
+                            f'object element decoding: {frb_get_len(&elem_buf)}')
+
+                datatypes.object_set(result, i, elem)
+        else:
+            if names[0] != '__tid__':
+                raise RuntimeError(
+                    f'the first field of object is expected to be __tid__, got {names[0]!r}')
             frb_read(buf, 4)  # reserved
             elem_len = hton.unpack_int32(frb_read(buf, 4))
-
             if elem_len == -1:
-                elem = None
-            else:
-                elem_codec = <BaseCodec>fields_codecs[i]
-                elem = elem_codec.decode(
-                    frb_slice_from(&elem_buf, buf, elem_len))
-                if frb_get_len(&elem_buf):
-                    raise RuntimeError(
-                        f'unexpected trailing data in buffer after '
-                        f'object element decoding: {frb_get_len(&elem_buf)}')
+                raise RuntimeError('__tid__ is unexepectedly empty')
 
-            datatypes.object_set(result, i, elem)
+            current_ret_type = return_type
+            if tid_map is not None and len(tid_map) > 1:
+                elem_codec = <BaseCodec>fields_codecs[0]
+                tid = elem_codec.decode(
+                    fields_types[0],
+                    frb_slice_from(&elem_buf, buf, elem_len)
+                )
+
+                try:
+                    current_ret_type = tid_map[tid]
+                except KeyError:
+                    pass
+            else:
+                # Don't bother with actually reading __tid__ if this isn't
+                # a polymorphic query scenario
+                frb_read(buf, elem_len)
+
+            result = current_ret_type.model_construct()
+            if return_type_proxy is not None:
+                lprops = return_type_proxy.__lprops__.model_construct()
+            else:
+                lprops = None
+
+            for i in range(1, elem_count):
+                frb_read(buf, 4)  # reserved
+                elem_len = hton.unpack_int32(frb_read(buf, 4))
+                if elem_len == -1:
+                    elem = None
+                else:
+                    elem_codec = <BaseCodec>fields_codecs[i]
+                    elem = elem_codec.decode(
+                        fields_types[i],
+                        frb_slice_from(&elem_buf, buf, elem_len)
+                    )
+                    if frb_get_len(&elem_buf):
+                        raise RuntimeError(
+                            f'unexpected trailing data in buffer after '
+                            f'object element decoding: {frb_get_len(&elem_buf)}')
+
+                name = names[i]
+                if flags[i] & datatypes._EDGE_POINTER_IS_LINKPROP:
+                    assert name[0] == '@' # XXX fix this
+                    object.__setattr__(lprops, name[1:], elem)
+                elif flags[i] & datatypes._EDGE_POINTER_IS_LINK:
+                    dlist_factory = self.cached_return_type_dlists[i]
+                    if dlist_factory is tuple:
+                        elem = tuple(elem)
+                    elif dlist_factory is not None:
+                        elem = dlist_factory(elem, __wrap_list__=True)
+                    object.__setattr__(result, name, elem)
+                else:
+                    object.__setattr__(result, name, elem)
+
+            if return_type_proxy is not None:
+                nested = result
+                result = return_type_proxy.model_construct()
+                object.__setattr__(result, '_p__obj__', nested)
+                object.__setattr__(result, '__linkprops__', lprops)
 
         return result
+
+    cdef adapt_to_return_type(self, object return_type):
+        cdef:
+            tuple names = self.names
+            tuple flags = self.flags
+            tuple fields_codecs = (<BaseRecordCodec>self).fields_codecs
+            Py_ssize_t fields_codecs_len = len(fields_codecs)
+
+        if return_type is None:
+            self.cached_tid_map = None
+            self.cached_return_type = None
+            self.cached_return_type_subcodecs = (None,) * fields_codecs_len
+            self.cached_return_type_dlists = (None,) * fields_codecs_len
+            self.cached_return_type_proxy = None
+            return
+
+        if return_type is self.cached_orig_return_type:
+            # return_type should always be the same in the overwhelming
+            # number of scenarios, so we should only do the expensive task
+            # of introspecting the return_type and tailoring to it once
+            # per Object codec's entire lifespan.
+            return
+
+        lprops_type = None
+        proxy = getattr(return_type, '__proxy_of__', None)
+        if proxy is not None:
+            self.cached_return_type_proxy = return_type
+            self.cached_return_type = proxy
+            lprops_type = self.cached_return_type_proxy.__lprops__
+        else:
+            self.cached_return_type = return_type
+            self.cached_return_type_proxy = None
+
+        subs = []
+        dlists = []
+        for i, name in enumerate(names):
+            if flags[i] & datatypes._EDGE_POINTER_IS_LINK:
+                if flags[i] & datatypes._EDGE_POINTER_IS_LINKPROP:
+                    sub = getattr(lprops_type, name)
+                    subs.append(sub.__gel_origin__)
+                    dlists.append(None)
+                else:
+                    sub = getattr(return_type, name)
+                    subs.append(sub.__gel_origin__)
+
+                    dlist_factory = None
+                    desc = inspect.getattr_static(return_type, name, None)
+                    if desc is not None and hasattr(desc, '__gel_resolved_type__'):
+                        target = desc.get_resolved_type_generic()
+                        if target is not None:
+                            torigin = typing.get_origin(target)
+                            if hasattr(torigin, '__gel_resolve_dlist__'):
+                                dlist_factory = torigin.__gel_resolve_dlist__(
+                                    typing.get_args(target),
+                                )
+
+                                if isinstance(dlist_factory, typing.GenericAlias):
+                                    dlist_factory = typing.get_origin(dlist_factory)
+
+                                if (not (
+                                    isinstance(dlist_factory, type) and (
+                                        issubclass(dlist_factory, _dlist.DistinctList)
+                                        or issubclass(dlist_factory, tuple)
+                                    )
+                                )):
+                                    raise RuntimeError(
+                                        f'invalid type returned from __gel_resolve_dlist__(), '
+                                        f'a DistinctList was expected, got {dlist_factory!r}'
+                                    )
+
+                    dlists.append(dlist_factory)
+            else:
+                subs.append(None)
+                dlists.append(None)
+
+        self.cached_return_type_subcodecs = tuple(subs)
+        self.cached_return_type_dlists = tuple(dlists)
+
+        tid_map = {}
+        try:
+            refl = return_type.__gel_reflection__
+        except AttributeError:
+            pass
+        else:
+            # Store base type's tid in the mapping *also* to exclude
+            # subclasses of base type, e.g. if we have this:
+            #
+            #    class CustomContent(default.Content):
+            #        pass
+            #
+            # then default.Content.__subclasses__() will contain
+            # CustomContent, which we don't want to be there.
+
+            tid_map[refl.id] = return_type
+
+            for ch in return_type.__subclasses__():
+                try:
+                    refl = ch.__gel_reflection__
+                except AttributeError:
+                    pass
+                else:
+                    if refl.id not in tid_map:
+                        tid_map[refl.id] = ch
+
+        self.cached_tid_map = tid_map
+        self.cached_orig_return_type = return_type
 
     def get_dataclass_fields(self):
         cdef descriptor = (<BaseNamedRecordCodec>self).descriptor
@@ -220,11 +415,20 @@ cdef class ObjectCodec(BaseNamedRecordCodec):
             codec.name = 'SparseObject'
         else:
             codec.name = 'Object'
+
+        codec.cached_return_type_proxy = None
+        codec.cached_return_type = None
+        codec.cached_return_type_subcodecs = (None,) * len(names)
+        codec.cached_orig_return_type = None
+        codec.cached_tid_map = None
+        codec.cached_return_type_dlists = None
+
+        codec.flags = flags
         codec.is_sparse = is_sparse
         codec.descriptor = datatypes.record_desc_new(names, flags, cards)
         codec.descriptor.set_dataclass_fields_func(codec.get_dataclass_fields)
         codec.fields_codecs = codecs
-
+        codec.names = names
         return codec
 
     def make_type(self, describe_context):

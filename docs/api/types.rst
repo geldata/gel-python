@@ -111,7 +111,7 @@ Objects
 
     .. code-block:: pycon
 
-        >>> import edgedb
+        >>> import gel
         >>> client = edgedb.create_client()
         >>> r = client.query_single('''
         ...     SELECT schema::ObjectType {name}
@@ -132,7 +132,7 @@ Objects
 
        .. code-block:: pycon
 
-          >>> import edgedb
+          >>> import gel
           >>> client = edgedb.create_client()
           >>> r = client.query_single('''
           ...     SELECT schema::Property {name, annotations: {name, @value}}
@@ -202,7 +202,7 @@ Named Tuples
 
     .. code-block:: pycon
 
-        >>> import edgedb
+        >>> import gel
         >>> client = edgedb.create_client()
         >>> r = client.query_single('''SELECT (a := 1, b := 'a', c := [3])''')
         >>> r
@@ -234,7 +234,7 @@ RelativeDuration
 
     .. code-block:: pycon
 
-        >>> import edgedb
+        >>> import gel
         >>> client = edgedb.create_client()
         >>> r = client.query_single('''SELECT <cal::relative_duration>"1 year 2 days 3 seconds"''')
         >>> r
@@ -256,7 +256,7 @@ DateDuration
 
     .. code-block:: pycon
 
-        >>> import edgedb
+        >>> import gel
         >>> client = edgedb.create_client()
         >>> r = client.query_single('''SELECT <cal::date_duration>"1 year 2 days"''')
         >>> r
@@ -283,7 +283,7 @@ EnumValue
 
     .. code-block:: pycon
 
-        >>> import edgedb
+        >>> import gel
         >>> client = edgedb.create_client()
         >>> r = client.query_single("""SELECT <Color>'red'""")
         >>> r

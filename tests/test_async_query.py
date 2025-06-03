@@ -26,17 +26,17 @@ import unittest
 import uuid
 
 import asyncio
-import edgedb
+import gel
 
-from edgedb import abstract
+from gel import abstract
 from gel import _testbase as tb
-from edgedb.options import RetryOptions
-from edgedb.protocol import protocol
+from gel.options import RetryOptions
+from gel.protocol import protocol
 
 try:
     from asyncio import TaskGroup
 except ImportError:
-    from edgedb._taskgroup import TaskGroup
+    from gel._taskgroup import TaskGroup
 
 
 class TestAsyncQuery(tb.AsyncQueryTestCase):
@@ -66,31 +66,31 @@ class TestAsyncQuery(tb.AsyncQueryTestCase):
 
     async def test_async_parse_error_recover_01(self):
         for _ in range(2):
-            with self.assertRaises(edgedb.EdgeQLSyntaxError):
+            with self.assertRaises(gel.EdgeQLSyntaxError):
                 await self.client.query('select syntax error')
 
-            with self.assertRaises(edgedb.EdgeQLSyntaxError):
+            with self.assertRaises(gel.EdgeQLSyntaxError):
                 await self.client.query('select syntax error')
 
-            with self.assertRaises(edgedb.EdgeQLSyntaxError):
+            with self.assertRaises(gel.EdgeQLSyntaxError):
                 await self.client.query('select (')
 
-            with self.assertRaises(edgedb.EdgeQLSyntaxError):
+            with self.assertRaises(gel.EdgeQLSyntaxError):
                 await self.client.query_json('select (')
 
             for _ in range(10):
                 self.assertEqual(
                     await self.client.query('select 1;'),
-                    edgedb.Set((1,)))
+                    gel.Set((1,)))
 
             self.assertFalse(self.client.connection.is_closed())
 
     async def test_async_parse_error_recover_02(self):
         for _ in range(2):
-            with self.assertRaises(edgedb.EdgeQLSyntaxError):
+            with self.assertRaises(gel.EdgeQLSyntaxError):
                 await self.client.execute('select syntax error')
 
-            with self.assertRaises(edgedb.EdgeQLSyntaxError):
+            with self.assertRaises(gel.EdgeQLSyntaxError):
                 await self.client.execute('select syntax error')
 
             for _ in range(10):
@@ -98,23 +98,23 @@ class TestAsyncQuery(tb.AsyncQueryTestCase):
 
     async def test_async_exec_error_recover_01(self):
         for _ in range(2):
-            with self.assertRaises(edgedb.DivisionByZeroError):
+            with self.assertRaises(gel.DivisionByZeroError):
                 await self.client.query('select 1 / 0;')
 
-            with self.assertRaises(edgedb.DivisionByZeroError):
+            with self.assertRaises(gel.DivisionByZeroError):
                 await self.client.query('select 1 / 0;')
 
             for _ in range(10):
                 self.assertEqual(
                     await self.client.query('select 1;'),
-                    edgedb.Set((1,)))
+                    gel.Set((1,)))
 
     async def test_async_exec_error_recover_02(self):
         for _ in range(2):
-            with self.assertRaises(edgedb.DivisionByZeroError):
+            with self.assertRaises(gel.DivisionByZeroError):
                 await self.client.execute('select 1 / 0;')
 
-            with self.assertRaises(edgedb.DivisionByZeroError):
+            with self.assertRaises(gel.DivisionByZeroError):
                 await self.client.execute('select 1 / 0;')
 
             for _ in range(10):
@@ -126,9 +126,9 @@ class TestAsyncQuery(tb.AsyncQueryTestCase):
             if i:
                 self.assertEqual(
                     await self.client.query(query, i),
-                    edgedb.Set([10 // i]))
+                    gel.Set([10 // i]))
             else:
-                with self.assertRaises(edgedb.DivisionByZeroError):
+                with self.assertRaises(gel.DivisionByZeroError):
                     await self.client.query(query, i)
 
     async def test_async_exec_error_recover_04(self):
@@ -136,11 +136,11 @@ class TestAsyncQuery(tb.AsyncQueryTestCase):
             if i:
                 await self.client.execute(f'select 10 // {i};')
             else:
-                with self.assertRaises(edgedb.DivisionByZeroError):
+                with self.assertRaises(gel.DivisionByZeroError):
                     await self.client.query(f'select 10 // {i};')
 
     async def test_async_exec_error_recover_05(self):
-        with self.assertRaises(edgedb.DivisionByZeroError):
+        with self.assertRaises(gel.DivisionByZeroError):
             await self.client.execute(f'select 1 / 0')
         self.assertEqual(
             await self.client.query('SELECT "HELLO"'),
@@ -154,7 +154,7 @@ class TestAsyncQuery(tb.AsyncQueryTestCase):
         res = await self.client.query_required_single("SELECT 1")
         self.assertEqual(res, 1)
 
-        with self.assertRaises(edgedb.NoDataError):
+        with self.assertRaises(gel.NoDataError):
             await self.client.query_required_single("SELECT <str>{}")
 
     async def test_async_query_single_command_01(self):
@@ -193,7 +193,7 @@ class TestAsyncQuery(tb.AsyncQueryTestCase):
         self.assertEqual(r, '[]')
 
         with self.assertRaisesRegex(
-                edgedb.InterfaceError,
+                gel.InterfaceError,
                 r'query cannot be executed with query_required_single_json\('):
             await self.client.query_required_single_json('''
                 DROP TYPE test::server_query_single_command_01;
@@ -210,13 +210,13 @@ class TestAsyncQuery(tb.AsyncQueryTestCase):
 
     async def test_async_query_no_return(self):
         with self.assertRaisesRegex(
-                edgedb.InterfaceError,
+                gel.InterfaceError,
                 r'cannot be executed with query_required_single\(\).*'
                 r'not return'):
             await self.client.query_required_single('create type Foo456')
 
         with self.assertRaisesRegex(
-                edgedb.InterfaceError,
+                gel.InterfaceError,
                 r'cannot be executed with query_required_single_json\(\).*'
                 r'not return'):
             await self.client.query_required_single_json('create type Bar456')
@@ -231,37 +231,37 @@ class TestAsyncQuery(tb.AsyncQueryTestCase):
             self.assertEqual(
                 await self.client.query(
                     'select (1,)'),
-                edgedb.Set([(1,)]))
+                gel.Set([(1,)]))
 
             self.assertEqual(
                 await self.client.query(
                     'select ["a", "b"]'),
-                edgedb.Set([["a", "b"]]))
+                gel.Set([["a", "b"]]))
 
             self.assertEqual(
                 await self.client.query('''
                     SELECT {(a := 1 + 1 + 40, world := ("hello", 32)),
                             (a:=1, world := ("yo", 10))};
                 '''),
-                edgedb.Set([
-                    edgedb.NamedTuple(a=42, world=("hello", 32)),
-                    edgedb.NamedTuple(a=1, world=("yo", 10)),
+                gel.Set([
+                    gel.NamedTuple(a=42, world=("hello", 32)),
+                    gel.NamedTuple(a=1, world=("yo", 10)),
                 ]))
 
             with self.assertRaisesRegex(
-                    edgedb.InterfaceError,
+                    gel.InterfaceError,
                     r'query_single\(\) as it may return more than one element'
             ):
                 await self.client.query_single('SELECT {1, 2}')
 
             with self.assertRaisesRegex(
-                    edgedb.InterfaceError,
+                    gel.InterfaceError,
                     r'query_required_single\(\) as it may return '
                     r'more than one element'):
                 await self.client.query_required_single('SELECT {1, 2}')
 
             with self.assertRaisesRegex(
-                    edgedb.NoDataError,
+                    gel.NoDataError,
                     r'\bquery_required_single\('):
                 await self.client.query_required_single('SELECT <int64>{}')
 
@@ -269,12 +269,12 @@ class TestAsyncQuery(tb.AsyncQueryTestCase):
         self.assertEqual(
             await self.client.query(
                 r'''select [b"\x00a", b"b", b'', b'\na']'''),
-            edgedb.Set([[b"\x00a", b"b", b'', b'\na']]))
+            gel.Set([[b"\x00a", b"b", b'', b'\na']]))
 
         self.assertEqual(
             await self.client.query(
                 r'select <bytes>$0', b'he\x00llo'),
-            edgedb.Set([b'he\x00llo']))
+            gel.Set([b'he\x00llo']))
 
     async def test_async_basic_datatypes_03(self):
         for _ in range(10):  # test opportunistic execute
@@ -325,7 +325,7 @@ class TestAsyncQuery(tb.AsyncQueryTestCase):
                 json.loads(await self.client.query_json('SELECT <int64>{}')),
                 [])
 
-            with self.assertRaises(edgedb.NoDataError):
+            with self.assertRaises(gel.NoDataError):
                 await self.client.query_required_single_json(
                     'SELECT <int64>{}'
                 )
@@ -352,15 +352,15 @@ class TestAsyncQuery(tb.AsyncQueryTestCase):
 
         self.assertEqual(
             val.foo,
-            edgedb.Set([
-                edgedb.Array([
-                    edgedb.NamedTuple(a=1, b=2),
-                    edgedb.NamedTuple(a=3, b=4),
+            gel.Set([
+                gel.Array([
+                    gel.NamedTuple(a=1, b=2),
+                    gel.NamedTuple(a=3, b=4),
                 ]),
-                edgedb.Array([
-                    edgedb.NamedTuple(a=5, b=6),
+                gel.Array([
+                    gel.NamedTuple(a=5, b=6),
                 ]),
-                edgedb.Array([]),
+                gel.Array([]),
             ]),
         )
 
@@ -369,27 +369,27 @@ class TestAsyncQuery(tb.AsyncQueryTestCase):
             await self.client.query(
                 'select (<array<str>>$foo)[0] ++ (<array<str>>$bar)[0];',
                 foo=['aaa'], bar=['bbb']),
-            edgedb.Set(('aaabbb',)))
+            gel.Set(('aaabbb',)))
 
     async def test_async_args_02(self):
         self.assertEqual(
             await self.client.query(
                 'select (<array<str>>$0)[0] ++ (<array<str>>$1)[0];',
                 ['aaa'], ['bbb']),
-            edgedb.Set(('aaabbb',)))
+            gel.Set(('aaabbb',)))
 
     async def test_async_args_03(self):
-        with self.assertRaisesRegex(edgedb.QueryError, r'missing \$0'):
+        with self.assertRaisesRegex(gel.QueryError, r'missing \$0'):
             await self.client.query('select <int64>$1;')
 
-        with self.assertRaisesRegex(edgedb.QueryError, r'missing \$1'):
+        with self.assertRaisesRegex(gel.QueryError, r'missing \$1'):
             await self.client.query('select <int64>$0 + <int64>$2;')
 
-        with self.assertRaisesRegex(edgedb.QueryError,
+        with self.assertRaisesRegex(gel.QueryError,
                                     'combine positional and named parameters'):
             await self.client.query('select <int64>$0 + <int64>$bar;')
 
-        with self.assertRaisesRegex(edgedb.InvalidArgumentError,
+        with self.assertRaisesRegex(gel.InvalidArgumentError,
                                     "None is not allowed"):
             await self.client.query(
                 "select <array<int64>>$0", [1, None, 3]
@@ -427,31 +427,31 @@ class TestAsyncQuery(tb.AsyncQueryTestCase):
                 naive_time),
             naive_time)
 
-        with self.assertRaisesRegex(edgedb.InvalidArgumentError,
+        with self.assertRaisesRegex(gel.InvalidArgumentError,
                                     r'a timezone-aware.*expected'):
             await self.client.query_single(
                 'select <datetime>$0;',
                 naive_datetime)
 
-        with self.assertRaisesRegex(edgedb.InvalidArgumentError,
+        with self.assertRaisesRegex(gel.InvalidArgumentError,
                                     r'a naive time object.*expected'):
             await self.client.query_single(
                 'select <cal::local_time>$0;',
                 aware_time)
 
-        with self.assertRaisesRegex(edgedb.InvalidArgumentError,
+        with self.assertRaisesRegex(gel.InvalidArgumentError,
                                     r'a naive datetime object.*expected'):
             await self.client.query_single(
                 'select <cal::local_datetime>$0;',
                 aware_datetime)
 
-        with self.assertRaisesRegex(edgedb.InvalidArgumentError,
+        with self.assertRaisesRegex(gel.InvalidArgumentError,
                                     r'datetime.datetime object was expected'):
             await self.client.query_single(
                 'select <cal::local_datetime>$0;',
                 date)
 
-        with self.assertRaisesRegex(edgedb.InvalidArgumentError,
+        with self.assertRaisesRegex(gel.InvalidArgumentError,
                                     r'datetime.datetime object was expected'):
             await self.client.query_single(
                 'select <datetime>$0;',
@@ -483,7 +483,7 @@ class TestAsyncQuery(tb.AsyncQueryTestCase):
         )
 
         with self.assertRaisesRegex(
-                edgedb.InvalidArgumentError,
+                gel.InvalidArgumentError,
                 r'argument \$a is required, but received None'):
             self.assertEqual(
                 await self.client.query('select <int32>$a', a=None),
@@ -492,7 +492,7 @@ class TestAsyncQuery(tb.AsyncQueryTestCase):
 
     async def test_async_mismatched_args_01(self):
         with self.assertRaisesRegex(
-                edgedb.QueryArgumentError,
+                gel.QueryArgumentError,
                 r"expected {'a'} arguments, "
                 "got {'[bc]', '[bc]'}, "
                 r"missed {'a'}, extra {'[bc]', '[bc]'}"):
@@ -501,7 +501,7 @@ class TestAsyncQuery(tb.AsyncQueryTestCase):
 
     async def test_async_mismatched_args_02(self):
         with self.assertRaisesRegex(
-                edgedb.QueryArgumentError,
+                gel.QueryArgumentError,
                 r"expected {'[ab]', '[ab]'} arguments, "
                 r"got {'[acd]', '[acd]', '[acd]'}, "
                 r"missed {'b'}, extra {'[cd]', '[cd]'}"):
@@ -512,7 +512,7 @@ class TestAsyncQuery(tb.AsyncQueryTestCase):
 
     async def test_async_mismatched_args_03(self):
         with self.assertRaisesRegex(
-                edgedb.QueryArgumentError,
+                gel.QueryArgumentError,
                 "expected {'a'} arguments, got {'b'}, "
                 "missed {'a'}, extra {'b'}"):
 
@@ -520,7 +520,7 @@ class TestAsyncQuery(tb.AsyncQueryTestCase):
 
     async def test_async_mismatched_args_04(self):
         with self.assertRaisesRegex(
-                edgedb.QueryArgumentError,
+                gel.QueryArgumentError,
                 r"expected {'[ab]', '[ab]'} arguments, "
                 r"got {'a'}, "
                 r"missed {'b'}"):
@@ -529,7 +529,7 @@ class TestAsyncQuery(tb.AsyncQueryTestCase):
 
     async def test_async_mismatched_args_05(self):
         with self.assertRaisesRegex(
-                edgedb.QueryArgumentError,
+                gel.QueryArgumentError,
                 r"expected {'a'} arguments, "
                 r"got {'[ab]', '[ab]'}, "
                 r"extra {'b'}"):
@@ -538,7 +538,7 @@ class TestAsyncQuery(tb.AsyncQueryTestCase):
 
     async def test_async_mismatched_args_06(self):
         with self.assertRaisesRegex(
-                edgedb.QueryArgumentError,
+                gel.QueryArgumentError,
                 r"expected {'a'} arguments, "
                 r"got nothing, "
                 r"missed {'a'}"):
@@ -547,7 +547,7 @@ class TestAsyncQuery(tb.AsyncQueryTestCase):
 
     async def test_async_mismatched_args_07(self):
         with self.assertRaisesRegex(
-            edgedb.QueryArgumentError,
+            gel.QueryArgumentError,
             "expected no named arguments",
         ):
 
@@ -579,7 +579,7 @@ class TestAsyncQuery(tb.AsyncQueryTestCase):
         self.assertEqual(obj.id, ot.id)
         self.assertEqual(obj.name, ot.name)
 
-        with self.assertRaisesRegex(edgedb.InvalidArgumentError,
+        with self.assertRaisesRegex(gel.InvalidArgumentError,
                                     'invalid UUID.*length must be'):
             await self.client.query(
                 'select schema::Object {name} filter .id=<uuid>$id',
@@ -666,43 +666,43 @@ class TestAsyncQuery(tb.AsyncQueryTestCase):
             arg=10)
         self.assertEqual(val, 10)
 
-        with self.assertRaisesRegex(edgedb.InvalidArgumentError,
+        with self.assertRaisesRegex(gel.InvalidArgumentError,
                                     'expected an int'):
             await self.client.query(
                 'select <bigint>$arg',
                 arg='bad int')
 
-        with self.assertRaisesRegex(edgedb.InvalidArgumentError,
+        with self.assertRaisesRegex(gel.InvalidArgumentError,
                                     'expected an int'):
             await self.client.query(
                 'select <bigint>$arg',
                 arg=10.11)
 
-        with self.assertRaisesRegex(edgedb.InvalidArgumentError,
+        with self.assertRaisesRegex(gel.InvalidArgumentError,
                                     'expected an int'):
             await self.client.query(
                 'select <bigint>$arg',
                 arg=decimal.Decimal('10.0'))
 
-        with self.assertRaisesRegex(edgedb.InvalidArgumentError,
+        with self.assertRaisesRegex(gel.InvalidArgumentError,
                                     'expected an int'):
             await self.client.query(
                 'select <bigint>$arg',
                 arg=decimal.Decimal('10.11'))
 
-        with self.assertRaisesRegex(edgedb.InvalidArgumentError,
+        with self.assertRaisesRegex(gel.InvalidArgumentError,
                                     'expected an int'):
             await self.client.query(
                 'select <bigint>$arg',
                 arg='10')
 
-        with self.assertRaisesRegex(edgedb.InvalidArgumentError,
+        with self.assertRaisesRegex(gel.InvalidArgumentError,
                                     'expected an int'):
             await self.client.query_single(
                 'select <bigint>$arg',
                 arg=decimal.Decimal('10'))
 
-        with self.assertRaisesRegex(edgedb.InvalidArgumentError,
+        with self.assertRaisesRegex(gel.InvalidArgumentError,
                                     'expected an int'):
             class IntLike:
                 def __int__(self):
@@ -717,19 +717,19 @@ class TestAsyncQuery(tb.AsyncQueryTestCase):
             def __int__(self):
                 return 10
 
-        with self.assertRaisesRegex(edgedb.InvalidArgumentError,
+        with self.assertRaisesRegex(gel.InvalidArgumentError,
                                     'expected an int'):
             await self.client.query_single(
                 'select <int16>$arg',
                 arg=IntLike())
 
-        with self.assertRaisesRegex(edgedb.InvalidArgumentError,
+        with self.assertRaisesRegex(gel.InvalidArgumentError,
                                     'expected an int'):
             await self.client.query_single(
                 'select <int32>$arg',
                 arg=IntLike())
 
-        with self.assertRaisesRegex(edgedb.InvalidArgumentError,
+        with self.assertRaisesRegex(gel.InvalidArgumentError,
                                     'expected an int'):
             await self.client.query_single(
                 'select <int64>$arg',
@@ -745,13 +745,13 @@ class TestAsyncQuery(tb.AsyncQueryTestCase):
         )
         self.assertEqual(val, 10)
 
-        with self.assertRaisesRegex(edgedb.InvalidArgumentError,
+        with self.assertRaisesRegex(gel.InvalidArgumentError,
                                     'expected a Decimal or an int'):
             await self.client.query_single(
                 'select <decimal>$arg',
                 arg=IntLike())
 
-        with self.assertRaisesRegex(edgedb.InvalidArgumentError,
+        with self.assertRaisesRegex(gel.InvalidArgumentError,
                                     'expected a Decimal or an int'):
             await self.client.query_single(
                 'select <decimal>$arg',
@@ -765,17 +765,17 @@ class TestAsyncQuery(tb.AsyncQueryTestCase):
 
         samples = [
             ('range<int64>', [
-                edgedb.Range(1, 2, inc_lower=True, inc_upper=False),
+                gel.Range(1, 2, inc_lower=True, inc_upper=False),
                 dict(
-                    input=edgedb.Range(1, 2, inc_lower=True, inc_upper=True),
-                    output=edgedb.Range(1, 3, inc_lower=True, inc_upper=False),
+                    input=gel.Range(1, 2, inc_lower=True, inc_upper=True),
+                    output=gel.Range(1, 3, inc_lower=True, inc_upper=False),
                 ),
-                edgedb.Range(empty=True),
+                gel.Range(empty=True),
                 dict(
-                    input=edgedb.Range(1, 1, inc_lower=True, inc_upper=False),
-                    output=edgedb.Range(empty=True),
+                    input=gel.Range(1, 1, inc_lower=True, inc_upper=False),
+                    output=gel.Range(empty=True),
                 ),
-                edgedb.Range(lower=None, upper=None),
+                gel.Range(lower=None, upper=None),
             ]),
         ]
 
@@ -805,9 +805,9 @@ class TestAsyncQuery(tb.AsyncQueryTestCase):
 
         result = await self.client.query_single(
             "SELECT <array<range<int32>>>$0",
-            [edgedb.Range(1, 2)]
+            [gel.Range(1, 2)]
         )
-        self.assertEqual([edgedb.Range(1, 2)], result)
+        self.assertEqual([gel.Range(1, 2)], result)
 
     async def test_async_multirange_01(self):
         has_range = await self.client.query(
@@ -818,38 +818,38 @@ class TestAsyncQuery(tb.AsyncQueryTestCase):
 
         samples = [
             ('multirange<int64>', [
-                edgedb.MultiRange(),
+                gel.MultiRange(),
                 dict(
-                    input=edgedb.MultiRange([edgedb.Range(empty=True)]),
-                    output=edgedb.MultiRange(),
+                    input=gel.MultiRange([gel.Range(empty=True)]),
+                    output=gel.MultiRange(),
                 ),
-                edgedb.MultiRange([
-                    edgedb.Range(None, 0),
-                    edgedb.Range(1, 2),
-                    edgedb.Range(4),
+                gel.MultiRange([
+                    gel.Range(None, 0),
+                    gel.Range(1, 2),
+                    gel.Range(4),
                 ]),
                 dict(
-                    input=edgedb.MultiRange([
-                        edgedb.Range(None, 2, inc_upper=True),
-                        edgedb.Range(5, 9),
-                        edgedb.Range(5, 9),
-                        edgedb.Range(5, 9),
-                        edgedb.Range(None, 2, inc_upper=True),
+                    input=gel.MultiRange([
+                        gel.Range(None, 2, inc_upper=True),
+                        gel.Range(5, 9),
+                        gel.Range(5, 9),
+                        gel.Range(5, 9),
+                        gel.Range(None, 2, inc_upper=True),
                     ]),
-                    output=edgedb.MultiRange([
-                        edgedb.Range(5, 9),
-                        edgedb.Range(None, 3),
+                    output=gel.MultiRange([
+                        gel.Range(5, 9),
+                        gel.Range(None, 3),
                     ]),
                 ),
                 dict(
-                    input=edgedb.MultiRange([
-                        edgedb.Range(None, 2),
-                        edgedb.Range(-5, 9),
-                        edgedb.Range(13),
+                    input=gel.MultiRange([
+                        gel.Range(None, 2),
+                        gel.Range(-5, 9),
+                        gel.Range(13),
                     ]),
-                    output=edgedb.MultiRange([
-                        edgedb.Range(None, 9),
-                        edgedb.Range(13),
+                    output=gel.MultiRange([
+                        gel.Range(None, 9),
+                        gel.Range(13),
                     ]),
                 ),
             ]),
@@ -882,9 +882,9 @@ class TestAsyncQuery(tb.AsyncQueryTestCase):
 
         result = await self.client.query_single(
             "SELECT <array<multirange<int32>>>$0",
-            [edgedb.MultiRange([edgedb.Range(1, 2)])]
+            [gel.MultiRange([gel.Range(1, 2)])]
         )
-        self.assertEqual([edgedb.MultiRange([edgedb.Range(1, 2)])], result)
+        self.assertEqual([gel.MultiRange([gel.Range(1, 2)])], result)
 
     async def test_async_wait_cancel_01(self):
         underscored_lock = await self.client.query_single("""
@@ -920,7 +920,7 @@ class TestAsyncQuery(tb.AsyncQueryTestCase):
 
                         async def exec_to_fail():
                             with self.assertRaises(
-                                edgedb.ClientConnectionClosedError,
+                                gel.ClientConnectionClosedError,
                             ):
                                 async for tx2 in client2.transaction():
                                     async with tx2:
@@ -975,7 +975,7 @@ class TestAsyncQuery(tb.AsyncQueryTestCase):
         self.assertEqual(str(A), 'A')
 
         with self.assertRaisesRegex(
-                edgedb.InvalidValueError, 'invalid input value for enum'):
+                gel.InvalidValueError, 'invalid input value for enum'):
             async for tx in self.client.transaction():
                 async with tx:
                     await tx.query_single('SELECT <MyEnum><str>$0', 'Oups')
@@ -989,13 +989,13 @@ class TestAsyncQuery(tb.AsyncQueryTestCase):
             A)
 
         with self.assertRaisesRegex(
-                edgedb.InvalidValueError, 'invalid input value for enum'):
+                gel.InvalidValueError, 'invalid input value for enum'):
             async for tx in self.client.transaction():
                 async with tx:
                     await tx.query_single('SELECT <MyEnum>$0', 'Oups')
 
         with self.assertRaisesRegex(
-                edgedb.InvalidArgumentError, 'a str or gel.EnumValue'):
+                gel.InvalidArgumentError, 'a str or gel.EnumValue'):
             await self.client.query_single('SELECT <MyEnum>$0', 123)
 
     async def test_enum_argument_02(self):
@@ -1020,7 +1020,7 @@ class TestAsyncQuery(tb.AsyncQueryTestCase):
             _ = A < MyEnum.C
         with self.assertRaises(ValueError):
             _ = A == MyEnum.C
-        with self.assertRaises(edgedb.InvalidArgumentError):
+        with self.assertRaises(gel.InvalidArgumentError):
             await self.client.query_single('SELECT <MyEnum>$0', MyEnum.C)
 
     async def test_json(self):
@@ -1032,7 +1032,7 @@ class TestAsyncQuery(tb.AsyncQueryTestCase):
         result = await self.client.connection.raw_query(
             abstract.QueryContext(
                 query=abstract.QueryWithArgs(
-                    'SELECT {"aaa", "bbb"}', (), {}
+                    'SELECT {"aaa", "bbb"}', None, (), {}
                 ),
                 cache=self.client._get_query_cache(),
                 query_options=abstract.QueryOptions(
@@ -1049,7 +1049,7 @@ class TestAsyncQuery(tb.AsyncQueryTestCase):
         )
         self.assertEqual(
             result,
-            edgedb.Set(['"aaa"', '"bbb"']))
+            gel.Set(['"aaa"', '"bbb"']))
 
     async def test_async_cancel_01(self):
         has_sleep = await self.client.query_single("""
@@ -1104,12 +1104,12 @@ class TestAsyncQuery(tb.AsyncQueryTestCase):
 
     async def test_async_banned_transaction(self):
         with self.assertRaisesRegex(
-                edgedb.CapabilityError,
+                gel.CapabilityError,
                 r'cannot execute transaction control commands'):
             await self.client.query('start transaction')
 
         with self.assertRaisesRegex(
-                edgedb.CapabilityError,
+                gel.CapabilityError,
                 r'cannot execute transaction control commands'):
             await self.client.execute('start transaction')
 
@@ -1146,7 +1146,7 @@ class TestAsyncQuery(tb.AsyncQueryTestCase):
         ''')
 
     async def test_transaction_state(self):
-        with self.assertRaisesRegex(edgedb.QueryError, "cannot assign to.*id"):
+        with self.assertRaisesRegex(gel.QueryError, "cannot assign to.*id"):
             async for tx in self.client.transaction():
                 async with tx:
                     await tx.execute('''
@@ -1200,7 +1200,7 @@ class TestAsyncQuery(tb.AsyncQueryTestCase):
         # The cached codec doesn't know about the change, so the client cannot
         # encode this string yet:
         with self.assertRaisesRegex(
-            edgedb.InvalidArgumentError, 'expected an int'
+            gel.InvalidArgumentError, 'expected an int'
         ):
             await self.client.query_single("SELECT <test::MyType>$0", "foo")
 
@@ -1209,7 +1209,7 @@ class TestAsyncQuery(tb.AsyncQueryTestCase):
         # we shall receive the new string codec. Because we cannot re-encode
         # `42` as str, the client shouldn't retry but raise a translated error.
         with self.assertRaisesRegex(
-            edgedb.QueryArgumentError, 'expected str, got int'
+            gel.QueryArgumentError, 'expected str, got int'
         ):
             await self.client.query_single("SELECT <test::MyType>$0", 42)
 
@@ -1269,7 +1269,7 @@ class TestAsyncQuery(tb.AsyncQueryTestCase):
         self.assertEqual(len(rv), 1)
 
     async def test_batch_04(self):
-        with self.assertRaises(edgedb.TransactionError):
+        with self.assertRaises(gel.TransactionError):
             async for bx in self.client._batch():
                 async with bx:
                     await bx.send_execute('''
@@ -1284,7 +1284,7 @@ class TestAsyncQuery(tb.AsyncQueryTestCase):
                         };
                     ''')
 
-                    with self.assertRaises(edgedb.DivisionByZeroError):
+                    with self.assertRaises(gel.DivisionByZeroError):
                         await bx.wait()
 
         rv = await self.client.query('''
@@ -1328,7 +1328,7 @@ class TestAsyncQuery(tb.AsyncQueryTestCase):
         """)
 
         # We should retry only once and succeed here
-        c = self.client.with_retry_options(edgedb.RetryOptions(attempts=2))
+        c = self.client.with_retry_options(gel.RetryOptions(attempts=2))
         async for bx in c._batch():
             async with bx:
                 await bx.send_query_single('SELECT <test::MyType>$0', 42)

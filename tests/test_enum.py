@@ -21,7 +21,7 @@ import dataclasses
 import enum
 import uuid
 
-import edgedb
+import gel
 from gel import _testbase as tb
 
 
@@ -37,7 +37,7 @@ class TestEnum(tb.AsyncQueryTestCase):
         ct_white = await self.client.query_single('SELECT <CellType>"white"')
         c_red = await self.client.query_single('SELECT <Color>"red"')
 
-        self.assertTrue(isinstance(ct_red, edgedb.EnumValue))
+        self.assertTrue(isinstance(ct_red, gel.EnumValue))
         self.assertTrue(isinstance(ct_red.__tid__, uuid.UUID))
 
         self.assertEqual(repr(ct_red), "<gel.EnumValue 'red'>")

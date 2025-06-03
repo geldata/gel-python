@@ -32,7 +32,7 @@ Running the code generator will generate a new file called
 .. code-block:: python
 
   from __future__ import annotations
-  import edgedb
+  import gel
 
 
   async def get_number(
@@ -93,4 +93,3 @@ The ``edgedb-py`` command supports the same set of :ref:`connection options
     --password-from-stdin
     --tls-ca-file <path/to/certificate>
     --tls-security <insecure | no_host_verification | strict | default>
-

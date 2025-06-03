@@ -25,9 +25,9 @@ import string
 import unittest
 import weakref
 
-import edgedb
-from edgedb.datatypes import datatypes as private
-from edgedb import introspect
+import gel
+from gel.datatypes import datatypes as private
+from gel import introspect
 
 
 class TestRecordDesc(unittest.TestCase):
@@ -139,7 +139,7 @@ class TestRecordDesc(unittest.TestCase):
 class TestTuple(unittest.TestCase):
 
     def test_tuple_empty_1(self):
-        t = edgedb.Tuple()
+        t = gel.Tuple()
         self.assertIsInstance(t, tuple)
         self.assertEqual(len(t), 0)
         self.assertEqual(hash(t), hash(()))
@@ -148,7 +148,7 @@ class TestTuple(unittest.TestCase):
             t[0]
 
     def test_tuple_2(self):
-        t = edgedb.Tuple((1, 'a'))
+        t = gel.Tuple((1, 'a'))
         self.assertEqual(len(t), 2)
         self.assertEqual(hash(t), hash((1, 'a')))
 
@@ -160,7 +160,7 @@ class TestTuple(unittest.TestCase):
             t[2]
 
     def test_tuple_3(self):
-        t = edgedb.Tuple((1, []))
+        t = gel.Tuple((1, []))
         t[1].append(t)
         self.assertEqual(t[1], [t])
 
@@ -170,115 +170,115 @@ class TestTuple(unittest.TestCase):
     def test_tuple_freelist_1(self):
         lst = []
         for _ in range(5000):
-            lst.append(edgedb.Tuple((1,)))
+            lst.append(gel.Tuple((1,)))
         for t in lst:
             self.assertEqual(t[0], 1)
 
     def test_tuple_5(self):
         self.assertEqual(
-            edgedb.Tuple([1, 2, 3]),
-            edgedb.Tuple([1, 2, 3]))
+            gel.Tuple([1, 2, 3]),
+            gel.Tuple([1, 2, 3]))
 
         self.assertNotEqual(
-            edgedb.Tuple([1, 2, 3]),
-            edgedb.Tuple([1, 3, 2]))
+            gel.Tuple([1, 2, 3]),
+            gel.Tuple([1, 3, 2]))
 
         self.assertLess(
-            edgedb.Tuple([1, 2, 3]),
-            edgedb.Tuple([1, 3, 2]))
+            gel.Tuple([1, 2, 3]),
+            gel.Tuple([1, 3, 2]))
 
         self.assertEqual(
-            edgedb.Tuple([]),
-            edgedb.Tuple([]))
+            gel.Tuple([]),
+            gel.Tuple([]))
 
         self.assertEqual(
-            edgedb.Tuple([1]),
-            edgedb.Tuple([1]))
+            gel.Tuple([1]),
+            gel.Tuple([1]))
 
         self.assertGreaterEqual(
-            edgedb.Tuple([1]),
-            edgedb.Tuple([1]))
+            gel.Tuple([1]),
+            gel.Tuple([1]))
 
         self.assertNotEqual(
-            edgedb.Tuple([1]),
-            edgedb.Tuple([]))
+            gel.Tuple([1]),
+            gel.Tuple([]))
 
         self.assertGreater(
-            edgedb.Tuple([1]),
-            edgedb.Tuple([]))
+            gel.Tuple([1]),
+            gel.Tuple([]))
 
         self.assertNotEqual(
-            edgedb.Tuple([1]),
-            edgedb.Tuple([2]))
+            gel.Tuple([1]),
+            gel.Tuple([2]))
 
         self.assertLess(
-            edgedb.Tuple([1]),
-            edgedb.Tuple([2]))
+            gel.Tuple([1]),
+            gel.Tuple([2]))
 
         self.assertNotEqual(
-            edgedb.Tuple([1, 2]),
-            edgedb.Tuple([2, 2]))
+            gel.Tuple([1, 2]),
+            gel.Tuple([2, 2]))
 
         self.assertNotEqual(
-            edgedb.Tuple([1, 1]),
-            edgedb.Tuple([2, 2, 1]))
+            gel.Tuple([1, 1]),
+            gel.Tuple([2, 2, 1]))
 
     def test_tuple_6(self):
         self.assertEqual(
-            edgedb.Tuple([1, 2, 3]),
+            gel.Tuple([1, 2, 3]),
             (1, 2, 3))
 
         self.assertEqual(
             (1, 2, 3),
-            edgedb.Tuple([1, 2, 3]))
+            gel.Tuple([1, 2, 3]))
 
         self.assertNotEqual(
-            edgedb.Tuple([1, 2, 3]),
+            gel.Tuple([1, 2, 3]),
             (1, 3, 2))
 
         self.assertLess(
-            edgedb.Tuple([1, 2, 3]),
+            gel.Tuple([1, 2, 3]),
             (1, 3, 2))
 
         self.assertEqual(
-            edgedb.Tuple([]),
+            gel.Tuple([]),
             ())
 
         self.assertEqual(
-            edgedb.Tuple([1]),
+            gel.Tuple([1]),
             (1,))
 
         self.assertGreaterEqual(
-            edgedb.Tuple([1]),
+            gel.Tuple([1]),
             (1,))
 
         self.assertNotEqual(
-            edgedb.Tuple([1]),
+            gel.Tuple([1]),
             ())
 
         self.assertGreater(
-            edgedb.Tuple([1]),
+            gel.Tuple([1]),
             ())
 
         self.assertNotEqual(
-            edgedb.Tuple([1]),
+            gel.Tuple([1]),
             (2,))
 
         self.assertLess(
-            edgedb.Tuple([1]),
+            gel.Tuple([1]),
             (2,))
 
         self.assertNotEqual(
-            edgedb.Tuple([1, 2]),
+            gel.Tuple([1, 2]),
             (2, 2))
 
         self.assertNotEqual(
-            edgedb.Tuple([1, 1]),
+            gel.Tuple([1, 1]),
             (2, 2, 1))
 
     def test_tuple_7(self):
         self.assertNotEqual(
-            edgedb.Tuple([1, 2, 3]),
+            gel.Tuple([1, 2, 3]),
             123)
 
 
@@ -286,13 +286,13 @@ class TestNamedTuple(unittest.TestCase):
 
     def test_namedtuple_empty_1(self):
         with self.assertRaisesRegex(ValueError, 'at least one field'):
-            edgedb.NamedTuple()
+            gel.NamedTuple()
 
     def test_namedtuple_2(self):
-        t = edgedb.NamedTuple(a=1)
+        t = gel.NamedTuple(a=1)
         self.assertEqual(repr(t), "(a := 1)")
 
-        t = edgedb.NamedTuple(a=1, b='a')
+        t = gel.NamedTuple(a=1, b='a')
 
         self.assertEqual(set(dir(t)), {'a', 'b'})
 
@@ -313,7 +313,7 @@ class TestNamedTuple(unittest.TestCase):
             t.z
 
     def test_namedtuple_3(self):
-        t = edgedb.NamedTuple(a=1, b=[])
+        t = gel.NamedTuple(a=1, b=[])
         t.b.append(t)
         self.assertEqual(t.b, [t])
 
@@ -321,8 +321,8 @@ class TestNamedTuple(unittest.TestCase):
         self.assertEqual(str(t), '(a := 1, b := [(...)])')
 
     def test_namedtuple_4(self):
-        t1 = edgedb.NamedTuple(a=1, b='aaaa')
-        t2 = edgedb.Tuple((1, 'aaaa'))
+        t1 = gel.NamedTuple(a=1, b='aaaa')
+        t2 = gel.Tuple((1, 'aaaa'))
         t3 = (1, 'aaaa')
 
         self.assertEqual(hash(t1), hash(t2))
@@ -330,58 +330,58 @@ class TestNamedTuple(unittest.TestCase):
 
     def test_namedtuple_5(self):
         self.assertEqual(
-            edgedb.NamedTuple(a=1, b=2, c=3),
-            edgedb.NamedTuple(x=1, y=2, z=3))
+            gel.NamedTuple(a=1, b=2, c=3),
+            gel.NamedTuple(x=1, y=2, z=3))
 
         self.assertNotEqual(
-            edgedb.NamedTuple(a=1, b=2, c=3),
-            edgedb.NamedTuple(a=1, c=3, b=2))
+            gel.NamedTuple(a=1, b=2, c=3),
+            gel.NamedTuple(a=1, c=3, b=2))
 
         self.assertLess(
-            edgedb.NamedTuple(a=1, b=2, c=3),
-            edgedb.NamedTuple(a=1, b=3, c=2))
+            gel.NamedTuple(a=1, b=2, c=3),
+            gel.NamedTuple(a=1, b=3, c=2))
 
         self.assertEqual(
-            edgedb.NamedTuple(a=1),
-            edgedb.NamedTuple(b=1))
+            gel.NamedTuple(a=1),
+            gel.NamedTuple(b=1))
 
         self.assertEqual(
-            edgedb.NamedTuple(a=1),
-            edgedb.NamedTuple(a=1))
+            gel.NamedTuple(a=1),
+            gel.NamedTuple(a=1))
 
     def test_namedtuple_6(self):
         self.assertEqual(
-            edgedb.NamedTuple(a=1, b=2, c=3),
+            gel.NamedTuple(a=1, b=2, c=3),
             (1, 2, 3))
 
         self.assertEqual(
             (1, 2, 3),
-            edgedb.NamedTuple(a=1, b=2, c=3))
+            gel.NamedTuple(a=1, b=2, c=3))
 
         self.assertNotEqual(
-            edgedb.NamedTuple(a=1, b=2, c=3),
+            gel.NamedTuple(a=1, b=2, c=3),
             (1, 3, 2))
 
         self.assertLess(
-            edgedb.NamedTuple(a=1, b=2, c=3),
+            gel.NamedTuple(a=1, b=2, c=3),
             (1, 3, 2))
 
         self.assertEqual(
-            edgedb.NamedTuple(a=1),
+            gel.NamedTuple(a=1),
             (1,))
 
         self.assertEqual(
-            edgedb.NamedTuple(a=1),
+            gel.NamedTuple(a=1),
             (1,))
 
     def test_namedtuple_7(self):
         self.assertNotEqual(
-            edgedb.NamedTuple(a=1, b=2, c=3),
+            gel.NamedTuple(a=1, b=2, c=3),
             1)
 
     def test_namedtuple_8(self):
         self.assertEqual(
-            edgedb.NamedTuple(壹=1, 贰=2, 叄=3),
+            gel.NamedTuple(壹=1, 贰=2, 叄=3),
             (1, 2, 3))
 
     def test_namedtuple_memory(self):
@@ -389,14 +389,14 @@ class TestNamedTuple(unittest.TestCase):
 
         def test():
             nt = []
-            fix_tp = type(edgedb.NamedTuple(a=1, b=2))
+            fix_tp = type(gel.NamedTuple(a=1, b=2))
             for _i in range(num):
                 values = {}
                 for _ in range(random.randint(9, 16)):
                     key = "".join(random.choices(string.ascii_letters, k=3))
                     value = random.randint(16384, 65536)
                     values[key] = value
-                nt.append(edgedb.NamedTuple(**values))
+                nt.append(gel.NamedTuple(**values))
                 if random.random() > 0.5:
                     nt.append(
                         fix_tp(random.randint(10, 20), random.randint(20, 30))
@@ -416,7 +416,7 @@ class TestNamedTuple(unittest.TestCase):
 
 
 class TestDerivedNamedTuple(unittest.TestCase):
-    DerivedNamedTuple = type(edgedb.NamedTuple(a=1, b=2, c=3))
+    DerivedNamedTuple = type(gel.NamedTuple(a=1, b=2, c=3))
 
     def test_derived_namedtuple_1(self):
         self.assertEqual(
@@ -463,9 +463,9 @@ class TestDerivedNamedTuple(unittest.TestCase):
             self.DerivedNamedTuple(1, 2, c=3, d=4)
 
     def test_derived_namedtuple_4(self):
-        tp = type(edgedb.NamedTuple(x=42))
+        tp = type(gel.NamedTuple(x=42))
         tp(8)
-        edgedb.NamedTuple(y=88)
+        gel.NamedTuple(y=88)
         tp(16)
         tp_ref = weakref.ref(tp)
         gc.collect()
@@ -582,7 +582,7 @@ class TestObject(unittest.TestCase):
 
         o2_1 = O2(1, 'linkprop o2 1', 3)
         o2_2 = O2(4, 'linkprop o2 2', 6)
-        o1 = O1(2, edgedb.Set((o2_1, o2_2)))
+        o1 = O1(2, gel.Set((o2_1, o2_2)))
 
         with self.assertRaisesRegex(TypeError,
                                     "link 'o2s' should be "
@@ -603,7 +603,7 @@ class TestObject(unittest.TestCase):
 
         o2_1 = O2(1, 'linkprop o2 1', 3)
         o2_2 = O2(4, 'linkprop o2 2', 6)
-        o1 = O1(2, edgedb.Set((o2_1, o2_2)))
+        o1 = O1(2, gel.Set((o2_1, o2_2)))
 
         o2s = o1.o2s
         self.assertEqual(len(o2s), 2)
@@ -653,8 +653,8 @@ class TestObject(unittest.TestCase):
         u = User(
             1,
             'Bob',
-            edgedb.Tuple((1, 2.0, '3')),
-            edgedb.NamedTuple(a=1, b="Y"),
+            gel.Tuple((1, 2.0, '3')),
+            gel.NamedTuple(a=1, b="Y"),
             123,
         )
         self.assertTrue(dataclasses.is_dataclass(u))
@@ -672,10 +672,10 @@ class TestObject(unittest.TestCase):
 class TestSet(unittest.TestCase):
 
     def test_set_1(self):
-        s = edgedb.Set(())
+        s = gel.Set(())
         self.assertEqual(repr(s), '[]')
 
-        s = edgedb.Set((1, 2, [], 'a'))
+        s = gel.Set((1, 2, [], 'a'))
 
         self.assertEqual(s[1], 2)
         self.assertEqual(s[2], [])
@@ -684,48 +684,48 @@ class TestSet(unittest.TestCase):
             s[10]
 
     def test_set_2(self):
-        s = edgedb.Set((1, 2, 3000, 'a'))
+        s = gel.Set((1, 2, 3000, 'a'))
 
         self.assertEqual(repr(s), "[1, 2, 3000, 'a']")
 
     def test_set_3(self):
-        s = edgedb.Set(())
+        s = gel.Set(())
 
         self.assertEqual(len(s), 0)
 
     def test_set_4(self):
-        s = edgedb.Set(([],))
+        s = gel.Set(([],))
         s[0].append(s)
         self.assertEqual(repr(s), "[[[...]]]")
 
     def test_set_5(self):
         self.assertNotEqual(
-            edgedb.Set([1, 2, 3]),
-            edgedb.Set([3, 2, 1]))
+            gel.Set([1, 2, 3]),
+            gel.Set([3, 2, 1]))
 
         self.assertEqual(
-            edgedb.Set([]),
-            edgedb.Set([]))
+            gel.Set([]),
+            gel.Set([]))
 
         self.assertEqual(
-            edgedb.Set([1]),
-            edgedb.Set([1]))
+            gel.Set([1]),
+            gel.Set([1]))
 
         self.assertNotEqual(
-            edgedb.Set([1]),
-            edgedb.Set([]))
+            gel.Set([1]),
+            gel.Set([]))
 
         self.assertNotEqual(
-            edgedb.Set([1]),
-            edgedb.Set([2]))
+            gel.Set([1]),
+            gel.Set([2]))
 
         self.assertNotEqual(
-            edgedb.Set([1, 2]),
-            edgedb.Set([2, 2]))
+            gel.Set([1, 2]),
+            gel.Set([2, 2]))
 
         self.assertNotEqual(
-            edgedb.Set([1, 1, 2]),
-            edgedb.Set([2, 2, 1]))
+            gel.Set([1, 1, 2]),
+            gel.Set([2, 2, 1]))
 
     def test_set_6(self):
         f = private.create_object_factory(
@@ -734,37 +734,37 @@ class TestSet(unittest.TestCase):
             c='property'
         )
 
-        o1 = f(1, 'aa', edgedb.Set([1, 2, 3]))
-        o2 = f(1, 'ab', edgedb.Set([1, 2, 4]))
-        o3 = f(3, 'ac', edgedb.Set([5, 5, 5, 5]))
+        o1 = f(1, 'aa', gel.Set([1, 2, 3]))
+        o2 = f(1, 'ab', gel.Set([1, 2, 4]))
+        o3 = f(3, 'ac', gel.Set([5, 5, 5, 5]))
 
         self.assertNotEqual(
-            edgedb.Set([o1, o2, o3]),
-            edgedb.Set([o2, o3, o1]))
+            gel.Set([o1, o2, o3]),
+            gel.Set([o2, o3, o1]))
 
         self.assertNotEqual(
-            edgedb.Set([o1, o3]),
-            edgedb.Set([o2, o3]))
+            gel.Set([o1, o3]),
+            gel.Set([o2, o3]))
 
         self.assertNotEqual(
-            edgedb.Set([o1, o1]),
-            edgedb.Set([o2, o3]))
+            gel.Set([o1, o1]),
+            gel.Set([o2, o3]))
 
     def test_set_7(self):
         self.assertEqual(
-            edgedb.Set([1, 2, 3]),
+            gel.Set([1, 2, 3]),
             [1, 2, 3])
 
         self.assertNotEqual(
-            edgedb.Set([1, 2, 3]),
+            gel.Set([1, 2, 3]),
             [3, 2, 1])
 
         self.assertNotEqual(
-            edgedb.Set([1, 2, 3]),
+            gel.Set([1, 2, 3]),
             1)
 
     def test_set_8(self):
-        s = edgedb.Set([1, 2, 3])
+        s = gel.Set([1, 2, 3])
         si = iter(s)
         self.assertEqual(list(si), [1, 2, 3])
 
@@ -772,14 +772,14 @@ class TestSet(unittest.TestCase):
 class TestArray(unittest.TestCase):
 
     def test_array_empty_1(self):
-        t = edgedb.Array()
+        t = gel.Array()
         self.assertEqual(len(t), 0)
         with self.assertRaisesRegex(IndexError, 'out of range'):
             t[0]
         self.assertEqual(repr(t), "[]")
 
     def test_array_2(self):
-        t = edgedb.Array((1, 'a'))
+        t = gel.Array((1, 'a'))
 
         self.assertEqual(repr(t), "[1, 'a']")
         self.assertEqual(str(t), "[1, 'a']")
@@ -792,127 +792,127 @@ class TestArray(unittest.TestCase):
             t[2]
 
     def test_array_3(self):
-        t = edgedb.Array((1, []))
+        t = gel.Array((1, []))
         t[1].append(t)
         self.assertEqual(t[1], [t])
         self.assertEqual(repr(t), '[1, [[...]]]')
 
     def test_array_4(self):
         self.assertEqual(
-            edgedb.Array([1, 2, 3]),
-            edgedb.Array([1, 2, 3]))
+            gel.Array([1, 2, 3]),
+            gel.Array([1, 2, 3]))
 
         self.assertNotEqual(
-            edgedb.Array([1, 2, 3]),
-            edgedb.Array([1, 3, 2]))
+            gel.Array([1, 2, 3]),
+            gel.Array([1, 3, 2]))
 
         self.assertLess(
-            edgedb.Array([1, 2, 3]),
-            edgedb.Array([1, 3, 2]))
+            gel.Array([1, 2, 3]),
+            gel.Array([1, 3, 2]))
 
         self.assertEqual(
-            edgedb.Array([]),
-            edgedb.Array([]))
+            gel.Array([]),
+            gel.Array([]))
 
         self.assertEqual(
-            edgedb.Array([1]),
-            edgedb.Array([1]))
+            gel.Array([1]),
+            gel.Array([1]))
 
         self.assertGreaterEqual(
-            edgedb.Array([1]),
-            edgedb.Array([1]))
+            gel.Array([1]),
+            gel.Array([1]))
 
         self.assertNotEqual(
-            edgedb.Array([1]),
-            edgedb.Array([]))
+            gel.Array([1]),
+            gel.Array([]))
 
         self.assertGreater(
-            edgedb.Array([1]),
-            edgedb.Array([]))
+            gel.Array([1]),
+            gel.Array([]))
 
         self.assertNotEqual(
-            edgedb.Array([1]),
-            edgedb.Array([2]))
+            gel.Array([1]),
+            gel.Array([2]))
 
         self.assertLess(
-            edgedb.Array([1]),
-            edgedb.Array([2]))
+            gel.Array([1]),
+            gel.Array([2]))
 
         self.assertNotEqual(
-            edgedb.Array([1, 2]),
-            edgedb.Array([2, 2]))
+            gel.Array([1, 2]),
+            gel.Array([2, 2]))
 
         self.assertNotEqual(
-            edgedb.Array([1, 1]),
-            edgedb.Array([2, 2, 1]))
+            gel.Array([1, 1]),
+            gel.Array([2, 2, 1]))
 
     def test_array_5(self):
         self.assertEqual(
-            edgedb.Array([1, 2, 3]),
+            gel.Array([1, 2, 3]),
             [1, 2, 3])
 
         self.assertEqual(
             [1, 2, 3],
-            edgedb.Array([1, 2, 3]))
+            gel.Array([1, 2, 3]))
 
         self.assertNotEqual(
             [1, 2, 4],
-            edgedb.Array([1, 2, 3]))
+            gel.Array([1, 2, 3]))
 
         self.assertNotEqual(
-            edgedb.Array([1, 2, 3]),
+            gel.Array([1, 2, 3]),
             [1, 3, 2])
 
         self.assertLess(
-            edgedb.Array([1, 2, 3]),
+            gel.Array([1, 2, 3]),
             [1, 3, 2])
 
         self.assertEqual(
-            edgedb.Array([]),
+            gel.Array([]),
             [])
 
         self.assertEqual(
-            edgedb.Array([1]),
+            gel.Array([1]),
             [1])
 
         self.assertGreaterEqual(
-            edgedb.Array([1]),
+            gel.Array([1]),
             [1])
 
         self.assertNotEqual(
-            edgedb.Array([1]),
+            gel.Array([1]),
             [])
 
         self.assertGreater(
-            edgedb.Array([1]),
+            gel.Array([1]),
             [])
 
         self.assertNotEqual(
-            edgedb.Array([1]),
+            gel.Array([1]),
             [2])
 
         self.assertLess(
-            edgedb.Array([1]),
+            gel.Array([1]),
             [2])
 
         self.assertNotEqual(
-            edgedb.Array([1, 2]),
+            gel.Array([1, 2]),
             [2, 2])
 
         self.assertNotEqual(
-            edgedb.Array([1, 1]),
+            gel.Array([1, 1]),
             [2, 2, 1])
 
     def test_array_6(self):
         self.assertNotEqual(
-            edgedb.Array([1, 2, 3]),
+            gel.Array([1, 2, 3]),
             False)
 
 
 class TestRange(unittest.TestCase):
 
     def test_range_empty_1(self):
-        t = edgedb.Range(empty=True)
+        t = gel.Range(empty=True)
         self.assertEqual(t.lower, None)
         self.assertEqual(t.upper, None)
         self.assertFalse(t.inc_lower)
@@ -920,13 +920,13 @@ class TestRange(unittest.TestCase):
         self.assertTrue(t.is_empty())
         self.assertFalse(t)
 
-        self.assertEqual(t, edgedb.Range(1, 1, empty=True))
+        self.assertEqual(t, gel.Range(1, 1, empty=True))
 
         with self.assertRaisesRegex(ValueError, 'conflicting arguments'):
-            edgedb.Range(1, 2, empty=True)
+            gel.Range(1, 2, empty=True)
 
     def test_range_2(self):
-        t = edgedb.Range(1, 2)
+        t = gel.Range(1, 2)
         self.assertEqual(repr(t), "<Range [1, 2]>")
         self.assertEqual(str(t), "<Range [1, 2]>")
 
@@ -938,21 +938,21 @@ class TestRange(unittest.TestCase):
         self.assertTrue(t)
 
     def test_range_3(self):
-        t = edgedb.Range(1)
+        t = gel.Range(1)
         self.assertEqual(t.lower, 1)
         self.assertEqual(t.upper, None)
         self.assertTrue(t.inc_lower)
         self.assertFalse(t.inc_upper)
         self.assertFalse(t.is_empty())
 
-        t = edgedb.Range(None, 1)
+        t = gel.Range(None, 1)
         self.assertEqual(t.lower, None)
         self.assertEqual(t.upper, 1)
         self.assertFalse(t.inc_lower)
         self.assertFalse(t.inc_upper)
         self.assertFalse(t.is_empty())
 
-        t = edgedb.Range(None, None)
+        t = gel.Range(None, None)
         self.assertEqual(t.lower, None)
         self.assertEqual(t.upper, None)
         self.assertFalse(t.inc_lower)
@@ -962,7 +962,7 @@ class TestRange(unittest.TestCase):
     def test_range_4(self):
         for il in (False, True):
             for iu in (False, True):
-                t = edgedb.Range(1, 2, inc_lower=il, inc_upper=iu)
+                t = gel.Range(1, 2, inc_lower=il, inc_upper=iu)
                 self.assertEqual(t.lower, 1)
                 self.assertEqual(t.upper, 2)
                 self.assertEqual(t.inc_lower, il)
@@ -973,15 +973,15 @@ class TestRange(unittest.TestCase):
         # test hash
         self.assertEqual(
             {
-                edgedb.Range(None, 2, inc_upper=True),
-                edgedb.Range(1, 2),
-                edgedb.Range(1, 2),
-                edgedb.Range(1, 2),
-                edgedb.Range(None, 2, inc_upper=True),
+                gel.Range(None, 2, inc_upper=True),
+                gel.Range(1, 2),
+                gel.Range(1, 2),
+                gel.Range(1, 2),
+                gel.Range(None, 2, inc_upper=True),
             },
             {
-                edgedb.Range(1, 2),
-                edgedb.Range(None, 2, inc_upper=True),
+                gel.Range(1, 2),
+                gel.Range(None, 2, inc_upper=True),
             }
         )
 
@@ -989,14 +989,14 @@ class TestRange(unittest.TestCase):
 class TestMultiRange(unittest.TestCase):
 
     def test_multirange_empty_1(self):
-        t = edgedb.MultiRange()
+        t = gel.MultiRange()
         self.assertEqual(len(t), 0)
-        self.assertEqual(t, edgedb.MultiRange([]))
+        self.assertEqual(t, gel.MultiRange([]))
 
     def test_multirange_2(self):
-        t = edgedb.MultiRange([
-            edgedb.Range(1, 2),
-            edgedb.Range(4),
+        t = gel.MultiRange([
+            gel.Range(1, 2),
+            gel.Range(4),
         ])
         self.assertEqual(
             repr(t), "<MultiRange [<Range [1, 2]>, <Range [4, ]>]>")
@@ -1005,51 +1005,51 @@ class TestMultiRange(unittest.TestCase):
 
         self.assertEqual(
             t,
-            edgedb.MultiRange([
-                edgedb.Range(1, 2),
-                edgedb.Range(4),
+            gel.MultiRange([
+                gel.Range(1, 2),
+                gel.Range(4),
             ])
         )
 
     def test_multirange_3(self):
         ranges = [
-            edgedb.Range(None, 0),
-            edgedb.Range(1, 2),
-            edgedb.Range(4),
+            gel.Range(None, 0),
+            gel.Range(1, 2),
+            gel.Range(4),
         ]
-        t = edgedb.MultiRange([
-            edgedb.Range(None, 0),
-            edgedb.Range(1, 2),
-            edgedb.Range(4),
+        t = gel.MultiRange([
+            gel.Range(None, 0),
+            gel.Range(1, 2),
+            gel.Range(4),
         ])
 
-        for el, r in zip(t, ranges):
+        for el, r in zip(t, ranges, strict=False):
             self.assertEqual(el, r)
 
     def test_multirange_4(self):
         # test hash
         self.assertEqual(
             {
-                edgedb.MultiRange([
-                    edgedb.Range(1, 2),
-                    edgedb.Range(4),
+                gel.MultiRange([
+                    gel.Range(1, 2),
+                    gel.Range(4),
                 ]),
-                edgedb.MultiRange([edgedb.Range(None, 2, inc_upper=True)]),
-                edgedb.MultiRange([
-                    edgedb.Range(1, 2),
-                    edgedb.Range(4),
+                gel.MultiRange([gel.Range(None, 2, inc_upper=True)]),
+                gel.MultiRange([
+                    gel.Range(1, 2),
+                    gel.Range(4),
                 ]),
-                edgedb.MultiRange([
-                    edgedb.Range(1, 2),
-                    edgedb.Range(4),
+                gel.MultiRange([
+                    gel.Range(1, 2),
+                    gel.Range(4),
                 ]),
-                edgedb.MultiRange([edgedb.Range(None, 2, inc_upper=True)]),
+                gel.MultiRange([gel.Range(None, 2, inc_upper=True)]),
             },
             {
-                edgedb.MultiRange([edgedb.Range(None, 2, inc_upper=True)]),
-                edgedb.MultiRange([
-                    edgedb.Range(1, 2),
-                    edgedb.Range(4),
+                gel.MultiRange([gel.Range(None, 2, inc_upper=True)]),
+                gel.MultiRange([
+                    gel.Range(1, 2),
+                    gel.Range(4),
                 ]),
             }
         )
@@ -1057,15 +1057,15 @@ class TestMultiRange(unittest.TestCase):
     def test_multirange_5(self):
         # test hash
         self.assertEqual(
-            edgedb.MultiRange([
-                edgedb.Range(None, 2, inc_upper=True),
-                edgedb.Range(5, 9),
-                edgedb.Range(5, 9),
-                edgedb.Range(5, 9),
-                edgedb.Range(None, 2, inc_upper=True),
+            gel.MultiRange([
+                gel.Range(None, 2, inc_upper=True),
+                gel.Range(5, 9),
+                gel.Range(5, 9),
+                gel.Range(5, 9),
+                gel.Range(None, 2, inc_upper=True),
             ]),
-            edgedb.MultiRange([
-                edgedb.Range(5, 9),
-                edgedb.Range(None, 2, inc_upper=True),
+            gel.MultiRange([
+                gel.Range(5, 9),
+                gel.Range(None, 2, inc_upper=True),
             ]),
         )

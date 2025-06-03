@@ -225,7 +225,7 @@ class BaseTransaction:
 
     async def _privileged_execute(self, query: str) -> None:
         await self._connection.privileged_execute(abstract.ExecuteContext(
-            query=abstract.QueryWithArgs(query, (), {}),
+            query=abstract.QueryWithArgs(query, None, (), {}),
             cache=self._get_query_cache(),
             state=self._get_state(),
             transaction_options=self._get_active_tx_options(),
@@ -260,7 +260,6 @@ class BaseRetry:
                 prefer_rr = False
 
         self._optimistic_rr = prefer_rr
-
 
     def _retry(self, exc):
         self._last_exception = exc

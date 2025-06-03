@@ -1,5 +1,6 @@
 abstract type Named {
     required name: str;
+    nickname: str;
 }
 
 type UserGroup extending Named {
@@ -12,6 +13,7 @@ type GameSession {
     # one-to-many
     multi link players: User {
         constraint exclusive;
+        property is_tall_enough: bool;
     };
 }
 

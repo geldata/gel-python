@@ -97,7 +97,7 @@ cdef class RangeCodec(BaseCodec):
         buf.write_buffer(sub_data)
 
     @staticmethod
-    cdef decode_range(FRBuffer *buf, BaseCodec sub_codec):
+    cdef decode_range(object return_type, FRBuffer *buf, BaseCodec sub_codec):
         cdef:
             uint8_t flags = <uint8_t>frb_read(buf, 1)[0]
             bint empty = (flags & RANGE_EMPTY) != 0
@@ -114,7 +114,7 @@ cdef class RangeCodec(BaseCodec):
             sub_len = hton.unpack_int32(frb_read(buf, 4))
             if sub_len != -1:
                 frb_slice_from(&sub_buf, buf, sub_len)
-                lower = sub_codec.decode(&sub_buf)
+                lower = sub_codec.decode(return_type, &sub_buf)
                 if frb_get_len(&sub_buf):
                     raise RuntimeError(
                         f'unexpected trailing data in buffer after '
@@ -124,7 +124,7 @@ cdef class RangeCodec(BaseCodec):
             sub_len = hton.unpack_int32(frb_read(buf, 4))
             if sub_len != -1:
                 frb_slice_from(&sub_buf, buf, sub_len)
-                upper = sub_codec.decode(&sub_buf)
+                upper = sub_codec.decode(return_type, &sub_buf)
                 if frb_get_len(&sub_buf):
                     raise RuntimeError(
                         f'unexpected trailing data in buffer after '
@@ -141,8 +141,8 @@ cdef class RangeCodec(BaseCodec):
     cdef encode(self, WriteBuffer buf, object obj):
         RangeCodec.encode_range(buf, obj, self.sub_codec)
 
-    cdef decode(self, FRBuffer *buf):
-        return RangeCodec.decode_range(buf, self.sub_codec)
+    cdef decode(self, object return_type, FRBuffer *buf):
+        return RangeCodec.decode_range(return_type, buf, self.sub_codec)
 
     cdef dump(self, int level = 0):
         return f'{level * " "}{self.name}\n{self.sub_codec.dump(level + 1)}'
@@ -216,7 +216,7 @@ cdef class MultiRangeCodec(BaseCodec):
         buf.write_int32(<int32_t>objlen)
         buf.write_buffer(elem_data)
 
-    cdef decode(self, FRBuffer *buf):
+    cdef decode(self, object return_type, FRBuffer *buf):
         cdef:
             Py_ssize_t elem_count = <Py_ssize_t><uint32_t>hton.unpack_int32(
                 frb_read(buf, 4))
@@ -233,7 +233,9 @@ cdef class MultiRangeCodec(BaseCodec):
                     'unexpected NULL element in multirange value')
             else:
                 frb_slice_from(&elem_buf, buf, elem_len)
-                elem = RangeCodec.decode_range(&elem_buf, self.sub_codec)
+                elem = RangeCodec.decode_range(
+                    return_type, &elem_buf, self.sub_codec
+                )
                 if frb_get_len(&elem_buf):
                     raise RuntimeError(
                         f'unexpected trailing data in buffer after '

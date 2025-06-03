@@ -20,7 +20,7 @@
 import base64
 import unittest
 
-from edgedb import scram
+from gel import scram
 
 
 class TestSCRAM(unittest.TestCase):

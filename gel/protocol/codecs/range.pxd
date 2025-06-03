@@ -30,7 +30,7 @@ cdef class RangeCodec(BaseCodec):
     cdef encode_range(WriteBuffer buf, object obj, BaseCodec sub_codec)
 
     @staticmethod
-    cdef decode_range(FRBuffer *buf, BaseCodec sub_codec)
+    cdef decode_range(object return_type, FRBuffer *buf, BaseCodec sub_codec)
 
 
 @cython.final

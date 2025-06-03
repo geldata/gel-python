@@ -129,7 +129,7 @@ int EdgeObject_SetItem(PyObject *, Py_ssize_t, PyObject *);
 PyObject * EdgeObject_GetItem(PyObject *, Py_ssize_t);
 
 
-/* === edgedb.Record ======================================== */
+/* === gel.Record ======================================== */
 
 #define EDGE_RECORD_FREELIST_SIZE 2000
 #define EDGE_RECORD_FREELIST_MAXSAVE 20

@@ -9,7 +9,7 @@ using :py:func:`edgedb.create_client`:
 .. code-block:: python
 
     import datetime
-    import edgedb
+    import gel
 
     client = edgedb.create_client()
 
@@ -35,7 +35,7 @@ When used with asyncio, this should be replaced with
 
     import asyncio
     import datetime
-    import edgedb
+    import gel
 
     client = edgedb.create_async_client()
 
@@ -94,7 +94,7 @@ Below is an example of a web API server running `aiohttp
 .. code-block:: python
 
     import asyncio
-    import edgedb
+    import gel
     from aiohttp import web
 
 

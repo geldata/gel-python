@@ -20,6 +20,7 @@
 cimport cython
 cimport cpython
 
+include "./abstract.pyx"
 include "./relative_duration.pyx"
 include "./date_duration.pyx"
 include "./enum.pyx"
