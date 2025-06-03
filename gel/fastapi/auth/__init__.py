@@ -33,17 +33,17 @@ from .. import client as client_mod
 
 if TYPE_CHECKING:
     from .email_password import EmailPassword
+    from .builtin_ui import BuiltinUI
 
 OnNewIdentity = Callable[
     [gel.AsyncIOClient, uuid.UUID, Optional[core.TokenData]],
     Awaitable[Optional[fastapi.Response]],
 ]
 
-# def get_client_with_auth_token(client: C, *, auth_token: Optional[str]) -> C:
-#     if auth_token:
-#         return client.with_globals({"ext::auth::client_token": auth_token})
-#     else:
-#         return client
+
+class Installable:
+    def install(self, router: fastapi.APIRouter) -> None:
+        raise NotImplementedError
 
 
 class GelAuth(client_mod.AsyncIOLifespan):
@@ -53,18 +53,27 @@ class GelAuth(client_mod.AsyncIOLifespan):
     tags: list[str] = ["Gel Auth"]
     secure_cookie: bool = True
     email_password: EmailPassword
+    builtin_ui: BuiltinUI
 
+    _app: fastapi.FastAPI
     _pkce_verifier: Optional[security.APIKeyCookie] = None
     _maybe_auth_token: Optional[security.APIKeyCookie] = None
     _auth_token: Optional[security.APIKeyCookie] = None
     _on_new_identity: Optional[OnNewIdentity] = None
+    _insts: dict[str, Installable]
 
     def __init__(self, client: gel.AsyncIOClient) -> None:
         super().__init__(client)
 
         from .email_password import EmailPassword
+        from .builtin_ui import BuiltinUI
 
         self.email_password = EmailPassword(self)
+        self.builtin_ui = BuiltinUI(self)
+
+        self._insts = {
+            "builtin::local_emailpassword": self.email_password,
+        }
 
     def get_unchecked_exp(self, token: str) -> Optional[datetime.datetime]:
         jwt_payload = jwt.decode(token, options={"verify_signature": False})
@@ -155,14 +164,36 @@ class GelAuth(client_mod.AsyncIOLifespan):
                 token_data,
             )
 
-    def install(self, app: fastapi.FastAPI) -> None:
+    async def __aenter__(self) -> dict[str, gel.AsyncIOClient]:
+        rv = await super().__aenter__()
         router = fastapi.APIRouter(
             prefix=self.auth_path_prefix,
             tags=self.tags,
-            lifespan=self,
         )
-        self.email_password.install(router)
-        app.include_router(router)
+        config = await self._client.query_single(
+            """
+            select assert_single(
+                cfg::Config.extensions[is ext::auth::AuthConfig]
+            ) {
+                providers: { id, name },
+                ui,
+            }
+            """
+        )
+        for provider in config.providers:
+            inst = self._insts.get(provider.name)
+            if inst is not None:
+                inst.install(router)
+
+        if config.ui is not None:
+            self.builtin_ui.install(router)
+
+        self._app.include_router(router)
+        return rv
+
+    def install(self, app: fastapi.FastAPI) -> None:
+        super().install(app)
+        self._app = app
 
 
 authify = client_mod.make_gelify(gel.create_async_client, GelAuth)
