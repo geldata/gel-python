@@ -20,6 +20,7 @@ from __future__ import annotations
 from typing import Annotated, Awaitable, Callable, Optional
 
 import http
+import logging
 
 import pydantic
 import fastapi
@@ -28,6 +29,9 @@ from fastapi import responses
 from gel.auth import email_password as core
 
 from . import GelAuth
+
+
+logger = logging.getLogger("gel.auth")
 
 
 class SignUpBody(pydantic.BaseModel):
@@ -200,6 +204,11 @@ class EmailPassword:
         self,
         result: core.SignUpFailedResponse,
     ) -> fastapi.Response:
+        logger.info(
+            "[%d] sign up failed: %s", result.status_code, result.message
+        )
+        logger.debug("%r", result)
+
         if self._on_sign_up_failed is None:
             return self._not_implemented("on_sign_up_failed")
 
@@ -268,6 +277,11 @@ class EmailPassword:
         self,
         result: core.SignInFailedResponse,
     ) -> fastapi.Response:
+        logger.info(
+            "[%d] sign in failed: %s", result.status_code, result.message
+        )
+        logger.debug("%r", result)
+
         if self._on_sign_in_failed is None:
             return self._not_implemented("on_sign_in_failed")
 
@@ -333,6 +347,13 @@ class EmailPassword:
         self,
         result: core.EmailVerificationFailedResponse,
     ) -> fastapi.Response:
+        logger.info(
+            "[%d] email verification failed: %s",
+            result.status_code,
+            result.message,
+        )
+        logger.debug("%r", result)
+
         if self._on_email_verification_failed is None:
             return self._not_implemented("on_email_verification_failed")
 
@@ -391,10 +412,17 @@ class EmailPassword:
         self._on_send_password_reset_email_failed = func
         return func
 
-    async def handle_send_password_reset_failed(
+    async def handle_send_password_reset_email_failed(
         self,
         result: core.SendPasswordResetEmailFailedResponse,
     ) -> fastapi.Response:
+        logger.info(
+            "[%d] send password reset email failed: %s",
+            result.status_code,
+            result.message,
+        )
+        logger.debug("%r", result)
+
         if self._on_send_password_reset_email_failed is None:
             return self._not_implemented("on_send_password_reset_email_failed")
 
@@ -426,7 +454,9 @@ class EmailPassword:
                     result
                 )
             elif isinstance(result, core.SendPasswordResetEmailFailedResponse):
-                return await self.handle_send_password_reset_failed(result)
+                return await self.handle_send_password_reset_email_failed(
+                    result
+                )
             else:
                 raise AssertionError("Invalid send password reset response")
 
@@ -470,6 +500,13 @@ class EmailPassword:
         self,
         result: core.PasswordResetFailedResponse,
     ) -> fastapi.Response:
+        logger.info(
+            "[%d] password reset failed: %s",
+            result.status_code,
+            result.message,
+        )
+        logger.debug("%r", result)
+
         if self._on_reset_password_failed is None:
             return self._not_implemented("on_reset_password_failed")
 
