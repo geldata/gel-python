@@ -86,6 +86,9 @@ class GelLifespan(Generic[Client_T]):
         self._state_name = name
         return self
 
+    def install(self, app: fastapi.FastAPI) -> None:
+        app.include_router(fastapi.APIRouter(lifespan=self))
+
     def with_global(
         self, name: str
     ) -> Callable[[Callable[P, str]], Callable[P, Client_T]]:
@@ -126,7 +129,7 @@ class AsyncIOLifespan(GelLifespan[gel.AsyncIOClient]):
             await asyncio.wait_for(self._client.aclose(), timeout=timeout)
 
 
-def _make_gelify(
+def make_gelify(
     client_creator: Callable[P, Client_T],
     lifespan_class: Type[GelLifespan[Client_T]],
 ) -> Callable[Concatenate[fastapi.FastAPI, P], GelLifespan[Client_T]]:
@@ -137,11 +140,11 @@ def _make_gelify(
         **kwargs: P.kwargs,
     ) -> GelLifespan[Client_T]:
         lifespan = lifespan_class(client_creator(*args, **kwargs))
-        app.include_router(fastapi.APIRouter(lifespan=lifespan))
+        lifespan.install(app)
         return lifespan
 
     return gelify
 
 
-gelify = _make_gelify(gel.create_async_client, AsyncIOLifespan)
-gelify_blocking = _make_gelify(gel.create_client, BlockingIOLifespan)
+gelify = make_gelify(gel.create_async_client, AsyncIOLifespan)
+gelify_blocking = make_gelify(gel.create_client, BlockingIOLifespan)
