@@ -53,7 +53,10 @@ class GelPrimitiveType(GelType):
 
         @classmethod
         def __gel_assert_single__(
-            cls, /, *, message: str | None = None,
+            cls,
+            /,
+            *,
+            message: str | None = None,
         ) -> type[Self]: ...
 
     else:

@@ -31,11 +31,12 @@ if __name__ == '__main__':
         errors_txt = f.read()
 
     names = re.findall(r'^class\s+(?P<name>\w+)', errors_txt, re.M)
+    names.sort()
     names_list = '\n'.join(f'    {name},' for name in names)
-    all_list = '\n'.join(f'    "{name}",' for name in names)
+    all_list = '\n'.join(f'        "{name}",' for name in names)
     code = (
         f'''from .errors import (\n{names_list}\n)\n'''
-        f'''\n__all__.extend([\n{all_list}\n])\n'''
+        f'''\n__all__.extend(\n    [\n{all_list}\n    ]\n)\n'''
     ).splitlines()
 
     with open(init_fn, 'rt') as f:

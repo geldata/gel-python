@@ -36,15 +36,14 @@ class TransactionState(enum.Enum):
 
 
 class BaseTransaction:
-
     __slots__ = (
-        '_client',
-        '_connection',
-        '_options',
-        '_state',
-        '__retry',
-        '__iteration',
-        '__started',
+        "_client",
+        "_connection",
+        "_options",
+        "_state",
+        "__retry",
+        "__iteration",
+        "__started",
     )
 
     def __init__(self, retry, client, iteration):
@@ -62,55 +61,63 @@ class BaseTransaction:
     def __check_state_base(self, opname):
         if self._state is TransactionState.COMMITTED:
             raise errors.InterfaceError(
-                'cannot {}; the transaction is already committed'.format(
-                    opname))
+                "cannot {}; the transaction is already committed".format(
+                    opname
+                )
+            )
         if self._state is TransactionState.ROLLEDBACK:
             raise errors.InterfaceError(
-                'cannot {}; the transaction is already rolled back'.format(
-                    opname))
+                "cannot {}; the transaction is already rolled back".format(
+                    opname
+                )
+            )
         if self._state is TransactionState.FAILED:
             raise errors.InterfaceError(
-                'cannot {}; the transaction is in error state'.format(
-                    opname))
+                "cannot {}; the transaction is in error state".format(opname)
+            )
 
     def __check_state(self, opname):
         if self._state is not TransactionState.STARTED:
             if self._state is TransactionState.NEW:
                 raise errors.InterfaceError(
-                    'cannot {}; the transaction is not yet started'.format(
-                        opname))
+                    "cannot {}; the transaction is not yet started".format(
+                        opname
+                    )
+                )
             self.__check_state_base(opname)
 
     def _make_start_query(self):
-        self.__check_state_base('start')
+        self.__check_state_base("start")
         if self._state is TransactionState.STARTED:
             raise errors.InterfaceError(
-                'cannot start; the transaction is already started')
+                "cannot start; the transaction is already started"
+            )
 
         return self._options.start_transaction_query(
             optimistic_isolation=self.__retry._optimistic_rr
         )
 
     def _make_commit_query(self):
-        self.__check_state('commit')
-        return 'COMMIT;'
+        self.__check_state("commit")
+        return "COMMIT;"
 
     def _make_rollback_query(self):
-        self.__check_state('rollback')
-        return 'ROLLBACK;'
+        self.__check_state("rollback")
+        return "ROLLBACK;"
 
     def __repr__(self):
         attrs = []
-        attrs.append('state:{}'.format(self._state.name.lower()))
+        attrs.append("state:{}".format(self._state.name.lower()))
         attrs.append(repr(self._options))
 
-        if self.__class__.__module__.startswith('gel.'):
-            mod = 'gel'
+        if self.__class__.__module__.startswith("gel."):
+            mod = "gel"
         else:
             mod = self.__class__.__module__
 
-        return '<{}.{} {} {:#x}>'.format(
-            mod, self.__class__.__name__, ' '.join(attrs), id(self))
+        return "<{}.{} {} {:#x}>".format(
+            mod, self.__class__.__name__, " ".join(attrs), id(self)
+        )
 
     async def _ensure_transaction(self):
         if not self.__started:
@@ -181,7 +188,7 @@ class BaseTransaction:
             extype is not None
             and issubclass(extype, errors.CapabilityError)
             # XXX: This is not the best way to check this
-            and 'REPEATABLE READ' in str(ex)
+            and "REPEATABLE READ" in str(ex)
         ):
             return self.__retry._retry_rr_failure(ex)
 
@@ -199,9 +206,9 @@ class BaseTransaction:
         # Return None, to prevent retrying *inside* a transaction.
         return None
 
-    def _get_active_tx_options(self) -> typing.Optional[
-        options.TransactionOptions
-    ]:
+    def _get_active_tx_options(
+        self,
+    ) -> typing.Optional[options.TransactionOptions]:
         # Return None, since the tx options are applied at the *start*
         # of transactions, not inside them.
         return None
@@ -224,19 +231,20 @@ class BaseTransaction:
         await self._connection._execute(execute_context)
 
     async def _privileged_execute(self, query: str) -> None:
-        await self._connection.privileged_execute(abstract.ExecuteContext(
-            query=abstract.QueryWithArgs(query, None, (), {}),
-            cache=self._get_query_cache(),
-            state=self._get_state(),
-            transaction_options=self._get_active_tx_options(),
-            retry_options=self._get_retry_options(),
-            warning_handler=self._get_warning_handler(),
-            annotations=self._get_annotations(),
-        ))
+        await self._connection.privileged_execute(
+            abstract.ExecuteContext(
+                query=abstract.QueryWithArgs(query, None, (), {}),
+                cache=self._get_query_cache(),
+                state=self._get_state(),
+                transaction_options=self._get_active_tx_options(),
+                retry_options=self._get_retry_options(),
+                warning_handler=self._get_warning_handler(),
+                annotations=self._get_annotations(),
+            )
+        )
 
 
 class BaseRetry:
-
     def __init__(self, owner):
         self._owner = owner
         self._iteration = 0

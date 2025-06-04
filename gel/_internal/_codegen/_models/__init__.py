@@ -6,6 +6,4 @@
 from ._pydantic import PydanticModelsGenerator
 
 
-__all__ = (
-    "PydanticModelsGenerator",
-)
+__all__ = ("PydanticModelsGenerator",)

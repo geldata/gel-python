@@ -140,6 +140,7 @@ exclude = [
     "tools",
     "gel/orm",
     "gel/codegen/generator.py",
+    "gel/pgproto",
 ]
 
 [tool.ruff.lint]

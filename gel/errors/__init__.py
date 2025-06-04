@@ -14,104 +14,111 @@ from gel.errors.tags import *
 
 
 __all__ = _base.__all__ + (  # type: ignore
-    'InternalServerError',
-    'UnsupportedFeatureError',
-    'ProtocolError',
-    'BinaryProtocolError',
-    'UnsupportedProtocolVersionError',
-    'TypeSpecNotFoundError',
-    'UnexpectedMessageError',
-    'InputDataError',
-    'ParameterTypeMismatchError',
-    'StateMismatchError',
-    'ResultCardinalityMismatchError',
-    'CapabilityError',
-    'UnsupportedCapabilityError',
-    'DisabledCapabilityError',
-    'QueryError',
-    'InvalidSyntaxError',
-    'EdgeQLSyntaxError',
-    'SchemaSyntaxError',
-    'GraphQLSyntaxError',
-    'InvalidTypeError',
-    'InvalidTargetError',
-    'InvalidLinkTargetError',
-    'InvalidPropertyTargetError',
-    'InvalidReferenceError',
-    'UnknownModuleError',
-    'UnknownLinkError',
-    'UnknownPropertyError',
-    'UnknownUserError',
-    'UnknownDatabaseError',
-    'UnknownParameterError',
-    'SchemaError',
-    'SchemaDefinitionError',
-    'InvalidDefinitionError',
-    'InvalidModuleDefinitionError',
-    'InvalidLinkDefinitionError',
-    'InvalidPropertyDefinitionError',
-    'InvalidUserDefinitionError',
-    'InvalidDatabaseDefinitionError',
-    'InvalidOperatorDefinitionError',
-    'InvalidAliasDefinitionError',
-    'InvalidFunctionDefinitionError',
-    'InvalidConstraintDefinitionError',
-    'InvalidCastDefinitionError',
-    'DuplicateDefinitionError',
-    'DuplicateModuleDefinitionError',
-    'DuplicateLinkDefinitionError',
-    'DuplicatePropertyDefinitionError',
-    'DuplicateUserDefinitionError',
-    'DuplicateDatabaseDefinitionError',
-    'DuplicateOperatorDefinitionError',
-    'DuplicateViewDefinitionError',
-    'DuplicateFunctionDefinitionError',
-    'DuplicateConstraintDefinitionError',
-    'DuplicateCastDefinitionError',
-    'DuplicateMigrationError',
-    'SessionTimeoutError',
-    'IdleSessionTimeoutError',
-    'QueryTimeoutError',
-    'TransactionTimeoutError',
-    'IdleTransactionTimeoutError',
-    'ExecutionError',
-    'InvalidValueError',
-    'DivisionByZeroError',
-    'NumericOutOfRangeError',
-    'AccessPolicyError',
-    'QueryAssertionError',
-    'IntegrityError',
-    'ConstraintViolationError',
-    'CardinalityViolationError',
-    'MissingRequiredError',
-    'TransactionError',
-    'TransactionConflictError',
-    'TransactionSerializationError',
-    'TransactionDeadlockError',
-    'WatchError',
-    'ConfigurationError',
-    'AccessError',
-    'AuthenticationError',
-    'AvailabilityError',
-    'BackendUnavailableError',
-    'ServerOfflineError',
-    'BackendError',
-    'UnsupportedBackendFeatureError',
-    'LogMessage',
-    'WarningMessage',
-    'ClientError',
-    'ClientConnectionError',
-    'ClientConnectionFailedError',
-    'ClientConnectionFailedTemporarilyError',
-    'ClientConnectionTimeoutError',
-    'ClientConnectionClosedError',
-    'InterfaceError',
-    'QueryArgumentError',
-    'MissingArgumentError',
-    'UnknownArgumentError',
-    'InvalidArgumentError',
-    'NoDataError',
-    'InternalClientError',
+    "AccessError",
+    "AccessPolicyError",
+    "AuthenticationError",
+    "AvailabilityError",
+    "BackendError",
+    "BackendUnavailableError",
+    "BinaryProtocolError",
+    "CapabilityError",
+    "CardinalityViolationError",
+    "ClientConnectionClosedError",
+    "ClientConnectionError",
+    "ClientConnectionFailedError",
+    "ClientConnectionFailedTemporarilyError",
+    "ClientConnectionTimeoutError",
+    "ClientError",
+    "ConfigurationError",
+    "ConstraintViolationError",
+    "DeprecatedScopingError",
+    "DisabledCapabilityError",
+    "DivisionByZeroError",
+    "DuplicateCastDefinitionError",
+    "DuplicateConstraintDefinitionError",
+    "DuplicateDatabaseDefinitionError",
+    "DuplicateDefinitionError",
+    "DuplicateFunctionDefinitionError",
+    "DuplicateLinkDefinitionError",
+    "DuplicateMigrationError",
+    "DuplicateModuleDefinitionError",
+    "DuplicateOperatorDefinitionError",
+    "DuplicatePropertyDefinitionError",
+    "DuplicateUserDefinitionError",
+    "DuplicateViewDefinitionError",
+    "EdgeQLSyntaxError",
+    "ExecutionError",
+    "GraphQLSyntaxError",
+    "IdleSessionTimeoutError",
+    "IdleTransactionTimeoutError",
+    "InputDataError",
+    "IntegrityError",
+    "InterfaceError",
+    "InternalClientError",
+    "InternalServerError",
+    "InvalidAliasDefinitionError",
+    "InvalidArgumentError",
+    "InvalidCastDefinitionError",
+    "InvalidConstraintDefinitionError",
+    "InvalidDatabaseDefinitionError",
+    "InvalidDefinitionError",
+    "InvalidFunctionDefinitionError",
+    "InvalidLinkDefinitionError",
+    "InvalidLinkTargetError",
+    "InvalidModuleDefinitionError",
+    "InvalidOperatorDefinitionError",
+    "InvalidPropertyDefinitionError",
+    "InvalidPropertyTargetError",
+    "InvalidReferenceError",
+    "InvalidSyntaxError",
+    "InvalidTargetError",
+    "InvalidTypeError",
+    "InvalidUserDefinitionError",
+    "InvalidValueError",
+    "LogMessage",
+    "MigrationStatusMessage",
+    "MissingArgumentError",
+    "MissingRequiredError",
+    "NoDataError",
+    "NumericOutOfRangeError",
+    "ParameterTypeMismatchError",
+    "ProtocolError",
+    "QueryArgumentError",
+    "QueryAssertionError",
+    "QueryCacheInvalidationError",
+    "QueryError",
+    "QueryTimeoutError",
+    "ResultCardinalityMismatchError",
+    "SchemaDefinitionError",
+    "SchemaError",
+    "SchemaSyntaxError",
+    "ServerBlockedError",
+    "ServerOfflineError",
+    "SessionTimeoutError",
+    "StateMismatchError",
+    "StatusMessage",
+    "TransactionConflictError",
+    "TransactionDeadlockError",
+    "TransactionError",
+    "TransactionSerializationError",
+    "TransactionTimeoutError",
+    "TypeSpecNotFoundError",
+    "UnexpectedMessageError",
+    "UnknownArgumentError",
+    "UnknownDatabaseError",
+    "UnknownLinkError",
+    "UnknownModuleError",
+    "UnknownParameterError",
+    "UnknownPropertyError",
+    "UnknownTenantError",
+    "UnknownUserError",
+    "UnsafeIsolationLevelError",
+    "UnsupportedBackendFeatureError",
+    "UnsupportedCapabilityError",
+    "UnsupportedFeatureError",
+    "UnsupportedProtocolVersionError",
+    "WarningMessage",
+    "WatchError",
 )
 
 
@@ -170,6 +177,10 @@ class UnsupportedCapabilityError(CapabilityError):
 
 class DisabledCapabilityError(CapabilityError):
     _code = 0x_03_04_02_00
+
+
+class UnsafeIsolationLevelError(CapabilityError):
+    _code = 0x_03_04_03_00
 
 
 class QueryError(EdgeDBError):
@@ -234,6 +245,10 @@ class UnknownDatabaseError(InvalidReferenceError):
 
 class UnknownParameterError(InvalidReferenceError):
     _code = 0x_04_03_00_06
+
+
+class DeprecatedScopingError(InvalidReferenceError):
+    _code = 0x_04_03_00_07
 
 
 class SchemaError(QueryError):
@@ -416,6 +431,11 @@ class TransactionDeadlockError(TransactionConflictError):
     tags = frozenset({SHOULD_RETRY})
 
 
+class QueryCacheInvalidationError(TransactionConflictError):
+    _code = 0x_05_03_01_03
+    tags = frozenset({SHOULD_RETRY})
+
+
 class WatchError(ExecutionError):
     _code = 0x_05_04_00_00
 
@@ -446,6 +466,15 @@ class ServerOfflineError(AvailabilityError):
     tags = frozenset({SHOULD_RECONNECT, SHOULD_RETRY})
 
 
+class UnknownTenantError(AvailabilityError):
+    _code = 0x_08_00_00_03
+    tags = frozenset({SHOULD_RECONNECT, SHOULD_RETRY})
+
+
+class ServerBlockedError(AvailabilityError):
+    _code = 0x_08_00_00_04
+
+
 class BackendError(EdgeDBError):
     _code = 0x_09_00_00_00
 
@@ -460,6 +489,14 @@ class LogMessage(EdgeDBMessage):
 
 class WarningMessage(LogMessage):
     _code = 0x_F0_01_00_00
+
+
+class StatusMessage(LogMessage):
+    _code = 0x_F0_02_00_00
+
+
+class MigrationStatusMessage(StatusMessage):
+    _code = 0x_F0_02_00_01
 
 
 class ClientError(EdgeDBError):
@@ -515,4 +552,3 @@ class NoDataError(ClientError):
 
 class InternalClientError(ClientError):
     _code = 0x_FF_04_00_00
-

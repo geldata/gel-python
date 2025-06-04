@@ -70,6 +70,7 @@ class GelModel(
     metaclass=GelModelMeta,
 ):
     if TYPE_CHECKING:
+
         @classmethod
         def __edgeql__(cls) -> tuple[type[Self], str]: ...  # pyright: ignore [reportIncompatibleMethodOverride]
 

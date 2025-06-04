@@ -12,7 +12,6 @@ from gel._internal import _qb
 
 
 if TYPE_CHECKING:
-
     from ._base import GelType
 
 

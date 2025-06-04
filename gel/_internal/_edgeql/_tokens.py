@@ -242,9 +242,9 @@ class Token(StrEnum):
     @classmethod
     def from_str(cls, s: str, /) -> Token:
         if not _token_str_map:
-            _token_str_map.update({
-                str(v): v for v in cls.__members__.values()
-            })
+            _token_str_map.update(
+                {str(v): v for v in cls.__members__.values()}
+            )
         try:
             return _token_str_map[s]
         except KeyError:

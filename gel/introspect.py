@@ -28,14 +28,12 @@ from gel.enums import ElementKind
 
 
 class PointerDescription(typing.NamedTuple):
-
     name: str
     kind: ElementKind
     implicit: bool
 
 
 class ObjectDescription(typing.NamedTuple):
-
     pointers: typing.Tuple[PointerDescription, ...]
 
 
@@ -53,14 +51,12 @@ def _introspect_object_desc(desc) -> ObjectDescription:
 
         pointers.append(
             PointerDescription(
-                name=name,
-                kind=kind,
-                implicit=desc.is_implicit(name)))
+                name=name, kind=kind, implicit=desc.is_implicit(name)
+            )
+        )
 
-    return ObjectDescription(
-        pointers=tuple(pointers))
+    return ObjectDescription(pointers=tuple(pointers))
 
 
 def introspect_object(obj) -> ObjectDescription:
-    return _introspect_object_desc(
-        dt.get_object_descriptor(obj))
+    return _introspect_object_desc(dt.get_object_descriptor(obj))

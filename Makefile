@@ -43,7 +43,7 @@ compile-fast:
 
 
 gen-errors:
-	edb gen-errors --import "$(echo "from gel.errors._base import *"; echo "from gel.errors.tags import *")" \
+	edb gen-errors --import "$$(printf 'from gel.errors._base import *\nfrom gel.errors.tags import *')" \
 		--extra-all "_base.__all__" --stdout --client > $(ROOT)/.errors
 	mv $(ROOT)/.errors $(ROOT)/gel/errors/__init__.py
 	$(PYTHON) tools/gen_init.py

@@ -23,6 +23,4 @@ else:
             return name.lower()
 
 
-__all__ = (
-    "StrEnum",
-)
+__all__ = ("StrEnum",)
