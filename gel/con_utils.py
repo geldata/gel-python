@@ -29,9 +29,10 @@ import urllib.parse
 import warnings
 import hashlib
 
+from gel._internal import _platform
+
 from . import errors
 from . import credentials as cred_utils
-from . import platform
 
 
 EDGEDB_PORT = 5656
@@ -152,7 +153,7 @@ def _parse_hostlist(hostlist, port):
 
 def _hash_path(path):
     path = os.path.realpath(path)
-    if platform.IS_WINDOWS and not path.startswith('\\\\'):
+    if _platform.IS_WINDOWS and not path.startswith('\\\\'):
         path = '\\\\?\\' + path
     return hashlib.sha1(str(path).encode('utf-8')).hexdigest()
 
@@ -160,7 +161,7 @@ def _hash_path(path):
 def _stash_path(path):
     base_name = os.path.basename(path)
     dir_name = base_name + '-' + _hash_path(path)
-    return platform.search_config_dir('projects', dir_name)
+    return _platform.search_config_dir('projects', dir_name)
 
 
 def _validate_tls_security(val: str) -> str:
@@ -391,7 +392,7 @@ class ResolvedConnectConfig:
             )
         else:
             ssl_ctx.load_default_certs(ssl.Purpose.SERVER_AUTH)
-            if platform.IS_WINDOWS:
+            if _platform.IS_WINDOWS:
                 import certifi
                 ssl_ctx.load_verify_locations(cafile=certifi.where())
 
@@ -962,7 +963,7 @@ def _parse_cloud_instance_name_into_config(
     secret_key = resolved_config.secret_key
     if secret_key is None:
         try:
-            config_dir = platform.config_dir()
+            config_dir = _platform.config_dir()
             if resolved_config._cloud_profile is None:
                 profile = profile_src = "default"
             else:

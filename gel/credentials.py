@@ -3,7 +3,7 @@ import pathlib
 import typing
 import json
 
-from . import platform
+from gel._internal import _platform
 
 
 class RequiredCredentials(typing.TypedDict, total=True):
@@ -23,7 +23,7 @@ class Credentials(RequiredCredentials, total=False):
 
 
 def get_credentials_path(instance_name: str) -> pathlib.Path:
-    return platform.search_config_dir("credentials", instance_name + ".json")
+    return _platform.search_config_dir("credentials", instance_name + ".json")
 
 
 def read_credentials(path: os.PathLike) -> Credentials:
