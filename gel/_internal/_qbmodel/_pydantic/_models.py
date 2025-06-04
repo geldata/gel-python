@@ -162,7 +162,7 @@ class GelModelMeta(_model_construction.ModelMetaclass, _abstract.GelModelMeta):
         return result
 
 
-def _resolve_pointers(cls: type[GelModel]) -> dict[str, Pointer]:
+def _resolve_pointers(cls: type[GelBaseModel]) -> dict[str, Pointer]:
     if not cls.__pydantic_complete__ and cls.model_rebuild() is False:
         raise TypeError(f"{cls} has unresolved fields")
 
@@ -289,27 +289,15 @@ def _process_pydantic_fields(
 _unset: object = object()
 
 
-class GelModel(
-    pydantic.BaseModel,
-    _abstract.GelModel,
-    metaclass=GelModelMeta,
-):
+class GelBaseModel(pydantic.BaseModel, metaclass=GelModelMeta):
     # We use slots because PyDantic overrides `__dict__`
     # making state management for "special" properties like
     # these hard.
     __slots__ = "__gel_changed_fields__", "__gel_track_changes__"
 
-    model_config = pydantic.ConfigDict(
-        json_encoders={uuid.UUID: str},
-        validate_assignment=True,
-        defer_build=True,
-        extra="forbid",
-    )
-
     __gel_pointer_infos__: ClassVar[dict[str, _abstract.PointerInfo]]
 
     if TYPE_CHECKING:
-        id: uuid.UUID
         __gel_changed_fields__: set[str] | None
         __gel_track_changes__: bool
 
@@ -318,6 +306,46 @@ class GelModel(
         object.__setattr__(self, "__gel_track_changes__", False)
         object.__setattr__(self, "__gel_changed_fields__", None)
         return self
+
+    @classmethod
+    def model_construct(cls, *args: Any, **values: Any) -> Self:
+        self = super().model_construct(*args, **values)
+        # Strictly speaking the way we instantiate models doesn't require
+        # this (we call `object.__setattr__` directly), but this is more
+        # futureproof and doesn't cost us much.
+        object.__setattr__(self, "__gel_track_changes__", True)  # noqa: PLC2801
+        return self
+
+    def __init__(self, /, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        # enable change tracking after init
+        object.__setattr__(self, "__gel_track_changes__", True)
+
+    def __gel_get_changed_fields__(self) -> Iterable[str]:
+        dirty: set[str] | None = object.__getattribute__(
+            self, "__gel_changed_fields__"
+        )
+        if dirty is None:
+            return ()
+        return dirty
+
+    def __gel_commit__(self) -> None:
+        object.__setattr__(self, "__gel_changed_fields__", None)
+
+
+class GelModel(
+    GelBaseModel,
+    _abstract.GelModel,
+):
+    model_config = pydantic.ConfigDict(
+        json_encoders={uuid.UUID: str},
+        validate_assignment=True,
+        defer_build=True,
+        extra="forbid",
+    )
+
+    if TYPE_CHECKING:
+        id: uuid.UUID
 
     def __init__(self, /, **kwargs: Any) -> None:
         cls = type(self)
@@ -356,17 +384,6 @@ class GelModel(
                 if field.init is False and field_name != "id":
                     self.__dict__.pop(field_name, None)
 
-        # enable change tracking after init
-        object.__setattr__(self, "__gel_track_changes__", True)
-
-    def __gel_get_changed_fields__(self) -> Iterable[str]:
-        dirty: set[str] | None = object.__getattribute__(
-            self, "__gel_changed_fields__"
-        )
-        if dirty is None:
-            return ()
-        return dirty
-
     def __gel_commit__(self, new_id: uuid.UUID | None = None) -> None:
         if new_id is not None:
             if self.id is not _unsetid.UNSET_UUID:
@@ -375,16 +392,7 @@ class GelModel(
                 )
             object.__setattr__(self, "id", new_id)
 
-        object.__setattr__(self, "__gel_changed_fields__", None)
-
-    @classmethod
-    def model_construct(cls, *args: Any, **values: Any) -> Self:
-        self = super().model_construct(*args, **values)
-        # Strictly speaking the way we instantiate models doesn't require
-        # this (we call `object.__setattr__` directly), but this is more
-        # futureproof and doesn't cost us much.
-        object.__setattr__(self, "__gel_track_changes__", True)  # noqa: PLC2801
-        return self
+        super().__gel_commit__()
 
     def __setattr__(self, name: str, value: Any) -> None:
         if not object.__getattribute__(self, "__gel_track_changes__"):
@@ -451,15 +459,11 @@ class LinkPropsDescriptor(Generic[_T_co]):
             return obj.__linkprops__  # type: ignore [no-any-return]
 
 
-class GelLinkModel(pydantic.BaseModel, metaclass=GelModelMeta):
+class GelLinkModel(GelBaseModel):
     model_config = pydantic.ConfigDict(
         validate_assignment=True,
         defer_build=True,
     )
-
-    @classmethod
-    def __descriptor__(cls) -> LinkPropsDescriptor[Self]:
-        return LinkPropsDescriptor()
 
 
 _MT_co = TypeVar("_MT_co", bound=GelModel, covariant=True)
