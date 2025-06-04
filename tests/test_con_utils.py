@@ -389,9 +389,9 @@ class TestConUtils(unittest.TestCase):
 
                 self.run_testcase(testcase)
 
-    @mock.patch("gel.platform.config_dir",
+    @mock.patch("gel._internal._platform.config_dir",
                 lambda: pathlib.Path("/home/user/.config/edgedb"))
-    @mock.patch("gel.platform.IS_WINDOWS", False)
+    @mock.patch("gel._internal._platform.IS_WINDOWS", False)
     @mock.patch("pathlib.Path.exists", lambda p: True)
     @mock.patch("os.path.realpath", lambda p: p)
     def test_stash_path(self):
@@ -423,7 +423,7 @@ class TestConUtils(unittest.TestCase):
                     "database": "inst1_db",
                 }))
 
-            with mock.patch('gel.platform.config_dir',
+            with mock.patch('gel._internal._platform.config_dir',
                             lambda: home / '.edgedb'), \
                     mock.patch('os.getcwd', lambda: str(project)):
                 stash_path = con_utils._stash_path(project)
