@@ -30,7 +30,7 @@ from . import options as _options
 from .protocol import protocol
 
 
-BaseConnection_T = typing.TypeVar('BaseConnection_T', bound='BaseConnection')
+BaseConnection_T = typing.TypeVar("BaseConnection_T", bound="BaseConnection")
 QUERY_CACHE_SIZE = 1000
 
 
@@ -69,8 +69,7 @@ class BaseConnection(metaclass=abc.ABCMeta):
         self._holder = None
 
     @abc.abstractmethod
-    def _dispatch_log_message(self, msg):
-        ...
+    def _dispatch_log_message(self, msg): ...
 
     def _on_log_message(self, msg):
         if self._log_listeners:
@@ -95,8 +94,9 @@ class BaseConnection(metaclass=abc.ABCMeta):
 
     def add_log_listener(
         self: BaseConnection_T,
-        callback: typing.Callable[[BaseConnection_T, errors.EdgeDBMessage],
-                                  None]
+        callback: typing.Callable[
+            [BaseConnection_T, errors.EdgeDBMessage], None
+        ],
     ) -> None:
         """Add a listener for EdgeDB log messages.
 
@@ -109,8 +109,9 @@ class BaseConnection(metaclass=abc.ABCMeta):
 
     def remove_log_listener(
         self: BaseConnection_T,
-        callback: typing.Callable[[BaseConnection_T, errors.EdgeDBMessage],
-                                  None]
+        callback: typing.Callable[
+            [BaseConnection_T, errors.EdgeDBMessage], None
+        ],
     ) -> None:
         """Remove a listening callback for log messages."""
         self._log_listeners.discard(callback)
@@ -124,16 +125,13 @@ class BaseConnection(metaclass=abc.ABCMeta):
         return self._params.branch
 
     @abc.abstractmethod
-    def is_closed(self) -> bool:
-        ...
+    def is_closed(self) -> bool: ...
 
     @abc.abstractmethod
-    async def connect_addr(self, addr, timeout):
-        ...
+    async def connect_addr(self, addr, timeout): ...
 
     @abc.abstractmethod
-    async def sleep(self, seconds):
-        ...
+    async def sleep(self, seconds): ...
 
     async def connect(self, *, single_attempt=False):
         start = time.monotonic()
@@ -156,9 +154,8 @@ class BaseConnection(metaclass=abc.ABCMeta):
                             f" {self._config.connect_timeout} sec"
                         ) from e
                 except errors.ClientConnectionError as e:
-                    if (
-                        e.has_tag(errors.SHOULD_RECONNECT) and
-                        (iteration == 1 or time.monotonic() < max_time)
+                    if e.has_tag(errors.SHOULD_RECONNECT) and (
+                        iteration == 1 or time.monotonic() < max_time
                     ):
                         continue
                     nice_err = e.__class__(
@@ -167,7 +164,8 @@ class BaseConnection(metaclass=abc.ABCMeta):
                             addr,
                             attempts=iteration,
                             duration=time.monotonic() - start,
-                        ))
+                        )
+                    )
                     raise nice_err from e.__cause__
                 else:
                     return
@@ -215,9 +213,8 @@ class BaseConnection(metaclass=abc.ABCMeta):
                 # A query is read-only if it has no capabilities i.e.
                 # capabilities == 0. Read-only queries are safe to retry.
                 # Explicit transaction conflicts as well.
-                if (
-                    ctx.capabilities != 0
-                    and not isinstance(e, errors.TransactionConflictError)
+                if ctx.capabilities != 0 and not isinstance(
+                    e, errors.TransactionConflictError
                 ):
                     raise e
                 rule = retry_options.get_rule_for_exception(e)
@@ -315,13 +312,15 @@ class BaseConnection(metaclass=abc.ABCMeta):
 
     def __repr__(self):
         if self.is_closed():
-            return '<{classname} [closed] {id:#x}>'.format(
-                classname=self.__class__.__name__, id=id(self))
+            return "<{classname} [closed] {id:#x}>".format(
+                classname=self.__class__.__name__, id=id(self)
+            )
         else:
-            return '<{classname} [connected to {addr}] {id:#x}>'.format(
+            return "<{classname} [connected to {addr}] {id:#x}>".format(
                 classname=self.__class__.__name__,
                 addr=self.connected_addr(),
-                id=id(self))
+                id=id(self),
+            )
 
 
 class PoolConnectionHolder(abc.ABC):
@@ -335,7 +334,6 @@ class PoolConnectionHolder(abc.ABC):
     _event_class = NotImplemented
 
     def __init__(self, pool):
-
         self._pool = pool
         self._con = None
 
@@ -346,18 +344,17 @@ class PoolConnectionHolder(abc.ABC):
         self._release_event.set()
 
     @abc.abstractmethod
-    async def close(self, *, wait=True):
-        ...
+    async def close(self, *, wait=True): ...
 
     @abc.abstractmethod
-    async def wait_until_released(self, timeout=None):
-        ...
+    async def wait_until_released(self, timeout=None): ...
 
     async def connect(self):
         if self._con is not None:
             raise errors.InternalClientError(
-                'PoolConnectionHolder.connect() called while another '
-                'connection already exists')
+                "PoolConnectionHolder.connect() called while another "
+                "connection already exists"
+            )
 
         self._con = await self._pool._get_new_connection()
         assert self._con._holder is None
@@ -383,8 +380,9 @@ class PoolConnectionHolder(abc.ABC):
     async def release(self, timeout):
         if self._release_event.is_set():
             raise errors.InternalClientError(
-                'PoolConnectionHolder.release() called on '
-                'a free connection holder')
+                "PoolConnectionHolder.release() called on "
+                "a free connection holder"
+            )
 
         if self._con.is_closed():
             # This is usually the case when the connection is broken rather
@@ -467,13 +465,13 @@ class BasePoolImpl(abc.ABC):
         self._query_cache = protocol.LRUMapping(maxsize=QUERY_CACHE_SIZE)
         # Whether a transaction() call from a particular source location
         # needs to use Serializable. See transaction.BaseRetry for details.
-        self._tx_needs_serializable_cache = (
-            protocol.LRUMapping(maxsize=QUERY_CACHE_SIZE)
+        self._tx_needs_serializable_cache = protocol.LRUMapping(
+            maxsize=QUERY_CACHE_SIZE
         )
 
         if max_concurrency is not None and max_concurrency <= 0:
             raise ValueError(
-                'max_concurrency is expected to be greater than zero'
+                "max_concurrency is expected to be greater than zero"
             )
 
         self._user_max_concurrency = max_concurrency
@@ -492,24 +490,19 @@ class BasePoolImpl(abc.ABC):
         self._generation = 0
 
     @abc.abstractmethod
-    def _ensure_initialized(self):
-        ...
+    def _ensure_initialized(self): ...
 
     @abc.abstractmethod
-    def _set_queue_maxsize(self, maxsize):
-        ...
+    def _set_queue_maxsize(self, maxsize): ...
 
     @abc.abstractmethod
-    async def _maybe_get_first_connection(self):
-        ...
+    async def _maybe_get_first_connection(self): ...
 
     @abc.abstractmethod
-    async def acquire(self, timeout=None):
-        ...
+    async def acquire(self, timeout=None): ...
 
     @abc.abstractmethod
-    async def _release(self, connection):
-        ...
+    async def _release(self, connection): ...
 
     @property
     def codecs_registry(self):
@@ -522,7 +515,7 @@ class BasePoolImpl(abc.ABC):
     def _resize_holder_pool(self):
         resize_diff = self._max_concurrency - len(self._holders)
 
-        if (resize_diff > 0):
+        if resize_diff > 0:
             if self._queue.maxsize != self._max_concurrency:
                 self._set_queue_maxsize(self._max_concurrency)
 
@@ -589,7 +582,8 @@ class BasePoolImpl(abc.ABC):
 
         if self._user_max_concurrency is None:
             suggested_concurrency = con.get_settings().get(
-                'suggested_pool_concurrency')
+                "suggested_pool_concurrency"
+            )
             if suggested_concurrency:
                 self._max_concurrency = suggested_concurrency
                 self._resize_holder_pool()
@@ -613,11 +607,10 @@ class BasePoolImpl(abc.ABC):
         return con
 
     async def release(self, connection):
-
         if not isinstance(connection, BaseConnection):
             raise errors.InterfaceError(
-                f'BasePoolImpl.release() received invalid connection: '
-                f'{connection!r} does not belong to any connection pool'
+                f"BasePoolImpl.release() received invalid connection: "
+                f"{connection!r} does not belong to any connection pool"
             )
 
         ch = connection._holder
@@ -627,8 +620,8 @@ class BasePoolImpl(abc.ABC):
 
         if ch._pool is not self:
             raise errors.InterfaceError(
-                f'BasePoolImpl.release() received invalid connection: '
-                f'{connection!r} is not a member of this pool'
+                f"BasePoolImpl.release() received invalid connection: "
+                f"{connection!r} is not a member of this pool"
             )
 
         return await self._release(ch)
@@ -738,9 +731,9 @@ class BaseClient(abstract.BaseReadOnlyExecutor, _options._OptionsMixin):
         # retrying *inside* a transaction.
         return self._options.retry_options
 
-    def _get_active_tx_options(self) -> typing.Optional[
-        _options.TransactionOptions
-    ]:
+    def _get_active_tx_options(
+        self,
+    ) -> typing.Optional[_options.TransactionOptions]:
         # This is overloaded in transaction.py to return None, since
         # the tx options are applied at the *start* of transactions,
         # not inside them.

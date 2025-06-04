@@ -4,7 +4,6 @@
 
 """enum.StrEnum polyfill"""
 
-
 import sys
 
 if sys.version_info >= (3, 11):
@@ -13,6 +12,4 @@ else:
     from ._strenum_impl import StrEnum
 
 
-__all__ = (
-    "StrEnum",
-)
+__all__ = ("StrEnum",)

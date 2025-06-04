@@ -103,9 +103,7 @@ class BaseRAGClient:
         )
 
     @staticmethod
-    def _parse_rag_response(
-        resp: typing.Any
-    ) -> str:
+    def _parse_rag_response(resp: typing.Any) -> str:
         data: dict[str, typing.Any] = resp.json()
 
         if text := data.get("text"):

@@ -13,6 +13,4 @@ else:
     from ._taskgroup_impl import TaskGroup
 
 
-__all__ = (
-    "TaskGroup",
-)
+__all__ = ("TaskGroup",)

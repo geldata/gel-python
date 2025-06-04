@@ -32,7 +32,7 @@ def find_project_root() -> pathlib.Path:
 
 
 class TestFlake8(unittest.TestCase):
-    def test_cqa_ruff(self):
+    def test_cqa_ruff_check(self):
         project_root = find_project_root()
 
         try:
@@ -44,6 +44,29 @@ class TestFlake8(unittest.TestCase):
             try:
                 subprocess.run(
                     ["ruff", "check", "."],
+                    check=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    cwd=project_root / subdir,
+                )
+            except subprocess.CalledProcessError as ex:
+                output = ex.output.decode()
+                raise AssertionError(
+                    f"ruff validation failed:\n{output}"
+                ) from None
+
+    def test_cqa_ruff_format_check(self):
+        project_root = find_project_root()
+
+        try:
+            import ruff  # NoQA
+        except ImportError:
+            raise unittest.SkipTest("ruff module is missing") from None
+
+        for subdir in ["gel"]:
+            try:
+                subprocess.run(
+                    ["ruff", "format", "--check", "."],
                     check=True,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,

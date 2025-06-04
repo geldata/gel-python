@@ -112,11 +112,7 @@ PrimitiveType = (
     | MultiRangeType
 )
 
-AnyType = (
-    PseudoType
-    | PrimitiveType
-    | ObjectType
-)
+AnyType = PseudoType | PrimitiveType | ObjectType
 
 Types = dict[uuid.UUID, AnyType]
 
