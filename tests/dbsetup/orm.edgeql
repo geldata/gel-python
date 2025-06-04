@@ -25,6 +25,10 @@ insert GameSession {
     num := 456,
     players := (select User filter .name in {'Dana'}),
 };
+update GameSession
+set {
+    players := .players{@is_tall_enough := not contains('AEIOU', .name[0])}
+};
 
 insert Post {
     author := assert_single((select User filter .name = 'Alice')),
@@ -51,4 +55,32 @@ insert AssortedScalars {
     date:= <cal::local_date>'2025-01-26',
     ts:=<datetime>'2025-01-26T20:13:45+00:00',
     lts:=<cal::local_datetime>'2025-01-26T20:13:45',
+};
+
+insert Image {
+    file := 'cat.jpg',
+    author := assert_single((
+        select User {
+            caption := 'made of snow',
+            year := 2025,
+        }
+        filter .name = 'Elsa'
+    ))
+};
+
+insert Loot {
+    name := 'Cool Hat',
+    owner := assert_single((
+        select User filter .name = 'Billie'
+    )),
+};
+
+insert StackableLoot {
+    name := 'Gold Coin',
+    owner := assert_single((
+        select User {
+            @count := 34,
+            @bonus := True,
+        } filter .name = 'Billie'
+    )),
 };

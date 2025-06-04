@@ -450,7 +450,7 @@ class TestModelGenerator(tb.ModelTestCase):
         ):
             u.name_len = cast(std.int64, 123)  # type: ignore[assignment]
 
-    def test_modelgen_save_1(self):
+    def test_modelgen_save_01(self):
         from models import default
 
         pq = (
@@ -513,6 +513,871 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(p2.post.author.name, "New Alice")
         self.assertEqual(p2.alice.name, "Alice the 5th")
         self.assertEqual(p2.new_alice.name, "New Alice")
+
+    def test_modelgen_save_02(self):
+        from models import default
+        # insert an object with a required multi: no link props, one object
+        # added to the link
+
+        party = default.Party(
+            name='Solo',
+            members=[
+                default.User(
+                    name='John Smith',
+                    nickname='Hannibal',
+                ),
+            ]
+        )
+        self.client.save(party)
+
+        # Fetch and verify
+        res = self.client.get(
+            default.Party.select(
+                name=True, members=True,
+            ).filter(name='Solo')
+        )
+        self.assertEqual(res.name, 'Solo')
+        self.assertEqual(len(res.members), 1)
+        m = res.members[0]
+        self.assertEqual(m.name, 'John Smith')
+        self.assertEqual(m.nickname, 'Hannibal')
+
+    def test_modelgen_save_03(self):
+        from models import default
+        # insert an object with a required multi: no link props, more than one
+        # object added to the link
+
+        party = default.Party(
+            name='The A-Team',
+            members=[
+                default.User(
+                    name='John Smith',
+                    nickname='Hannibal',
+                ),
+                default.User(
+                    name='Templeton Peck',
+                    nickname='Faceman',
+                ),
+                default.User(
+                    name='H.M. Murdock',
+                    nickname='Howling Mad',
+                ),
+                default.User(
+                    name='Bosco Baracus',
+                    nickname='Bad Attitude',
+                ),
+            ]
+        )
+        self.client.save(party)
+
+        # Fetch and verify
+        res = self.client.get(
+            default.Party.select(
+                name=True,
+                members=lambda p: p.members.select(
+                    name=True,
+                    nickname=True,
+                ).order_by(name=True),
+            ).filter(name='The A-Team')
+        )
+        self.assertEqual(res.name, 'The A-Team')
+        self.assertEqual(len(res.members), 4)
+        for m, (name, nickname) in zip(res.members, [
+                ('Bosco Baracus', 'Bad Attitude'),
+                ('H.M. Murdock', 'Howling Mad'),
+                ('John Smith', 'Hannibal'),
+                ('Templeton Peck', 'Faceman'),
+        ]):
+            self.assertEqual(m.name, name)
+            self.assertEqual(m.nickname, nickname)
+
+    def test_modelgen_save_04(self):
+        from models import default
+        # insert an object with a required multi: with link props, one object
+        # added to the link
+
+        raid = default.Raid(
+            name='Solo',
+            members=[
+                default.Raid.members.link(
+                    default.User(
+                        name='John Smith',
+                        nickname='Hannibal',
+                    ),
+                    role='everything',
+                    rank=1,
+                )
+            ]
+        )
+        self.client.save(raid)
+
+        # Fetch and verify
+        res = self.client.get(
+            default.Raid.select(
+                name=True, members=True,
+            ).filter(name='Solo')
+        )
+        self.assertEqual(res.name, 'Solo')
+        self.assertEqual(len(res.members), 1)
+        m = res.members[0]
+        self.assertEqual(m.name, 'John Smith')
+        self.assertEqual(m.nickname, 'Hannibal')
+        self.assertEqual(m.__linkprops__.role, 'everything')
+        self.assertEqual(m.__linkprops__.rank, 1)
+
+    def test_modelgen_save_05(self):
+        from models import default
+        # insert an object with a required multi: with link props, more than
+        # one object added to the link; have one link prop for the first
+        # object within the link, and another for the second object within the
+        # same link
+
+        raid = default.Raid(
+            name='The A-Team',
+            members=[
+                default.Raid.members.link(
+                    default.User(
+                        name='John Smith',
+                        nickname='Hannibal',
+                    ),
+                    role='brains',
+                    rank=1,
+                ),
+                default.Raid.members.link(
+                    default.User(
+                        name='Templeton Peck',
+                        nickname='Faceman',
+                    ),
+                    rank=2,
+                ),
+                default.Raid.members.link(
+                    default.User(
+                        name='H.M. Murdock',
+                        nickname='Howling Mad',
+                    ),
+                    role='medic',
+                ),
+                default.User(
+                    name='Bosco Baracus',
+                    nickname='Bad Attitude',
+                ),
+            ]
+        )
+        self.client.save(raid)
+
+        # Fetch and verify
+        res = self.client.get(
+            default.Party.select(
+                name=True,
+                members=lambda p: p.members.select(
+                    name=True,
+                    nickname=True,
+                    # FIXME: actually don't remember if I need to include link
+                    # props here exclicitly
+                ).order_by(name=True),
+            ).filter(name='The A-Team')
+        )
+        self.assertEqual(res.name, 'The A-Team')
+        self.assertEqual(len(res.members), 4)
+        for m, (name, nickname, rank, role) in zip(res.members, [
+                ('Bosco Baracus', 'Bad Attitude', None, None),
+                ('H.M. Murdock', 'Howling Mad', None, 'medic'),
+                ('John Smith', 'Hannibal', 1, 'brains'),
+                ('Templeton Peck', 'Faceman', 2, None),
+        ]):
+            self.assertEqual(m.name, name)
+            self.assertEqual(m.nickname, nickname)
+            self.assertEqual(m.__linkprops__.role, role)
+            self.assertEqual(m.__linkprops__.rank, rank)
+
+    def test_modelgen_save_06(self):
+        from models import default
+        # Update object adding multiple existing objects to an exiting link
+        # (no link props)
+
+        gr = self.client.get(default.UserGroup.select(
+                name=True,
+                users=True,
+            ).filter(name='blue')
+        )
+        self.assertEqual(len(gr.users), 0)
+        a = self.client.get(default.User.filter(name='Alice'))
+        c = self.client.get(default.User.filter(name='Cameron'))
+        z = self.client.get(default.User.filter(name='Zoe'))
+        gr.users.extend([a, c, z])
+        self.client.save(gr)
+
+        # Fetch and verify
+        res = self.client.query('''
+            select User.name filter "blue" in User.groups.name
+        ''')
+        self.assertEqual(set(res), {'Alice', 'Cameron', 'Zoe'})
+
+    def test_modelgen_save_07(self):
+        from models import default
+        # Update object adding multiple existing objects to an exiting link
+        # (no link props)
+
+        gr = self.client.get(default.UserGroup.select(
+                name=True,
+                users=True,
+            ).filter(name='green')
+        )
+        self.assertEqual({u.name for u in gr.users}, {'Alice', 'Billie'})
+        a = self.client.get(default.User.filter(name='Alice'))
+        c = self.client.get(default.User.filter(name='Cameron'))
+        z = self.client.get(default.User.filter(name='Zoe'))
+        gr.users.extend([a, c, z])
+        self.client.save(gr)
+
+        # Fetch and verify
+        res = self.client.query('''
+            select User.name filter "green" in User.groups.name
+        ''')
+        self.assertEqual(set(res), {'Alice', 'Billie', 'Cameron', 'Zoe'})
+
+    def test_modelgen_save_08(self):
+        from models import default
+        # Update object adding multiple existing objects to an exiting link
+        # with link props (try variance of props within the same multi link
+        # for the same object)
+
+        self.client.save(default.Team(name='test team 8'))
+        team = self.client.get(default.Team.select(
+                name=True,
+                members=True,
+            ).filter(name='test team 8')
+        )
+        self.assertEqual(len(team.members), 0)
+        a = self.client.get(default.User.filter(name='Alice'))
+        b = self.client.get(default.User.filter(name='Billie'))
+        c = self.client.get(default.User.filter(name='Cameron'))
+        z = self.client.get(default.User.filter(name='Zoe'))
+        team.members.extend([
+            default.Team.members.link(
+                a, role='lead', rank=1,
+            ),
+            default.Team.members.link(
+                b, rank=2,
+            ),
+        ])
+        self.client.save(team)
+
+        # Fetch and verify
+        res = self.client.query_required_single('''
+            select Team {
+                members: {
+                    @rank,
+                    @role,
+                    name,
+                } order by .name
+            }
+            filter .name = "test team 8"
+        ''')
+        self.assertEqual(
+            [(r.name, r['@rank'], r['@role']) for r in res.members],
+            [
+                ('Alice', 1, 'lead'),
+                ('Billie', 2, None),
+            ]
+        )
+
+        # Refetch and update it again
+        team = self.client.get(default.Team.select(
+                name=True,
+                members=True,
+            ).filter(name='test team 8')
+        )
+        team.members.extend([
+            default.Team.members.link(
+                c, role='notes-taker',
+            ),
+            z,
+        ])
+        self.client.save(team)
+
+        res = self.client.query_required_single('''
+            select Team {
+                members: {
+                    @rank,
+                    @role,
+                    name,
+                } order by .name
+            }
+            filter .name = "test team 8"
+        ''')
+        self.assertEqual(
+            [(r.name, r['@rank'], r['@role']) for r in res.members],
+            [
+                ('Alice', 1, 'lead'),
+                ('Billie', 2, None),
+                ('Cameron', None, 'note-taker'),
+                ('Zoe', None, None),
+            ]
+        )
+
+    def test_modelgen_save_09(self):
+        from models import default
+        # Update object removing multiple existing objects from an existing
+        # multi link
+
+        gr = self.client.get(default.UserGroup.select(
+                name=True,
+                users=True,
+            ).filter(name='red')
+        )
+        self.assertEqual(gr.name, 'red')
+        self.assertEqual(
+            {u.name for u in gr.users},
+            {'Alice', 'Billie', 'Cameron', 'Dana'},
+        )
+        for u in list(gr.users):
+            if u.name in {'Billie', 'Cameron'}:
+                gr.users.remove(u)
+        self.client.save(gr)
+
+        # Fetch and verify
+        res = self.client.query('''
+            select User.name filter "red" in User.groups.name
+        ''')
+        self.assertEqual(set(res), {'Alice', 'Dana'})
+
+    def test_modelgen_save_10(self):
+        from models import default
+        # Update object removing multiple existing objects from an existing
+        # multi link
+
+        self.client.query('''
+            insert Team {
+                name := 'test team 10',
+                members := assert_distinct((
+                    for t in {
+                        ('Alice', 'fire', 99),
+                        ('Billie', 'ice', 0),
+                        ('Cameron', '', 1),
+                    }
+                    select User {
+                        @role := if t.1 = '' then <str>{} else t.1,
+                        @rank := if t.2 = 0 then <int64>{} else t.2,
+                    }
+                    filter .name = t.0
+                )),
+            }
+        ''')
+        team = self.client.get(default.Team.select(
+                name=True,
+                members=True,
+            ).filter(name='test team 10')
+        )
+        self.assertEqual(team.name, 'test team 10')
+        self.assertEqual(
+            {u.name for u in team.members},
+            {'Alice', 'Billie', 'Cameron'},
+        )
+        for u in list(team.members):
+            if u.name in {'Alice', 'Cameron'}:
+                team.members.remove(u)
+        self.client.save(team)
+
+        # Fetch and verify
+        res = self.client.query_required_single('''
+            select Team {
+                members: {
+                    @rank,
+                    @role,
+                    name,
+                } order by .name
+            }
+            filter .name = "test team 10"
+        ''')
+        self.assertEqual(
+            [(r.name, r['@role'], r['@rank']) for r in res.members],
+            [
+                ('Billie', 'ice', None),
+            ]
+        )
+
+    def test_modelgen_save_11(self):
+        from models import default
+        # Update object adding an existing objecs to an exiting single
+        # required link (no link props)
+
+        post = self.client.get(default.Post.select(
+                body=True,
+                author=True,
+            ).filter(body='Hello')
+        )
+        z = self.client.get(default.User.filter(name='Zoe'))
+        self.assertEqual(post.author.name, 'Alice')
+        post.author = z
+        self.client.save(post)
+
+        # Fetch and verify
+        res = self.client.get('''
+            select Post {body, author: {name}}
+            filter .body = 'Hello'
+        ''')
+        self.assertEqual(res.author.name, 'Zoe')
+
+    def test_modelgen_save_12(self):
+        from models import default
+        # Update object adding an existing object to an exiting single
+        # required link (with link props)
+
+        img = self.client.get(default.Image.select(
+                file=True,
+                author=True,
+            ).filter(file='cat.jpg')
+        )
+        a = self.client.get(default.User.filter(name='Alice'))
+        z = self.client.get(default.User.filter(name='Zoe'))
+        self.assertEqual(img.author.name, 'Elsa')
+        self.assertEqual(img.author.__linkprops__.caption, 'made of snow')
+        self.assertEqual(img.author.__linkprops__.year, 2025)
+
+        img.author = default.Image.author.link(
+            z, caption='kitty!'
+        )
+        self.client.save(img)
+
+        # Re-fetch and verify
+        img = self.client.get(default.Image.select(
+                file=True,
+                author=True,
+            ).filter(file='cat.jpg')
+        )
+        self.assertEqual(img.author.name, 'Zoe')
+        self.assertEqual(img.author.__linkprops__.caption, 'kitty!')
+        self.assertEqual(img.author.__linkprops__.year, None)
+
+        img.author = a
+        self.client.save(img)
+
+        # Re-fetch and verify
+        img = self.client.get(default.Image.select(
+                file=True,
+                author=True,
+            ).filter(file='cat.jpg')
+        )
+        self.assertEqual(img.author.name, 'Alice')
+        self.assertEqual(img.author.__linkprops__.caption, None)
+        self.assertEqual(img.author.__linkprops__.year, None)
+
+        img.author = default.Image.author.link(
+            z, caption='cute', year=2024
+        )
+        self.client.save(img)
+
+        # Re-fetch and verify
+        img = self.client.get(default.Image.select(
+                file=True,
+                author=True,
+            ).filter(file='cat.jpg')
+        )
+        self.assertEqual(img.author.name, 'Zoe')
+        self.assertEqual(img.author.__linkprops__.caption, 'cute')
+        self.assertEqual(img.author.__linkprops__.year, 2024)
+
+    def test_modelgen_save_13(self):
+        from models import default
+        # Update object adding an existing object to an exiting single
+        # optional link (no link props)
+
+        loot = self.client.get(default.Loot.select(
+                name=True,
+                owner=True,
+            ).filter(name='Cool Hat')
+        )
+        z = self.client.get(default.User.filter(name='Zoe'))
+        self.assertEqual(loot.owner.name, 'Billie')
+        loot.owner = z
+        self.client.save(loot)
+
+        # Fetch and verify
+        res = self.client.get('''
+            select Loot {name, owner: {name}}
+            filter .name = 'Cool Hat'
+        ''')
+        self.assertEqual(res.owner.name, 'Zoe')
+
+    def test_modelgen_save_14(self):
+        from models import default
+        # Update object adding an existing object to an exiting single
+        # optional link (with link props)
+
+        loot = self.client.get(default.StackableLoot.select(
+                name=True,
+                owner=True,
+            ).filter(name='Gold Coin')
+        )
+        a = self.client.get(default.User.filter(name='Alice'))
+        z = self.client.get(default.User.filter(name='Zoe'))
+        self.assertEqual(loot.owner.name, 'Billie')
+        self.assertEqual(loot.owner.__linkprops__.count, 34)
+        self.assertEqual(loot.owner.__linkprops__.bonus, True)
+
+        loot.owner = default.StackableLoot.owner.link(
+            z, count=12,
+        )
+        self.client.save(loot)
+
+        # Re-fetch and verify
+        loot = self.client.get(default.StackableLoot.select(
+                name=True,
+                owner=True,
+            ).filter(name='Gold Coin')
+        )
+        self.assertEqual(loot.owner.name, 'Zoe')
+        self.assertEqual(loot.owner.__linkprops__.count, 12)
+        self.assertEqual(loot.owner.__linkprops__.bonus, None)
+
+        loot.owner = a
+        self.client.save(loot)
+
+        # Re-fetch and verify
+        loot = self.client.get(default.StackableLoot.select(
+                name=True,
+                owner=True,
+            ).filter(name='Gold Coin')
+        )
+        self.assertEqual(loot.owner.name, 'Alice')
+        self.assertEqual(loot.owner.__linkprops__.count, None)
+        self.assertEqual(loot.owner.__linkprops__.bonus, None)
+
+        loot.owner = default.StackableLoot.owner.link(
+            z, count=56, bonus=False
+        )
+        self.client.save(loot)
+
+        # Re-fetch and verify
+        loot = self.client.get(default.StackableLoot.select(
+                name=True,
+                owner=True,
+            ).filter(name='Gold Coin')
+        )
+        self.assertEqual(loot.owner.name, 'Zoe')
+        self.assertEqual(loot.owner.__linkprops__.count, 56)
+        self.assertEqual(loot.owner.__linkprops__.bonus, False)
+
+    def test_modelgen_save_15(self):
+        from models import default
+        # insert an object with a required single: no link props, one object
+        # added to the link
+
+        z = self.client.get(default.User.filter(name='Zoe'))
+        post = default.Post(
+            body='test post 15',
+            author=z,
+        )
+        self.client.save(post)
+
+        # Fetch and verify
+        res = self.client.get('''
+            select Post {body, author: {name}}
+            filter .body = 'test post 15'
+        ''')
+        self.assertEqual(res.body, 'test post 15')
+        self.assertEqual(res.author.name, 'Zoe')
+
+    def test_modelgen_save_16(self):
+        from models import default
+        # insert an object with a required single: with link props
+
+        a = self.client.get(default.User.filter(name='Alice'))
+        img = default.Image(
+            file='puppy.jpg',
+            author=default.Image.author.link(
+                a, caption='woof!', year=2000,
+            )
+        )
+        self.client.save(img)
+
+        # Re-fetch and verify
+        img = self.client.get(default.Image.select(
+                file=True,
+                author=True,
+            ).filter(file='puppy.jpg')
+        )
+        self.assertEqual(img.author.name, 'Alice')
+        self.assertEqual(img.author.__linkprops__.caption, 'woof!')
+        self.assertEqual(img.author.__linkprops__.year, 2000)
+
+    def test_modelgen_save_17(self):
+        from models import default
+        # insert an object with an optional single: no link props, one object
+        # added to the link
+
+        z = self.client.get(default.User.filter(name='Zoe'))
+        loot = default.Loot(
+            name='Pony',
+            owner=z,
+        )
+        self.client.save(loot)
+
+        # Fetch and verify
+        res = self.client.get('''
+            select Loot {name, owner: {name}}
+            filter .name = 'Pony'
+        ''')
+        self.assertEqual(res.name, 'Pony')
+        self.assertEqual(res.owner.name, 'Zoe')
+
+    def test_modelgen_save_18(self):
+        from models import default
+        # insert an object with an optional single: with link props
+
+        a = self.client.get(default.User.filter(name='Alice'))
+        loot = default.StackableLoot(
+            name='Button',
+            owner=default.StackableLoot.owner.link(
+                a, count=5, bonus=False,
+            ),
+        )
+        self.client.save(loot)
+
+        # Re-fetch and verify
+        loot = self.client.get(default.StackableLoot.select(
+                name=True,
+                owner=True,
+            ).filter(name='Button')
+        )
+        self.assertEqual(loot.owner.name, 'Alice')
+        self.assertEqual(loot.owner.__linkprops__.count, 5)
+        self.assertEqual(loot.owner.__linkprops__.bonus, False)
+
+    def test_modelgen_save_19(self):
+        # FIXME: pydantic might never be happy with the loops that are made by
+        # the literally identical object, so this may be invalid, see next
+        # test for a workaround
+        from models import default
+        # insert an object with an optional link to self set to self
+
+        p = default.LinearPath(label='singleton')
+        p.next = p
+        self.client.save(p)
+
+        # Fetch and verify
+        res = self.client.query('''
+            select LinearPath {id, label, next: {id, label}}
+            order by .label
+        ''')
+        self.assertEqual(len(res), 1)
+        self.assertEqual(res[0].label, 'singleton')
+        self.assertEqual(res[0].id, res[0].next.id)
+
+    def test_modelgen_save_20(self):
+        from models import default
+        # make a self loop in 2 steps
+
+        p = default.LinearPath(label='singleton')
+        self.client.save(p)
+        # close the loop
+        p.next = self.client.get(default.LinearPath.filter(label='singleton'))
+        self.client.save(p)
+
+        # Fetch and verify
+        res = self.client.query('''
+            select LinearPath {id, label, next: {id, label}}
+            order by .label
+        ''')
+        self.assertEqual(len(res), 1)
+        self.assertEqual(res[0].label, 'singleton')
+        self.assertEqual(res[0].id, res[0].next.id)
+
+    def test_modelgen_save_21(self):
+        from models import default
+        # insert an object with an optional link to self set to self
+
+        p = default.LinearPath(
+            label='start',
+            next=default.LinearPath(
+                label='step 1',
+                next=default.LinearPath(
+                    label='step 2'
+                )
+            )
+        )
+        p.next.next.next = p
+        self.client.save(p)
+
+        # Fetch and verify
+        res = self.client.query('''
+            select LinearPath {id, label, next: {id, label}}
+            order by .label
+        ''')
+        self.assertEqual(len(res), 3)
+        self.assertEqual(res[0].label, 'start')
+        self.assertEqual(res[0].next.label, 'step 1')
+        self.assertEqual(res[1].label, 'step 1')
+        self.assertEqual(res[1].next.label, 'step 2')
+        self.assertEqual(res[2].label, 'step 2')
+        self.assertEqual(res[2].next.label, 'start')
+
+    def test_modelgen_save_escape_01(self):
+        from models import default
+        # insert an object that needs a lot of escaping
+
+        a = self.client.get(default.User.filter(name='Alice'))
+        obj = default.limit(
+            alter=False,
+            like='like this',
+            commit=a,
+            configure=[
+                default.limit.configure.link(
+                    a, create=True
+                )
+            ]
+        )
+        self.client.save(obj)
+
+        # Fetch and verify
+        res = self.client.get(default.limit.select(
+            alter=True,
+            like=True,
+            commit=True,
+            configure=True,
+        ))
+        self.assertEqual(res.alter, False)
+        self.assertEqual(res.like, 'like this')
+        self.assertEqual(res.commit.name, 'Alice')
+        self.assertEqual(len(res.configure), 1)
+        self.assertEqual(res.configure[0].name, 'Alice')
+        self.assertEqual(res.configure[0].__linkprops__.create, True)
+
+    def test_modelgen_save_escape_02(self):
+        from models import default
+        # insert and update an object that needs a lot of escaping
+
+        a = self.client.get(default.User.filter(name='Alice'))
+        obj = default.limit(
+            alter=False,
+        )
+        self.client.save(obj)
+        obj.like = 'like this'
+        self.client.save(obj)
+        obj.commit = a
+        self.client.save(obj)
+        obj.configure.append(
+            default.limit.configure.link(
+                a, create=True
+            )
+        )
+        self.client.save(obj)
+
+        # Fetch and verify
+        res = self.client.get(default.limit.select(
+            alter=True,
+            like=True,
+            commit=True,
+            configure=True,
+        ))
+        self.assertEqual(res.alter, False)
+        self.assertEqual(res.like, 'like this')
+        self.assertEqual(res.commit.name, 'Alice')
+        self.assertEqual(len(res.configure), 1)
+        self.assertEqual(res.configure[0].name, 'Alice')
+        self.assertEqual(res.configure[0].__linkprops__.create, True)
+
+    @tb.to_be_fixed
+    def test_modelgen_linkprops_1(self):
+        from models import default
+
+        # Create a new GameSession and add a player
+        u = self.client.get(default.User.filter(name='Zoe'))
+        gs = default.GameSession(
+            num=1001,
+            players=[
+                default.GameSession.players.link(
+                    u, is_tall_enough=True)
+            ]
+        )
+        self.client.save(gs)
+
+        # Now fetch it again
+        res = self.client.get(
+            default.GameSession.select(
+                num=True,
+                players=True,
+            ).filter(num=1001)
+        )
+        self.assertEqual(res.num, 1001)
+        self.assertEqual(len(res.players), 1)
+        p = res.players[0]
+
+        self.assertEqual(p.name, 'Zoe')
+        self.assertEqual(p.__linkprops__.is_tall_enough, True)
+
+    @tb.to_be_fixed
+    def test_modelgen_linkprops_2(self):
+        from models import default
+
+        # Create a new GameSession and add a player
+        u = self.client.get(default.User.filter(name='Elsa'))
+        gs = default.GameSession(num=1002)
+        gs.players.append(u)
+        self.client.save(gs)
+
+        # Now fetch it again snd update
+        gs = self.client.get(
+            default.GameSession.select(
+                num=True,
+                players=True,
+            ).filter(num=1002)
+        )
+        self.assertEqual(gs.num, 1002)
+        self.assertEqual(len(gs.players), 1)
+        self.assertEqual(gs.players[0].__linkprops__.is_tall_enough, None)
+        gs.players[0].__linkprops__.is_tall_enough = False
+        self.client.save(gs)
+
+        # Now fetch after update
+        res = self.client.get(
+            default.GameSession.select(
+                num=True,
+                players=True,
+            ).filter(num=1002)
+        )
+        self.assertEqual(res.num, 1002)
+        self.assertEqual(len(res.players), 1)
+        p = res.players[0]
+
+        self.assertEqual(p.name, 'Elsa')
+        self.assertEqual(p.__linkprops__.is_tall_enough, False)
+
+    @tb.to_be_fixed
+    def test_modelgen_linkprops_3(self):
+        from models import default
+
+        # This one only has a single player
+        q = default.GameSession.select(
+            num=True,
+            players=True,
+        ).filter(num=456)
+        res = self.client.get(q)
+
+        self.assertEqual(res.num, 456)
+        self.assertEqual(len(res.players), 1)
+        p0 = res.players[0]
+
+        self.assertEqual(p0.name, 'Dana')
+        self.assertEqual(p0.nickname, None)
+        self.assertEqual(p0.__linkprops__.is_tall_enough, True)
+
+        p0.name = 'Dana?'
+        p0.nickname = 'HACKED'
+        p0.__linkprops__.is_tall_enough = False
+
+        self.client.save(res)
+
+        # Now fetch it again
+        upd = self.client.get(q)
+        self.assertEqual(upd.num, 456)
+        self.assertEqual(len(upd.players), 1)
+        p1 = upd.players[0]
+
+        self.assertEqual(p1.name, 'Dana?')
+        self.assertEqual(p1.nickname, 'HACKED')
+        self.assertEqual(p1.__linkprops__.is_tall_enough, False)
 
     def test_modelgen_reflection_1(self):
         from models import default, std
