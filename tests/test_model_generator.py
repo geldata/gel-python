@@ -1305,6 +1305,73 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(res[2].label, 'step 2')
         self.assertEqual(res[2].next.label, 'start')
 
+    @tb.xfail
+    def test_modelgen_save_escape_01(self):
+        from models import default
+        # insert an object that needs a lot of escaping
+
+        a = self.client.get(default.User.filter(name='Alice'))
+        obj = default.limit(
+            alter=False,
+            like='like this',
+            commit=a,
+            configure=[
+                default.limit.configure.link(
+                    a, create=True
+                )
+            ]
+        )
+        self.client.save(obj)
+
+        # Fetch and verify
+        res = self.client.get(default.limit.select(
+            alter=True,
+            like=True,
+            commit=True,
+            configure=True,
+        ))
+        self.assertEqual(res.alter, False)
+        self.assertEqual(res.like, 'like this')
+        self.assertEqual(res.commit.name, 'Alice')
+        self.assertEqual(len(res.configure), 1)
+        self.assertEqual(res.configure[0].name, 'Alice')
+        self.assertEqual(res.configure[0].__linkprops__.create, True)
+
+    @tb.xfail
+    def test_modelgen_save_escape_02(self):
+        from models import default
+        # insert and update an object that needs a lot of escaping
+
+        a = self.client.get(default.User.filter(name='Alice'))
+        obj = default.limit(
+            alter=False,
+        )
+        self.client.save(obj)
+        obj.like = 'like this'
+        self.client.save(obj)
+        obj.commit = a
+        self.client.save(obj)
+        obj.configure.append(
+            default.limit.configure.link(
+                a, create=True
+            )
+        )
+        self.client.save(obj)
+
+        # Fetch and verify
+        res = self.client.get(default.limit.select(
+            alter=True,
+            like=True,
+            commit=True,
+            configure=True,
+        ))
+        self.assertEqual(res.alter, False)
+        self.assertEqual(res.like, 'like this')
+        self.assertEqual(res.commit.name, 'Alice')
+        self.assertEqual(len(res.configure), 1)
+        self.assertEqual(res.configure[0].name, 'Alice')
+        self.assertEqual(res.configure[0].__linkprops__.create, True)
+
     @tb.typecheck
     def test_modelgen_linkprops_1(self):
         from models import default
