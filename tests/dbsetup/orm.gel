@@ -82,8 +82,40 @@ type Team extending ExclusivelyNamed {
     };
 }
 
-# Object with optional link to self, has link props
+# Object with single required link with link props
+type Image {
+    required file: str;
+    required link author: User {
+        caption: str;
+        year: int64;
+    }
+}
+
+# Object with single optional link no link props
+type Loot extending ExclusivelyNamed {
+    link owner: User;
+}
+
+# Object with single optional link no link props
+type StackableLoot extending ExclusivelyNamed {
+    link owner: User {
+        count: int64;
+        bonus: bool;
+    }
+}
+
+# Object with optional link to self, no link props
 type LinearPath {
+    required label: str {
+        constraint exclusive;
+    }
+    next: LinearPath {
+        constraint exclusive;
+    }
+}
+
+# Object with optional link to self, has link props
+type StepPath {
     required label: str {
         constraint exclusive;
     }

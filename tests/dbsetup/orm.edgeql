@@ -56,3 +56,31 @@ insert AssortedScalars {
     ts:=<datetime>'2025-01-26T20:13:45+00:00',
     lts:=<cal::local_datetime>'2025-01-26T20:13:45',
 };
+
+insert Image {
+    file := 'cat.jpg',
+    author := assert_single((
+        select User {
+            @caption := 'made of snow',
+            @year := 2025,
+        }
+        filter .name = 'Elsa'
+    ))
+};
+
+insert Loot {
+    name := 'Cool Hat',
+    owner := assert_single((
+        select User filter .name = 'Billie'
+    )),
+};
+
+insert StackableLoot {
+    name := 'Gold Coin',
+    owner := assert_single((
+        select User {
+            @count := 34,
+            @bonus := True,
+        } filter .name = 'Billie'
+    )),
+};

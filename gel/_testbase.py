@@ -1031,6 +1031,10 @@ def to_be_fixed(f):
     return unittest.expectedFailure(f)
 
 
+def xfail(f):
+    return unittest.expectedFailure(f)
+
+
 if os.environ.get("USE_UVLOOP"):
     import uvloop
 
