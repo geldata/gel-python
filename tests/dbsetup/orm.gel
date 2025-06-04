@@ -39,3 +39,17 @@ type AssortedScalars {
     lts: cal::local_datetime;
     bstr: bytes;
 }
+
+module sub {
+    type TypeInSub {
+        post: default::Post;
+        subsub: default::sub::subsub::TypeInSubSub;
+    }
+
+    module subsub {
+        type TypeInSubSub;
+    }
+}
+
+module emptysub {
+}

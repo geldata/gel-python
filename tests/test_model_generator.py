@@ -351,6 +351,18 @@ class TestModelGenerator(tb.ModelTestCase):
             self.client.query(q)
 
     @tb.typecheck
+    def test_modelgen_submodules_and_reexports(self):
+        import models
+
+        models.default.Post
+        models.std.str
+
+        self.assertEqual(
+            reveal_type(models.sub.TypeInSub.post),
+            "type[models.default.Post]",
+        )
+
+    @tb.typecheck
     def test_modelgen_data_model_validation_1(self):
         from typing import cast
         from gel._internal._dlist import DistinctList
