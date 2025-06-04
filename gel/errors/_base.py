@@ -360,4 +360,4 @@ except KeyError:
     SHOW_HINT = False
 
 
-from gel.color import get_color
+from gel._internal._color import get_color

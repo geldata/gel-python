@@ -18,7 +18,7 @@ import typing
 
 import gel
 from gel.con_utils import find_gel_project_dir
-from gel.color import get_color
+from gel._internal._color import get_color
 
 if TYPE_CHECKING:
     import argparse
