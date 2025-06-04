@@ -111,3 +111,14 @@ type StepPath {
         }
     }
 }
+
+# Object with keyword links and props
+type `limit` {
+    `alter`: bool;
+    `like`: str;
+
+    `commit`: User;
+    multi `configure`: User {
+        `create`: bool;
+    }
+}
