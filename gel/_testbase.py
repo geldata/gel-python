@@ -496,7 +496,19 @@ class DatabaseTestCase(ClusterTestCase, ConnectedTestCaseMixin):
     BASE_TEST_CLASS = True
     TEARDOWN_RETRY_DROP_DB = 1
 
+    ISOLATED_TEST_BRANCHES = False
+
     def setUp(self):
+        if self.ISOLATED_TEST_BRANCHES:
+            cls = type(self)
+            root = cls.get_database_name()
+            testdb = self._testMethodName
+            cls.__client__.query(f"""
+                create data branch {testdb} from {root};
+            """)
+            cls.client = cls.make_test_client(database=testdb)
+            cls.client.ensure_connected()
+
         if self.SETUP_METHOD:
             self.adapt_call(self.client.execute(self.SETUP_METHOD))
 
@@ -518,6 +530,11 @@ class DatabaseTestCase(ClusterTestCase, ConnectedTestCaseMixin):
                     )
 
             finally:
+                if self.ISOLATED_TEST_BRANCHES:
+                    cls = type(self)
+                    cls.client.close()
+                    cls.client = cls.__client__
+
                 super().tearDown()
 
     @classmethod
@@ -535,7 +552,7 @@ class DatabaseTestCase(ClusterTestCase, ConnectedTestCaseMixin):
             cls.admin_client = cls.make_test_client()
             cls.adapt_call(cls.admin_client.execute(script))
 
-        cls.client = cls.make_test_client(database=dbname)
+        cls.__client__ = cls.client = cls.make_test_client(database=dbname)
         cls.server_version = cls.adapt_call(
             cls.client.query_required_single("""
                 select sys::get_version()

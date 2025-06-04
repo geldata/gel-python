@@ -66,6 +66,8 @@ class TestModelGenerator(tb.ModelTestCase):
 
     SETUP = os.path.join(os.path.dirname(__file__), "dbsetup", "orm.edgeql")
 
+    ISOLATED_TEST_BRANCHES = True
+
     def assert_pointers_match(
         self, obj: type[GelModel], expected: list[MockPointer]
     ):
@@ -279,10 +281,12 @@ class TestModelGenerator(tb.ModelTestCase):
                 num=True,
                 players=lambda s: s.players.select(
                     name=True,
-                    groups=lambda p: p.groups.select(name=True).order_by(
+                    groups=lambda p: p.groups.select(name=True)
+                    .order_by(
                         name="asc",
                         id=("desc", "empty first"),
-                    ).order_by(
+                    )
+                    .order_by(
                         lambda u: u.name,
                         (lambda u: u.name, "asc"),
                         (lambda u: u.name, "asc", "empty last"),
