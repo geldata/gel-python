@@ -332,6 +332,10 @@ class GeneratedModule:
     def export(self, *names: str) -> None:
         self._exports.update(names)
 
+    @property
+    def exports(self) -> set[str]:
+        return self._exports
+
     def current_indentation(self) -> str:
         return self.INDENT * self._indent_level
 

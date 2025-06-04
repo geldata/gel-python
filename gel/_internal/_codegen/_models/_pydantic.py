@@ -18,6 +18,7 @@ import functools
 import graphlib
 import keyword
 import logging
+import operator
 import textwrap
 
 from collections import defaultdict
@@ -55,6 +56,22 @@ COMMENT = """\
 """
 
 logger = logging.getLogger(__name__)
+
+
+@functools.cache
+def ident(s: str) -> str:
+    if keyword.iskeyword(s):
+        return f"{s}_"
+    elif s.isidentifier():
+        return s
+    else:
+        result = "".join(
+            c if c.isidentifier() or c.isdigit() else "_" for c in s
+        )
+        if result and result[0].isdigit():
+            result = f"_{result}"
+
+        return result
 
 
 class IntrospectedModule(TypedDict):
@@ -102,6 +119,7 @@ class SchemaGenerator:
         self._basemodule = "models"
         self._outdir = outdir
         self._modules: dict[reflection.SchemaPath, IntrospectedModule] = {}
+        self._std_modules: list[reflection.SchemaPath] = []
         self._types: Mapping[uuid.UUID, reflection.AnyType] = {}
         self._casts: reflection.CastMatrix
         self._operators: reflection.OperatorMatrix
@@ -113,7 +131,13 @@ class SchemaGenerator:
         self.introspect_schema()
 
         self._generate_common_types()
-        for modname, content in self._modules.items():
+        modules: dict[reflection.SchemaPath, GeneratedSchemaModule] = {}
+        order = sorted(
+            self._modules.items(),
+            key=operator.itemgetter(0),
+            reverse=True,
+        )
+        for modname, content in order:
             if not content:
                 # skip apparently empty modules
                 continue
@@ -127,7 +151,34 @@ class SchemaGenerator:
                 schema_part=self._schema_part,
             )
             module.process(content)
+            module.write_submodules(
+                [
+                    k
+                    for k, v in modules.items()
+                    if k.is_relative_to(modname)
+                    and len(k.parts) == len(modname.parts) + 1
+                    and v.has_content()
+                ]
+            )
             module.write_files(self._outdir)
+            modules[modname] = module
+
+        all_modules = list(self._modules)
+        if self._schema_part is not reflection.SchemaPart.STD:
+            all_modules += [m for m in self._std_modules if len(m.parts) == 1]
+        module = GeneratedSchemaModule(
+            reflection.SchemaPath(),
+            all_types=self._types,
+            all_casts=self._casts,
+            all_operators=self._operators,
+            modules=all_modules,
+            schema_part=self._schema_part,
+        )
+        module.write_submodules([m for m in all_modules if len(m.parts) == 1])
+        default_module = modules.get(reflection.SchemaPath("default"))
+        if default_module is not None:
+            module.reexport_module(default_module)
+        module.write_files(self._outdir)
 
     def introspect_schema(self) -> None:
         for mod in reflection.fetch_modules(self._client, self._schema_part):
@@ -158,6 +209,12 @@ class SchemaGenerator:
             self._functions = these_funcs + reflection.fetch_functions(
                 self._client, std_part
             )
+            self._std_modules = [
+                reflection.parse_name(mod)
+                for mod in reflection.fetch_modules(self._client, std_part)
+            ]
+        else:
+            self._std_modules = list(self._modules)
 
         for t in these_types.values():
             if reflection.is_object_type(t):
@@ -269,6 +326,12 @@ class BaseGeneratedModule:
             )
         self._schema_object_type = schema_obj_type
         self._modules = frozenset(modules)
+        self._submodules = sorted(
+            m
+            for m in self._modules
+            if m.is_relative_to(modname)
+            and len(m.parts) == len(modname.parts) + 1
+        )
         self._schema_part = schema_part
         self._is_package = self.mod_is_package(modname, schema_part)
         self._py_files = {
@@ -295,14 +358,18 @@ class BaseGeneratedModule:
         else:
             return reflection.SchemaPart.USER
 
-    @classmethod
     def mod_is_package(
-        cls,
+        self,
         mod: reflection.SchemaPath,
         schema_part: reflection.SchemaPart,
     ) -> bool:
-        return bool(mod.parent.parts) or (
-            schema_part is reflection.SchemaPart.STD and len(mod.parts) == 1
+        return (
+            not mod.parts
+            or bool(self._submodules)
+            or (
+                schema_part is reflection.SchemaPart.STD
+                and len(mod.parts) == 1
+            )
         )
 
     @property
@@ -316,6 +383,9 @@ class BaseGeneratedModule:
     @property
     def current_aspect(self) -> ModuleAspect:
         return self._current_aspect
+
+    def has_content(self) -> bool:
+        return self.py_files[ModuleAspect.MAIN].has_content()
 
     @contextmanager
     def aspect(self, aspect: ModuleAspect) -> Iterator[None]:
@@ -395,7 +465,10 @@ class BaseGeneratedModule:
 
     def write_files(self, path: pathlib.Path) -> None:
         for aspect, py_file in self.py_files.items():
-            if not py_file.has_content():
+            if not py_file.has_content() and (
+                self._schema_part is not reflection.SchemaPart.STD
+                or aspect is not ModuleAspect.MAIN
+            ):
                 continue
 
             with self._open_py_file(
@@ -426,6 +499,10 @@ class BaseGeneratedModule:
 
     def export(self, *name: str) -> None:
         self.py_file.export(*name)
+
+    @property
+    def exports(self) -> set[str]:
+        return self.py_file.exports
 
     def current_indentation(self) -> str:
         return self.py_file.current_indentation()
@@ -841,6 +918,70 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         self.write_object_types(mod["object_types"])
         self.write_functions(mod["functions"])
 
+    def reexport_module(self, mod: GeneratedSchemaModule) -> None:
+        exports = sorted(mod.exports)
+        if not exports:
+            return
+
+        rel_imp = self._resolve_rel_import(
+            mod.canonical_modpath / exports[0],
+            aspect=ModuleAspect.MAIN,
+            import_directly=True,
+        )
+        if rel_imp is None:
+            raise RuntimeError(
+                f"could not resolve module import: {mod.canonical_modpath}"
+            )
+
+        for export in exports:
+            self.import_name(
+                rel_imp.module,
+                export,
+                suggested_module_alias=rel_imp.module_alias,
+            )
+
+            self.export(export)
+
+    def write_submodules(self, mods: list[reflection.SchemaPath]) -> None:
+        if not mods:
+            return
+
+        builtins_str = self.import_name(
+            "builtins", "str", import_time=ImportTime.typecheck
+        )
+        any_ = self.import_name(
+            "typing", "Any", import_time=ImportTime.typecheck
+        )
+        implib = self.import_name("importlib", ".")
+
+        for mod in mods:
+            self.import_name(
+                "." + mod.name, ".", import_time=ImportTime.typecheck
+            )
+
+        with self.not_type_checking():
+            with self._func_def(
+                "__getattr__", [f"name: {builtins_str}"], any_
+            ):
+                self.write(
+                    self.format_list(
+                        "mods = frozenset([{list}])",
+                        [f'"{m.name}"' for m in mods],
+                    )
+                )
+                self.write("if name in mods:")
+                with self.indented():
+                    self.write(
+                        f'return {implib}.import_module("." + name, __name__)'
+                    )
+                self.write(
+                    'e = f"module {__name__!r} has no attribute {name!r}"'
+                )
+                self.write("raise AttributeError(e)")
+
+        for mod in mods:
+            self.export(mod.name)
+
     def write_description(
         self,
         stype: reflection.ScalarType | reflection.ObjectType,
@@ -1032,7 +1173,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         with self._class_def(tname, [anyenum]):
             self.write_description(stype)
             for value in stype.enum_values:
-                self.write(f"{value} = {value!r}")
+                self.write(f"{ident(value)} = {value!r}")
         self.write_section_break()
 
     def _write_scalar_type(
