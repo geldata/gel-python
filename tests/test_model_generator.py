@@ -470,6 +470,9 @@ class TestModelGenerator(tb.ModelTestCase):
         p.author.name = "Alice the 5th"
         p.body = "I'm Alice the 5th"
 
+        with self.assertRaisesRegex(NotImplementedError, '"del" operation'):
+            del p.body
+
         self.client.save(p)
         self.client.save(p)  # should be no op
 
