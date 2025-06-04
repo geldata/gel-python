@@ -21,7 +21,7 @@ from gel.datatypes import range as _range
 
 from gel._internal import _qb
 from gel._internal import _typing_parametric
-from gel._internal._polyfills import StrEnum
+from gel._internal._polyfills._strenum import StrEnum
 
 from ._base import GelType, GelTypeMeta
 from ._functions import assert_single

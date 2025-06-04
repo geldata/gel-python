@@ -9,7 +9,7 @@ from typing import NamedTuple, final
 
 import enum
 
-from gel._internal._polyfills import StrEnum
+from gel._internal._polyfills._strenum import StrEnum
 
 
 _token_str_map: dict[str, Token] = {}
