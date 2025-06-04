@@ -15,7 +15,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
+# ruff: noqa: ERA001
 
+
+from __future__ import annotations
+from typing import TYPE_CHECKING, Any
+from typing_extensions import Self
 
 import asyncio
 import functools
@@ -23,80 +28,87 @@ import itertools
 import textwrap
 import traceback
 
+if TYPE_CHECKING:
+    from collections.abc import Callable, Coroutine
+    from types import TracebackType
+
 
 class TaskGroup:
+    _loop: asyncio.AbstractEventLoop
 
-    def __init__(self, *, name=None):
+    def __init__(self, *, name: str | None = None) -> None:
         if name is None:
-            self._name = f'tg-{_name_counter()}'
+            self._name = f"tg-{_name_counter()}"
         else:
             self._name = str(name)
 
         self._entered = False
         self._exiting = False
         self._aborting = False
-        self._loop = None
-        self._parent_task = None
+        self._parent_task: asyncio.Task[Any] | None = None
         self._parent_cancel_requested = False
-        self._tasks = set()
+        self._tasks: set[asyncio.Task[Any]] = set()
         self._unfinished_tasks = 0
-        self._errors = []
-        self._base_error = None
-        self._on_completed_fut = None
+        self._errors: list[BaseException] = []
+        self._base_error: BaseException | None = None
+        self._on_completed_fut: asyncio.Future[Any] | None = None
 
-    def get_name(self):
+    def get_name(self) -> str:
         return self._name
 
-    def __repr__(self):
-        msg = f'<TaskGroup {self._name!r}'
+    def __repr__(self) -> str:
+        msg = f"<TaskGroup {self._name!r}"
         if self._tasks:
-            msg += f' tasks:{len(self._tasks)}'
+            msg += f" tasks:{len(self._tasks)}"
         if self._unfinished_tasks:
-            msg += f' unfinished:{self._unfinished_tasks}'
+            msg += f" unfinished:{self._unfinished_tasks}"
         if self._errors:
-            msg += f' errors:{len(self._errors)}'
+            msg += f" errors:{len(self._errors)}"
         if self._aborting:
-            msg += ' cancelling'
+            msg += " cancelling"
         elif self._entered:
-            msg += ' entered'
-        msg += '>'
+            msg += " entered"
+        msg += ">"
         return msg
 
-    async def __aenter__(self):
+    async def __aenter__(self) -> Self:
         if self._entered:
-            raise RuntimeError(
-                f"TaskGroup {self!r} has been already entered")
+            raise RuntimeError(f"TaskGroup {self!r} has been already entered")
         self._entered = True
 
-        if self._loop is None:
-            self._loop = asyncio.get_event_loop()
+        self._loop = asyncio.get_event_loop()
 
-        if hasattr(asyncio, 'current_task'):
-            self._parent_task = asyncio.current_task(self._loop)
-        else:
-            self._parent_task = asyncio.Task.current_task(self._loop)
-
+        self._parent_task = asyncio.current_task(self._loop)
         if self._parent_task is None:
             raise RuntimeError(
-                f'TaskGroup {self!r} cannot determine the parent task')
+                f"TaskGroup {self!r} cannot determine the parent task"
+            )
         self._patch_task(self._parent_task)
 
         return self
 
-    async def __aexit__(self, et, exc, tb):
+    async def __aexit__(
+        self,
+        et: type[BaseException] | None,
+        exc: BaseException | None,
+        tb: TracebackType | None,
+    ) -> None:
         self._exiting = True
         propagate_cancelation = False
 
-        if (exc is not None and
-                self._is_base_error(exc) and
-                self._base_error is None):
+        if (
+            exc is not None
+            and self._is_base_error(exc)
+            and self._base_error is None
+        ):
             self._base_error = exc
 
         if et is asyncio.CancelledError:
             if self._parent_cancel_requested:
                 # Only if we did request task to cancel ourselves
                 # we mark it as no longer cancelled.
-                self._parent_task.__cancel_requested__ = False
+                assert self._parent_task is not None
+                self._parent_task.__cancel_requested__ = False  # type: ignore [attr-defined]
             else:
                 propagate_cancelation = True
 
@@ -155,70 +167,84 @@ class TaskGroup:
             # request now.
             raise asyncio.CancelledError()
 
-        if et is not None and et is not asyncio.CancelledError:
+        if (
+            et is not None
+            and et is not asyncio.CancelledError
+            and exc is not None
+        ):
             self._errors.append(exc)
 
         if self._errors:
             # Exceptions are heavy objects that can have object
             # cycles (bad for GC); let's not keep a reference to
             # a bunch of them.
-            errors = self._errors
-            self._errors = None
+            errors = tuple(self._errors)
+            self._errors.clear()
 
-            me = TaskGroupError('unhandled errors in a TaskGroup',
-                                errors=errors)
+            me = TaskGroupError(
+                "unhandled errors in a TaskGroup", errors=errors
+            )
             raise me from None
 
-    def create_task(self, coro):
+    def create_task(self, coro: Coroutine[Any, Any, Any]) -> asyncio.Task[Any]:
         if not self._entered:
             raise RuntimeError(f"TaskGroup {self!r} has not been entered")
         if self._exiting:
             raise RuntimeError(f"TaskGroup {self!r} is awaiting in exit")
+        assert self._loop is not None
         task = self._loop.create_task(coro)
         task.add_done_callback(self._on_task_done)
         self._unfinished_tasks += 1
         self._tasks.add(task)
         return task
 
-    def _is_base_error(self, exc):
+    def _is_base_error(self, exc: BaseException) -> bool:
         assert isinstance(exc, BaseException)
         return not isinstance(exc, Exception)
 
-    def _patch_task(self, task):
+    def _patch_task(self, task: asyncio.Task[Any]) -> None:
         # In Python 3.8 we'll need proper API on asyncio.Task to
         # make TaskGroups possible. We need to be able to access
         # information about task cancellation, more specifically,
         # we need a flag to say if a task was cancelled or not.
         # We also need to be able to flip that flag.
 
-        def _task_cancel(task, orig_cancel):
-            task.__cancel_requested__ = True
-            return orig_cancel()
+        def _task_cancel(
+            task: asyncio.Task[Any],
+            orig_cancel: Callable[[Any], bool],
+            msg: Any | None = None,
+        ) -> bool:
+            task.__cancel_requested__ = True  # type: ignore [attr-defined]
+            return orig_cancel(msg)
 
-        if hasattr(task, '__cancel_requested__'):
+        if hasattr(task, "__cancel_requested__"):
             return
 
-        task.__cancel_requested__ = False
+        task.__cancel_requested__ = False  # type: ignore [attr-defined]
         # confirm that we were successful at adding the new attribute:
-        assert not task.__cancel_requested__
+        assert not task.__cancel_requested__  # type: ignore [attr-defined]
 
         orig_cancel = task.cancel
-        task.cancel = functools.partial(_task_cancel, task, orig_cancel)
+        task.cancel = functools.partial(_task_cancel, task, orig_cancel)  # type: ignore [method-assign]
 
-    def _abort(self):
+    def _abort(self) -> None:
         self._aborting = True
 
         for t in self._tasks:
             if not t.done():
                 t.cancel()
 
-    def _on_task_done(self, task):
+    def _on_task_done(self, task: asyncio.Task[Any]) -> None:
         self._unfinished_tasks -= 1
         assert self._unfinished_tasks >= 0
 
-        if self._exiting and not self._unfinished_tasks:
-            if not self._on_completed_fut.done():
-                self._on_completed_fut.set_result(True)
+        if (
+            self._exiting
+            and not self._unfinished_tasks
+            and self._on_completed_fut is not None
+            and not self._on_completed_fut.done()
+        ):
+            self._on_completed_fut.set_result(True)
 
         if task.cancelled():
             return
@@ -231,19 +257,22 @@ class TaskGroup:
         if self._is_base_error(exc) and self._base_error is None:
             self._base_error = exc
 
+        assert self._parent_task is not None
         if self._parent_task.done():
             # Not sure if this case is possible, but we want to handle
             # it anyways.
-            self._loop.call_exception_handler({
-                'message': f'Task {task!r} has errored out but its parent '
-                           f'task {self._parent_task} is already completed',
-                'exception': exc,
-                'task': task,
-            })
+            self._loop.call_exception_handler(
+                {
+                    "message": f"Task {task!r} has errored out but its parent "
+                    f"task {self._parent_task} is already completed",
+                    "exception": exc,
+                    "task": task,
+                }
+            )
             return
 
         self._abort()
-        if not self._parent_task.__cancel_requested__:
+        if not self._parent_task.__cancel_requested__:  # type: ignore [attr-defined]
             # If parent task *is not* being cancelled, it means that we want
             # to manually cancel it to abort whatever is being run right now
             # in the TaskGroup.  But we want to mark parent task as
@@ -267,25 +296,26 @@ class TaskGroup:
 
 
 class MultiError(Exception):
-
-    def __init__(self, msg, *args, errors=()):
+    def __init__(
+        self, msg: str, *args: Any, errors: tuple[BaseException, ...] = ()
+    ) -> None:
         if errors:
-            types = set(type(e).__name__ for e in errors)
-            msg = f'{msg}; {len(errors)} sub errors: ({", ".join(types)})'
+            types = {type(e).__name__ for e in errors}
+            msg = f"{msg}; {len(errors)} sub errors: ({', '.join(types)})"
             for er in errors:
-                msg += f'\n + {type(er).__name__}: {er}'
+                msg += f"\n + {type(er).__name__}: {er}"
                 if er.__traceback__:
-                    er_tb = ''.join(traceback.format_tb(er.__traceback__))
-                    er_tb = textwrap.indent(er_tb, ' | ')
-                    msg += f'\n{er_tb}\n'
+                    er_tb = "".join(traceback.format_tb(er.__traceback__))
+                    er_tb = textwrap.indent(er_tb, " | ")
+                    msg += f"\n{er_tb}\n"
         super().__init__(msg, *args)
         self.__errors__ = tuple(errors)
 
-    def get_error_types(self):
+    def get_error_types(self) -> set[type[BaseException]]:
         return {type(e) for e in self.__errors__}
 
-    def __reduce__(self):
-        return (type(self), (self.args,), {'__errors__': self.__errors__})
+    def __reduce__(self) -> tuple[Any, ...]:
+        return (type(self), (self.args,), {"__errors__": self.__errors__})
 
 
 class TaskGroupError(MultiError):

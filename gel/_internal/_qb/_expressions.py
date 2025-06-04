@@ -16,8 +16,8 @@ import typing
 from dataclasses import dataclass, field
 
 from gel._internal import _edgeql
-from gel._internal import _polyfills
 from gel._internal import _reflection
+from gel._internal._polyfills import _strenum
 from gel._internal._reflection import SchemaPath
 
 from ._abstract import (
@@ -357,12 +357,12 @@ class Filter(Clause):
         return f"FILTER {edgeql(fexpr, ctx=ctx)}"
 
 
-class OrderDirection(_polyfills.StrEnum):
+class OrderDirection(_strenum.StrEnum):
     asc = "asc"
     desc = "desc"
 
 
-class OrderEmptyDirection(_polyfills.StrEnum):
+class OrderEmptyDirection(_strenum.StrEnum):
     empty_first = "empty first"
     empty_last = "empty last"
 

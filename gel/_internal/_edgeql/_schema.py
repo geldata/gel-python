@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from typing import final
 
-from gel._internal._polyfills import StrEnum
+from gel._internal._polyfills._strenum import StrEnum
 
 
 @final

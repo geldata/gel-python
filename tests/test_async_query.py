@@ -33,10 +33,7 @@ from gel import _testbase as tb
 from gel.options import RetryOptions
 from gel.protocol import protocol
 
-try:
-    from asyncio import TaskGroup
-except ImportError:
-    from gel._taskgroup import TaskGroup
+from gel._internal._polyfills._taskgroup import TaskGroup
 
 
 class TestAsyncQuery(tb.AsyncQueryTestCase):
