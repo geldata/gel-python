@@ -154,6 +154,40 @@ cdef class ObjectCodec(BaseNamedRecordCodec):
 
         return errors.QueryArgumentError(error_message)
 
+    cdef _decode_plain(self, FRBuffer *buf, Py_ssize_t elem_count):
+        cdef:
+            object result
+            Py_ssize_t i
+            int32_t elem_len
+            object elem
+            BaseCodec elem_codec
+            FRBuffer elem_buf
+            tuple fields_codecs = (<BaseRecordCodec>self).fields_codecs
+            descriptor = (<BaseNamedRecordCodec>self).descriptor
+
+        result = datatypes.object_new(descriptor)
+
+        for i in range(elem_count):
+            frb_read(buf, 4)  # reserved
+            elem_len = hton.unpack_int32(frb_read(buf, 4))
+
+            if elem_len == -1:
+                elem = None
+            else:
+                elem_codec = <BaseCodec>fields_codecs[i]
+                elem = elem_codec.decode(
+                    None,
+                    frb_slice_from(&elem_buf, buf, elem_len)
+                )
+                if frb_get_len(&elem_buf):
+                    raise RuntimeError(
+                        f'unexpected trailing data in buffer after '
+                        f'object element decoding: {frb_get_len(&elem_buf)}')
+
+            datatypes.object_set(result, i, elem)
+
+        return result
+
     cdef decode(self, object return_type, FRBuffer *buf):
         cdef:
             object result, lprops
@@ -171,6 +205,8 @@ cdef class ObjectCodec(BaseNamedRecordCodec):
             object return_type_proxy
             Py_ssize_t fields_codecs_len = len(fields_codecs)
             descriptor = (<BaseNamedRecordCodec>self).descriptor
+            dict lprops_dict
+            dict result_dict
 
         if self.is_sparse:
             raise NotImplementedError
@@ -190,93 +226,82 @@ cdef class ObjectCodec(BaseNamedRecordCodec):
                 f'elements, got {elem_count}')
 
         if return_type is None:
-            result = datatypes.object_new(descriptor)
+            return self._decode_plain(buf, elem_count)
 
-            for i in range(elem_count):
-                frb_read(buf, 4)  # reserved
-                elem_len = hton.unpack_int32(frb_read(buf, 4))
+        if names[0] != '__tid__':
+            raise RuntimeError(
+                f'the first field of object is expected to be __tid__, got {names[0]!r}')
+        frb_read(buf, 4)  # reserved
+        elem_len = hton.unpack_int32(frb_read(buf, 4))
+        if elem_len == -1:
+            raise RuntimeError('__tid__ is unexepectedly empty')
 
-                if elem_len == -1:
-                    elem = None
-                else:
-                    elem_codec = <BaseCodec>fields_codecs[i]
-                    elem = elem_codec.decode(
-                        fields_types[i],
-                        frb_slice_from(&elem_buf, buf, elem_len)
-                    )
-                    if frb_get_len(&elem_buf):
-                        raise RuntimeError(
-                            f'unexpected trailing data in buffer after '
-                            f'object element decoding: {frb_get_len(&elem_buf)}')
+        current_ret_type = return_type
+        if tid_map is not None and len(tid_map) > 1:
+            elem_codec = <BaseCodec>fields_codecs[0]
+            tid = elem_codec.decode(
+                fields_types[0],
+                frb_slice_from(&elem_buf, buf, elem_len)
+            )
 
-                datatypes.object_set(result, i, elem)
+            try:
+                current_ret_type = tid_map[tid]
+            except KeyError:
+                pass
         else:
-            if names[0] != '__tid__':
-                raise RuntimeError(
-                    f'the first field of object is expected to be __tid__, got {names[0]!r}')
+            # Don't bother with actually reading __tid__ if this isn't
+            # a polymorphic query scenario
+            frb_read(buf, elem_len)
+
+        result_dict = {}
+        if return_type_proxy is not None:
+            lprops_dict = {}
+        else:
+            lprops_dict = None
+
+        for i in range(1, elem_count):
             frb_read(buf, 4)  # reserved
             elem_len = hton.unpack_int32(frb_read(buf, 4))
             if elem_len == -1:
-                raise RuntimeError('__tid__ is unexepectedly empty')
-
-            current_ret_type = return_type
-            if tid_map is not None and len(tid_map) > 1:
-                elem_codec = <BaseCodec>fields_codecs[0]
-                tid = elem_codec.decode(
-                    fields_types[0],
+                elem = None
+            else:
+                elem_codec = <BaseCodec>fields_codecs[i]
+                elem = elem_codec.decode(
+                    fields_types[i],
                     frb_slice_from(&elem_buf, buf, elem_len)
                 )
+                if frb_get_len(&elem_buf):
+                    raise RuntimeError(
+                        f'unexpected trailing data in buffer after '
+                        f'object element decoding: {frb_get_len(&elem_buf)}')
 
-                try:
-                    current_ret_type = tid_map[tid]
-                except KeyError:
-                    pass
+            name = names[i]
+            if flags[i] & datatypes._EDGE_POINTER_IS_LINKPROP:
+                assert name[0] == '@' # XXX fix this
+                lprops_dict[name[1:]] = elem
+            elif flags[i] & datatypes._EDGE_POINTER_IS_LINK:
+                dlist_factory = self.cached_return_type_dlists[i]
+                if dlist_factory is tuple:
+                    elem = tuple(elem)
+                elif dlist_factory is not None:
+                    elem = dlist_factory(elem, __wrap_list__=True)
+                result_dict[name] = elem
             else:
-                # Don't bother with actually reading __tid__ if this isn't
-                # a polymorphic query scenario
-                frb_read(buf, elem_len)
+                result_dict[name] = elem
 
-            result = current_ret_type.model_construct()
-            if return_type_proxy is not None:
-                lprops = return_type_proxy.__lprops__.model_construct()
-            else:
-                lprops = None
-
-            for i in range(1, elem_count):
-                frb_read(buf, 4)  # reserved
-                elem_len = hton.unpack_int32(frb_read(buf, 4))
-                if elem_len == -1:
-                    elem = None
-                else:
-                    elem_codec = <BaseCodec>fields_codecs[i]
-                    elem = elem_codec.decode(
-                        fields_types[i],
-                        frb_slice_from(&elem_buf, buf, elem_len)
-                    )
-                    if frb_get_len(&elem_buf):
-                        raise RuntimeError(
-                            f'unexpected trailing data in buffer after '
-                            f'object element decoding: {frb_get_len(&elem_buf)}')
-
-                name = names[i]
-                if flags[i] & datatypes._EDGE_POINTER_IS_LINKPROP:
-                    assert name[0] == '@' # XXX fix this
-                    object.__setattr__(lprops, name[1:], elem)
-                elif flags[i] & datatypes._EDGE_POINTER_IS_LINK:
-                    dlist_factory = self.cached_return_type_dlists[i]
-                    if dlist_factory is tuple:
-                        elem = tuple(elem)
-                    elif dlist_factory is not None:
-                        elem = dlist_factory(elem, __wrap_list__=True)
-                    object.__setattr__(result, name, elem)
-                else:
-                    object.__setattr__(result, name, elem)
-
-            if return_type_proxy is not None:
-                nested = result
-                result = return_type_proxy.model_construct()
-                object.__setattr__(result, '_p__obj__', nested)
-                object.__setattr__(result, '__linkprops__', lprops)
+        if return_type_proxy is not None:
+            nested = current_ret_type.__gel_model_construct__(result_dict)
+            result = return_type_proxy.__gel_model_construct__(None)
+            object.__setattr__(result, '_p__obj__', nested)
+            object.__setattr__(
+                result,
+                '__linkprops__',
+                return_type_proxy.__lprops__.__gel_model_construct__(
+                    lprops_dict
+                )
+            )
+        else:
+            result = current_ret_type.__gel_model_construct__(result_dict)
 
         return result
 
@@ -301,6 +326,11 @@ cdef class ObjectCodec(BaseNamedRecordCodec):
             # of introspecting the return_type and tailoring to it once
             # per Object codec's entire lifespan.
             return
+
+        if not hasattr(return_type, '__gel_model_construct__'):
+            raise TypeError(
+                'only GelModel subclasses are supported in the decoding pipeline'
+            )
 
         lprops_type = None
         proxy = getattr(return_type, '__proxy_of__', None)

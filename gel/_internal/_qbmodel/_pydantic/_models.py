@@ -18,6 +18,7 @@ from typing import (
 
 from typing_extensions import (
     Self,
+    TypeAliasType,
 )
 
 import dataclasses
@@ -45,7 +46,8 @@ from gel._internal._qbmodel import _abstract
 
 if TYPE_CHECKING:
     from typing import Type  # noqa: UP035
-    from collections.abc import Iterator, Iterable
+    from collections.abc import Iterator, Iterable, Set as AbstractSet
+    from gel._internal._qbmodel._abstract import GelType
 
 
 @dataclasses.dataclass(kw_only=True, frozen=True)
@@ -56,15 +58,15 @@ class Pointer:
     kind: _edgeql.PointerKind
     name: str
     readonly: bool
-    type: type[Any]
+    type: type[GelType]
 
     @classmethod
     def from_ptr_info(
         cls,
         name: str,
-        # We're using `Type[Any]` below because `type` is bound
-        # to `type[Any]` a few lines above.
-        type: Type[Any],  # noqa: UP006, A002
+        # We're using `Type[GelType]` below because `type` is bound
+        # to `type[GelType]` a few lines above.
+        type: Type[GelType],  # noqa: UP006, A002
         kind: _edgeql.PointerKind,
         ptrinfo: _abstract.PointerInfo,
     ) -> Self:
@@ -77,6 +79,9 @@ class Pointer:
             readonly=ptrinfo.readonly,
             type=type,
         )
+
+
+GelPointers = TypeAliasType("GelPointers", dict[str, Pointer])
 
 
 _model_pointers_cache: weakref.WeakKeyDictionary[
@@ -152,7 +157,7 @@ class GelModelMeta(_model_construction.ModelMetaclass, _abstract.GelModelMeta):
 
         return tuple(ptrs)
 
-    def __gel_pointers__(cls) -> dict[str, Pointer]:  # noqa: N805
+    def __gel_pointers__(cls) -> GelPointers:  # noqa: N805
         cls = cast("type[GelModel]", cls)
         result = _model_pointers_cache.get(cls)
         if result is None:
@@ -287,50 +292,89 @@ def _process_pydantic_fields(
 
 
 _unset: object = object()
+_empty_str_set: frozenset[str] = frozenset()
+_setattr = object.__setattr__
 
 
 class GelBaseModel(pydantic.BaseModel, metaclass=GelModelMeta):
     # We use slots because PyDantic overrides `__dict__`
     # making state management for "special" properties like
     # these hard.
-    __slots__ = "__gel_changed_fields__", "__gel_track_changes__"
+    __slots__ = ("__gel_changed_fields__",)
 
     __gel_pointer_infos__: ClassVar[dict[str, _abstract.PointerInfo]]
 
     if TYPE_CHECKING:
         __gel_changed_fields__: set[str] | None
-        __gel_track_changes__: bool
 
-    def __new__(cls, *_args: Any, **_kwargs: Any) -> Self:
-        self = super().__new__(cls)
-        object.__setattr__(self, "__gel_track_changes__", False)
-        object.__setattr__(self, "__gel_changed_fields__", None)
+    @classmethod
+    def __gel_model_construct__(cls, __dict__: dict[str, Any] | None) -> Self:
+        self = cls.__new__(cls)
+        if __dict__ is not None:
+            _setattr(self, "__dict__", __dict__)
+            _setattr(self, "__pydantic_fields_set__", set(__dict__.keys()))
+        else:
+            _setattr(self, "__pydantic_fields_set__", set())
+        _setattr(self, "__pydantic_extra__", None)
+        _setattr(self, "__pydantic_private__", None)
+        _setattr(self, "__gel_changed_fields__", None)
         return self
 
     @classmethod
-    def model_construct(cls, *args: Any, **values: Any) -> Self:
-        self = super().model_construct(*args, **values)
-        # Strictly speaking the way we instantiate models doesn't require
-        # this (we call `object.__setattr__` directly), but this is more
-        # futureproof and doesn't cost us much.
-        object.__setattr__(self, "__gel_track_changes__", True)  # noqa: PLC2801
+    def model_construct(
+        cls, _fields_set: set[str] | None = None, **values: Any
+    ) -> Self:
+        self = super().model_construct(_fields_set, **values)
+        _setattr(self, "__gel_changed_fields__", None)
         return self
 
     def __init__(self, /, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         # enable change tracking after init
-        object.__setattr__(self, "__gel_track_changes__", True)
+        _setattr(
+            self, "__gel_changed_fields__", set(self.__pydantic_fields_set__)
+        )
 
-    def __gel_get_changed_fields__(self) -> Iterable[str]:
+    def __gel_get_changed_fields__(self) -> AbstractSet[str]:
         dirty: set[str] | None = object.__getattribute__(
             self, "__gel_changed_fields__"
         )
         if dirty is None:
-            return ()
+            return _empty_str_set
         return dirty
 
     def __gel_commit__(self) -> None:
-        object.__setattr__(self, "__gel_changed_fields__", None)
+        _setattr(self, "__gel_changed_fields__", None)
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        if name not in self.__pydantic_fields__:
+            super().__setattr__(name, value)
+            return
+
+        current_value = getattr(self, name, _unset)
+        if value == current_value:
+            return
+
+        super().__setattr__(name, value)
+
+        dirty: set[str] | None = object.__getattribute__(
+            self, "__gel_changed_fields__"
+        )
+        if dirty is None:
+            dirty = set()
+            object.__setattr__(self, "__gel_changed_fields__", dirty)
+        dirty.add(name)
+
+    def __delattr__(self, name: str) -> None:
+        # The semantics of 'del' isn't straightforward. Probably we should
+        # disable deleting required fields, but then what do we do for optional
+        # fields? Still delete them, or assign them to the default? The default
+        # can be an EdgeQL expression in the schema, so this is where
+        # the Python <> Gel interaction can get weird. So let's disable it
+        # at least for now.
+        raise NotImplementedError(
+            'Gel models do not support the "del" operation'
+        )
 
 
 class GelModel(
@@ -394,29 +438,6 @@ class GelModel(
 
         super().__gel_commit__()
 
-    def __setattr__(self, name: str, value: Any) -> None:
-        if not object.__getattribute__(self, "__gel_track_changes__"):
-            super().__setattr__(name, value)
-            return
-
-        if name not in self.__pydantic_fields__:
-            super().__setattr__(name, value)
-            return
-
-        current_value = getattr(self, name, _unset)
-        if value == current_value:
-            return
-
-        super().__setattr__(name, value)
-
-        dirty: set[str] | None = object.__getattribute__(
-            self, "__gel_changed_fields__"
-        )
-        if dirty is None:
-            dirty = set()
-            object.__setattr__(self, "__gel_changed_fields__", dirty)
-        dirty.add(name)
-
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, GelModel):
             return NotImplemented
@@ -470,14 +491,20 @@ _MT_co = TypeVar("_MT_co", bound=GelModel, covariant=True)
 
 
 class ProxyModel(GelModel, Generic[_MT_co]):
-    __proxy_of__: ClassVar[type[_MT_co]]  # type: ignore [misc]
+    __slots__ = ("_p__obj__",)
+
     __gel_proxied_dunders__: ClassVar[frozenset[str]] = frozenset(
         {
             "__linkprops__",
         }
     )
 
-    _p__obj__: _MT_co
+    if TYPE_CHECKING:
+        _p__obj__: _MT_co
+
+        __proxy_of__: ClassVar[type[_MT_co]]  # type: ignore [misc]
+        __linkprops__: GelLinkModel
+        __lprops__: ClassVar[type[GelLinkModel]]
 
     def __init__(self, obj: _MT_co, /) -> None:
         if not isinstance(obj, self.__proxy_of__):
