@@ -26,6 +26,7 @@ from unittest import mock
 from gel import credentials
 from gel._internal import _platform
 
+
 class _MockExists:
     def __init__(self):
         self.called = False
