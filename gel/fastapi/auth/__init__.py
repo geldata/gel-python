@@ -42,14 +42,8 @@ OnNewIdentity = Callable[
 
 
 class Installable:
-    _enabled: bool = False
-
     def install(self, router: fastapi.APIRouter) -> None:
         raise NotImplementedError
-
-    @property
-    def enabled(self) -> bool:
-        return self._enabled
 
 
 class GelAuth(client_mod.Extension):
@@ -190,10 +184,8 @@ class GelAuth(client_mod.Extension):
             inst = self._insts.get(provider.name)
             if inst is not None:
                 inst.install(router)
-                inst._enabled = True
 
         if config.ui is not None:
             self.builtin_ui.install(router)
-            self.builtin_ui._enabled = True
 
         app.include_router(router)
