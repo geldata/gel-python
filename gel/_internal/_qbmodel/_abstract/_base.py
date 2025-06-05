@@ -49,8 +49,6 @@ else:
     GelTypeMeta = type
 
     class GelType(_qb.AbstractDescriptor, GelTypeMetadata):
-        __gel_type_class__: ClassVar[type]
-
         @hybridmethod
         def __edgeql_qb_expr__(self) -> _qb.Expr:
             if isinstance(self, type):

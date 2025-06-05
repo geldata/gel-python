@@ -11,21 +11,27 @@ from typing import (
 )
 
 import dataclasses
+import functools
+import re
 import uuid
+
+from gel._internal import _dataclass_extras
 
 from . import _enums as enums
 from . import _query
+from . import _support
+from ._struct import struct
 
 if TYPE_CHECKING:
     from gel import abstract
 
 
-@dataclasses.dataclass(frozen=True, kw_only=True)
+@struct
 class TypeRef:
     id: uuid.UUID
 
 
-@dataclasses.dataclass(frozen=True, kw_only=True)
+@struct
 class Type:
     id: uuid.UUID
     kind: enums.TypeKind
@@ -34,73 +40,91 @@ class Type:
     builtin: bool
     internal: bool
 
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, Type):
+            return NotImplemented
+        else:
+            return self.id == other.id
 
-@dataclasses.dataclass(frozen=True, kw_only=True)
+    def __hash__(self) -> int:
+        return hash(self.id)
+
+    @functools.cached_property
+    def schemapath(self) -> _support.SchemaPath:
+        return _support.parse_name(self.name)
+
+
+@struct
 class InheritingType(Type):
     abstract: bool
     final: bool
-    bases: list[TypeRef]
-    ancestors: list[TypeRef]
+    bases: tuple[TypeRef, ...]
+    ancestors: tuple[TypeRef, ...]
 
 
-@dataclasses.dataclass(frozen=True)
+@struct
 class PseudoType(Type):
     kind: Literal[enums.TypeKind.Pseudo]
 
 
-@dataclasses.dataclass(frozen=True, kw_only=True)
+@struct
 class ScalarType(InheritingType):
     kind: Literal[enums.TypeKind.Scalar]
     is_seq: bool
-    enum_values: list[str] | None = None
+    enum_values: tuple[str, ...] | None = None
     material_id: uuid.UUID | None = None
     cast_type: uuid.UUID | None = None
 
 
-@dataclasses.dataclass(frozen=True)
+@struct
 class ObjectType(InheritingType):
     kind: Literal[enums.TypeKind.Object]
-    union_of: list[TypeRef]
-    intersection_of: list[TypeRef]
+    union_of: tuple[TypeRef, ...]
+    intersection_of: tuple[TypeRef, ...]
     compound_type: bool
-    pointers: list[Pointer]
-    exclusives: list[dict[str, Pointer]]
+    pointers: tuple[Pointer, ...]
 
 
-@dataclasses.dataclass(frozen=True, kw_only=True)
-class ArrayType(Type):
+class CollectionType(Type):
+    @functools.cached_property
+    def schemapath(self) -> _support.SchemaPath:
+        return _support.SchemaPath(re.sub(r"\|+", "::", self.name))
+
+
+@struct
+class ArrayType(CollectionType):
     kind: Literal[enums.TypeKind.Array]
     array_element_id: uuid.UUID
 
 
-@dataclasses.dataclass(frozen=True, kw_only=True)
-class RangeType(InheritingType):
+@struct
+class RangeType(CollectionType):
     kind: Literal[enums.TypeKind.Range]
     range_element_id: uuid.UUID
 
 
-@dataclasses.dataclass(frozen=True, kw_only=True)
-class MultiRangeType(InheritingType):
+@struct
+class MultiRangeType(CollectionType):
     kind: Literal[enums.TypeKind.MultiRange]
     multirange_element_id: uuid.UUID
 
 
-@dataclasses.dataclass(frozen=True, kw_only=True)
+@struct
 class TupleElement:
     name: str
     type_id: uuid.UUID
 
 
-@dataclasses.dataclass(frozen=True)
-class TupleType(Type):
+@struct
+class TupleType(CollectionType):
     kind: Literal[enums.TypeKind.Tuple]
-    tuple_elements: list[TupleElement]
+    tuple_elements: tuple[TupleElement, ...]
 
 
-@dataclasses.dataclass(frozen=True)
-class NamedTupleType(Type):
+@struct
+class NamedTupleType(CollectionType):
     kind: Literal[enums.TypeKind.NamedTuple]
-    tuple_elements: list[TupleElement]
+    tuple_elements: tuple[TupleElement, ...]
 
 
 PrimitiveType = (
@@ -115,6 +139,18 @@ PrimitiveType = (
 AnyType = PseudoType | PrimitiveType | ObjectType
 
 Types = dict[uuid.UUID, AnyType]
+
+
+_kind_to_class: dict[enums.TypeKind, type[Type]] = {
+    enums.TypeKind.Array: ArrayType,
+    enums.TypeKind.MultiRange: MultiRangeType,
+    enums.TypeKind.NamedTuple: NamedTupleType,
+    enums.TypeKind.Object: ObjectType,
+    enums.TypeKind.Pseudo: PseudoType,
+    enums.TypeKind.Range: RangeType,
+    enums.TypeKind.Scalar: ScalarType,
+    enums.TypeKind.Tuple: TupleType,
+}
 
 
 def is_pseudo_type(t: AnyType) -> TypeGuard[PseudoType]:
@@ -167,7 +203,7 @@ class Pointer:
     is_computed: bool
     is_readonly: bool
     has_default: bool
-    pointers: list[Pointer] | None = None
+    pointers: tuple[Pointer, ...] | None = None
 
 
 def is_link(p: Pointer) -> bool:
@@ -186,5 +222,7 @@ def fetch_types(
     types: list[AnyType] = db.query(_query.TYPES, builtin=builtin)
     result = {}
     for t in types:
-        result[t.id] = t
-    return result
+        result[t.id] = _dataclass_extras.coerce_to_dataclass(
+            _kind_to_class[t.kind], t
+        )
+    return result  # type: ignore [return-value]
