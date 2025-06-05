@@ -19,6 +19,8 @@
 from typing import Any
 
 import dataclasses
+import datetime as dt
+import json
 import os
 import typing
 
@@ -1279,7 +1281,7 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(res.configure[0].__linkprops__.create, True)
 
     @tb.to_be_fixed
-    def test_modelgen_linkprops_1(self):
+    def test_modelgen_linkprops_01(self):
         from models import default
 
         # Create a new GameSession and add a player
@@ -1308,7 +1310,7 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(p.__linkprops__.is_tall_enough, True)
 
     @tb.to_be_fixed
-    def test_modelgen_linkprops_2(self):
+    def test_modelgen_linkprops_02(self):
         from models import default
 
         # Create a new GameSession and add a player
@@ -1345,7 +1347,7 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(p.__linkprops__.is_tall_enough, False)
 
     @tb.to_be_fixed
-    def test_modelgen_linkprops_3(self):
+    def test_modelgen_linkprops_03(self):
         from models import default
 
         # This one only has a single player
@@ -1378,6 +1380,169 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(p1.name, 'Dana?')
         self.assertEqual(p1.nickname, 'HACKED')
         self.assertEqual(p1.__linkprops__.is_tall_enough, False)
+
+    @tb.must_fail
+    def test_modelgen_linkprops_04(self):
+        from models import default
+
+        # It should not be possible to append the wrong kind of proxy model
+        u = self.client.get(default.User.filter(name='Zoe'))
+        gs = default.GameSession(num=111)
+        gs.players.append(default.Team.members.link(u))
+        self.client.save(gs)
+
+    def test_modelgen_scalars_01(self):
+        from models import default
+
+        # Get the object with non-trivial scalars
+        s = self.client.get(
+            default.AssortedScalars.filter(name='hello world'))
+        self.assertEqual(s.name, 'hello world')
+        self.assertEqual(s.vals, ['brown', 'fox'])
+        self.assertEqual(
+            json.loads(s.json),
+            [
+                'hello',
+                {
+                    'age': 42,
+                    'name': 'John Doe',
+                    'special': None,
+                },
+                False,
+            ],
+        )
+        self.assertEqual(s.bstr, b'word\x00\x0b')
+        self.assertEqual(s.time, dt.time(20, 13, 45, 678000))
+        self.assertEqual(s.date, dt.date(2025, 1, 26))
+        self.assertEqual(
+            s.ts,
+            dt.datetime(2025, 1, 26, 20, 13, 45, tzinfo=dt.timezone.utc)
+        )
+        self.assertEqual(
+            s.lts,
+            dt.datetime(2025, 1, 26, 20, 13, 45)
+        )
+
+    def test_modelgen_scalars_02(self):
+        from models import default
+
+        # Get the object with non-trivial scalars
+        s = self.client.get(
+            default.NestedScalars.filter(name='hello world'))
+        self.assertEqual(s.name, 'hello world')
+        self.assertEqual(
+            s.nested_array,
+            [(1, 'a'), (2, 'big'), (3, 'cat')],
+        )
+        self.assertEqual(
+            s.nested_tuple,
+            ((99, 'beers on the wall'), True),
+        )
+        self.assertEqual(
+            [(t[0], json.loads(t[1])) for t in s.nested_mixed],
+            [
+                (
+                    [1, 1, 2, 3],
+                    {'next': 5, 'label': 'Fibonacci sequence'},
+                ),
+                (
+                    [123, 0, 0, 3],
+                    'simple JSON',
+                ),
+                (
+                    [],
+                    None,
+                )
+            ],
+        )
+
+    def _compare_scalars(self, tname, name, prop):
+        self.assertTrue(
+            self.client.query_single(f'''
+                with
+                    A := assert_single((
+                        select {tname}
+                        filter .name = 'hello world'
+                    )),
+                    B := assert_single((
+                        select {tname}
+                        filter .name = {name!r}
+                    )),
+                select A.{prop} = B.{prop}
+            '''),
+            f'property {prop} value does not match'
+        )
+
+    def test_modelgen_scalars_03(self):
+        from models import default
+
+        # Create a new AssortedScalars object with all fields same as the
+        # existing one, except the name. This makes it easy to verify the
+        # result.
+        s = default.AssortedScalars(name='test03')
+        s.vals = ['brown', 'fox']
+        self.client.save(s)
+        _compare_scalars('AssortedScalars', 'test03', 'vals')
+
+        s.json = json.dumps(
+            [
+                'hello',
+                {
+                    'age': 42,
+                    'name': 'John Doe',
+                    'special': None,
+                },
+                False,
+            ],
+        )
+        self.client.save(s)
+        _compare_scalars('AssortedScalars', 'test03', 'json')
+
+        s.bstr = b'word\x00\x0b'
+        self.client.save(s)
+        _compare_scalars('AssortedScalars', 'test03', 'bstr')
+
+        s.time = dt.time(20, 13, 45, 678000)
+        s.date = dt.date(2025, 1, 26)
+        s.ts = dt.datetime(2025, 1, 26, 20, 13, 45, tzinfo=dt.timezone.utc)
+        s.lts = dt.datetime(2025, 1, 26, 20, 13, 45)
+        self.client.save(s)
+        _compare_scalars('AssortedScalars', 'test03', 'time')
+        _compare_scalars('AssortedScalars', 'test03', 'date')
+        _compare_scalars('AssortedScalars', 'test03', 'ts')
+        _compare_scalars('AssortedScalars', 'test03', 'lts')
+
+    def test_modelgen_scalars_04(self):
+        from models import default
+
+        # Create a new NestedScalars object with all fields same as the
+        # existing one, except the name. This makes it easy to verify the
+        # result.
+        s = default.NestedScalars(name='test04')
+        s.nested_array = [(1, 'a'), (2, 'big'), (3, 'cat')]
+        self.client.save(s)
+        _compare_scalars('NestedScalars', 'test04', 'nested_array')
+
+        s.nested_tuple = ((99, 'beers on the wall'), True)
+        self.client.save(s)
+        _compare_scalars('NestedScalars', 'test04', 'nested_tuple')
+
+        s.nested_mixed = [
+            (
+                [1, 1, 2, 3],
+                json.dumps({'next': 5, 'label': 'Fibonacci sequence'}),
+            ),
+            (
+                [123, 0, 0, 3],
+                '"simple JSON"',
+            ),
+            (
+                [],
+                'null',
+            )
+        ]
+        self.client.save(s)
+        _compare_scalars('NestedScalars', 'test04', 'nested_mixed')
 
     def test_modelgen_reflection_1(self):
         from models import default, std

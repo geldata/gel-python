@@ -50,11 +50,24 @@ insert Post {
 insert AssortedScalars {
     name:= 'hello world',
     vals := ['brown', 'fox'],
+    json := to_json(
+        '["hello", {"name": "John Doe", "age": 42, "special": null}, false]'),
     bstr := b'word\x00\x0b',
     time := <cal::local_time>'20:13:45.678',
     date:= <cal::local_date>'2025-01-26',
     ts:=<datetime>'2025-01-26T20:13:45+00:00',
     lts:=<cal::local_datetime>'2025-01-26T20:13:45',
+};
+
+insert NestedScalars {
+    name:= 'hello world',
+    nested_array := [(1, 'a'), (2, 'big'), (3, 'cat')],
+    nested_tuple := ((99, 'beers on the wall'), true),
+    nested_mixed := [
+        ([1, 1, 2, 3], to_json('{"label": "Fibonacci sequence", "next": 5}')),
+        ([123, 0, 0, 3], to_json('"simple JSON"')),
+        (<array<int64>>[], to_json('null')),
+    ],
 };
 
 insert Image {

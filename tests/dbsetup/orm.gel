@@ -39,11 +39,20 @@ type AssortedScalars {
     required name: str;
     vals: array<str>;
 
+    json: json;
     date: cal::local_date;
     time: cal::local_time;
     ts: datetime;
     lts: cal::local_datetime;
     bstr: bytes;
+}
+
+type NestedScalars {
+    required name: str;
+    # nested composite scalars
+    nested_array: array<tuple<int64, str>>;
+    nested_tuple: tuple<tuple<int64, str>, bool>;
+    nested_mixed: array<tuple<array<int64>, json>>;
 }
 
 # Object with required multi link, no link props
