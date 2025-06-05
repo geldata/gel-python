@@ -23,7 +23,7 @@ try:
 except ImportError:
     warnings.warn("FastAPI is not installed.")
 else:
-    from .client import gelify, gelify_blocking
+    from .client import gelify, gelify_blocking, Client, BlockingClient
 
 try:
     import httpx, jwt

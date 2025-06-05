@@ -18,10 +18,11 @@
 
 from __future__ import annotations
 from typing import (
+    Any,
+    Annotated,
     Callable,
     Generic,
     Optional,
-    Type,
     TypeVar,
     Union,
 )
@@ -45,6 +46,7 @@ import gel
 from starlette import concurrency
 
 
+GEL_STATE_NAME_STATE = "_gel_state_name"
 P = ParamSpec("P")
 Client_T = TypeVar("Client_T", bound=Union[gel.AsyncIOClient, gel.Client])
 Lifespan_T = TypeVar("Lifespan_T", bound="GelLifespan[Client_T]")
@@ -61,7 +63,10 @@ class GelLifespan(Generic[Client_T]):
 
     async def __aenter__(self) -> dict[str, Client_T]:
         await self._ensure_connected()
-        return {self._state_name: self._client}
+        return {
+            self._state_name: self._client,
+            GEL_STATE_NAME_STATE: self._state_name,
+        }
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         await self._shutdown(self._shutdown_timeout)
@@ -149,3 +154,12 @@ def make_gelify(
 
 gelify = make_gelify(gel.create_async_client, AsyncIOLifespan)
 gelify_blocking = make_gelify(gel.create_client, BlockingIOLifespan)
+
+
+def get_client(request: fastapi.Request) -> Any:
+    state_name = getattr(request.state, GEL_STATE_NAME_STATE)
+    return getattr(request.state, state_name)
+
+
+Client = Annotated[gel.AsyncIOClient, fastapi.Depends(get_client)]
+BlockingClient = Annotated[gel.Client, fastapi.Depends(get_client)]
