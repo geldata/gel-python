@@ -32,6 +32,10 @@ def is_generic_alias(t: Any) -> TypeGuard[GenericAlias]:
     return isinstance(t, (GenericAlias, _GenericAlias, _SpecialGenericAlias))
 
 
+def is_valid_type_arg(t: Any) -> bool:
+    return isinstance(t, type) or is_generic_alias(t)
+
+
 def is_type_alias(t: Any) -> TypeGuard[TypeAliasType]:
     return isinstance(t, TypeAliasType) and not is_generic_alias(t)
 

@@ -4,8 +4,9 @@ import dataclasses
 
 from typing import TYPE_CHECKING, NamedTuple, TypeAlias, TypeVar, Generic
 
+from gel._internal._qbmodel._abstract import GelPrimitiveType
 from gel._internal._qbmodel._pydantic._models import GelModel, ProxyModel
-from gel._internal._dlist import DistinctList
+from gel._internal._dlist import TrackedList, DistinctList
 from gel._internal._unsetid import UNSET_UUID
 from gel._internal._edgeql import PointerKind, quote_ident
 
@@ -21,6 +22,12 @@ T = TypeVar("T")
 _unset = object()
 
 
+class MultiPropertyChanges(NamedTuple):
+    name: str
+    added: Iterable[GelPrimitiveType]
+    removed: Iterable[GelPrimitiveType]
+
+
 class MultiLinkChanges(NamedTuple):
     name: str
     added: Iterable[GelModel]
@@ -30,6 +37,7 @@ class MultiLinkChanges(NamedTuple):
 class ModelChanges(NamedTuple):
     model: GelModel
     fields: Iterable[str]
+    multi_props: Iterable[MultiPropertyChanges]
     multi_links: Iterable[MultiLinkChanges]
 
 
@@ -73,7 +81,13 @@ class IDTracker(Generic[T]):
         yield from self._seen.values()
 
 
-def is_dlist(val: object) -> TypeGuard[DistinctList[GelModel]]:
+def _is_prop_list(val: object) -> TypeGuard[TrackedList[GelPrimitiveType]]:
+    return isinstance(val, TrackedList) and issubclass(
+        type(val).type, GelPrimitiveType
+    )
+
+
+def _is_link_list(val: object) -> TypeGuard[DistinctList[GelModel]]:
     return isinstance(val, DistinctList) and issubclass(
         type(val).type, GelModel
     )
@@ -114,7 +128,7 @@ def iter_graph(objs: Iterable[GelModel]) -> Iterable[GelModel]:
                 continue
 
             if prop.cardinality.is_multi():
-                assert is_dlist(linked)
+                assert _is_link_list(linked)
                 for ref in linked:
                     yield from _traverse(unwrap_proxy(ref))
             else:
@@ -146,7 +160,7 @@ def get_linked_new_objects(obj: GelModel) -> Iterable[GelModel]:
             continue
 
         if prop.cardinality.is_multi():
-            assert is_dlist(linked)
+            assert _is_link_list(linked)
             for ref in linked:
                 unwrapped = unwrap_proxy(ref)
                 if unwrapped.id is UNSET_UUID and unwrapped not in visited:
@@ -174,29 +188,37 @@ def compute_ops(
         # Capture changes in *properties* and *single links*
         field_changes = obj.__gel_get_changed_fields__()
 
-        # Compute changes in *multi links* (for existing objects)
+        # Compute changes in *multi links* and *multi properties*
+        # (for existing objects)
+        prop_changes: list[MultiPropertyChanges] = []
         link_changes: list[MultiLinkChanges] = []
         for prop in pointers.values():
-            if (
-                prop.computed
-                or prop.kind is not PointerKind.Link
-                or not prop.cardinality.is_multi()
-            ):
+            if prop.computed or not prop.cardinality.is_multi():
                 # See _get_all_deps for explanation.
                 continue
 
-            linked = getattr(obj, prop.name, _unset)
-            if linked is _unset or linked is None:
+            val = getattr(obj, prop.name, _unset)
+            if val is _unset or val is None:
                 continue
 
-            assert is_dlist(linked)
-            added = linked.__gel_get_added__()
-            removed = linked.__gel_get_removed__()
+            if prop.kind is PointerKind.Link:
+                assert _is_link_list(val)
+                added_objs = val.__gel_get_added__()
+                removed_objs = val.__gel_get_removed__()
 
-            if added or removed:
-                link_changes.append(
-                    MultiLinkChanges(prop.name, added, removed)
-                )
+                if added_objs or removed_objs:
+                    link_changes.append(
+                        MultiLinkChanges(prop.name, added_objs, removed_objs)
+                    )
+            else:
+                assert _is_prop_list(val)
+                added = val.__gel_get_added__()
+                removed = val.__gel_get_removed__()
+
+                if added or removed:
+                    prop_changes.append(
+                        MultiPropertyChanges(prop.name, added, removed)
+                    )
 
         if is_new:
             new_objects.append(obj)
@@ -214,7 +236,7 @@ def compute_ops(
                 if val is _unset:
                     continue
                 if prop.cardinality.is_multi():
-                    assert is_dlist(val)
+                    assert _is_link_list(val)
                     if val:
                         optional_links.append(
                             MultiLinkChanges(prop.name, list(val), [])
@@ -224,11 +246,13 @@ def compute_ops(
 
             if optional_fields or optional_links:
                 update_ops.append(
-                    ModelChanges(obj, optional_fields, optional_links)
+                    ModelChanges(obj, optional_fields, (), optional_links)
                 )
 
         elif field_changes or link_changes:
-            update_ops.append(ModelChanges(obj, field_changes, link_changes))
+            update_ops.append(
+                ModelChanges(obj, field_changes, (), link_changes)
+            )
 
     # Compute batch creation of new objects
 
@@ -325,27 +349,33 @@ class SaveExecutor:
             unwrapped.__gel_commit__(self.object_ids.get(id(unwrapped)))
 
             for prop in type(obj).__gel_pointers__().values():
-                if prop.computed or prop.kind is not PointerKind.Link:
+                if prop.computed:
                     # We don't want to traverse computeds (they don't form the
                     # actual dependency graph, real links do)
                     continue
 
-                linked = getattr(obj, prop.name, _unset)
-                if linked is _unset or linked is None:
+                val = getattr(obj, prop.name, _unset)
+                if val is _unset or val is None:
                     # If users mess-up with user-defined types and smoe
                     # of the data isn't fetched, we don't want to crash
                     # with an AttributeErorr, it's not critical here.
                     # Not fetched means not used, which is good for save().
                     continue
 
-                if prop.cardinality.is_multi():
-                    assert is_dlist(linked)
-                    for ref in linked:
-                        _traverse(unwrap_proxy(ref))
-                    linked.__gel_commit__()
+                if prop.kind is PointerKind.Link:
+                    if prop.cardinality.is_multi():
+                        assert _is_link_list(val)
+                        for ref in val:
+                            _traverse(unwrap_proxy(ref))
+                        val.__gel_commit__()
+                    else:
+                        assert isinstance(val, GelModel)
+                        _traverse(unwrap_proxy(val))
                 else:
-                    assert isinstance(linked, GelModel)
-                    _traverse(unwrap_proxy(linked))
+                    assert prop.kind is PointerKind.Property
+                    if prop.cardinality.is_multi():
+                        assert _is_prop_list(val)
+                        val.__gel_commit__()
 
         for o in self.objs:
             _traverse(o)
@@ -377,13 +407,16 @@ class SaveExecutor:
             q_name = quote_ident(prop_name)
 
             if prop.kind is PointerKind.Property:
-                scalar_type = (
-                    prop.type.__gel_reflection__.name.as_schema_name()
-                )
-                q_scalar_type = quote_ident(scalar_type)
+                prim_type = prop.type.__gel_reflection__.name.as_schema_name()
                 arg = self.param_builder()
                 args[arg] = val
-                shape_parts.append(f"{q_name} := <{q_scalar_type}>${arg}")
+
+                if prop.cardinality.is_multi():
+                    expr = f"std::array_unpack(<array<{prim_type}>>${arg})"
+                else:
+                    expr = f"<{prim_type}>${arg}"
+
+                shape_parts.append(f"{q_name} := {expr}")
 
             else:
                 assert prop.kind is PointerKind.Link
@@ -393,7 +426,7 @@ class SaveExecutor:
 
                 if prop.cardinality.is_multi():
                     items: list[str] = []
-                    assert is_dlist(val)
+                    assert _is_link_list(val)
                     for linked in val:
                         u = unwrap_proxy(linked)
                         arg = self.param_builder()
@@ -439,13 +472,10 @@ class SaveExecutor:
             q_name = quote_ident(name)
             val = getattr(obj, name)
             if prop.kind is PointerKind.Property:
-                scalar_type = (
-                    prop.type.__gel_reflection__.name.as_schema_name()
-                )
-                q_scalar_type = quote_ident(scalar_type)
+                prim_type = prop.type.__gel_reflection__.name.as_schema_name()
                 param = self.param_builder()
                 args[param] = val
-                assignments.append(f"{q_name} := <{q_scalar_type}>${param}")
+                assignments.append(f"{q_name} := <{prim_type}>${param}")
             else:
                 assert prop.kind is PointerKind.Link
 
@@ -486,6 +516,25 @@ class SaveExecutor:
                     q_t = quote_ident(t_name)
                     items_rm.append(f"<{q_t}><uuid>${param}")
                 assignments.append(f"{q_name} -= {{{', '.join(items_rm)}}}")
+
+        # multi props: perform add/remove updates
+        for mp in change.multi_props:
+            name = mp.name
+            prop = pointers[name]
+            prim_type = prop.type.__gel_reflection__.name.as_schema_name()
+            q_name = quote_ident(name)
+
+            if mp.added:
+                arg = self.param_builder()
+                args[arg] = list(mp.added)
+                expr = f"std::array_unpack(<array<{prim_type}>>${arg})"
+                assignments.append(f"{q_name} += {expr}")
+
+            if mp.removed:
+                arg = self.param_builder()
+                args[arg] = list(mp.removed)
+                expr = f"std::array_unpack(<array<{prim_type}>>${arg})"
+                assignments.append(f"{q_name} -= {expr}")
 
         assert assignments
 

@@ -284,7 +284,9 @@ class ParametricType:
             for i, attr in tuple_to_attr.items():
                 type_dict[attr] = all_params[i]
 
-        if not all(isinstance(param, type) for param in type_params):
+        if not all(
+            _typing_inspect.is_valid_type_arg(param) for param in type_params
+        ):
             if all(
                 type(param) is TypeVar  # type: ignore[comparison-overlap]
                 for param in type_params
