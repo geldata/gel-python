@@ -52,7 +52,7 @@ class Installable:
         return self._enabled
 
 
-class GelAuth(client_mod.AsyncIOLifespan):
+class GelAuth(client_mod.Extension):
     auth_path_prefix: str = "/auth"
     auth_cookie_name: str = "gel_auth_token"
     verifier_cookie_name: str = "gel_verifier"
@@ -61,16 +61,13 @@ class GelAuth(client_mod.AsyncIOLifespan):
     email_password: EmailPassword
     builtin_ui: BuiltinUI
 
-    _app: fastapi.FastAPI
     _pkce_verifier: Optional[security.APIKeyCookie] = None
     _maybe_auth_token: Optional[security.APIKeyCookie] = None
     _auth_token: Optional[security.APIKeyCookie] = None
     _on_new_identity: Optional[OnNewIdentity] = None
     _insts: dict[str, Installable]
 
-    def __init__(self, client: gel.AsyncIOClient) -> None:
-        super().__init__(client)
-
+    def _post_init(self) -> None:
         from .email_password import EmailPassword
         from .builtin_ui import BuiltinUI
 
@@ -122,15 +119,19 @@ class GelAuth(client_mod.AsyncIOLifespan):
             )
         return self._pkce_verifier
 
+    @property
+    def client(self) -> gel.AsyncIOClient:
+        return self._lifespan.client
+
     def client_with_auth_token(
         self, auth_token: Optional[str]
     ) -> gel.AsyncIOClient:
         if auth_token:
-            return self._client.with_globals(
+            return self.client.with_globals(
                 {"ext::auth::client_token": auth_token}
             )
         else:
-            return self._client
+            return self.client
 
     @property
     def maybe_auth_token_cookie(self) -> security.APIKeyCookie:
@@ -170,13 +171,12 @@ class GelAuth(client_mod.AsyncIOLifespan):
                 token_data,
             )
 
-    async def __aenter__(self) -> dict[str, gel.AsyncIOClient]:
-        rv = await super().__aenter__()
+    async def on_startup(self, app: fastapi.FastAPI) -> None:
         router = fastapi.APIRouter(
             prefix=self.auth_path_prefix,
             tags=self.tags,
         )
-        config = await self._client.query_single(
+        config = await self._lifespan.client.query_single(
             """
             select assert_single(
                 cfg::Config.extensions[is ext::auth::AuthConfig]
@@ -196,12 +196,4 @@ class GelAuth(client_mod.AsyncIOLifespan):
             self.builtin_ui.install(router)
             self.builtin_ui._enabled = True
 
-        self._app.include_router(router)
-        return rv
-
-    def install(self, app: fastapi.FastAPI) -> None:
-        super().install(app)
-        self._app = app
-
-
-authify = client_mod.make_gelify(gel.create_async_client, GelAuth)
+        app.include_router(router)
