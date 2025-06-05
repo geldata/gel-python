@@ -628,3 +628,9 @@ class TestModelGenerator(tb.ModelTestCase):
                 ),
             ],
         )
+
+        ntup_t = default.sub.TypeInSub.__gel_pointers__()["ntup"].type
+        self.assertEqual(
+            ntup_t.__gel_reflection__.name.as_schema_name(),
+            "tuple<a:std::str, b:tuple<c:std::int64, d:std::str>>"
+        )

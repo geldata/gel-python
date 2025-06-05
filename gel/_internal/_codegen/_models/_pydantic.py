@@ -478,6 +478,30 @@ class BaseGeneratedModule:
             ) as f:
                 py_file.output(f)
 
+    def write_type_reflection(
+        self,
+        stype: reflection.AnyType,
+    ) -> None:
+        uuid = self.import_name("uuid", "UUID")
+        schemapath = self.import_name(BASE_IMPL, "SchemaPath")
+        if isinstance(stype, reflection.InheritingType):
+            base_types = [
+                self.get_type(self._types[base.id]) for base in stype.bases
+            ]
+        else:
+            gmm = self.import_name(BASE_IMPL, "GelTypeMetadata")
+            base_types = [gmm]
+        with self._class_def(
+            "__gel_reflection__",
+            _map_name(
+                lambda s: f"{s}.__gel_reflection__",
+                base_types,
+            ),
+        ):
+            self.write(f"id = {uuid}(int={stype.id.int})")
+            schema_path = ", ".join(repr(p) for p in stype.schemapath.parts)
+            self.write(f"name = {schemapath}({schema_path})")
+
     def import_name(
         self,
         module: str,
@@ -1246,7 +1270,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             with self._class_def(
                 tname, typecheck_parents, class_kwargs={"metaclass": tmeta}
             ):
-                self._write_type_reflection(stype)
+                self.write_type_reflection(stype)
 
         self.write()
 
@@ -1257,33 +1281,9 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             with self._class_def(tname, runtime_parents):
                 self.write(f"__gel_type_class__: {classvar}[type] = {tmeta}")
                 self.write()
-                self._write_type_reflection(stype)
+                self.write_type_reflection(stype)
 
         self.write_section_break()
-
-    def _write_type_reflection(
-        self,
-        stype: reflection.AnyType,
-    ) -> None:
-        uuid = self.import_name("uuid", "UUID")
-        schemapath = self.import_name(BASE_IMPL, "SchemaPath")
-        type_name = reflection.parse_name(stype.name)
-        if isinstance(stype, reflection.InheritingType):
-            base_types = [
-                self.get_type(self._types[base.id]) for base in stype.bases
-            ]
-        else:
-            base_types = []
-        with self._class_def(
-            "__gel_reflection__",
-            _map_name(
-                lambda s: f"{s}.__gel_reflection__",
-                base_types,
-            ),
-        ):
-            self.write(f"id = {uuid}(int={stype.id.int})")
-            schema_path = ", ".join(repr(p) for p in type_name.parts)
-            self.write(f"name = {schemapath}({schema_path})")
 
     def render_callable_return_type(
         self,
@@ -1662,7 +1662,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         self.write(f"# type {objtype.name}")
         self.write("#")
 
-        type_name = reflection.parse_name(objtype.name)
+        type_name = objtype.schemapath
         name = type_name.name
 
         def _mangle_typeof(name: str) -> str:
@@ -2729,7 +2729,7 @@ class GeneratedGlobalModule(BaseGeneratedModule):
         anytuple = self.import_name(BASE_IMPL, "AnyTuple")
 
         self.write("#")
-        self.write(f"# tuple type {t.name}")
+        self.write(f"# tuple type {t.schemapath.as_schema_name()}")
         self.write("#")
         classname = self.get_tuple_name(t)
         with self._class_def(f"_{classname}", [namedtuple]):
@@ -2741,5 +2741,7 @@ class GeneratedGlobalModule(BaseGeneratedModule):
                 self.write(f"{elem.name}: {elem_type}")
         self.write_section_break()
         with self._class_def(classname, [f"_{classname}", anytuple]):
+            self.write_type_reflection(t)
+            self.write()
             self.write("__slots__ = ()")
         self.write()

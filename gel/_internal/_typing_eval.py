@@ -8,6 +8,7 @@ from typing import (
     Annotated,
     Any,
     ForwardRef,
+    Literal,
     Union,
 )
 from typing_extensions import (
@@ -89,6 +90,9 @@ def resolve_type(
                     locals=locals,
                 )
             return resolved
+
+        elif origin is Literal:  # type: ignore [comparison-overlap]
+            return value
 
         # other typing generics (e.g. list[int])
         else:
