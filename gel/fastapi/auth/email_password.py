@@ -201,11 +201,10 @@ class EmailPassword(Installable):
         request: fastapi.Request,
         **query_params: str,
     ) -> fastapi.Response:
-        name = self.error_page_name
-        if self._auth.builtin_ui.enabled:
-            name = self._auth.builtin_ui.sign_in_name
         return self.redirect_class(
-            url=request.url_for(name).include_query_params(**query_params),
+            url=request.url_for(self.error_page_name).include_query_params(
+                **query_params
+            ),
             status_code=self.redirect_code,
         )
 
@@ -214,11 +213,10 @@ class EmailPassword(Installable):
         request: fastapi.Request,
         **query_params: str,
     ) -> fastapi.Response:
-        name = self.sign_in_page_name
-        if self._auth.builtin_ui.enabled:
-            name = self._auth.builtin_ui.sign_in_name
         return self.redirect_class(
-            url=request.url_for(name).include_query_params(**query_params),
+            url=request.url_for(self.sign_in_page_name).include_query_params(
+                **query_params
+            ),
             status_code=self.redirect_code,
         )
 
