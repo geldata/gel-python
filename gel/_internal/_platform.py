@@ -1,9 +1,14 @@
-import functools
+# SPDX-PackageName: gel-python
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright Gel Data Inc. and the contributors.
+
+
 import os
 import pathlib
 import sys
 
 if sys.platform == "darwin":
+
     def config_dir() -> pathlib.Path:
         return (
             pathlib.Path.home() / "Library" / "Application Support" / "edgedb"
@@ -24,6 +29,7 @@ elif sys.platform == "win32":
     IS_WINDOWS = True
 
 else:
+
     def config_dir() -> pathlib.Path:
         xdg_conf_dir = pathlib.Path(os.environ.get("XDG_CONFIG_HOME", "."))
         if not xdg_conf_dir.is_absolute():
@@ -37,14 +43,12 @@ def old_config_dir() -> pathlib.Path:
     return pathlib.Path.home() / ".edgedb"
 
 
-def search_config_dir(*suffix):
-    rv = functools.reduce(lambda p1, p2: p1 / p2, [config_dir(), *suffix])
+def search_config_dir(*suffix: str) -> pathlib.Path:
+    rv = config_dir().joinpath(*suffix)
     if rv.exists():
         return rv
 
-    fallback = functools.reduce(
-        lambda p1, p2: p1 / p2, [old_config_dir(), *suffix]
-    )
+    fallback = old_config_dir().joinpath(*suffix)
     if fallback.exists():
         return fallback
 

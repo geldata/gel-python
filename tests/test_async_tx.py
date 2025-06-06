@@ -19,11 +19,11 @@
 import asyncio
 import itertools
 
-import edgedb
+import gel
 
 from gel import _testbase as tb
-from edgedb import TransactionOptions
-from edgedb.options import RetryOptions
+from gel import TransactionOptions
+from gel.options import RetryOptions
 
 
 class TestAsyncTx(tb.AsyncQueryTestCase):
@@ -73,7 +73,7 @@ class TestAsyncTx(tb.AsyncQueryTestCase):
     async def test_async_transaction_kinds(self):
         isolations = [
             None,
-            edgedb.IsolationLevel.Serializable,
+            gel.IsolationLevel.Serializable,
         ]
         booleans = [None, True, False]
         all = itertools.product(isolations, booleans, booleans)
@@ -93,7 +93,7 @@ class TestAsyncTx(tb.AsyncQueryTestCase):
                     pass
 
     async def test_async_transaction_commit_failure(self):
-        with self.assertRaises(edgedb.errors.QueryError):
+        with self.assertRaises(gel.errors.QueryError):
             async for tx in self.client.transaction():
                 async with tx:
                     await tx.execute("start migration to {};")
@@ -106,13 +106,12 @@ class TestAsyncTx(tb.AsyncQueryTestCase):
                 f1 = self.loop.create_task(tx.execute(query))
                 f2 = self.loop.create_task(tx.execute(query))
                 with self.assertRaisesRegex(
-                    edgedb.InterfaceError,
+                    gel.InterfaceError,
                     "concurrent queries within the same transaction "
                     "are not allowed"
                 ):
                     await asyncio.wait_for(f1, timeout=5)
                     await asyncio.wait_for(f2, timeout=5)
-
 
     async def _try_bogus_rr_tx(self, con, first_try):
         # A transaction that needs to be serializable
@@ -152,8 +151,8 @@ class TestAsyncTx(tb.AsyncQueryTestCase):
         ):
             self.skipTest("DML in RepeatableRead not supported yet")
         con = self.client.with_transaction_options(
-            edgedb.TransactionOptions(
-                isolation=edgedb.IsolationLevel.PreferRepeatableRead
+            gel.TransactionOptions(
+                isolation=gel.IsolationLevel.PreferRepeatableRead
             )
         )
         # A transaction that needs to be serializable

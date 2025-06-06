@@ -1,7 +1,7 @@
 __all__ = [
-    'Tag',
-    'SHOULD_RECONNECT',
-    'SHOULD_RETRY',
+    "Tag",
+    "SHOULD_RECONNECT",
+    "SHOULD_RETRY",
 ]
 
 
@@ -18,8 +18,8 @@ class Tag(object):
         self.name = name
 
     def __repr__(self):
-        return f'<Tag {self.name}>'
+        return f"<Tag {self.name}>"
 
 
-SHOULD_RECONNECT = Tag('SHOULD_RECONNECT')
-SHOULD_RETRY = Tag('SHOULD_RETRY')
+SHOULD_RECONNECT = Tag("SHOULD_RECONNECT")
+SHOULD_RETRY = Tag("SHOULD_RETRY")

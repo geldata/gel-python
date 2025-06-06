@@ -87,10 +87,9 @@ def main():
 
 
 def generate_models(args, spec):
-    match args.orm:
-        case 'sqlalchemy':
-            if args.mod is None:
-                parser.error('sqlalchemy requires to specify --mod')
+    if args.orm == 'sqlalchemy':
+        if args.mod is None:
+            parser.error('sqlalchemy requires to specify --mod')
 
             gen = SQLAModGen(
                 outdir=args.out,
@@ -98,18 +97,21 @@ def generate_models(args, spec):
             )
             gen.render_models(spec)
 
-        case 'sqlmodel':
-            if args.mod is None:
-                parser.error('sqlmodel requires to specify --mod')
+    elif args.orm == 'sqlmodel':
+        if args.mod is None:
+            parser.error('sqlmodel requires to specify --mod')
 
-            gen = SQLModGen(
-                outdir=args.out,
-                basemodule=args.mod,
-            )
-            gen.render_models(spec)
+        gen = SQLModGen(
+            outdir=args.out,
+            basemodule=args.mod,
+        )
+        gen.render_models(spec)
 
-        case 'django':
-            gen = DjangoModGen(
-                out=args.out,
-            )
-            gen.render_models(spec)
+    elif args.orm == 'django':
+        gen = DjangoModGen(
+            out=args.out,
+        )
+        gen.render_models(spec)
+
+    else:
+        raise NotImplementedError(f"unsupported orm type: {args.orm}")

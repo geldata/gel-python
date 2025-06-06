@@ -17,7 +17,7 @@
 #
 
 from gel import _testbase as tb
-import edgedb
+import gel
 
 import array
 import math
@@ -115,7 +115,7 @@ class TestVector(tb.SyncQueryTestCase):
         # self.assertEqual(val, '[3,9,-42.5]')
 
         # Some sad path tests
-        with self.assertRaises(edgedb.InvalidArgumentError):
+        with self.assertRaises(gel.InvalidArgumentError):
             self.client.query_single(
                 '''
                     select <ext::pgvector::vector>$0
@@ -123,7 +123,7 @@ class TestVector(tb.SyncQueryTestCase):
                 [3.0, None, -42.5],
             )
 
-        with self.assertRaises(edgedb.InvalidArgumentError):
+        with self.assertRaises(gel.InvalidArgumentError):
             self.client.query_single(
                 '''
                     select <ext::pgvector::vector>$0
@@ -131,7 +131,7 @@ class TestVector(tb.SyncQueryTestCase):
                 [3.0, 'x', -42.5],
             )
 
-        with self.assertRaises(edgedb.InvalidArgumentError):
+        with self.assertRaises(gel.InvalidArgumentError):
             self.client.query_single(
                 '''
                     select <ext::pgvector::vector>$0
@@ -169,7 +169,7 @@ class TestVector(tb.SyncQueryTestCase):
         self.assertEqual(val[4], 0)
         self.assertEqual(val[5], 0)
 
-        with self.assertRaises(edgedb.InvalidArgumentError):
+        with self.assertRaises(gel.InvalidArgumentError):
             self.client.query_single(
                 '''
                     select <ext::pgvector::sparsevec>$0
@@ -177,7 +177,7 @@ class TestVector(tb.SyncQueryTestCase):
                 {'dim': 1, 1: 1.5, 2: 2, 3: 3.8},
             )
 
-        with self.assertRaises(edgedb.InvalidArgumentError):
+        with self.assertRaises(gel.InvalidArgumentError):
             self.client.query_single(
                 '''
                     select <ext::pgvector::sparsevec>$0
@@ -185,7 +185,7 @@ class TestVector(tb.SyncQueryTestCase):
                 {'dims': 1, 1: 1.5, 2: 2, 3: 3.8},
             )
 
-        with self.assertRaises(edgedb.InvalidArgumentError):
+        with self.assertRaises(gel.InvalidArgumentError):
             self.client.query_single(
                 '''
                     select <ext::pgvector::sparsevec>$0
@@ -193,7 +193,7 @@ class TestVector(tb.SyncQueryTestCase):
                 {'dim': 6, 1: 1.5, 2: 2, 3: '3.8'},
             )
 
-        with self.assertRaises(edgedb.InvalidArgumentError):
+        with self.assertRaises(gel.InvalidArgumentError):
             self.client.query_single(
                 '''
                     select <ext::pgvector::sparsevec>$0
@@ -201,7 +201,7 @@ class TestVector(tb.SyncQueryTestCase):
                 {'dim': 6, 1: 1.5, 2: 2, '3': 3.8},
             )
 
-        with self.assertRaises(edgedb.InvalidArgumentError):
+        with self.assertRaises(gel.InvalidArgumentError):
             self.client.query_single(
                 '''
                     select <ext::pgvector::sparsevec>$0
@@ -252,7 +252,7 @@ class TestVector(tb.SyncQueryTestCase):
         self.assertTrue(math.isclose(val[7], 2.38e-7, rel_tol=1e-2))
         self.assertTrue(math.isclose(val[8], -5.96e-8, rel_tol=1e-2))
 
-        with self.assertRaises(edgedb.InvalidArgumentError):
+        with self.assertRaises(gel.InvalidArgumentError):
             self.client.query_single(
                 '''
                     select <ext::pgvector::halfvec>$0
@@ -260,7 +260,7 @@ class TestVector(tb.SyncQueryTestCase):
                 [3.0, None, -42.5],
             )
 
-        with self.assertRaises(edgedb.InvalidArgumentError):
+        with self.assertRaises(gel.InvalidArgumentError):
             self.client.query_single(
                 '''
                     select <ext::pgvector::halfvec>$0
@@ -268,7 +268,7 @@ class TestVector(tb.SyncQueryTestCase):
                 [3.0, 'x', -42.5],
             )
 
-        with self.assertRaises(edgedb.InvalidArgumentError):
+        with self.assertRaises(gel.InvalidArgumentError):
             self.client.query_single(
                 '''
                     select <ext::pgvector::halfvec>$0
@@ -276,7 +276,7 @@ class TestVector(tb.SyncQueryTestCase):
                 'foo',
             )
 
-        with self.assertRaises(edgedb.InvalidArgumentError):
+        with self.assertRaises(gel.InvalidArgumentError):
             self.client.query_single(
                 '''
                     select <ext::pgvector::halfvec>$0

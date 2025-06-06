@@ -19,7 +19,7 @@
 
 from gel import _testbase as tb
 
-from edgedb import State
+from gel import State
 
 
 class TestState(tb.TestCase):

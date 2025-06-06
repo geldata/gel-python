@@ -35,18 +35,20 @@ import time
 import urllib.request
 
 
-PACKAGE_URL_PREFIX = "https://packages.edgedb.com/dist"
-STRONG_CIPHERSUITES = ":".join([
-    "TLS_AES_128_GCM_SHA256",
-    "TLS_CHACHA20_POLY1305_SHA256",
-    "TLS_AES_256_GCM_SHA384",
-    "ECDHE-ECDSA-AES128-GCM-SHA256",
-    "ECDHE-RSA-AES128-GCM-SHA256",
-    "ECDHE-ECDSA-CHACHA20-POLY1305",
-    "ECDHE-RSA-CHACHA20-POLY1305",
-    "ECDHE-ECDSA-AES256-GCM-SHA384",
-    "ECDHE-RSA-AES256-GCM-SHA384",
-])
+PACKAGE_URL_PREFIX = "https://packages.geldata.com/dist"
+STRONG_CIPHERSUITES = ":".join(
+    [
+        "TLS_AES_128_GCM_SHA256",
+        "TLS_CHACHA20_POLY1305_SHA256",
+        "TLS_AES_256_GCM_SHA384",
+        "ECDHE-ECDSA-AES128-GCM-SHA256",
+        "ECDHE-RSA-AES128-GCM-SHA256",
+        "ECDHE-ECDSA-CHACHA20-POLY1305",
+        "ECDHE-RSA-CHACHA20-POLY1305",
+        "ECDHE-ECDSA-AES256-GCM-SHA384",
+        "ECDHE-RSA-AES256-GCM-SHA384",
+    ]
+)
 
 
 def _die(msg: str) -> NoReturn:
@@ -146,7 +148,7 @@ def _download(url: str, dest: pathlib.Path) -> None:
             if response.status != 200:
                 raise RuntimeError(f"{response.status}")
 
-            spinner_symbols = ['|', '/', '-', '\\']
+            spinner_symbols = ["|", "/", "-", "\\"]
             msg = "downloading Gel CLI"
             print(f"{msg}", end="\r")
             start = time.monotonic()
@@ -173,20 +175,20 @@ def _download(url: str, dest: pathlib.Path) -> None:
 
 def _get_binary_cache_dir(os_name) -> pathlib.Path:
     home = pathlib.Path.home()
-    if os_name == 'Windows':
-        localappdata = os.environ.get('LOCALAPPDATA', '')
+    if os_name == "Windows":
+        localappdata = os.environ.get("LOCALAPPDATA", "")
         if localappdata:
             base_cache_dir = pathlib.Path(localappdata)
         else:
-            base_cache_dir = home / 'AppData' / 'Local'
-    elif os_name == 'Linux':
-        xdg_cache_home = os.environ.get('XDG_CACHE_HOME', '')
+            base_cache_dir = home / "AppData" / "Local"
+    elif os_name == "Linux":
+        xdg_cache_home = os.environ.get("XDG_CACHE_HOME", "")
         if xdg_cache_home:
             base_cache_dir = pathlib.Path(xdg_cache_home)
         else:
-            base_cache_dir = home / '.cache'
-    elif os_name == 'Darwin':
-        base_cache_dir = home / 'Library' / 'Caches'
+            base_cache_dir = home / ".cache"
+    elif os_name == "Darwin":
+        base_cache_dir = home / "Library" / "Caches"
     else:
         _die(f"unsupported OS: {os_name}")
 
@@ -232,16 +234,20 @@ def _install_cli(os_name: str, arch: str, path: pathlib.Path) -> str:
     url = f"{PACKAGE_URL_PREFIX}/{triple}/gel-cli{ext}"
 
     if path.exists() and not path.is_file():
-        _die(f"{path} exists but is not a regular file, "
-             f"please remove it and try again")
+        _die(
+            f"{path} exists but is not a regular file, "
+            f"please remove it and try again"
+        )
 
     _download(url, path)
 
     try:
         path.chmod(
             stat.S_IRWXU
-            | stat.S_IRGRP | stat.S_IXGRP
-            | stat.S_IROTH | stat.S_IXOTH,
+            | stat.S_IRGRP
+            | stat.S_IXGRP
+            | stat.S_IROTH
+            | stat.S_IXOTH,
         )
     except OSError as e:
         _die(f"could not max {path!r} executable: {e}")

@@ -19,7 +19,7 @@
 
 import socket
 
-import edgedb
+import gel
 
 from gel import _testbase as tb
 
@@ -49,16 +49,16 @@ class TestConnect(tb.AsyncQueryTestCase):
         conn_args['wait_until_available'] = 0
 
         with self.assertRaisesRegex(
-                edgedb.ClientConnectionError,
+                gel.ClientConnectionError,
                 f'(?s).*Is the server running.*port {self.port}.*'):
             conn_args['host'] = '127.0.0.1'
-            await edgedb.create_async_client(**conn_args).ensure_connected()
+            await gel.create_async_client(**conn_args).ensure_connected()
 
         with self.assertRaisesRegex(
-                edgedb.ClientConnectionError,
+                gel.ClientConnectionError,
                 f'(?s).*Is the server running.*port {self.port}.*'):
             conn_args['host'] = orig_conn_args['host']
-            await edgedb.create_async_client(**conn_args).ensure_connected()
+            await gel.create_async_client(**conn_args).ensure_connected()
 
     def test_connect_sync_01(self):
         orig_conn_args = self.get_connect_args()
@@ -67,13 +67,13 @@ class TestConnect(tb.AsyncQueryTestCase):
         conn_args['wait_until_available'] = 0
 
         with self.assertRaisesRegex(
-                edgedb.ClientConnectionError,
+                gel.ClientConnectionError,
                 f'(?s).*Is the server running.*port {self.port}.*'):
             conn_args['host'] = '127.0.0.1'
-            edgedb.create_client(**conn_args).ensure_connected()
+            gel.create_client(**conn_args).ensure_connected()
 
         with self.assertRaisesRegex(
-                edgedb.ClientConnectionError,
+                gel.ClientConnectionError,
                 f'(?s).*Is the server running.*port {self.port}.*'):
             conn_args['host'] = orig_conn_args['host']
-            edgedb.create_client(**conn_args).ensure_connected()
+            gel.create_client(**conn_args).ensure_connected()

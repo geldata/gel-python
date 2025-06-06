@@ -29,3 +29,5 @@ cdef class SansIOProtocolBackwardsCompatible(SansIOProtocol):
         uint64_t allow_capabilities,
     )
     cdef dict legacy_parse_headers(self)
+    cdef _legacy_parse_type_data(self, CodecsRegistry reg)
+    cdef _legacy_parse_data_messages(self, BaseCodec out_dc, result)

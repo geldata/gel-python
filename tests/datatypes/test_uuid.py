@@ -23,7 +23,8 @@ import unittest
 
 import uuid
 from uuid import UUID as std_UUID
-from edgedb.protocol.protocol import UUID as c_UUID
+
+from gel.protocol.protocol import UUID as c_UUID
 
 
 special_uuids = frozenset({

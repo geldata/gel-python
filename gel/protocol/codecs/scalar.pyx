@@ -27,7 +27,7 @@ cdef class ScalarCodec(BaseCodec):
     cdef encode(self, WriteBuffer buf, object obj):
         self.c_encoder(DEFAULT_CODEC_CONTEXT, buf, obj)
 
-    cdef decode(self, FRBuffer *buf):
+    cdef decode(self, object return_type, FRBuffer *buf):
         return self.c_decoder(DEFAULT_CODEC_CONTEXT, buf)
 
     cdef derive(self, bytes tid):

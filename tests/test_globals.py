@@ -18,7 +18,7 @@
 
 
 from gel import _testbase as tb
-from edgedb import errors
+from gel import errors
 
 
 class TestGlobals(tb.AsyncQueryTestCase):

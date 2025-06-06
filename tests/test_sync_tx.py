@@ -19,10 +19,10 @@
 import itertools
 from concurrent.futures import ThreadPoolExecutor
 
-import edgedb
+import gel
 
 from gel import _testbase as tb
-from edgedb import TransactionOptions
+from gel import TransactionOptions
 
 
 class TestSyncTx(tb.SyncQueryTestCase):
@@ -70,15 +70,15 @@ class TestSyncTx(tb.SyncQueryTestCase):
     async def test_sync_transaction_kinds(self):
         isolations = [
             None,
-            edgedb.IsolationLevel.Serializable,
+            gel.IsolationLevel.Serializable,
         ]
         if not (
             str(self.server_version.stage) != 'dev'
             and (self.server_version.major, self.server_version.minor) < (6, 5)
         ):
             isolations += [
-                edgedb.IsolationLevel.PreferRepeatableRead,
-                edgedb.IsolationLevel.RepeatableRead,
+                gel.IsolationLevel.PreferRepeatableRead,
+                gel.IsolationLevel.RepeatableRead,
             ]
 
         booleans = [None, True, False]
@@ -99,7 +99,7 @@ class TestSyncTx(tb.SyncQueryTestCase):
                     with tx:
                         tx.execute(
                             'INSERT test::TransactionTest {name := "test"}')
-            except edgedb.TransactionError:
+            except gel.TransactionError:
                 self.assertTrue(readonly)
             else:
                 self.assertFalse(readonly)
@@ -146,8 +146,8 @@ class TestSyncTx(tb.SyncQueryTestCase):
         ):
             self.skipTest("DML in RepeatableRead not supported yet")
         con = self.client.with_transaction_options(
-            edgedb.TransactionOptions(
-                isolation=edgedb.IsolationLevel.PreferRepeatableRead
+            gel.TransactionOptions(
+                isolation=gel.IsolationLevel.PreferRepeatableRead
             )
         )
         # A transaction that needs to be serializable
@@ -166,7 +166,7 @@ class TestSyncTx(tb.SyncQueryTestCase):
             self.assertEqual(str(res.level), 'RepeatableRead')
 
     def test_sync_transaction_commit_failure(self):
-        with self.assertRaises(edgedb.errors.QueryError):
+        with self.assertRaises(gel.errors.QueryError):
             for tx in self.client.transaction():
                 with tx:
                     tx.execute("start migration to {};")
@@ -180,7 +180,7 @@ class TestSyncTx(tb.SyncQueryTestCase):
                     f1 = executor.submit(tx.execute, query)
                     f2 = executor.submit(tx.execute, query)
                     with self.assertRaisesRegex(
-                        edgedb.InterfaceError,
+                        gel.InterfaceError,
                         "concurrent queries within the same transaction "
                         "are not allowed"
                     ):
