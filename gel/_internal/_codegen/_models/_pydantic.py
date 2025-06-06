@@ -13,8 +13,10 @@ from typing import (
 
 import base64
 import collections
+import dataclasses
 import enum
 import functools
+import json
 import graphlib
 import keyword
 import logging
@@ -22,12 +24,17 @@ import operator
 import textwrap
 
 from collections import defaultdict
+from collections.abc import MutableMapping  # noqa: TC003  # pydantic needs it
 from contextlib import contextmanager
 
 import gel
 from gel import abstract
+from gel import _version as _gel_py_ver
+from gel._internal import _cache
+from gel._internal import _dataclass_extras
 from gel._internal import _reflection as reflection
 from gel._internal._qbmodel import _abstract as _qbmodel
+from gel._internal._reflection._enums import SchemaPart
 
 from .._generator import C, AbstractCodeGenerator
 from .._module import ImportTime, CodeSection, GeneratedModule
@@ -35,7 +42,6 @@ from .._module import ImportTime, CodeSection, GeneratedModule
 if TYPE_CHECKING:
     import io
     import pathlib
-    import uuid
 
     from collections.abc import (
         Callable,
@@ -81,6 +87,14 @@ class IntrospectedModule(TypedDict):
     functions: list[reflection.Function]
 
 
+@dataclasses.dataclass(kw_only=True, frozen=True)
+class Schema:
+    types: MutableMapping[str, reflection.AnyType]
+    casts: reflection.CastMatrix
+    operators: reflection.OperatorMatrix
+    functions: list[reflection.Function]
+
+
 class PydanticModelsGenerator(AbstractCodeGenerator):
     def run(self) -> None:
         try:
@@ -89,22 +103,111 @@ class PydanticModelsGenerator(AbstractCodeGenerator):
             logger.exception("could not connect to Gel instance")
             self.abort(61)
 
-        with self._client:
-            std_gen = SchemaGenerator(
-                self._client,
-                reflection.SchemaPart.STD,
-                self._project_dir / "models",
-            )
-            std_gen.run()
+        models_root = self._project_dir / "models"
 
-            usr_gen = SchemaGenerator(
-                self._client,
-                reflection.SchemaPart.USER,
-                self._project_dir / "models",
-            )
-            usr_gen.run()
+        with self._client:
+            db_state = reflection.fetch_branch_state(self._client)
+            file_state = self._get_last_state()
+            std_schema: Schema | None = None
+
+            if (
+                file_state is None
+                or file_state.server_version != db_state.server_version
+                or self._no_cache
+            ):
+                std_gen = SchemaGenerator(
+                    self._client,
+                    reflection.SchemaPart.STD,
+                    models_root,
+                )
+                std_schema = std_gen.run()
+                self._save_std_schema_cache(
+                    std_schema, db_state.server_version
+                )
+            else:
+                std_schema = self._load_std_schema_cache(
+                    db_state.server_version,
+                )
+
+            if (
+                file_state is None
+                or file_state.top_migration != db_state.top_migration
+                or self._no_cache
+            ):
+                usr_gen = SchemaGenerator(
+                    self._client,
+                    reflection.SchemaPart.USER,
+                    models_root,
+                    std_schema=std_schema,
+                )
+                usr_gen.run()
+
+            self._write_state(db_state)
 
         self.print_msg(f"{C.GREEN}{C.BOLD}Done.{C.ENDC}")
+
+    def _cache_key(self, suf: str, sv: reflection.ServerVersion) -> str:
+        return f"gm-c-{_gel_py_ver.__version__}-s-{sv.major}.{sv.minor}-{suf}"
+
+    def _save_std_schema_cache(
+        self, schema: Schema, sv: reflection.ServerVersion
+    ) -> None:
+        _cache.save_json(
+            self._cache_key("std.json", sv),
+            dataclasses.asdict(schema),
+        )
+
+    def _load_std_schema_cache(
+        self, sv: reflection.ServerVersion
+    ) -> Schema | None:
+        schema_data = _cache.load_json(self._cache_key("std.json", sv))
+        if schema_data is None:
+            return None
+
+        if not isinstance(schema_data, dict):
+            return None
+
+        try:
+            return _dataclass_extras.coerce_to_dataclass(Schema, schema_data)
+        except Exception:
+            return None
+
+    def _get_last_state(self) -> reflection.BranchState | None:
+        state_json = self._project_dir / "models" / "_state.json"
+        try:
+            with open(state_json, encoding="utf8") as f:
+                state_data = json.load(f)
+        except (OSError, ValueError, TypeError):
+            return None
+
+        try:
+            server_version = state_data["server_version"]
+            top_migration = state_data["top_migration"]
+        except KeyError:
+            return None
+
+        if (
+            not isinstance(server_version, list)
+            or len(server_version) != 2
+            or not all(isinstance(part, int) for part in server_version)
+        ):
+            return None
+
+        if not isinstance(top_migration, str):
+            return None
+
+        return reflection.BranchState(
+            server_version=reflection.ServerVersion(*server_version),
+            top_migration=top_migration,
+        )
+
+    def _write_state(self, state: reflection.BranchState) -> None:
+        state_json = self._project_dir / "models" / "_state.json"
+        try:
+            with open(state_json, mode="w", encoding="utf8") as f:
+                json.dump(dataclasses.asdict(state), f)
+        except (OSError, ValueError, TypeError):
+            return None
 
 
 class SchemaGenerator:
@@ -113,6 +216,7 @@ class SchemaGenerator:
         client: abstract.ReadOnlyExecutor,
         schema_part: reflection.SchemaPart,
         outdir: pathlib.Path,
+        std_schema: Schema | None = None,
     ) -> None:
         self._client = client
         self._schema_part = schema_part
@@ -120,15 +224,20 @@ class SchemaGenerator:
         self._outdir = outdir
         self._modules: dict[reflection.SchemaPath, IntrospectedModule] = {}
         self._std_modules: list[reflection.SchemaPath] = []
-        self._types: Mapping[uuid.UUID, reflection.AnyType] = {}
+        self._types: Mapping[str, reflection.AnyType] = {}
         self._casts: reflection.CastMatrix
         self._operators: reflection.OperatorMatrix
         self._functions: list[reflection.Function]
-        self._named_tuples: dict[uuid.UUID, reflection.NamedTupleType] = {}
+        self._named_tuples: dict[str, reflection.NamedTupleType] = {}
         self._wrapped_types: set[str] = set()
+        self._std_schema = std_schema
+        if schema_part is not SchemaPart.STD and std_schema is None:
+            raise ValueError(
+                "must pass std_schema when reflecting user schemas"
+            )
 
-    def run(self) -> None:
-        self.introspect_schema()
+    def run(self) -> Schema:
+        schema = self.introspect_schema()
 
         self._generate_common_types()
         modules: dict[reflection.SchemaPath, GeneratedSchemaModule] = {}
@@ -180,7 +289,9 @@ class SchemaGenerator:
             module.reexport_module(default_module)
         module.write_files(self._outdir)
 
-    def introspect_schema(self) -> None:
+        return schema
+
+    def introspect_schema(self) -> Schema:
         for mod in reflection.fetch_modules(self._client, self._schema_part):
             self._modules[reflection.parse_name(mod)] = {
                 "scalar_types": {},
@@ -200,15 +311,14 @@ class SchemaGenerator:
         self._functions = these_funcs
 
         if self._schema_part is not std_part:
-            std_types = reflection.fetch_types(self._client, std_part)
+            assert self._std_schema is not None
+            std_types = self._std_schema.types
             self._types = collections.ChainMap(std_types, these_types)
-            std_casts = reflection.fetch_casts(self._client, std_part)
+            std_casts = self._std_schema.casts
             self._casts = self._casts.chain(std_casts)
-            std_operators = reflection.fetch_operators(self._client, std_part)
+            std_operators = self._std_schema.operators
             self._operators = self._operators.chain(std_operators)
-            self._functions = these_funcs + reflection.fetch_functions(
-                self._client, std_part
-            )
+            self._functions = these_funcs + self._std_schema.functions
             self._std_modules = [
                 reflection.parse_name(mod)
                 for mod in reflection.fetch_modules(self._client, std_part)
@@ -229,6 +339,13 @@ class SchemaGenerator:
         for f in these_funcs:
             name = reflection.parse_name(f.name)
             self._modules[name.parent]["functions"].append(f)
+
+        return Schema(
+            types=self._types,
+            casts=self._casts,
+            operators=self._operators,
+            functions=self._functions,
+        )
 
     def get_comment_preamble(self) -> str:
         return COMMENT
@@ -301,7 +418,7 @@ class BaseGeneratedModule:
         self,
         modname: reflection.SchemaPath,
         *,
-        all_types: Mapping[uuid.UUID, reflection.AnyType],
+        all_types: Mapping[str, reflection.AnyType],
         all_casts: reflection.CastMatrix,
         all_operators: reflection.OperatorMatrix,
         modules: Collection[reflection.SchemaPath],
@@ -498,7 +615,7 @@ class BaseGeneratedModule:
                 base_types,
             ),
         ):
-            self.write(f"id = {uuid}(int={stype.id.int})")
+            self.write(f"id = {uuid}(int={stype.uuid.int})")
             schema_path = ", ".join(repr(p) for p in stype.schemapath.parts)
             self.write(f"name = {schemapath}({schema_path})")
 
@@ -569,7 +686,7 @@ class BaseGeneratedModule:
         t: reflection.NamedTupleType,
     ) -> str:
         names = [elem.name.capitalize() for elem in t.tuple_elements]
-        digest = base64.b64encode(t.id.bytes[:4], altchars=b"__").decode()
+        digest = base64.b64encode(t.uuid.bytes[:4], altchars=b"__").decode()
         return "".join(names) + "_Tuple_" + digest.rstrip("=")
 
     def _resolve_rel_import(
@@ -1025,7 +1142,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         self,
         types: Iterable[InheritingType_T],
     ) -> Iterator[InheritingType_T]:
-        graph: dict[uuid.UUID, set[uuid.UUID]] = {}
+        graph: dict[str, set[str]] = {}
         for t in types:
             graph[t.id] = set()
             t_name = reflection.parse_name(t.name)
@@ -1412,7 +1529,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         type_ = self.import_name("builtins", "type")
         any_ = self.import_name("typing", "Any")
 
-        explicit_rparams: defaultdict[str, set[uuid.UUID]] = defaultdict(set)
+        explicit_rparams: defaultdict[str, set[str]] = defaultdict(set)
         for op in ops:
             opname = reflection.parse_name(op.name).name
             explicit_rparams[opname].add(op.params[1].type.id)
@@ -1644,7 +1761,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         refl_t: str,
     ) -> None:
         uuid_t = self.import_name("uuid", "UUID")
-        self.write(f"id={uuid_t}(int={objtype.id.int}),")
+        self.write(f"id={uuid_t}(int={objtype.uuid.int}),")
         self.write(f"name={objtype.name!r},")
         self.write(f"builtin={objtype.builtin!r},")
         self.write(f"internal={objtype.internal!r},")
@@ -1704,7 +1821,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                     base_types,
                 ),
             ):
-                self.write(f"id = {uuid}(int={objtype.id.int})")
+                self.write(f"id = {uuid}(int={objtype.uuid.int})")
                 schema_path = ", ".join(repr(p) for p in type_name.parts)
                 self.write(f"name = {sp}({schema_path})")
                 with self._classmethod_def(
@@ -1747,7 +1864,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         self.write()
 
         class_kwargs = {}
-        class_r_kwargs = {"__gel_type_id__": f"{uuid}(int={objtype.id.int})"}
+        class_r_kwargs = {"__gel_type_id__": f"{uuid}(int={objtype.uuid.int})"}
         if not base_types:
             gel_model = self.import_name(BASE_IMPL, "GelModel")
             vbase_types = [gel_model]
@@ -2332,8 +2449,8 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                 self.write()
 
     def write_functions(self, functions: list[reflection.Function]) -> None:
-        param_map: defaultdict[str, defaultdict[str, set[uuid.UUID]]] = (
-            defaultdict(lambda: defaultdict(set))
+        param_map: defaultdict[str, defaultdict[str, set[str]]] = defaultdict(
+            lambda: defaultdict(set)
         )
         funcmap: defaultdict[str, list[reflection.Function]] = defaultdict(
             list
@@ -2351,7 +2468,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         self,
         fname: str,
         overloads: list[reflection.Function],
-        param_map: defaultdict[str, defaultdict[str, set[uuid.UUID]]],
+        param_map: defaultdict[str, defaultdict[str, set[str]]],
     ) -> None:
         if len(overloads) > 1:
             for overload in overloads:
@@ -2389,7 +2506,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
     def _write_function_overload(
         self,
         function: reflection.Function,
-        param_map: defaultdict[str, defaultdict[str, set[uuid.UUID]]],
+        param_map: defaultdict[str, defaultdict[str, set[str]]],
         *,
         overload: bool,
         generic_signature: bool = False,
@@ -2720,11 +2837,11 @@ class GeneratedSchemaModule(BaseGeneratedModule):
 
 
 class GeneratedGlobalModule(BaseGeneratedModule):
-    def process(self, types: Mapping[uuid.UUID, reflection.AnyType]) -> None:
-        graph: defaultdict[uuid.UUID, set[uuid.UUID]] = defaultdict(set)
+    def process(self, types: Mapping[str, reflection.AnyType]) -> None:
+        graph: defaultdict[str, set[str]] = defaultdict(set)
 
         @functools.singledispatch
-        def type_dispatch(t: reflection.AnyType, ref_t: uuid.UUID) -> None:
+        def type_dispatch(t: reflection.AnyType, ref_t: str) -> None:
             if reflection.is_named_tuple_type(t):
                 graph[ref_t].add(t.id)
                 for elem in t.tuple_elements:

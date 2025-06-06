@@ -8,6 +8,7 @@ from typing import (
     Any,
     ClassVar,
     ForwardRef,
+    Literal,
     TypeGuard,
     Union,
     get_args,
@@ -52,15 +53,19 @@ def is_forward_ref(t: Any) -> TypeGuard[ForwardRef]:
     return isinstance(t, ForwardRef)
 
 
-def is_union_type(t: Any) -> bool:
+def is_union_type(t: Any) -> TypeGuard[UnionType]:
     return (
         (is_generic_alias(t) and get_origin(t) is Union)  # type: ignore [comparison-overlap]
         or isinstance(t, UnionType)
     )
 
 
-def is_optional_type(t: Any) -> bool:
+def is_optional_type(t: Any) -> TypeGuard[UnionType]:
     return is_union_type(t) and type(None) in get_args(t)
+
+
+def is_literal(t: Any) -> bool:
+    return is_generic_alias(t) and get_origin(t) is Literal  # type: ignore [comparison-overlap]
 
 
 __all__ = (
@@ -72,6 +77,7 @@ __all__ = (
     "is_forward_ref",
     "is_generic_alias",
     "is_generic_type_alias",
+    "is_literal",
     "is_optional_type",
     "is_type_alias",
     "is_union_type",

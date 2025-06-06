@@ -3,6 +3,21 @@
 # SPDX-FileCopyrightText: Copyright Gel Data Inc. and the contributors.
 
 
+STATE = """
+SELECT
+    {
+        server_version := (
+            WITH v := sys::get_version()
+            SELECT (major := v.major, minor := v.minor)
+        ),
+        top_migration := assert_single((
+            WITH MODULE schema
+            SELECT Migration FILTER NOT EXISTS .<parents[IS Migration]
+        ).name)
+    }
+"""
+
+
 MODULES = """
 WITH
     MODULE schema,
@@ -201,8 +216,14 @@ SELECT Type {
             name,
             target_id := .target.id,
             kind := 'Property',
+            is_exclusive := EXISTS (SELECT .constraints
+                                    FILTER .name = 'std::exclusive'),
             is_computed := len(.computed_fields) != 0,
-            is_readonly := .readonly
+            is_readonly := .readonly,
+            has_default := (
+                EXISTS .default
+                OR ("std::sequence" IN .target[IS ScalarType].ancestors.name)
+            ),
         } FILTER .name != 'source' AND .name != 'target'
     } FILTER any(@is_owned),
     exclusives := assert_distinct((
