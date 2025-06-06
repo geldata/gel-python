@@ -544,15 +544,20 @@ class Client(base_client.BaseClient, abstract.Executor):
     _impl_class = _PoolImpl
 
     def save(self, *objs: GelModel) -> None:
+        print("SAVE", objs)
         make_executor = make_save_executor_constructor(objs)
 
         for tx in self.transaction():
             with tx:
+                print(type(tx))
                 executor = make_executor()
 
                 for batch in executor:
                     ids = []
                     for query, args in batch:
+                        print()
+                        print(query, "|||||", args)
+                        print()
                         ids.append(
                             self.query_required_single(query, **args).id
                         )

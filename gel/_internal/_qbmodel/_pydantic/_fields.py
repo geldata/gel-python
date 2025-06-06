@@ -212,9 +212,8 @@ class _OptionalLink(_abstract.OptionalLinkDescriptor[_MT_co, _BMT_co]):
         if _typing_inspect.is_generic_alias(source_type):
             args = typing.get_args(source_type)
             if issubclass(args[0], ProxyModel):
-                return core_schema.no_info_before_validator_function(
+                return core_schema.no_info_plain_validator_function(
                     functools.partial(cls._validate, generic_args=args),
-                    schema=handler.generate_schema(args[0]),
                 )
             else:
                 return handler.generate_schema(args[0])
@@ -300,24 +299,64 @@ OptionalComputedLinkWithProps = TypeAliasType(
 class _UpcastingDistinctList(
     _dlist.DistinctList[_MT_co], Generic[_MT_co, _BMT_co]
 ):
-    @classmethod
-    def _check_value(cls, value: Any) -> _MT_co:
-        t = cls.type
-        if isinstance(value, t):
-            return value
-        elif issubclass(t, ProxyModel) and isinstance(value, t.__proxy_of__):
-            return t(value)  # type: ignore [return-value]
+    def _check_value(self, value: Any) -> _MT_co:
+        cls = type(self)
 
-        if issubclass(t, ProxyModel):
-            raise ValueError(
-                f"{cls!r} accepts only values of type {t.__name__} "
-                f"or {t.__proxy_of__.__name__}, got {type(value)!r}",
-            )
-        else:
-            raise ValueError(
-                f"{cls!r} accepts only values of type {t.__name__}, "
-                f"got {type(value)!r}",
-            )
+        t = cls.type
+        assert issubclass(t, ProxyModel)
+
+        if not isinstance(value, t):
+            if not isinstance(value, ProxyModel) and isinstance(
+                value, t.__proxy_of__
+            ):
+                value = t(value)
+            else:
+                raise ValueError(
+                    f"{cls!r} accepts only values of type {t.__name__} "
+                    f"or {t.__proxy_of__.__name__}, got {type(value)!r}",
+                )
+
+        if (
+            sub := self._find_proxied_obj(value)
+        ) is not None and sub is not value:
+            assert isinstance(sub, ProxyModel)
+            if sub.__linkprops__.__dict__ != value.__linkprops__.__dict__:
+                raise ValueError(
+                    f"the list already contains {value!r} with "
+                    f" a different set of link properties"
+                )
+            # Return the already present identical proxy instead of inserting
+            # another one
+            return sub  # type: ignore [return-value]
+
+        return value  # type: ignore [no-any-return]
+
+    def _find_proxied_obj(self, item: _MT_co | _BMT_co) -> _MT_co | None:
+        if isinstance(item, ProxyModel):
+            item = item._p__obj__
+
+        for sub in self._unhashables.values():
+            assert isinstance(sub, ProxyModel)
+            if sub._p__obj__ is item:
+                return sub  # type: ignore [return-value]
+
+        for sub in self._set:
+            assert isinstance(sub, ProxyModel)
+            if sub._p__obj__ is item:
+                return sub  # type: ignore [return-value]
+
+        return None
+
+    def __contains__(self, item: Any) -> bool:
+        if id(item) in self._unhashables:
+            return True
+
+        try:
+            return item in self._set
+        except TypeError:
+            pass
+
+        return self._find_proxied_obj(item) is not None
 
     if TYPE_CHECKING:
 
