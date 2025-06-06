@@ -28,12 +28,12 @@ if TYPE_CHECKING:
 
 @struct
 class TypeRef:
-    id: uuid.UUID
+    id: str
 
 
 @struct
 class Type:
-    id: uuid.UUID
+    id: str
     kind: enums.TypeKind
     name: str
     description: str | None
@@ -52,6 +52,10 @@ class Type:
     @functools.cached_property
     def schemapath(self) -> _support.SchemaPath:
         return _support.parse_name(self.name)
+
+    @functools.cached_property
+    def uuid(self) -> uuid.UUID:
+        return uuid.UUID(self.id)
 
 
 @struct
@@ -72,8 +76,8 @@ class ScalarType(InheritingType):
     kind: Literal[enums.TypeKind.Scalar]
     is_seq: bool
     enum_values: tuple[str, ...] | None = None
-    material_id: uuid.UUID | None = None
-    cast_type: uuid.UUID | None = None
+    material_id: str | None = None
+    cast_type: str | None = None
 
 
 @struct
@@ -94,25 +98,25 @@ class CollectionType(Type):
 @struct
 class ArrayType(CollectionType):
     kind: Literal[enums.TypeKind.Array]
-    array_element_id: uuid.UUID
+    array_element_id: str
 
 
 @struct
 class RangeType(CollectionType):
     kind: Literal[enums.TypeKind.Range]
-    range_element_id: uuid.UUID
+    range_element_id: str
 
 
 @struct
 class MultiRangeType(CollectionType):
     kind: Literal[enums.TypeKind.MultiRange]
-    multirange_element_id: uuid.UUID
+    multirange_element_id: str
 
 
 @struct
 class TupleElement:
     name: str
-    type_id: uuid.UUID
+    type_id: str
 
 
 @struct
@@ -138,7 +142,7 @@ PrimitiveType = (
 
 AnyType = PseudoType | PrimitiveType | ObjectType
 
-Types = dict[uuid.UUID, AnyType]
+Types = dict[str, AnyType]
 
 
 _kind_to_class: dict[enums.TypeKind, type[Type]] = {
@@ -198,7 +202,7 @@ class Pointer:
     card: enums.Cardinality
     kind: enums.PointerKind
     name: str
-    target_id: uuid.UUID
+    target_id: str
     is_exclusive: bool
     is_computed: bool
     is_readonly: bool
@@ -222,7 +226,9 @@ def fetch_types(
     types: list[AnyType] = db.query(_query.TYPES, builtin=builtin)
     result = {}
     for t in types:
-        result[t.id] = _dataclass_extras.coerce_to_dataclass(
-            _kind_to_class[t.kind], t
+        vt = _dataclass_extras.coerce_to_dataclass(
+            _kind_to_class[t.kind], t, cast_map={str: (uuid.UUID,)}
         )
+        result[vt.id] = vt
+
     return result  # type: ignore [return-value]

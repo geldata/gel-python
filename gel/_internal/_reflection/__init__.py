@@ -33,6 +33,12 @@ from ._operators import (
     fetch_operators,
 )
 
+from ._state import (
+    BranchState,
+    ServerVersion,
+    fetch_branch_state,
+)
+
 from ._types import (
     AnyType,
     ArrayType,
@@ -66,6 +72,7 @@ from ._modules import (
 __all__ = (
     "AnyType",
     "ArrayType",
+    "BranchState",
     "CallableParamKind",
     "Cardinality",
     "CastMatrix",
@@ -82,10 +89,12 @@ __all__ = (
     "ScalarType",
     "SchemaPart",
     "SchemaPath",
+    "ServerVersion",
     "TupleType",
     "Type",
     "TypeKind",
     "TypeModifier",
+    "fetch_branch_state",
     "fetch_casts",
     "fetch_functions",
     "fetch_modules",

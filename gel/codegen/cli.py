@@ -52,6 +52,7 @@ def _get_base_parser(description: str) -> ColoredArgumentParser:
         "--tls-security",
         choices=["default", "strict", "no_host_verification", "insecure"],
     )
+    parser.add_argument("--no-cache", action="store_true")
     return parser
 
 
