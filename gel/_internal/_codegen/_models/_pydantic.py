@@ -29,6 +29,8 @@ from contextlib import contextmanager
 
 import gel
 from gel import abstract
+from gel import _version as _gel_py_ver
+from gel._internal import _cache
 from gel._internal import _dataclass_extras
 from gel._internal import _reflection as reflection
 from gel._internal._qbmodel import _abstract as _qbmodel
@@ -119,9 +121,13 @@ class PydanticModelsGenerator(AbstractCodeGenerator):
                     models_root,
                 )
                 std_schema = std_gen.run()
-                self._save_std_schema_cache(std_schema)
+                self._save_std_schema_cache(
+                    std_schema, db_state.server_version
+                )
             else:
-                std_schema = self._load_std_schema_cache()
+                std_schema = self._load_std_schema_cache(
+                    db_state.server_version,
+                )
 
             if (
                 file_state is None
@@ -140,18 +146,22 @@ class PydanticModelsGenerator(AbstractCodeGenerator):
 
         self.print_msg(f"{C.GREEN}{C.BOLD}Done.{C.ENDC}")
 
-    def _save_std_schema_cache(self, schema: Schema) -> None:
-        schema_data = dataclasses.asdict(schema)
-        schema_json_file = self._project_dir / "models" / "_stdschema.json"
-        with open(schema_json_file, mode="w", encoding="utf8") as f:
-            json.dump(schema_data, f)
+    def _cache_key(self, suf: str, sv: reflection.ServerVersion) -> str:
+        return f"gm-c-{_gel_py_ver.__version__}-s-{sv.major}.{sv.minor}-{suf}"
 
-    def _load_std_schema_cache(self) -> Schema | None:
-        schema_json_file = self._project_dir / "models" / "_stdschema.json"
-        try:
-            with open(schema_json_file, encoding="utf8") as f:
-                schema_data = json.load(f)
-        except (OSError, ValueError, TypeError):
+    def _save_std_schema_cache(
+        self, schema: Schema, sv: reflection.ServerVersion
+    ) -> None:
+        _cache.save_json(
+            self._cache_key("std.json", sv),
+            dataclasses.asdict(schema),
+        )
+
+    def _load_std_schema_cache(
+        self, sv: reflection.ServerVersion
+    ) -> Schema | None:
+        schema_data = _cache.load_json(self._cache_key("std.json", sv))
+        if schema_data is None:
             return None
 
         if not isinstance(schema_data, dict):
@@ -160,7 +170,6 @@ class PydanticModelsGenerator(AbstractCodeGenerator):
         try:
             return _dataclass_extras.coerce_to_dataclass(Schema, schema_data)
         except Exception:
-            raise
             return None
 
     def _get_last_state(self) -> reflection.BranchState | None:
