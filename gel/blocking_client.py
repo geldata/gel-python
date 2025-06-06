@@ -16,6 +16,10 @@
 # limitations under the License.
 #
 
+from __future__ import annotations
+
+from __future__ import annotations
+from typing import Any
 
 import contextlib
 import datetime
@@ -33,6 +37,11 @@ from . import errors
 from . import transaction
 from .protocol import blocking_proto
 from .protocol.protocol import InputLanguage, OutputFormat
+
+from ._internal._save import make_save_executor_constructor
+
+if typing.TYPE_CHECKING:
+    from ._internal._qbmodel._pydantic import GelModel
 
 
 DEFAULT_PING_BEFORE_IDLE_TIMEOUT = datetime.timedelta(seconds=5)
@@ -166,8 +175,12 @@ class BlockingIOConnection(base_client.BaseConnection):
 
     def is_closed(self):
         proto = self._protocol
-        return not (proto and proto.sock is not None and
-                    proto.sock.fileno() >= 0 and proto.connected)
+        return not (
+            proto
+            and proto.sock is not None
+            and proto.sock.fileno() >= 0
+            and proto.connected
+        )
 
     async def close(self, timeout=None):
         """Send graceful termination message wait for connection to drop."""
@@ -231,9 +244,10 @@ class _PoolImpl(base_client.BasePoolImpl):
     ):
         if not issubclass(connection_class, BlockingIOConnection):
             raise TypeError(
-                f'connection_class is expected to be a subclass of '
-                f'gel.blocking_client.BlockingIOConnection, '
-                f'got {connection_class}')
+                f"connection_class is expected to be a subclass of "
+                f"gel.blocking_client.BlockingIOConnection, "
+                f"got {connection_class}"
+            )
         super().__init__(
             connect_args,
             connection_class,
@@ -259,7 +273,7 @@ class _PoolImpl(base_client.BasePoolImpl):
         self._ensure_initialized()
 
         if self._closing:
-            raise errors.InterfaceError('pool is closing')
+            raise errors.InterfaceError("pool is closing")
 
         ch = self._queue.get(timeout=timeout)
         try:
@@ -276,8 +290,8 @@ class _PoolImpl(base_client.BasePoolImpl):
     async def _release(self, holder):
         if not isinstance(holder._con, BlockingIOConnection):
             raise errors.InterfaceError(
-                f'release() received invalid connection: '
-                f'{holder._con!r} does not belong to any connection pool'
+                f"release() received invalid connection: "
+                f"{holder._con!r} does not belong to any connection pool"
             )
 
         timeout = None
@@ -321,7 +335,6 @@ class _PoolImpl(base_client.BasePoolImpl):
 
 
 class Iteration(transaction.BaseTransaction, abstract.Executor):
-
     __slots__ = ("_managed", "_lock")
 
     def __init__(self, retry, client, iteration):
@@ -333,7 +346,8 @@ class Iteration(transaction.BaseTransaction, abstract.Executor):
         with self._exclusive():
             if self._managed:
                 raise errors.InterfaceError(
-                    'cannot enter context: already in a `with` block')
+                    "cannot enter context: already in a `with` block"
+                )
             self._managed = True
             return self
 
@@ -372,7 +386,6 @@ class Iteration(transaction.BaseTransaction, abstract.Executor):
 
 
 class Retry(transaction.BaseRetry):
-
     def __iter__(self):
         return self
 
@@ -385,6 +398,132 @@ class Retry(transaction.BaseRetry):
             time.sleep(self._next_backoff)
         self._done = True
         iteration = Iteration(self, self._owner, self._iteration)
+        self._iteration += 1
+        return iteration
+
+
+class BatchIteration(transaction.BaseTransaction):
+    __slots__ = ("_managed", "_lock", "_batched_ops")
+
+    def __init__(self, retry, client, iteration):
+        super().__init__(retry, client, iteration)
+        self._managed = False
+        self._lock = threading.Lock()
+        self._batched_ops = []
+
+    def __enter__(self):
+        with self._exclusive():
+            if self._managed:
+                raise errors.InterfaceError(
+                    "cannot enter context: already in a `with` block"
+                )
+            self._managed = True
+            return self
+
+    def __exit__(self, extype, ex, tb):
+        with self._exclusive():
+            self._client._iter_coroutine(self._wait())
+            self._managed = False
+            return self._client._iter_coroutine(self._exit(extype, ex))
+
+    async def _ensure_transaction(self):
+        if not self._managed:
+            raise errors.InterfaceError(
+                "Only managed retriable transactions are supported. "
+                "Use `with transaction:`"
+            )
+        await super()._ensure_transaction()
+
+    @contextlib.contextmanager
+    def _exclusive(self):
+        if not self._lock.acquire(blocking=False):
+            raise errors.InterfaceError(
+                "concurrent queries within the same transaction "
+                "are not allowed"
+            )
+        try:
+            yield
+        finally:
+            self._lock.release()
+
+    def send_query(self, query: str, *args, **kwargs) -> None:
+        self._batched_ops.append(
+            abstract.QueryContext(
+                query=abstract.QueryWithArgs(query, None, args, kwargs),
+                cache=self._client._get_query_cache(),
+                query_options=abstract._query_opts,
+                retry_options=None,
+                state=self._client._get_state(),
+                transaction_options=None,
+                warning_handler=self._client._get_warning_handler(),
+                annotations=self._client._get_annotations(),
+            )
+        )
+
+    def send_query_single(self, query: str, *args, **kwargs) -> None:
+        self._batched_ops.append(
+            abstract.QueryContext(
+                query=abstract.QueryWithArgs(query, None, args, kwargs),
+                cache=self._client._get_query_cache(),
+                query_options=abstract._query_single_opts,
+                retry_options=None,
+                state=self._client._get_state(),
+                transaction_options=None,
+                warning_handler=self._client._get_warning_handler(),
+                annotations=self._client._get_annotations(),
+            )
+        )
+
+    def send_query_required_single(self, query: str, *args, **kwargs) -> None:
+        self._batched_ops.append(
+            abstract.QueryContext(
+                query=abstract.QueryWithArgs(query, None, args, kwargs),
+                cache=self._client._get_query_cache(),
+                query_options=abstract._query_required_single_opts,
+                retry_options=None,
+                state=self._client._get_state(),
+                transaction_options=None,
+                warning_handler=self._client._get_warning_handler(),
+                annotations=self._client._get_annotations(),
+            )
+        )
+
+    def send_execute(self, commands: str, *args, **kwargs) -> None:
+        self._batched_ops.append(
+            abstract.ExecuteContext(
+                query=abstract.QueryWithArgs(commands, None, args, kwargs),
+                cache=self._client._get_query_cache(),
+                retry_options=None,
+                state=self._client._get_state(),
+                transaction_options=None,
+                warning_handler=self._client._get_warning_handler(),
+                annotations=self._client._get_annotations(),
+            )
+        )
+
+    def wait(self) -> list[Any]:
+        with self._exclusive():
+            return self._client._iter_coroutine(self._wait())
+
+    async def _wait(self) -> list[Any]:
+        await self._ensure_transaction()
+        ops, self._batched_ops[:] = self._batched_ops[:], []
+        return await self._connection.batch_query(ops)
+
+
+class Batch(transaction.BaseRetry):
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        # Note: when changing this code consider also
+        # updating AsyncIOBatch.__anext__.
+        if self._done:
+            raise StopIteration
+        if self._next_backoff:
+            time.sleep(self._next_backoff)
+        self._done = True
+        iteration = BatchIteration(self, self._owner, self._iteration)
         self._iteration += 1
         return iteration
 
@@ -404,6 +543,23 @@ class Client(base_client.BaseClient, abstract.Executor):
     __slots__ = ()
     _impl_class = _PoolImpl
 
+    def save(self, *objs: GelModel) -> None:
+        make_executor = make_save_executor_constructor(objs)
+
+        for tx in self.transaction():
+            with tx:
+                executor = make_executor()
+
+                for batch in executor:
+                    ids = []
+                    for query, args in batch:
+                        ids.append(
+                            self.query_required_single(query, **args).id
+                        )
+                    executor.feed_ids(ids)
+
+                executor.commit()
+
     def _query(self, query_context: abstract.QueryContext):
         return iter_coroutine(super()._query(query_context))
 
@@ -419,6 +575,9 @@ class Client(base_client.BaseClient, abstract.Executor):
 
     def transaction(self) -> Retry:
         return Retry(self)
+
+    def _batch(self) -> Batch:
+        return Batch(self)
 
     def close(self, timeout=None):
         """Attempt to gracefully close all connections in the client.
@@ -445,14 +604,18 @@ class Client(base_client.BaseClient, abstract.Executor):
         output_format: OutputFormat = OutputFormat.BINARY,
         expect_one: bool = False,
     ) -> abstract.DescribeResult:
-        return iter_coroutine(self._describe(abstract.DescribeContext(
-            query=query,
-            state=self._get_state(),
-            inject_type_names=inject_type_names,
-            input_language=input_language,
-            output_format=output_format,
-            expect_one=expect_one,
-        )))
+        return iter_coroutine(
+            self._describe(
+                abstract.DescribeContext(
+                    query=query,
+                    state=self._get_state(),
+                    inject_type_names=inject_type_names,
+                    input_language=input_language,
+                    output_format=output_format,
+                    expect_one=expect_one,
+                )
+            )
+        )
 
 
 def create_client(
@@ -477,7 +640,6 @@ def create_client(
     return Client(
         connection_class=BlockingIOConnection,
         max_concurrency=max_concurrency,
-
         # connect arguments
         dsn=dsn,
         host=host,

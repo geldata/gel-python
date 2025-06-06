@@ -84,7 +84,7 @@ EdgeRecord_GetRecordDesc(PyObject *o)
     if (!EdgeRecord_Check(o)) {
         PyErr_Format(
             PyExc_TypeError,
-            "an instance of edgedb.Object expected");
+            "an instance of gel.Object expected");
         return NULL;
     }
 
@@ -269,7 +269,7 @@ static PyMethodDef record_methods[] = {
 
 PyTypeObject EdgeRecord_Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
-    "edgedb.Record",
+    "gel.Record",
     .tp_basicsize = sizeof(EdgeRecord) - sizeof(PyObject *),
     .tp_itemsize = sizeof(PyObject *),
     .tp_dealloc = (destructor)record_dealloc,

@@ -3,7 +3,7 @@ import pathlib
 import typing
 import json
 
-from . import platform
+from gel._internal import _platform
 
 
 class RequiredCredentials(typing.TypedDict, total=True):
@@ -23,28 +23,26 @@ class Credentials(RequiredCredentials, total=False):
 
 
 def get_credentials_path(instance_name: str) -> pathlib.Path:
-    return platform.search_config_dir("credentials", instance_name + ".json")
+    return _platform.search_config_dir("credentials", instance_name + ".json")
 
 
 def read_credentials(path: os.PathLike) -> Credentials:
     try:
-        with open(path, encoding='utf-8') as f:
+        with open(path, encoding="utf-8") as f:
             credentials = json.load(f)
         return validate_credentials(credentials)
     except Exception as e:
-        raise RuntimeError(
-            f"cannot read credentials at {path}"
-        ) from e
+        raise RuntimeError(f"cannot read credentials at {path}") from e
 
 
 def validate_credentials(data: dict) -> Credentials:
-    port = data.get('port')
+    port = data.get("port")
     if port is None:
         port = 5656
     if not isinstance(port, int) or port < 1 or port > 65535:
         raise ValueError("invalid `port` value")
 
-    user = data.get('user')
+    user = data.get("user")
     if user is None:
         raise ValueError("`user` key is required")
     if not isinstance(user, str):
@@ -55,62 +53,64 @@ def validate_credentials(data: dict) -> Credentials:
         "port": port,
     }
 
-    host = data.get('host')
+    host = data.get("host")
     if host is not None:
         if not isinstance(host, str):
             raise ValueError("`host` must be a string")
-        result['host'] = host
+        result["host"] = host
 
-    database = data.get('database')
+    database = data.get("database")
     if database is not None:
         if not isinstance(database, str):
             raise ValueError("`database` must be a string")
-        result['database'] = database
+        result["database"] = database
 
-    branch = data.get('branch')
+    branch = data.get("branch")
     if branch is not None:
         if not isinstance(branch, str):
             raise ValueError("`branch` must be a string")
         if database is not None and branch != database:
-            raise ValueError(
-                f"`database` and `branch` cannot be different")
-        result['branch'] = branch
+            raise ValueError(f"`database` and `branch` cannot be different")
+        result["branch"] = branch
 
-    password = data.get('password')
+    password = data.get("password")
     if password is not None:
         if not isinstance(password, str):
             raise ValueError("`password` must be a string")
-        result['password'] = password
+        result["password"] = password
 
-    ca = data.get('tls_ca')
+    ca = data.get("tls_ca")
     if ca is not None:
         if not isinstance(ca, str):
             raise ValueError("`tls_ca` must be a string")
-        result['tls_ca'] = ca
+        result["tls_ca"] = ca
 
-    cert_data = data.get('tls_cert_data')
+    cert_data = data.get("tls_cert_data")
     if cert_data is not None:
         if not isinstance(cert_data, str):
             raise ValueError("`tls_cert_data` must be a string")
         if ca is not None and ca != cert_data:
             raise ValueError(
-                f"tls_ca and tls_cert_data are both set and disagree")
-        result['tls_ca'] = cert_data
+                f"tls_ca and tls_cert_data are both set and disagree"
+            )
+        result["tls_ca"] = cert_data
 
-    verify = data.get('tls_verify_hostname')
+    verify = data.get("tls_verify_hostname")
     if verify is not None:
         if not isinstance(verify, bool):
             raise ValueError("`tls_verify_hostname` must be a bool")
-        result['tls_security'] = 'strict' if verify else 'no_host_verification'
+        result["tls_security"] = "strict" if verify else "no_host_verification"
 
-    tls_security = data.get('tls_security')
+    tls_security = data.get("tls_security")
     if tls_security is not None:
         if not isinstance(tls_security, str):
             raise ValueError("`tls_security` must be a string")
-        result['tls_security'] = tls_security
+        result["tls_security"] = tls_security
 
-    missmatch = ValueError(f"tls_verify_hostname={verify} and "
-                           f"tls_security={tls_security} are incompatible")
+    missmatch = ValueError(
+        f"tls_verify_hostname={verify} and "
+        f"tls_security={tls_security} are incompatible"
+    )
     if tls_security == "strict" and verify is False:
         raise missmatch
     if tls_security in {"no_host_verification", "insecure"} and verify is True:

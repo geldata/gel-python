@@ -20,8 +20,7 @@
 from libc.stdint cimport int64_t
 
 
-@cython.final
-cdef class ConfigMemory:
+cdef class ConfigMemory(CustomType):
 
     cdef:
         readonly int64_t _bytes

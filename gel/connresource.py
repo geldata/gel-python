@@ -34,7 +34,6 @@ def guarded(meth):
 
 
 class ConnectionResource:
-
     def __init__(self, connection):
         self._connection = connection
         self._con_release_ctr = connection._pool_release_ctr
@@ -43,12 +42,15 @@ class ConnectionResource:
         con_release_ctr = self._connection._pool_release_ctr
         if con_release_ctr != self._con_release_ctr:
             raise errors.InterfaceError(
-                'cannot call {}.{}(): '
-                'the underlying connection has been released back '
-                'to the pool'.format(self.__class__.__name__, meth_name))
+                "cannot call {}.{}(): "
+                "the underlying connection has been released back "
+                "to the pool".format(self.__class__.__name__, meth_name)
+            )
 
         if self._connection.is_closed():
             raise errors.InterfaceError(
-                'cannot call {}.{}(): '
-                'the underlying connection is closed'.format(
-                    self.__class__.__name__, meth_name))
+                "cannot call {}.{}(): "
+                "the underlying connection is closed".format(
+                    self.__class__.__name__, meth_name
+                )
+            )

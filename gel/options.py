@@ -9,7 +9,7 @@ from collections import namedtuple
 from . import errors
 
 
-logger = logging.getLogger('gel')
+logger = logging.getLogger("gel")
 
 
 _RetryRule = namedtuple("_RetryRule", ["attempts", "backoff"])
@@ -17,7 +17,7 @@ TAG_NAME = "tag"
 
 
 def default_backoff(attempt):
-    return (2 ** attempt) * 0.1 + random.randrange(100) * 0.001
+    return (2**attempt) * 0.1 + random.randrange(100) * 0.001
 
 
 WarningHandler = typing.Callable[
@@ -27,10 +27,7 @@ WarningHandler = typing.Callable[
 
 
 def raise_warnings(warnings, res):
-    if (
-        len(warnings) > 1
-        and sys.version_info >= (3, 11)
-    ):
+    if len(warnings) > 1 and sys.version_info >= (3, 11):
         raise ExceptionGroup(  # noqa
             "Query produced warnings", warnings
         )
@@ -46,37 +43,39 @@ def log_warnings(warnings, res):
 
 class RetryCondition:
     """Specific condition to retry on for fine-grained control"""
+
     TransactionConflict = enum.auto()
     NetworkError = enum.auto()
 
 
 class IsolationLevel:
     """Isolation level for transaction"""
+
     Serializable = "Serializable"
     RepeatableRead = "RepeatableRead"
     PreferRepeatableRead = "PreferRepeatableRead"
 
     @staticmethod
     def _to_start_tx_str(v, optimistic_isolation):
-        if (
-            v == IsolationLevel.Serializable
-        ):
-            return 'SERIALIZABLE'
+        if v == IsolationLevel.Serializable:
+            return "SERIALIZABLE"
         elif v == IsolationLevel.RepeatableRead:
-            return 'REPEATABLE READ'
+            return "REPEATABLE READ"
         elif v == IsolationLevel.PreferRepeatableRead:
             if optimistic_isolation:
-                return 'REPEATABLE READ'
+                return "REPEATABLE READ"
             else:
-                return 'SERIALIZABLE'
+                return "SERIALIZABLE"
         else:
             raise ValueError(
-                f"Invalid isolation_level value for transaction(): {self}"
+                f"Invalid isolation_level value for transaction(): {v}"
             )
+
 
 class RetryOptions:
     """An immutable class that contains rules for `transaction()`"""
-    __slots__ = ['_default', '_overrides']
+
+    __slots__ = ["_default", "_overrides"]
 
     def __init__(self, attempts: int, backoff=default_backoff):
         self._default = _RetryRule(attempts, backoff)
@@ -119,7 +118,8 @@ class RetryOptions:
 
 class TransactionOptions:
     """Options for `transaction()`"""
-    __slots__ = ['_isolation', '_readonly', '_deferrable']
+
+    __slots__ = ["_isolation", "_readonly", "_deferrable"]
 
     def __init__(
         self,
@@ -139,37 +139,38 @@ class TransactionOptions:
         options = []
         if self._isolation is not None:
             level = IsolationLevel._to_start_tx_str(
-                self._isolation, optimistic_isolation)
-            options.append(f'ISOLATION {level}')
+                self._isolation, optimistic_isolation
+            )
+            options.append(f"ISOLATION {level}")
 
         if self._readonly is not None:
             if self._readonly:
-                mode = 'READ ONLY'
+                mode = "READ ONLY"
             else:
-                mode = 'READ WRITE'
+                mode = "READ WRITE"
             options.append(mode)
 
         if self._deferrable is not None:
             if self._deferrable:
-                defer = 'DEFERRABLE'
+                defer = "DEFERRABLE"
             else:
-                defer = 'NOT DEFERRABLE'
+                defer = "NOT DEFERRABLE"
             options.append(defer)
 
-        opt_str = ', '.join(options)
-        return f'START TRANSACTION {opt_str};'
+        opt_str = ", ".join(options)
+        return f"START TRANSACTION {opt_str};"
 
     def __repr__(self):
         return (
-            f'<{self.__class__.__name__} '
-            f'isolation:{self._isolation}, '
-            f'readonly:{self._readonly}, '
-            f'deferrable:{self._deferrable}>'
+            f"<{self.__class__.__name__} "
+            f"isolation:{self._isolation}, "
+            f"readonly:{self._readonly}, "
+            f"deferrable:{self._deferrable}>"
         )
 
 
 class State:
-    __slots__ = ['_module', '_aliases', '_config', '_globals']
+    __slots__ = ["_module", "_aliases", "_config", "_globals"]
 
     def __init__(
         self,
@@ -249,7 +250,7 @@ class State:
             mod = self._aliases.get(mod, mod)
             return f"{mod}::{name}"
         else:
-            raise AssertionError('broken split')
+            raise AssertionError("broken split")
 
     def with_globals(self, *args, **globals_):
         if len(args) > 1:
@@ -352,7 +353,7 @@ class _OptionsMixin:
         result._options = self._options.with_transaction_options(options)
         return result
 
-    def with_retry_options(self, options: RetryOptions=None):
+    def with_retry_options(self, options: RetryOptions = None):
         """Returns object with adjusted options for future retrying
         transactions.
 
@@ -370,7 +371,7 @@ class _OptionsMixin:
         result._options = self._options.with_retry_options(options)
         return result
 
-    def with_warning_handler(self, warning_handler: WarningHandler=None):
+    def with_warning_handler(self, warning_handler: WarningHandler = None):
         """Returns object with adjusted options for handling warnings.
 
         :param warning_handler WarningHandler:
@@ -470,8 +471,11 @@ class _Options:
     """Internal class for storing connection options"""
 
     __slots__ = [
-        '_retry_options', '_transaction_options', '_state',
-        '_warning_handler', '_annotations'
+        "_retry_options",
+        "_transaction_options",
+        "_state",
+        "_warning_handler",
+        "_annotations",
     ]
 
     def __init__(

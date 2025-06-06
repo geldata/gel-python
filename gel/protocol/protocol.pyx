@@ -111,6 +111,7 @@ cdef class ExecuteContext:
         state: typing.Optional[dict] = None,
         annotations: typing.Optional[dict[str, str]] = None,
         transaction_options: typing.Optional[object] = None,
+        return_type: typing.Optional[typing.Type],
     ):
         self.query = query
         self.args = args
@@ -134,6 +135,8 @@ cdef class ExecuteContext:
         self.warnings = ()
         self.unsafe_isolation_dangers = ()
         self.annotations = annotations
+
+        self.return_type = return_type
 
     cdef inline bint has_na_cardinality(self):
         return self.cardinality == CARDINALITY_NOT_APPLICABLE
@@ -178,6 +181,20 @@ cdef class ExecuteContext:
             self.capabilities,
             self.unsafe_isolation_dangers,
         )
+
+    cdef inline invalidate_cache(self):
+        key = (
+            self.query,
+            self.output_format,
+            self.implicit_limit,
+            self.inline_typenames,
+            self.inline_typeids,
+            self.expect_one,
+        )
+        try:
+            del self.qc[key]
+        except KeyError:
+            pass
 
 
 cdef prefers_repeatable_read(state):
@@ -301,6 +318,10 @@ cdef class SansIOProtocol:
             WriteBuffer buf
 
         compilation_flags = enums.CompilationFlag.INJECT_OUTPUT_OBJECT_IDS
+
+        # XXX
+        compilation_flags |= enums.CompilationFlag.INJECT_OUTPUT_TYPE_IDS
+
         if ctx.inline_typenames:
             compilation_flags |= enums.CompilationFlag.INJECT_OUTPUT_TYPE_NAMES
         if ctx.inline_typeids:
@@ -441,6 +462,84 @@ cdef class SansIOProtocol:
                 f'query cannot be executed with {methname}() as it '
                 f'does not return any data')
 
+    async def _backpressure(self):
+        pass
+
+    async def _parse_batch(self, ctxs: list[ExecuteContext]):
+        cdef:
+            WriteBuffer buf, params
+            char mtype
+            ExecuteContext ctx
+
+        for ctx in ctxs:
+            await self._backpressure()
+            if not self.connected:
+                raise RuntimeError('not connected')
+
+            buf = WriteBuffer.new_message(PREPARE_MSG)
+            self.write_annotations(ctx, buf)
+            params = self.encode_parse_params(
+                ctx, self._get_active_state(ctx, is_execute=False)
+            )
+            buf.write_buffer(params)
+            buf.end_message()
+
+            if ctx is ctxs[-1]:
+                buf.write_bytes(SYNC_MESSAGE)
+
+            self.write(buf)
+
+        it = iter(ctxs)
+        exc = None
+        while True:
+            if not self.buffer.take_message():
+                await self.wait_for_message()
+            mtype = self.buffer.get_message_type()
+
+            try:
+                if mtype == STMT_DATA_DESC_MSG:
+                    ctx = next(it)
+                    self.parse_describe_type_message(ctx)
+                    if ctx.required_one and ctx.has_na_cardinality():
+                        assert ctx.output_format != OutputFormat.NONE
+                        methname = _QUERY_SINGLE_METHOD[
+                            ctx.required_one][ctx.output_format]
+                        exc = errors.InterfaceError(
+                            f'query cannot be executed with {methname}() '
+                            f'as it does not return any data')
+                    else:
+                        ctx.store_to_cache()
+
+                elif mtype == STATE_DATA_DESC_MSG:
+                    self.parse_describe_state_message()
+
+                elif mtype == ERROR_RESPONSE_MSG:
+                    ctx = next(it)
+                    if exc is None:
+                        exc = self.parse_error_message()
+                        exc._query = ctx.query
+                        exc = self._amend_parse_error(
+                            exc,
+                            ctx.output_format,
+                            ctx.expect_one,
+                            ctx.required_one,
+                        )
+                    else:
+                        self.buffer.discard_message()
+
+                elif mtype == READY_FOR_COMMAND_MSG:
+                    self.parse_sync_message()
+                    break
+
+                else:
+                    self.fallthrough()
+
+            finally:
+                self.buffer.finish_message()
+
+        if exc is not None:
+            raise exc
+
     async def _execute(self, ctx: ExecuteContext):
         cdef:
             WriteBuffer packet
@@ -489,7 +588,7 @@ cdef class SansIOProtocol:
                 elif mtype == DATA_MSG:
                     if exc is None:
                         try:
-                            self.parse_data_messages(ctx.out_dc, result)
+                            self.parse_data_messages(ctx, result)
                         except Exception as ex:
                             # An error during data decoding.  We need to
                             # handle this as gracefully as possible:
@@ -553,6 +652,137 @@ cdef class SansIOProtocol:
         else:
             return result
 
+    async def _execute_batch(self, ctxs: list[ExecuteContext]):
+        cdef:
+            WriteBuffer packet, buf, params
+            char mtype
+            object result
+            ExecuteContext ctx, c
+
+        if not ctxs:
+            return []
+
+        for ctx in ctxs:
+            await self._backpressure()
+            if not self.connected:
+                raise RuntimeError('not connected')
+
+            params = self.encode_parse_params(
+                ctx, self._get_active_state(ctx, is_execute=True)
+            )
+            buf = WriteBuffer.new_message(EXECUTE_MSG)
+            self.write_annotations(ctx, buf)
+            buf.write_buffer(params)
+            buf.write_bytes(ctx.in_dc.get_tid())
+            buf.write_bytes(ctx.out_dc.get_tid())
+            self.encode_args(ctx.in_dc, buf, ctx.args, ctx.kwargs)
+            buf.end_message()
+            if ctx is ctxs[-1]:
+                packet = WriteBuffer.new()
+                packet.write_buffer(buf)
+                packet.write_bytes(SYNC_MESSAGE)
+            else:
+                packet = buf
+            self.write(packet)
+
+        result = []
+        results = []
+        it = iter(ctxs)
+        ctx = next(it)
+        exc = None
+        while True:
+            if not self.buffer.take_message():
+                await self.wait_for_message()
+            mtype = self.buffer.get_message_type()
+
+            try:
+                if mtype == STMT_DATA_DESC_MSG:
+                    self.parse_describe_type_message(ctx)
+                    ctx.store_to_cache()
+
+                elif mtype == STATE_DATA_DESC_MSG:
+                    self.parse_describe_state_message()
+
+                elif mtype == DATA_MSG:
+                    if exc is None:
+                        try:
+                            self.parse_data_messages(ctx, result)
+                        except Exception as ex:
+                            # An error during data decoding.  We need to
+                            # handle this as gracefully as possible:
+                            # * save the exception to raise it once SYNC is
+                            #   received;
+                            # * ignore all 'D' messages for this query.
+                            exc = errors.ClientError(
+                                'unable to decode data to Python objects')
+                            exc.__cause__ = ex
+                            # Take care of a partially consumed 'D' message
+                            # and the ones yet unparsed.
+                            while self.buffer.take_message_type(DATA_MSG):
+                                self.buffer.discard_message()
+                    else:
+                        self.buffer.discard_message()
+
+                elif mtype == COMMAND_COMPLETE_MSG:
+                    self.parse_command_complete_message()
+                    results.append(result)
+                    result = []
+                    if ctx is ctxs[-1]:
+                        ctx = None
+                    else:
+                        ctx = next(it)
+
+                elif mtype == ERROR_RESPONSE_MSG:
+                    exc = self.parse_error_message()
+                    exc._query = ctx.query
+                    if exc.get_code() == parameter_type_mismatch_code:
+                        if not isinstance(ctx.in_dc, NullCodec):
+                            buf = WriteBuffer.new()
+                            try:
+                                self.encode_args(
+                                    ctx.in_dc, buf, ctx.args, ctx.kwargs
+                                )
+                            except errors.QueryArgumentError as ex:
+                                exc = ex
+                            else:
+                                # Now we know for sure that the new codec can
+                                # encode the same arguments, let's hint the
+                                # caller to retry as a special case.
+                                exc.tags = exc.tags.union(
+                                    {errors.SHOULD_RETRY}
+                                )
+
+                                # If we may retry this batch, invalidate codec
+                                # cache for all queries except the current one
+                                # because we just updated its input codec
+                                for c in ctxs:
+                                    if c is not ctx:
+                                        c.invalidate_cache()
+                            finally:
+                                buf = None
+                    else:
+                        exc = self._amend_parse_error(
+                            exc,
+                            ctx.output_format,
+                            ctx.expect_one,
+                            ctx.required_one,
+                        )
+
+                elif mtype == READY_FOR_COMMAND_MSG:
+                    self.parse_sync_message()
+                    break
+
+                else:
+                    self.fallthrough()
+
+            finally:
+                self.buffer.finish_message()
+
+        if exc is not None:
+            raise exc
+        else:
+            return results
+
     cdef encode_state(self, state):
         cdef WriteBuffer buf
 
@@ -600,6 +830,9 @@ cdef class SansIOProtocol:
 
     async def query(self, ctx: ExecuteContext):
         ret = await self.execute(ctx)
+        return self._handle_query_result(ctx, ret)
+
+    cdef _handle_query_result(self, ExecuteContext ctx, ret):
         if ctx.expect_one:
             if ret or not ctx.required_one:
                 if ret:
@@ -626,6 +859,37 @@ cdef class SansIOProtocol:
                     return '[]'
                 else:
                     return ret
+
+    async def batch_execute(self, ctxs: list[ExecuteContext]):
+        cdef ExecuteContext ctx
+
+        self.ensure_connected()
+        self.reset_status()
+
+        needs_parse = []
+        for ctx in ctxs:
+            if ctx.load_from_cache():
+                pass
+            elif (
+                not ctx.args
+                and not ctx.kwargs
+                and not ctx.required_one
+                and not prefers_repeatable_read(ctx.state)
+            ):
+                ctx.in_dc = ctx.out_dc = NULL_CODEC
+            else:
+                needs_parse.append(ctx)
+
+        if needs_parse:
+            await self._parse_batch(needs_parse)
+
+        results = await self._execute_batch(ctxs)
+        return [
+            None
+            if ctx.output_format == OutputFormat.NONE
+            else self._handle_query_result(ctx, ret)
+            for ctx, ret in zip(ctxs, results)
+        ]
 
     async def dump(self, header_callback, block_callback):
         cdef:
@@ -1040,7 +1304,7 @@ cdef class SansIOProtocol:
 
         frb_init(rbuf, buf, buf_len)
 
-        return decoder(codec, rbuf)
+        return decoder(codec, None, rbuf)
 
     cdef parse_server_settings(self, str name, bytes val):
         if name == 'suggested_pool_concurrency':
@@ -1145,7 +1409,7 @@ cdef class SansIOProtocol:
 
             ctx.capabilities = self.buffer.read_int64()
             ctx.cardinality = self.buffer.read_byte()
-            ctx.in_dc, ctx.out_dc = self.parse_type_data(ctx.reg)
+            ctx.in_dc, ctx.out_dc = self.parse_type_data(ctx)
         finally:
             self.buffer.finish_message()
 
@@ -1169,10 +1433,11 @@ cdef class SansIOProtocol:
         finally:
             self.buffer.finish_message()
 
-    cdef parse_type_data(self, CodecsRegistry reg):
+    cdef parse_type_data(self, ExecuteContext ctx):
         cdef:
             bytes type_id
             BaseCodec in_dc, out_dc
+            CodecsRegistry reg = ctx.reg
 
         type_id = self.buffer.read_bytes(16)
         type_data = self.buffer.read_len_prefixed_bytes()
@@ -1192,9 +1457,10 @@ cdef class SansIOProtocol:
 
         return in_dc, out_dc
 
-    cdef parse_data_messages(self, BaseCodec out_dc, result):
+    cdef parse_data_messages(self, ExecuteContext ctx, result):
         cdef:
             ReadBuffer buf = self.buffer
+            BaseCodec out_dc = ctx.out_dc
 
             decode_row_method decoder = <decode_row_method>out_dc.decode
             pgproto.try_consume_message_method try_consume_message = \
@@ -1243,7 +1509,7 @@ cdef class SansIOProtocol:
                 # so we want to skip first 6 bytes:
                 frb_init(rbuf, cbuf + 6, cbuf_len - 6)
 
-            row = decoder(out_dc, rbuf)
+            row = decoder(out_dc, ctx.return_type, rbuf)
             result.append(row)
 
             if frb_get_len(rbuf):

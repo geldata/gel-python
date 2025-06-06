@@ -21,9 +21,9 @@ import asyncio
 import logging
 import unittest.mock
 
-import edgedb
-from edgedb import errors
-from edgedb import RetryOptions
+import gel
+from gel import errors
+from gel import RetryOptions
 from gel import _testbase as tb
 
 log = logging.getLogger(__name__)
@@ -78,7 +78,7 @@ class TestAsyncRetry(tb.AsyncQueryTestCase):
                         };
                     ''')
                     1 / 0
-        with self.assertRaises(edgedb.NoDataError):
+        with self.assertRaises(gel.NoDataError):
             await self.client.query_required_single('''
                 SELECT test::Counter
                 FILTER .name = 'counter_retry_02'
@@ -86,7 +86,7 @@ class TestAsyncRetry(tb.AsyncQueryTestCase):
 
     async def test_async_retry_begin(self):
         patcher = unittest.mock.patch(
-            "edgedb.base_client.BaseConnection.privileged_execute"
+            "gel.base_client.BaseConnection.privileged_execute"
         )
         _start = patcher.start()
 
@@ -108,7 +108,7 @@ class TestAsyncRetry(tb.AsyncQueryTestCase):
                             name := 'counter_retry_begin'
                         };
                     ''')
-        with self.assertRaises(edgedb.NoDataError):
+        with self.assertRaises(gel.NoDataError):
             await self.client.query_required_single('''
                 SELECT test::Counter
                 FILTER .name = 'counter_retry_begin'
@@ -138,10 +138,10 @@ class TestAsyncRetry(tb.AsyncQueryTestCase):
         await self.execute_conflict('counter2')
 
     async def test_async_conflict_no_retry(self):
-        with self.assertRaises(edgedb.TransactionSerializationError):
+        with self.assertRaises(gel.TransactionSerializationError):
             await self.execute_conflict(
                 'counter3',
-                RetryOptions(attempts=1, backoff=edgedb.default_backoff)
+                RetryOptions(attempts=1, backoff=gel.default_backoff)
             )
 
     async def execute_conflict(self, name='counter2', options=None):
@@ -293,13 +293,13 @@ class TestAsyncRetry(tb.AsyncQueryTestCase):
             async for tx in self.client.transaction():
                 await tx.start()
 
-        with self.assertRaisesRegex(edgedb.InterfaceError,
+        with self.assertRaisesRegex(gel.InterfaceError,
                                     r'.*Use `async with transaction:`'):
             async for tx in self.client.transaction():
                 await tx.execute("SELECT 123")
 
         with self.assertRaisesRegex(
-            edgedb.InterfaceError,
+            gel.InterfaceError,
             r"already in an `async with` block",
         ):
             async for tx in self.client.transaction():

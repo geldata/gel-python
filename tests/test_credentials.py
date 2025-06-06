@@ -23,8 +23,8 @@ import os
 import unittest
 from unittest import mock
 
-from edgedb import credentials
-from edgedb import platform
+from gel import credentials
+from gel._internal import _platform
 
 
 class _MockExists:
@@ -41,7 +41,7 @@ class _MockExists:
 
 class TestCredentials(unittest.TestCase):
     def tearDown(self):
-        importlib.reload(platform)
+        importlib.reload(_platform)
 
     def test_credentials_read(self):
         creds = credentials.read_credentials(
@@ -94,7 +94,7 @@ class TestCredentials(unittest.TestCase):
     @mock.patch("sys.platform", "darwin")
     @mock.patch("pathlib.Path.home")
     def test_get_credentials_path_macos(self, home_method):
-        importlib.reload(platform)
+        importlib.reload(_platform)
         home_method.return_value = pathlib.PurePosixPath("/Users/edgedb")
         with mock.patch(
             "pathlib.PurePosixPath.exists", lambda x: True, create=True,
@@ -116,7 +116,7 @@ class TestCredentials(unittest.TestCase):
     @mock.patch("pathlib.Path", pathlib.PureWindowsPath)
     @mock.patch("ctypes.windll", create=True)
     def test_get_credentials_path_win(self, windll):
-        importlib.reload(platform)
+        importlib.reload(_platform)
 
         def get_folder_path(_a, _b, _c, _d, path_buf):
             path_buf.value = r"c:\Users\edgedb\AppData\Local"
@@ -151,7 +151,7 @@ class TestCredentials(unittest.TestCase):
         os.environ, {"XDG_CONFIG_HOME": "/home/edgedb/.config"}, clear=True
     )
     def test_get_credentials_path_linux_xdg(self):
-        importlib.reload(platform)
+        importlib.reload(_platform)
         with mock.patch(
             "pathlib.PurePosixPath.exists", lambda x: True, create=True
         ):
@@ -175,7 +175,7 @@ class TestCredentials(unittest.TestCase):
     @mock.patch("pathlib.PurePosixPath.home", create=True)
     @mock.patch.dict(os.environ, {}, clear=True)
     def test_get_credentials_path_linux_no_xdg(self, home_method):
-        importlib.reload(platform)
+        importlib.reload(_platform)
         home_method.return_value = pathlib.PurePosixPath("/home/edgedb")
 
         with mock.patch(

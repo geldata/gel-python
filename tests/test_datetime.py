@@ -21,8 +21,8 @@ import random
 from datetime import timedelta
 
 from gel import _testbase as tb
-from edgedb import errors
-from edgedb.datatypes.datatypes import RelativeDuration, DateDuration
+from gel import errors
+from gel.datatypes.datatypes import RelativeDuration, DateDuration
 
 
 USECS_PER_HOUR = 3600000000
@@ -255,7 +255,7 @@ class TestDatetimeTypes(tb.SyncQueryTestCase):
             SELECT args;
         ''', durs)
 
-        for db_dur, client_dur in zip(durs_as_text, durs):
+        for db_dur, client_dur in zip(durs_as_text, durs, strict=False):
             self.assertEqual(db_dur, str(client_dur))
 
         self.assertEqual(list(durs_from_db), durs)

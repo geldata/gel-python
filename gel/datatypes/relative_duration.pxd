@@ -20,8 +20,7 @@
 from libc.stdint cimport int64_t, int32_t
 
 
-@cython.final
-cdef class RelativeDuration:
+cdef class RelativeDuration(CustomType):
 
     cdef:
         readonly int64_t microseconds

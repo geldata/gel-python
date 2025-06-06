@@ -19,8 +19,8 @@
 
 import sys
 
-if sys.version_info < (3, 9):
-    raise RuntimeError("gel requires Python 3.9 or greater")
+if sys.version_info < (3, 10):
+    raise RuntimeError("gel requires Python 3.10 or greater")
 
 import os
 import os.path
@@ -36,7 +36,7 @@ from setuptools.command import sdist as setuptools_sdist
 from setuptools.command import build_ext as setuptools_build_ext
 
 
-CYTHON_DEPENDENCY = "Cython(>=3.0.11,<3.1.0)"
+CYTHON_DEPENDENCY = "Cython(>=3.1.1,<4.0.0)"
 
 if flag := os.environ.get('EDGEDB_OPT_CFLAG'):
     CFLAGS = [flag]

@@ -24,12 +24,12 @@ import threading
 import time
 import uuid
 
-import edgedb
+import gel
 
-from edgedb import abstract
+from gel import abstract
 from gel import _testbase as tb
 from gel import blocking_client
-from edgedb.protocol import protocol
+from gel.protocol import protocol
 
 
 class TestSyncQuery(tb.SyncQueryTestCase):
@@ -50,9 +50,13 @@ class TestSyncQuery(tb.SyncQueryTestCase):
         CREATE SCALAR TYPE MyEnum EXTENDING enum<"A", "B">;
 
         CREATE SCALAR TYPE test::MyType EXTENDING int32;
+        CREATE SCALAR TYPE test::MyType2 EXTENDING int64;
+        CREATE SCALAR TYPE test::MyType3 EXTENDING int16;
     '''
 
     TEARDOWN = '''
+        DROP SCALAR TYPE test::MyType3;
+        DROP SCALAR TYPE test::MyType2;
         DROP SCALAR TYPE test::MyType;
         DROP TYPE test::Tmp;
         DROP TYPE test::TmpConflictChild;
@@ -61,31 +65,31 @@ class TestSyncQuery(tb.SyncQueryTestCase):
 
     def test_sync_parse_error_recover_01(self):
         for _ in range(2):
-            with self.assertRaises(edgedb.EdgeQLSyntaxError):
+            with self.assertRaises(gel.EdgeQLSyntaxError):
                 self.client.query('select syntax error')
 
-            with self.assertRaises(edgedb.EdgeQLSyntaxError):
+            with self.assertRaises(gel.EdgeQLSyntaxError):
                 self.client.query('select syntax error')
 
-            with self.assertRaises(edgedb.EdgeQLSyntaxError):
+            with self.assertRaises(gel.EdgeQLSyntaxError):
                 self.client.query('select (')
 
-            with self.assertRaises(edgedb.EdgeQLSyntaxError):
+            with self.assertRaises(gel.EdgeQLSyntaxError):
                 self.client.query_json('select (')
 
             for _ in range(10):
                 self.assertEqual(
                     self.client.query('select 1;'),
-                    edgedb.Set((1,)))
+                    gel.Set((1,)))
 
             self.assertFalse(self.client.connection.is_closed())
 
     def test_sync_parse_error_recover_02(self):
         for _ in range(2):
-            with self.assertRaises(edgedb.EdgeQLSyntaxError):
+            with self.assertRaises(gel.EdgeQLSyntaxError):
                 self.client.execute('select syntax error')
 
-            with self.assertRaises(edgedb.EdgeQLSyntaxError):
+            with self.assertRaises(gel.EdgeQLSyntaxError):
                 self.client.execute('select syntax error')
 
             for _ in range(10):
@@ -93,23 +97,23 @@ class TestSyncQuery(tb.SyncQueryTestCase):
 
     def test_sync_exec_error_recover_01(self):
         for _ in range(2):
-            with self.assertRaises(edgedb.DivisionByZeroError):
+            with self.assertRaises(gel.DivisionByZeroError):
                 self.client.query('select 1 / 0;')
 
-            with self.assertRaises(edgedb.DivisionByZeroError):
+            with self.assertRaises(gel.DivisionByZeroError):
                 self.client.query('select 1 / 0;')
 
             for _ in range(10):
                 self.assertEqual(
                     self.client.query('select 1;'),
-                    edgedb.Set((1,)))
+                    gel.Set((1,)))
 
     def test_sync_exec_error_recover_02(self):
         for _ in range(2):
-            with self.assertRaises(edgedb.DivisionByZeroError):
+            with self.assertRaises(gel.DivisionByZeroError):
                 self.client.execute('select 1 / 0;')
 
-            with self.assertRaises(edgedb.DivisionByZeroError):
+            with self.assertRaises(gel.DivisionByZeroError):
                 self.client.execute('select 1 / 0;')
 
             for _ in range(10):
@@ -121,9 +125,9 @@ class TestSyncQuery(tb.SyncQueryTestCase):
             if i:
                 self.assertEqual(
                     self.client.query(query, i),
-                    edgedb.Set([10 // i]))
+                    gel.Set([10 // i]))
             else:
-                with self.assertRaises(edgedb.DivisionByZeroError):
+                with self.assertRaises(gel.DivisionByZeroError):
                     self.client.query(query, i)
 
     def test_sync_exec_error_recover_04(self):
@@ -131,11 +135,11 @@ class TestSyncQuery(tb.SyncQueryTestCase):
             if i:
                 self.client.execute(f'select 10 // {i};')
             else:
-                with self.assertRaises(edgedb.DivisionByZeroError):
+                with self.assertRaises(gel.DivisionByZeroError):
                     self.client.query(f'select 10 // {i};')
 
     def test_sync_exec_error_recover_05(self):
-        with self.assertRaises(edgedb.DivisionByZeroError):
+        with self.assertRaises(gel.DivisionByZeroError):
             self.client.execute(f'select 1 / 0')
         self.assertEqual(
             self.client.query('SELECT "HELLO"'),
@@ -149,7 +153,7 @@ class TestSyncQuery(tb.SyncQueryTestCase):
         res = self.client.query_required_single("SELECT 1")
         self.assertEqual(res, 1)
 
-        with self.assertRaises(edgedb.NoDataError):
+        with self.assertRaises(gel.NoDataError):
             self.client.query_required_single("SELECT <str>{}")
 
     def test_sync_query_single_command_01(self):
@@ -198,13 +202,13 @@ class TestSyncQuery(tb.SyncQueryTestCase):
 
     def test_sync_query_no_return(self):
         with self.assertRaisesRegex(
-                edgedb.InterfaceError,
+                gel.InterfaceError,
                 r'cannot be executed with query_required_single\(\).*'
                 r'not return'):
             self.client.query_required_single('create type Foo123')
 
         with self.assertRaisesRegex(
-                edgedb.InterfaceError,
+                gel.InterfaceError,
                 r'cannot be executed with query_required_single_json\(\).*'
                 r'not return'):
             self.client.query_required_single_json('create type Bar123')
@@ -219,7 +223,7 @@ class TestSyncQuery(tb.SyncQueryTestCase):
             self.assertEqual(
                 self.client.query(
                     'select (1,)'),
-                edgedb.Set([(1,)]))
+                gel.Set([(1,)]))
 
             self.assertEqual(
                 self.client.query_single(
@@ -229,24 +233,24 @@ class TestSyncQuery(tb.SyncQueryTestCase):
             self.assertEqual(
                 self.client.query(
                     'select ["a", "b"]'),
-                edgedb.Set([["a", "b"]]))
+                gel.Set([["a", "b"]]))
 
             self.assertEqual(
                 self.client.query('''
                     SELECT {(a := 1 + 1 + 40, world := ("hello", 32)),
                             (a:=1, world := ("yo", 10))};
                 '''),
-                edgedb.Set([
-                    edgedb.NamedTuple(a=42, world=("hello", 32)),
-                    edgedb.NamedTuple(a=1, world=("yo", 10)),
+                gel.Set([
+                    gel.NamedTuple(a=42, world=("hello", 32)),
+                    gel.NamedTuple(a=1, world=("yo", 10)),
                 ]))
 
             with self.assertRaisesRegex(
-                    edgedb.InterfaceError,
+                    gel.InterfaceError,
                     r'query cannot be executed with query_single\('):
                 self.client.query_single('SELECT {1, 2}')
 
-            with self.assertRaisesRegex(edgedb.NoDataError,
+            with self.assertRaisesRegex(gel.NoDataError,
                                         r'\bquery_required_single_json\('):
                 self.client.query_required_single_json('SELECT <int64>{}')
 
@@ -254,12 +258,12 @@ class TestSyncQuery(tb.SyncQueryTestCase):
         self.assertEqual(
             self.client.query(
                 r'''select [b"\x00a", b"b", b'', b'\na']'''),
-            edgedb.Set([[b"\x00a", b"b", b'', b'\na']]))
+            gel.Set([[b"\x00a", b"b", b'', b'\na']]))
 
         self.assertEqual(
             self.client.query(
                 r'select <bytes>$0', b'he\x00llo'),
-            edgedb.Set([b'he\x00llo']))
+            gel.Set([b'he\x00llo']))
 
     def test_sync_basic_datatypes_03(self):
         for _ in range(10):
@@ -310,7 +314,7 @@ class TestSyncQuery(tb.SyncQueryTestCase):
                 json.loads(self.client.query_json('SELECT <int64>{}')),
                 [])
 
-            with self.assertRaises(edgedb.NoDataError):
+            with self.assertRaises(gel.NoDataError):
                 self.client.query_required_single_json('SELECT <int64>{}')
 
             self.assertEqual(
@@ -323,23 +327,23 @@ class TestSyncQuery(tb.SyncQueryTestCase):
             self.client.query(
                 'select (<array<str>>$foo)[0] ++ (<array<str>>$bar)[0];',
                 foo=['aaa'], bar=['bbb']),
-            edgedb.Set(('aaabbb',)))
+            gel.Set(('aaabbb',)))
 
     def test_sync_args_02(self):
         self.assertEqual(
             self.client.query(
                 'select (<array<str>>$0)[0] ++ (<array<str>>$1)[0];',
                 ['aaa'], ['bbb']),
-            edgedb.Set(('aaabbb',)))
+            gel.Set(('aaabbb',)))
 
     def test_sync_args_03(self):
-        with self.assertRaisesRegex(edgedb.QueryError, r'missing \$0'):
+        with self.assertRaisesRegex(gel.QueryError, r'missing \$0'):
             self.client.query('select <int64>$1;')
 
-        with self.assertRaisesRegex(edgedb.QueryError, r'missing \$1'):
+        with self.assertRaisesRegex(gel.QueryError, r'missing \$1'):
             self.client.query('select <int64>$0 + <int64>$2;')
 
-        with self.assertRaisesRegex(edgedb.QueryError,
+        with self.assertRaisesRegex(gel.QueryError,
                                     'combine positional and named parameters'):
             self.client.query('select <int64>$0 + <int64>$bar;')
 
@@ -375,31 +379,31 @@ class TestSyncQuery(tb.SyncQueryTestCase):
                 naive_time),
             naive_time)
 
-        with self.assertRaisesRegex(edgedb.InvalidArgumentError,
+        with self.assertRaisesRegex(gel.InvalidArgumentError,
                                     r'a timezone-aware.*expected'):
             self.client.query_single(
                 'select <datetime>$0;',
                 naive_datetime)
 
-        with self.assertRaisesRegex(edgedb.InvalidArgumentError,
+        with self.assertRaisesRegex(gel.InvalidArgumentError,
                                     r'a naive time object.*expected'):
             self.client.query_single(
                 'select <cal::local_time>$0;',
                 aware_time)
 
-        with self.assertRaisesRegex(edgedb.InvalidArgumentError,
+        with self.assertRaisesRegex(gel.InvalidArgumentError,
                                     r'a naive datetime object.*expected'):
             self.client.query_single(
                 'select <cal::local_datetime>$0;',
                 aware_datetime)
 
-        with self.assertRaisesRegex(edgedb.InvalidArgumentError,
+        with self.assertRaisesRegex(gel.InvalidArgumentError,
                                     r'datetime.datetime object was expected'):
             self.client.query_single(
                 'select <cal::local_datetime>$0;',
                 date)
 
-        with self.assertRaisesRegex(edgedb.InvalidArgumentError,
+        with self.assertRaisesRegex(gel.InvalidArgumentError,
                                     r'datetime.datetime object was expected'):
             self.client.query_single(
                 'select <datetime>$0;',
@@ -407,7 +411,7 @@ class TestSyncQuery(tb.SyncQueryTestCase):
 
     def test_sync_mismatched_args_01(self):
         with self.assertRaisesRegex(
-                edgedb.QueryArgumentError,
+                gel.QueryArgumentError,
                 r"expected {'a'} arguments, "
                 "got {'[bc]', '[bc]'}, "
                 r"missed {'a'}, extra {'[bc]', '[bc]'}"):
@@ -416,7 +420,7 @@ class TestSyncQuery(tb.SyncQueryTestCase):
 
     def test_sync_mismatched_args_02(self):
         with self.assertRaisesRegex(
-                edgedb.QueryArgumentError,
+                gel.QueryArgumentError,
                 r"expected {'[ab]', '[ab]'} arguments, "
                 r"got {'[acd]', '[acd]', '[acd]'}, "
                 r"missed {'b'}, extra {'[cd]', '[cd]'}"):
@@ -427,7 +431,7 @@ class TestSyncQuery(tb.SyncQueryTestCase):
 
     def test_sync_mismatched_args_03(self):
         with self.assertRaisesRegex(
-                edgedb.QueryArgumentError,
+                gel.QueryArgumentError,
                 "expected {'a'} arguments, got {'b'}, "
                 "missed {'a'}, extra {'b'}"):
 
@@ -435,7 +439,7 @@ class TestSyncQuery(tb.SyncQueryTestCase):
 
     def test_sync_mismatched_args_04(self):
         with self.assertRaisesRegex(
-                edgedb.QueryArgumentError,
+                gel.QueryArgumentError,
                 r"expected {'[ab]', '[ab]'} arguments, "
                 r"got {'a'}, "
                 r"missed {'b'}"):
@@ -444,7 +448,7 @@ class TestSyncQuery(tb.SyncQueryTestCase):
 
     def test_sync_mismatched_args_05(self):
         with self.assertRaisesRegex(
-                edgedb.QueryArgumentError,
+                gel.QueryArgumentError,
                 r"expected {'a'} arguments, "
                 r"got {'[ab]', '[ab]'}, "
                 r"extra {'b'}"):
@@ -453,7 +457,7 @@ class TestSyncQuery(tb.SyncQueryTestCase):
 
     def test_sync_mismatched_args_06(self):
         with self.assertRaisesRegex(
-                edgedb.QueryArgumentError,
+                gel.QueryArgumentError,
                 r"expected {'a'} arguments, "
                 r"got nothing, "
                 r"missed {'a'}"):
@@ -462,7 +466,7 @@ class TestSyncQuery(tb.SyncQueryTestCase):
 
     def test_sync_mismatched_args_07(self):
         with self.assertRaisesRegex(
-            edgedb.QueryArgumentError,
+            gel.QueryArgumentError,
             "expected no named arguments",
         ):
 
@@ -494,7 +498,7 @@ class TestSyncQuery(tb.SyncQueryTestCase):
         self.assertEqual(obj.id, ot.id)
         self.assertEqual(obj.name, ot.name)
 
-        with self.assertRaisesRegex(edgedb.InvalidArgumentError,
+        with self.assertRaisesRegex(gel.InvalidArgumentError,
                                     'invalid UUID.*length must be'):
             self.client.query(
                 'select schema::Object {name} filter .id=<uuid>$id',
@@ -581,43 +585,43 @@ class TestSyncQuery(tb.SyncQueryTestCase):
             arg=10)
         self.assertEqual(val, 10)
 
-        with self.assertRaisesRegex(edgedb.InvalidArgumentError,
+        with self.assertRaisesRegex(gel.InvalidArgumentError,
                                     'expected an int'):
             self.client.query(
                 'select <bigint>$arg',
                 arg='bad int')
 
-        with self.assertRaisesRegex(edgedb.InvalidArgumentError,
+        with self.assertRaisesRegex(gel.InvalidArgumentError,
                                     'expected an int'):
             self.client.query(
                 'select <bigint>$arg',
                 arg=10.11)
 
-        with self.assertRaisesRegex(edgedb.InvalidArgumentError,
+        with self.assertRaisesRegex(gel.InvalidArgumentError,
                                     'expected an int'):
             self.client.query(
                 'select <bigint>$arg',
                 arg=decimal.Decimal('10.0'))
 
-        with self.assertRaisesRegex(edgedb.InvalidArgumentError,
+        with self.assertRaisesRegex(gel.InvalidArgumentError,
                                     'expected an int'):
             self.client.query(
                 'select <bigint>$arg',
                 arg=decimal.Decimal('10.11'))
 
-        with self.assertRaisesRegex(edgedb.InvalidArgumentError,
+        with self.assertRaisesRegex(gel.InvalidArgumentError,
                                     'expected an int'):
             self.client.query(
                 'select <bigint>$arg',
                 arg='10')
 
-        with self.assertRaisesRegex(edgedb.InvalidArgumentError,
+        with self.assertRaisesRegex(gel.InvalidArgumentError,
                                     'expected an int'):
             self.client.query_single(
                 'select <bigint>$arg',
                 arg=decimal.Decimal('10'))
 
-        with self.assertRaisesRegex(edgedb.InvalidArgumentError,
+        with self.assertRaisesRegex(gel.InvalidArgumentError,
                                     'expected an int'):
             class IntLike:
                 def __int__(self):
@@ -632,19 +636,19 @@ class TestSyncQuery(tb.SyncQueryTestCase):
             def __int__(self):
                 return 10
 
-        with self.assertRaisesRegex(edgedb.InvalidArgumentError,
+        with self.assertRaisesRegex(gel.InvalidArgumentError,
                                     'expected an int'):
             self.client.query_single(
                 'select <int16>$arg',
                 arg=IntLike())
 
-        with self.assertRaisesRegex(edgedb.InvalidArgumentError,
+        with self.assertRaisesRegex(gel.InvalidArgumentError,
                                     'expected an int'):
             self.client.query_single(
                 'select <int32>$arg',
                 arg=IntLike())
 
-        with self.assertRaisesRegex(edgedb.InvalidArgumentError,
+        with self.assertRaisesRegex(gel.InvalidArgumentError,
                                     'expected an int'):
             self.client.query_single(
                 'select <int64>$arg',
@@ -660,13 +664,13 @@ class TestSyncQuery(tb.SyncQueryTestCase):
         )
         self.assertEqual(val, 10)
 
-        with self.assertRaisesRegex(edgedb.InvalidArgumentError,
+        with self.assertRaisesRegex(gel.InvalidArgumentError,
                                     'expected a Decimal or an int'):
             self.client.query_single(
                 'select <decimal>$arg',
                 arg=IntLike())
 
-        with self.assertRaisesRegex(edgedb.InvalidArgumentError,
+        with self.assertRaisesRegex(gel.InvalidArgumentError,
                                     'expected a Decimal or an int'):
             self.client.query_single(
                 'select <decimal>$arg',
@@ -686,12 +690,12 @@ class TestSyncQuery(tb.SyncQueryTestCase):
         lock_key = tb.gen_lock_key()
 
         client = self.client.with_retry_options(
-            edgedb.RetryOptions(attempts=1)
+            gel.RetryOptions(attempts=1)
         )
         client2 = self.make_test_client(
             database=self.client.dbname
         ).with_retry_options(
-            edgedb.RetryOptions(attempts=1)
+            gel.RetryOptions(attempts=1)
         ).ensure_connected()
 
         for tx in client.transaction():
@@ -704,8 +708,8 @@ class TestSyncQuery(tb.SyncQueryTestCase):
 
                 def exec_to_fail():
                     with self.assertRaises((
-                        edgedb.ClientConnectionClosedError,
-                        edgedb.ClientConnectionFailedError,
+                        gel.ClientConnectionClosedError,
+                        gel.ClientConnectionFailedError,
                     )):
                         for tx2 in client2.transaction():
                             with tx2:
@@ -725,7 +729,7 @@ class TestSyncQuery(tb.SyncQueryTestCase):
                     evt.wait(1)
                     time.sleep(0.1)
 
-                    with self.assertRaises(edgedb.InterfaceError):
+                    with self.assertRaises(gel.InterfaceError):
                         # close() will ask the server nicely to
                         # disconnect, but since the server is blocked on
                         # the lock, close() will timeout and get
@@ -759,7 +763,7 @@ class TestSyncQuery(tb.SyncQueryTestCase):
         self.assertEqual(str(A), 'A')
 
         with self.assertRaisesRegex(
-            edgedb.InvalidValueError, 'invalid input value for enum'
+            gel.InvalidValueError, 'invalid input value for enum'
         ):
             for tx in self.client.transaction():
                 with tx:
@@ -774,14 +778,14 @@ class TestSyncQuery(tb.SyncQueryTestCase):
             A)
 
         with self.assertRaisesRegex(
-            edgedb.InvalidValueError, 'invalid input value for enum'
+            gel.InvalidValueError, 'invalid input value for enum'
         ):
             for tx in self.client.transaction():
                 with tx:
                     tx.query_single('SELECT <MyEnum>$0', 'Oups')
 
         with self.assertRaisesRegex(
-            edgedb.InvalidArgumentError, 'a str or gel.EnumValue'
+            gel.InvalidArgumentError, 'a str or gel.EnumValue'
         ):
             self.client.query_single('SELECT <MyEnum>$0', 123)
 
@@ -796,7 +800,7 @@ class TestSyncQuery(tb.SyncQueryTestCase):
             self.client.connection.raw_query(
                 abstract.QueryContext(
                     query=abstract.QueryWithArgs(
-                        'SELECT {"aaa", "bbb"}', (), {}
+                        'SELECT {"aaa", "bbb"}', None, (), {}
                     ),
                     cache=self.client._get_query_cache(),
                     query_options=abstract.QueryOptions(
@@ -814,7 +818,7 @@ class TestSyncQuery(tb.SyncQueryTestCase):
         )
         self.assertEqual(
             result,
-            edgedb.Set(['"aaa"', '"bbb"']))
+            gel.Set(['"aaa"', '"bbb"']))
 
     def _test_sync_cancel_01(self):
         # TODO(fantix): enable when command_timeout is implemented
@@ -833,7 +837,7 @@ class TestSyncQuery(tb.SyncQueryTestCase):
 
             protocol_before = client._impl._holders[0]._con._protocol
 
-            with self.assertRaises(edgedb.InterfaceError):
+            with self.assertRaises(gel.InterfaceError):
                 client.with_timeout_options(command_timeout=0.1).query_single(
                     'SELECT sys::_sleep(10)'
                 )
@@ -873,19 +877,19 @@ class TestSyncQuery(tb.SyncQueryTestCase):
 
     def test_sync_banned_transaction(self):
         with self.assertRaisesRegex(
-            edgedb.CapabilityError,
+            gel.CapabilityError,
             r'cannot execute transaction control commands',
         ):
             self.client.query('start transaction')
 
         with self.assertRaisesRegex(
-            edgedb.CapabilityError,
+            gel.CapabilityError,
             r'cannot execute transaction control commands',
         ):
             self.client.execute('start transaction')
 
     def test_transaction_state(self):
-        with self.assertRaisesRegex(edgedb.QueryError, "cannot assign to.*id"):
+        with self.assertRaisesRegex(gel.QueryError, "cannot assign to.*id"):
             for tx in self.client.transaction():
                 with tx:
                     tx.execute('''
@@ -905,9 +909,9 @@ class TestSyncQuery(tb.SyncQueryTestCase):
 
         # Test the bug fixed in geldata/gel#8623
         with self.client.with_config(
-            default_transaction_isolation=edgedb.IsolationLevel.RepeatableRead
+            default_transaction_isolation=gel.IsolationLevel.RepeatableRead
         ) as db2:
-            res = db2.query('''
+            db2.query('''
                 select 1; select 2;
             ''')
 
@@ -916,8 +920,8 @@ class TestSyncQuery(tb.SyncQueryTestCase):
             self.skipTest("RepeatableRead not supported yet")
 
         with self.client.with_transaction_options(
-            edgedb.TransactionOptions(
-                isolation=edgedb.IsolationLevel.RepeatableRead
+            gel.TransactionOptions(
+                isolation=gel.IsolationLevel.RepeatableRead
             )
         ) as db2:
             res = db2.query_single('''
@@ -926,8 +930,8 @@ class TestSyncQuery(tb.SyncQueryTestCase):
             self.assertEqual(str(res), 'RepeatableRead')
 
         with self.client.with_transaction_options(
-            edgedb.TransactionOptions(
-                isolation=edgedb.IsolationLevel.PreferRepeatableRead
+            gel.TransactionOptions(
+                isolation=gel.IsolationLevel.PreferRepeatableRead
             )
         ) as db2:
             res = db2.query_single('''
@@ -937,10 +941,10 @@ class TestSyncQuery(tb.SyncQueryTestCase):
 
         # transaction_options takes precedence over config
         with self.client.with_config(
-            default_transaction_isolation=edgedb.IsolationLevel.RepeatableRead
+            default_transaction_isolation=gel.IsolationLevel.RepeatableRead
         ) as db1, db1.with_transaction_options(
-            edgedb.TransactionOptions(
-                isolation=edgedb.IsolationLevel.Serializable,
+            gel.TransactionOptions(
+                isolation=gel.IsolationLevel.Serializable,
             )
         ) as db2:
             res = db2.query_single('''
@@ -949,9 +953,9 @@ class TestSyncQuery(tb.SyncQueryTestCase):
             self.assertEqual(str(res), 'Serializable')
 
         with self.client.with_transaction_options(
-            edgedb.TransactionOptions(readonly=True)
+            gel.TransactionOptions(readonly=True)
         ) as db2:
-            with self.assertRaises(edgedb.errors.TransactionError):
+            with self.assertRaises(gel.errors.TransactionError):
                 res = db2.execute('''
                     insert test::Tmp { tmp := "test" }
                 ''')
@@ -964,8 +968,7 @@ class TestSyncQuery(tb.SyncQueryTestCase):
             self.skipTest("DML in RepeatableRead not supported yet")
 
         with self.client.with_config(
-            default_transaction_isolation=
-            edgedb.IsolationLevel.PreferRepeatableRead
+            default_transaction_isolation=gel.IsolationLevel.PreferRepeatableRead
         ) as db2:
             # This query can run in RepeatableRead mode
             res = db2.query_single('''
@@ -986,8 +989,8 @@ class TestSyncQuery(tb.SyncQueryTestCase):
             self.assertEqual(str(res.level), 'Serializable')
 
         with self.client.with_transaction_options(
-            edgedb.TransactionOptions(
-                isolation=edgedb.IsolationLevel.PreferRepeatableRead
+            gel.TransactionOptions(
+                isolation=gel.IsolationLevel.PreferRepeatableRead
             )
         ) as db2:
             res = db2.query_single('''
@@ -1024,7 +1027,7 @@ class TestSyncQuery(tb.SyncQueryTestCase):
         # The cached codec doesn't know about the change, so the client cannot
         # encode this string yet:
         with self.assertRaisesRegex(
-            edgedb.InvalidArgumentError, 'expected an int'
+            gel.InvalidArgumentError, 'expected an int'
         ):
             self.client.query_single("SELECT <test::MyType>$0", "foo")
 
@@ -1033,10 +1036,129 @@ class TestSyncQuery(tb.SyncQueryTestCase):
         # we shall receive the new string codec. Because we cannot re-encode
         # `42` as str, the client shouldn't retry but raise a translated error.
         with self.assertRaisesRegex(
-            edgedb.QueryArgumentError, 'expected str, got int'
+            gel.QueryArgumentError, 'expected str, got int'
         ):
             self.client.query_single("SELECT <test::MyType>$0", 42)
 
         # At last, verify that a string gets encoded properly
         val = self.client.query_single("SELECT <test::MyType>$0", "foo")
         self.assertEqual(val, 'foo')
+
+    def test_batch_01(self):
+        for bx in self.client._batch():
+            with bx:
+                bx.send_query_single('SELECT 1')
+                bx.send_query_single('SELECT 2')
+                bx.send_query_single('SELECT 3')
+
+                self.assertEqual(bx.wait(), [1, 2, 3])
+
+                bx.send_query_single('SELECT 4')
+                bx.send_query_single('SELECT 5')
+                bx.send_query_single('SELECT 6')
+
+                self.assertEqual(bx.wait(), [4, 5, 6])
+
+    def test_batch_02(self):
+        for bx in self.client._batch():
+            with bx:
+                bx.send_query_required_single('''
+                    INSERT test::Tmp {
+                        tmp := 'Test Batch'
+                    };
+                ''')
+                bx.send_query('''
+                    SELECT
+                        test::Tmp
+                    FILTER
+                        .tmp = 'Test Batch';
+                ''')
+                inserted, selected = bx.wait()
+
+        self.assertEqual([inserted.id], [o.id for o in selected])
+
+    def test_batch_03(self):
+        for bx in self.client._batch():
+            with bx:
+                bx.send_execute('''
+                    INSERT test::Tmp {
+                        tmp := 'Test Auto Wait'
+                    };
+                ''')
+                # No explicit wait() - should auto-wait on scope exit
+
+        rv = self.client.query('''
+            SELECT
+                test::Tmp
+            FILTER
+                .tmp = 'Test Auto Wait';
+        ''')
+        self.assertEqual(len(rv), 1)
+
+    def test_batch_04(self):
+        with self.assertRaises(gel.TransactionError):
+            for bx in self.client._batch():
+                with bx:
+                    bx.send_execute('''
+                        INSERT test::Tmp {
+                            tmp := 'Test Atomic'
+                        };
+                    ''')
+                    bx.send_query_single('SELECT 1/0')
+                    bx.send_execute('''
+                        INSERT test::Tmp {
+                            tmp := 'Test Atomic'
+                        };
+                    ''')
+
+                    with self.assertRaises(gel.DivisionByZeroError):
+                        bx.wait()
+
+        rv = self.client.query('''
+            SELECT
+                test::Tmp
+            FILTER
+                .tmp = 'Test Atomic';
+        ''')
+        self.assertEqual(len(rv), 0)
+
+    def test_batch_05(self):
+        for bx in self.client._batch():
+            with bx:
+                # Test alternating queries that need Parse
+                bx.send_query_single('SELECT 1')
+                bx.send_query_single('SELECT <int16>$0', 2)
+                bx.send_query_single('SELECT 3')
+                bx.send_query_single('SELECT <int32>$0', 4)
+                bx.send_query_single('SELECT 5')
+                bx.send_query_single('SELECT <int64>$0', 6)
+                bx.send_query_single('SELECT 7')
+                self.assertEqual(bx.wait(), [1, 2, 3, 4, 5, 6, 7])
+
+    def test_batch_06(self):
+        # Cache the input type descriptors first
+        val = self.client.query_single("SELECT <test::MyType>$0", 42)
+        self.assertEqual(val, 42)
+        val = self.client.query_single("SELECT <test::MyType2>$0", 42)
+        self.assertEqual(val, 42)
+        val = self.client.query_single("SELECT <test::MyType3>$0", 42)
+        self.assertEqual(val, 42)
+
+        # Modify the schema to outdate the previous type descriptors
+        self.client.execute("""
+            DROP SCALAR TYPE test::MyType;
+            DROP SCALAR TYPE test::MyType2;
+            DROP SCALAR TYPE test::MyType3;
+            CREATE SCALAR TYPE test::MyType EXTENDING std::int64;
+            CREATE SCALAR TYPE test::MyType2 EXTENDING std::int16;
+            CREATE SCALAR TYPE test::MyType3 EXTENDING std::int32;
+        """)
+
+        # We should retry only once and succeed here
+        c = self.client.with_retry_options(gel.RetryOptions(attempts=2))
+        for bx in c._batch():
+            with bx:
+                bx.send_query_single('SELECT <test::MyType>$0', 42)
+                bx.send_query_single('SELECT <test::MyType2>$0', 42)
+                bx.send_query_single('SELECT <test::MyType3>$0', 42)
+                self.assertEqual(bx.wait(), [42, 42, 42])

@@ -1,0 +1,45 @@
+extend = "../../pyproject.toml"
+
+[lint]
+preview = true
+extend-select = [
+    "A", # flake8-builtins
+    "B",  # flake8-bugbear
+    "C4", # flake8-comprehensions
+    "COM", # flake8-commas
+    "DTZ", # flake8-datetimez
+    "E",   # pycodestyle
+    "ERA", # flake8-eradicate
+    "F",   # pyflakes
+    "FA",  # flake8-future-annotations
+    "FBT", # flake8-boolean-trap
+    "FURB", # refurb
+    "G",   # flake8-logging-format
+    "ICN", # flake8-import-conventions
+    "ISC", # flake8-implicit-str-concat
+    "LOG", # flake8-logging
+    "N",   # pep8-naming
+    "PERF", # perflint
+    "PGH", # pygrep-hooks
+    "PIE", # flake8-pie
+    "PL",  # pylint
+    "PYI", # flake8-pyi
+    "Q",   # flake8-quotes
+    "RUF", # ruff specific
+    "S",   # flake8-bandit
+    "SIM", # flake8-simplify
+    "SLOT", # flake8-slots
+    "T20", # flake8-print
+    "TC",  # flake8-type-checking
+    "UP",  # pyupgrade
+    "W",   # warning
+]
+extend-ignore = [
+    "S101",    # assert
+    "COM812",  # missing-trailing-comma
+    "ISC002",  # multi-line-implicit-string-concatenation
+    "PLC0105", # type-name-incorrect-variance
+    "PLC0414", # useless-import-alias
+    "PLR0904", # too-many-public-methods
+    "PLW3201", # bad-dunder-method-name
+]

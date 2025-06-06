@@ -22,11 +22,11 @@ import random
 import threading
 import time
 
-import edgedb
+import gel
 
 from gel import _testbase as tb
-from edgedb import errors
-from edgedb import blocking_client
+from gel import errors
+from gel import blocking_client
 
 
 class TestBlockingClient(tb.SyncQueryTestCase):
@@ -102,9 +102,9 @@ class TestBlockingClient(tb.SyncQueryTestCase):
         client = self.create_client(max_concurrency=1)
 
         client.with_transaction_options(
-            edgedb.TransactionOptions(readonly=True))
+            gel.TransactionOptions(readonly=True))
         client.with_retry_options(
-            edgedb.RetryOptions(attempts=1, backoff=edgedb.default_backoff))
+            gel.RetryOptions(attempts=1, backoff=gel.default_backoff))
         for tx in client.transaction():
             with tx:
                 self.assertEqual(tx.query_single("SELECT 7*8"), 56)
@@ -464,7 +464,7 @@ class TestBlockingClient(tb.SyncQueryTestCase):
         conargs["database"] = self.get_database_name()
         conargs["timeout"] = 120
 
-        client = edgedb.create_client(**conargs)
+        client = gel.create_client(**conargs)
 
         self.assertEqual(client.max_concurrency, 1)
 
@@ -473,7 +473,7 @@ class TestBlockingClient(tb.SyncQueryTestCase):
 
         client.close()
 
-        client = edgedb.create_client(**conargs, max_concurrency=5)
+        client = gel.create_client(**conargs, max_concurrency=5)
 
         self.assertEqual(client.max_concurrency, 5)
 

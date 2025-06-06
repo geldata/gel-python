@@ -17,6 +17,7 @@
 #
 
 
+import argparse
 import asyncio
 import atexit
 import contextlib
@@ -25,13 +26,14 @@ import importlib.util
 import inspect
 import json
 import logging
-import pathlib
 import os
+import pathlib
 import re
 import shutil
 import subprocess
 import sys
 import tempfile
+import textwrap
 import time
 import unittest
 import warnings
@@ -52,9 +54,9 @@ log = logging.getLogger(__name__)
 def silence_asyncio_long_exec_warning():
     def flt(log_record):
         msg = log_record.getMessage()
-        return not msg.startswith('Executing ')
+        return not msg.startswith("Executing ")
 
-    logger = logging.getLogger('asyncio')
+    logger = logging.getLogger("asyncio")
     logger.addFilter(flt)
     try:
         yield
@@ -64,8 +66,8 @@ def silence_asyncio_long_exec_warning():
 
 def _get_wsl_path(win_path):
     return (
-        re.sub(r'^([A-Z]):', lambda m: f'/mnt/{m.group(1)}', win_path)
-        .replace("\\", '/')
+        re.sub(r"^([A-Z]):", lambda m: f"/mnt/{m.group(1)}", win_path)
+        .replace("\\", "/")
         .lower()
     )
 
@@ -87,7 +89,7 @@ def _start_cluster(*, cleanup_atexit=True):
 
     try:
         tmpdir = tempfile.TemporaryDirectory()
-        status_file = os.path.join(tmpdir.name, 'server-status')
+        status_file = os.path.join(tmpdir.name, "server-status")
 
         # if running on windows adjust the path for WSL
         status_file_unix = _get_wsl_path(status_file)
@@ -95,11 +97,11 @@ def _start_cluster(*, cleanup_atexit=True):
         env = os.environ.copy()
         # Make sure the PYTHONPATH of _this_ process does
         # not interfere with the server's.
-        env.pop('PYTHONPATH', None)
+        env.pop("PYTHONPATH", None)
 
-        gel_server = env.get('GEL_SERVER_BINARY')
+        gel_server = env.get("GEL_SERVER_BINARY")
         if not gel_server:
-            gel_server = env.get('EDGEDB_SERVER_BINARY')
+            gel_server = env.get("EDGEDB_SERVER_BINARY")
 
         if not gel_server:
             if sys.platform == "win32":
@@ -132,30 +134,30 @@ def _start_cluster(*, cleanup_atexit=True):
                         "GEL_SERVER_BINARY environment variable",
                     )
 
-        version_args = [gel_server, '--version']
-        if sys.platform == 'win32':
-            version_args = ['wsl', '-u', 'edgedb'] + version_args
+        version_args = [gel_server, "--version"]
+        if sys.platform == "win32":
+            version_args = ["wsl", "-u", "edgedb"] + version_args
         version_res = subprocess.run(
             version_args,
             capture_output=True,
             text=True,
         )
-        is_gel = version_res.stdout.startswith('gel-server,')
+        is_gel = version_res.stdout.startswith("gel-server,")
 
         version_line = version_res.stdout
-        is_gel = version_line.startswith('gel-server,')
+        is_gel = version_line.startswith("gel-server,")
 
         # The default role became admin in nightly build 9024 for 6.0
         if is_gel:
-            if '6.0-dev' in version_line:
-                rev = int(version_line.split('.')[2].split('+')[0])
+            if "6.0-dev" in version_line:
+                rev = int(version_line.split(".")[2].split("+")[0])
                 has_admin = rev >= 9024
             else:
                 has_admin = True
         else:
             has_admin = False
 
-        role = 'admin' if has_admin else 'edgedb'
+        role = "admin" if has_admin else "edgedb"
         args = [
             gel_server,
             "--temp-dir",
@@ -163,12 +165,12 @@ def _start_cluster(*, cleanup_atexit=True):
             f"--emit-server-status={status_file_unix}",
             "--port=auto",
             "--auto-shutdown",
-            f"--bootstrap-command=ALTER ROLE {role} {{SET password := 'test'}}",
+            f"--bootstrap-command=ALTER ROLE {role} {{SET password:='test'}}",
         ]
 
         help_args = [gel_server, "--help"]
-        if sys.platform == 'win32':
-            help_args = ['wsl', '-u', 'edgedb'] + help_args
+        if sys.platform == "win32":
+            help_args = ["wsl", "-u", "edgedb"] + help_args
 
         supported_opts = subprocess.run(
             help_args,
@@ -185,10 +187,10 @@ def _start_cluster(*, cleanup_atexit=True):
         elif "--generate-self-signed-cert" in supported_opts:
             args.append("--generate-self-signed-cert")
 
-        if sys.platform == 'win32':
-            args = ['wsl', '-u', 'edgedb'] + args
+        if sys.platform == "win32":
+            args = ["wsl", "-u", "edgedb"] + args
 
-        if env.get('EDGEDB_DEBUG_SERVER'):
+        if env.get("EDGEDB_DEBUG_SERVER"):
             server_stdout = None
         else:
             server_stdout = subprocess.DEVNULL
@@ -204,42 +206,43 @@ def _start_cluster(*, cleanup_atexit=True):
         for _ in range(600):
             if p.poll() is not None:
                 raise RuntimeError(
-                    'Database server crashed before signalling READY status.'
-                    ' Run with `env EDGEDB_DEBUG_SERVER=1` to debug.')
+                    "Database server crashed before signalling READY status."
+                    " Run with `env EDGEDB_DEBUG_SERVER=1` to debug."
+                )
             try:
-                with open(status_file, 'rb') as f:
+                with open(status_file, "rb") as f:
                     for line in f:
-                        if line.startswith(b'READY='):
+                        if line.startswith(b"READY="):
                             break
                     else:
-                        raise RuntimeError('not ready')
+                        raise RuntimeError("not ready")
                 break
             except Exception:
                 time.sleep(1)
         else:
-            raise RuntimeError('server status file not found')
+            raise RuntimeError("server status file not found")
 
-        data = json.loads(line.split(b'READY=')[1])
-        con_args = dict(host='localhost', port=data['port'])
-        if 'tls_cert_file' in data:
-            if sys.platform == 'win32':
-                con_args['tls_ca_file'] = os.path.join(
+        data = json.loads(line.split(b"READY=")[1])
+        con_args = dict(host="localhost", port=data["port"])
+        if "tls_cert_file" in data:
+            if sys.platform == "win32":
+                con_args["tls_ca_file"] = os.path.join(
                     tmpdir.name, "edbtlscert.pem"
                 )
                 subprocess.check_call(
                     [
-                        'wsl',
-                        '-u',
-                        'edgedb',
-                        'cp',
-                        data['tls_cert_file'],
-                        _get_wsl_path(con_args['tls_ca_file'])
+                        "wsl",
+                        "-u",
+                        "edgedb",
+                        "cp",
+                        data["tls_cert_file"],
+                        _get_wsl_path(con_args["tls_ca_file"]),
                     ]
                 )
             else:
-                con_args['tls_ca_file'] = data['tls_cert_file']
+                con_args["tls_ca_file"] = data["tls_cert_file"]
 
-        client = gel.create_client(password='test', **con_args)
+        client = gel.create_client(password="test", **con_args)
         client.ensure_connected()
         client.execute("""
             # Set session_idle_transaction_timeout to 5 minutes.
@@ -247,14 +250,14 @@ def _start_cluster(*, cleanup_atexit=True):
                 <duration>'5 minutes';
         """)
         _default_cluster = {
-            'proc': p,
-            'client': client,
-            'con_args': con_args,
+            "proc": p,
+            "client": client,
+            "con_args": con_args,
         }
 
-        if 'tls_cert_file' in data:
+        if "tls_cert_file" in data:
             # Keep the temp dir which we also copied the cert from WSL
-            _default_cluster['_tmpdir'] = tmpdir
+            _default_cluster["_tmpdir"] = tmpdir
 
         atexit.register(client.close)
     except Exception as e:
@@ -271,7 +274,7 @@ class TestCaseMeta(type(unittest.TestCase)):
     def _iter_methods(bases, ns):
         for base in bases:
             for methname in dir(base):
-                if not methname.startswith('test_'):
+                if not methname.startswith("test_"):
                     continue
 
                 meth = getattr(base, methname)
@@ -281,7 +284,7 @@ class TestCaseMeta(type(unittest.TestCase)):
                 yield methname, meth
 
         for methname, meth in ns.items():
-            if not methname.startswith('test_'):
+            if not methname.startswith("test_"):
                 continue
 
             if not inspect.iscoroutinefunction(meth):
@@ -302,14 +305,15 @@ class TestCaseMeta(type(unittest.TestCase)):
                     # than hunting them down every time, simply
                     # retry the test.
                     self.loop.run_until_complete(
-                        __meth__(self, *args, **kwargs))
+                        __meth__(self, *args, **kwargs)
+                    )
                 except gel.TransactionSerializationError:
                     if try_no == 3:
                         raise
                     else:
-                        self.loop.run_until_complete(self.client.execute(
-                            'ROLLBACK;'
-                        ))
+                        self.loop.run_until_complete(
+                            self.client.execute("ROLLBACK;")
+                        )
                         try_no += 1
                 else:
                     break
@@ -327,12 +331,13 @@ class TestCaseMeta(type(unittest.TestCase)):
             mcls.add_method(methname, ns, meth)
 
         cls = super().__new__(mcls, name, bases, ns)
-        if not ns.get('BASE_TEST_CLASS') and hasattr(cls, 'get_database_name'):
+        if not ns.get("BASE_TEST_CLASS") and hasattr(cls, "get_database_name"):
             dbname = cls.get_database_name()
 
             if name in mcls._database_names:
                 raise TypeError(
-                    f'{name} wants duplicate database name: {dbname}')
+                    f"{name} wants duplicate database name: {dbname}"
+                )
 
             mcls._database_names.add(name)
 
@@ -352,7 +357,7 @@ class TestCase(unittest.TestCase, metaclass=TestCaseMeta):
         asyncio.set_event_loop(None)
 
     def add_fail_notes(self, **kwargs):
-        if not hasattr(self, 'fail_notes'):
+        if not hasattr(self, "fail_notes"):
             self.fail_notes = {}
         self.fail_notes.update(kwargs)
 
@@ -366,8 +371,7 @@ class TestCase(unittest.TestCase, metaclass=TestCaseMeta):
             raise
 
     @contextlib.contextmanager
-    def assertRaisesRegex(self, exception, regex, msg=None,
-                          **kwargs):
+    def assertRaisesRegex(self, exception, regex, msg=None, **kwargs):
         with super().assertRaisesRegex(exception, regex, msg=msg):
             try:
                 yield
@@ -377,9 +381,10 @@ class TestCase(unittest.TestCase, metaclass=TestCaseMeta):
                         val = getattr(e, attr_name)
                         if val != expected_val:
                             raise self.failureException(
-                                f'{exception.__name__} context attribute '
-                                f'{attr_name!r} is {val} (expected '
-                                f'{expected_val!r})') from e
+                                f"{exception.__name__} context attribute "
+                                f"{attr_name!r} is {val} (expected "
+                                f"{expected_val!r})"
+                            ) from e
                 raise
 
     def addCleanup(self, func, *args, **kwargs):
@@ -388,11 +393,11 @@ class TestCase(unittest.TestCase, metaclass=TestCaseMeta):
             res = func(*args, **kwargs)
             if inspect.isawaitable(res):
                 self.loop.run_until_complete(res)
+
         super().addCleanup(cleanup)
 
 
 class ClusterTestCase(TestCase):
-
     BASE_TEST_CLASS = True
 
     @classmethod
@@ -437,21 +442,23 @@ class ConnectedTestCaseMixin:
 
     @classmethod
     def make_test_client(
-        cls, *,
+        cls,
+        *,
         cluster=None,
-        database='edgedb',
-        user='edgedb',
-        password='test',
+        database="edgedb",
+        user="edgedb",
+        password="test",
         host=...,
         port=...,
         connection_class=...,
     ):
         conargs = cls.get_connect_args(
-            cluster=cluster, database=database, user=user, password=password)
+            cluster=cluster, database=database, user=user, password=password
+        )
         if host is not ...:
-            conargs['host'] = host
+            conargs["host"] = host
         if port is not ...:
-            conargs['port'] = port
+            conargs["port"] = port
         if connection_class is ...:
             connection_class = (
                 asyncio_client.AsyncIOConnection
@@ -465,15 +472,11 @@ class ConnectedTestCaseMixin:
         )
 
     @classmethod
-    def get_connect_args(cls, *,
-                         cluster=None,
-                         database='edgedb',
-                         user='edgedb',
-                         password='test'):
-        conargs = cls.cluster['con_args'].copy()
-        conargs.update(dict(user=user,
-                            password=password,
-                            database=database))
+    def get_connect_args(
+        cls, *, cluster=None, database="edgedb", user="edgedb", password="test"
+    ):
+        conargs = cls.cluster["con_args"].copy()
+        conargs.update(dict(user=user, password=password, database=database))
         return conargs
 
     @classmethod
@@ -485,7 +488,7 @@ class DatabaseTestCase(ClusterTestCase, ConnectedTestCaseMixin):
     SETUP = None
     TEARDOWN = None
     SCHEMA = None
-    DEFAULT_MODULE = 'test'
+    DEFAULT_MODULE = "test"
 
     SETUP_METHOD = None
     TEARDOWN_METHOD = None
@@ -493,18 +496,28 @@ class DatabaseTestCase(ClusterTestCase, ConnectedTestCaseMixin):
     BASE_TEST_CLASS = True
     TEARDOWN_RETRY_DROP_DB = 1
 
+    ISOLATED_TEST_BRANCHES = False
+
     def setUp(self):
+        if self.ISOLATED_TEST_BRANCHES:
+            cls = type(self)
+            root = cls.get_database_name()
+            testdb = self._testMethodName
+            cls.__client__.query(f"""
+                create data branch {testdb} from {root};
+            """)
+            cls.client = cls.make_test_client(database=testdb)
+            cls.client.ensure_connected()
+
         if self.SETUP_METHOD:
-            self.adapt_call(
-                self.client.execute(self.SETUP_METHOD))
+            self.adapt_call(self.client.execute(self.SETUP_METHOD))
 
         super().setUp()
 
     def tearDown(self):
         try:
             if self.TEARDOWN_METHOD:
-                self.adapt_call(
-                    self.client.execute(self.TEARDOWN_METHOD))
+                self.adapt_call(self.client.execute(self.TEARDOWN_METHOD))
         finally:
             try:
                 if (
@@ -512,10 +525,16 @@ class DatabaseTestCase(ClusterTestCase, ConnectedTestCaseMixin):
                     and self.client.connection.is_in_transaction()
                 ):
                     raise AssertionError(
-                        'test connection is still in transaction '
-                        '*after* the test')
+                        "test connection is still in transaction "
+                        "*after* the test"
+                    )
 
             finally:
+                if self.ISOLATED_TEST_BRANCHES:
+                    cls = type(self)
+                    cls.client.close()
+                    cls.client = cls.__client__
+
                 super().tearDown()
 
     @classmethod
@@ -525,19 +544,19 @@ class DatabaseTestCase(ClusterTestCase, ConnectedTestCaseMixin):
 
         cls.admin_client = None
 
-        class_set_up = os.environ.get('EDGEDB_TEST_CASES_SET_UP')
+        class_set_up = os.environ.get("EDGEDB_TEST_CASES_SET_UP")
 
         # Only open an extra admin connection if necessary.
         if not class_set_up:
-            script = f'CREATE DATABASE {dbname};'
+            script = f"CREATE DATABASE {dbname};"
             cls.admin_client = cls.make_test_client()
             cls.adapt_call(cls.admin_client.execute(script))
 
-        cls.client = cls.make_test_client(database=dbname)
+        cls.__client__ = cls.client = cls.make_test_client(database=dbname)
         cls.server_version = cls.adapt_call(
-            cls.client.query_required_single('''
+            cls.client.query_required_single("""
                 select sys::get_version()
-            ''')
+            """)
         )
 
         if not class_set_up:
@@ -546,23 +565,26 @@ class DatabaseTestCase(ClusterTestCase, ConnectedTestCaseMixin):
                 # The setup is expected to contain a CREATE MIGRATION,
                 # which needs to be wrapped in a transaction.
                 if cls.is_client_async:
+
                     async def execute():
                         async for tr in cls.client.transaction():
                             async with tr:
                                 await tr.execute(script)
                 else:
+
                     def execute():
                         for tr in cls.client.transaction():
                             with tr:
                                 tr.execute(script)
+
                 cls.adapt_call(execute())
 
     @classmethod
     def get_database_name(cls):
-        if cls.__name__.startswith('TestEdgeQL'):
-            dbname = cls.__name__[len('TestEdgeQL'):]
-        elif cls.__name__.startswith('Test'):
-            dbname = cls.__name__[len('Test'):]
+        if cls.__name__.startswith("TestEdgeQL"):
+            dbname = cls.__name__[len("TestEdgeQL") :]
+        elif cls.__name__.startswith("Test"):
+            dbname = cls.__name__[len("Test") :]
         else:
             dbname = cls.__name__
 
@@ -570,30 +592,32 @@ class DatabaseTestCase(ClusterTestCase, ConnectedTestCaseMixin):
 
     @classmethod
     def get_setup_script(cls):
-        script = ''
+        script = ""
         schema = []
 
         # Look at all SCHEMA entries and potentially create multiple
         # modules, but always create the test module, if not `default`.
-        if cls.DEFAULT_MODULE != 'default':
-            schema.append(f'\nmodule {cls.DEFAULT_MODULE} {{}}')
+        if cls.DEFAULT_MODULE != "default":
+            schema.append(f"\nmodule {cls.DEFAULT_MODULE} {{}}")
         for name, val in cls.__dict__.items():
-            m = re.match(r'^SCHEMA(?:_(\w+))?', name)
+            m = re.match(r"^SCHEMA(?:_(\w+))?", name)
             if m:
                 module_name = (
-                    m.group(1) or cls.DEFAULT_MODULE
-                ).lower().replace('_', '::')
+                    (m.group(1) or cls.DEFAULT_MODULE)
+                    .lower()
+                    .replace("_", "::")
+                )
 
-                with open(val, 'r') as sf:
+                with open(val, "r") as sf:
                     module = sf.read()
 
-                schema.append(f'\nmodule {module_name} {{ {module} }}')
+                schema.append(f"\nmodule {module_name} {{ {module} }}")
 
         # Don't wrap the script into a transaction here, so that
         # potentially it's easier to stitch multiple such scripts
         # together in a fashion similar to what `edb inittestdb` does.
-        script += f'\nSTART MIGRATION TO {{ {"".join(schema)} }};'
-        script += f'\nPOPULATE MIGRATION; \nCOMMIT MIGRATION;'
+        script += f"\nSTART MIGRATION TO {{ {''.join(schema)} }};"
+        script += f"\nPOPULATE MIGRATION; \nCOMMIT MIGRATION;"
 
         if cls.SETUP:
             if not isinstance(cls.SETUP, (list, tuple)):
@@ -602,27 +626,26 @@ class DatabaseTestCase(ClusterTestCase, ConnectedTestCaseMixin):
                 scripts = cls.SETUP
 
             for scr in scripts:
-                if '\n' not in scr and os.path.exists(scr):
-                    with open(scr, 'rt') as f:
+                if "\n" not in scr and os.path.exists(scr):
+                    with open(scr, "rt") as f:
                         setup = f.read()
                 else:
                     setup = scr
 
-                script += '\n' + setup
+                script += "\n" + setup
 
-        return script.strip(' \n')
+        return script.strip(" \n")
 
     @classmethod
     def tearDownClass(cls):
-        script = ''
+        script = ""
 
         if cls.TEARDOWN:
             script = cls.TEARDOWN.strip()
 
         try:
             if script:
-                cls.adapt_call(
-                    cls.client.execute(script))
+                cls.adapt_call(cls.client.execute(script))
         finally:
             try:
                 if cls.is_client_async:
@@ -631,13 +654,12 @@ class DatabaseTestCase(ClusterTestCase, ConnectedTestCaseMixin):
                     cls.client.close()
 
                 dbname = cls.get_database_name()
-                script = f'DROP DATABASE {dbname};'
+                script = f"DROP DATABASE {dbname};"
 
                 retry = cls.TEARDOWN_RETRY_DROP_DB
                 for i in range(retry):
                     try:
-                        cls.adapt_call(
-                            cls.admin_client.execute(script))
+                        cls.adapt_call(cls.admin_client.execute(script))
                     except gel.errors.ExecutionError:
                         if i < retry - 1:
                             time.sleep(0.1)
@@ -647,15 +669,14 @@ class DatabaseTestCase(ClusterTestCase, ConnectedTestCaseMixin):
                         break
 
             except Exception:
-                log.exception('error running teardown')
+                log.exception("error running teardown")
                 # skip the exception so that original error is shown instead
                 # of finalizer error
             finally:
                 try:
                     if cls.admin_client is not None:
                         if cls.is_client_async:
-                            cls.adapt_call(
-                                cls.admin_client.aclose())
+                            cls.adapt_call(cls.admin_client.aclose())
                         else:
                             cls.admin_client.close()
                 finally:
@@ -676,9 +697,51 @@ class SyncQueryTestCase(DatabaseTestCase):
         return result
 
 
+class ModelTestCase(SyncQueryTestCase):
+    DEFAULT_MODULE = "default"
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+
+        cls.orm_debug = os.environ.get("GEL_PYTHON_TEST_ORM") in {"1", "true"}
+
+        cls.tmp_model_dir = tempfile.TemporaryDirectory()
+        if cls.orm_debug:
+            print(cls.tmp_model_dir.name)
+
+        from gel._internal._codegen._models import PydanticModelsGenerator
+
+        cls.gen = PydanticModelsGenerator(
+            argparse.Namespace(),
+            project_dir=pathlib.Path(cls.tmp_model_dir.name),
+            client=cls.client,
+            interactive=False,
+        )
+
+        try:
+            cls.gen.run()
+        except Exception as e:
+            raise RuntimeError(
+                f"error running model codegen, its stderr:\n"
+                f"{cls.gen.get_error_output()}"
+            ) from e
+
+        sys.path.insert(0, cls.tmp_model_dir.name)
+
+    @classmethod
+    def tearDownClass(cls):
+        try:
+            super().tearDownClass()
+        finally:
+            sys.path.remove(cls.tmp_model_dir.name)
+            if not cls.orm_debug:
+                cls.tmp_model_dir.cleanup()
+
+
 class ORMTestCase(SyncQueryTestCase):
     MODEL_PACKAGE = None
-    DEFAULT_MODULE = 'default'
+    DEFAULT_MODULE = "default"
 
     @classmethod
     def setUpClass(cls):
@@ -695,7 +758,7 @@ class ORMTestCase(SyncQueryTestCase):
 
             super().setUpClass()
 
-            class_set_up = os.environ.get('EDGEDB_TEST_CASES_SET_UP')
+            class_set_up = os.environ.get("EDGEDB_TEST_CASES_SET_UP")
             if not class_set_up:
                 # We'll need a temp directory to setup the generated Python
                 # package
@@ -711,10 +774,12 @@ class ORMTestCase(SyncQueryTestCase):
 
     @classmethod
     def tearDownClass(cls):
-        super().tearDownClass()
-        # cleanup the temp modules
-        sys.path.remove(cls.tmpormdir.name)
-        cls.tmpormdir.cleanup()
+        try:
+            super().tearDownClass()
+        finally:
+            # cleanup the temp modules
+            sys.path.remove(cls.tmpormdir.name)
+            cls.tmpormdir.cleanup()
 
 
 class SQLATestCase(ORMTestCase):
@@ -730,8 +795,8 @@ class SQLATestCase(ORMTestCase):
     def get_dsn_for_sqla(cls):
         cargs = cls.get_connect_args(database=cls.get_database_name())
         dsn = (
-            f'postgresql://{cargs["user"]}:{cargs["password"]}'
-            f'@{cargs["host"]}:{cargs["port"]}/{cargs["database"]}'
+            f"postgresql://{cargs['user']}:{cargs['password']}"
+            f"@{cargs['host']}:{cargs['port']}/{cargs['database']}"
         )
 
         return dsn
@@ -750,23 +815,23 @@ class SQLModelTestCase(ORMTestCase):
     def get_dsn_for_sqla(cls):
         cargs = cls.get_connect_args(database=cls.get_database_name())
         dsn = (
-            f'postgresql://{cargs["user"]}:{cargs["password"]}'
-            f'@{cargs["host"]}:{cargs["port"]}/{cargs["database"]}'
+            f"postgresql://{cargs['user']}:{cargs['password']}"
+            f"@{cargs['host']}:{cargs['port']}/{cargs['database']}"
         )
 
         return dsn
 
 
-APPS_PY = '''\
+APPS_PY = """\
 from django.apps import AppConfig
 
 
 class TestConfig(AppConfig):
     default_auto_field = 'django.db.models.BigAutoField'
     name = {name!r}
-'''
+"""
 
-SETTINGS_PY = '''\
+SETTINGS_PY = """\
 from pathlib import Path
 
 mysettings = dict(
@@ -785,7 +850,7 @@ mysettings = dict(
         }}
     }},
 )
-'''
+"""
 
 
 class DjangoTestCase(ORMTestCase):
@@ -794,14 +859,14 @@ class DjangoTestCase(ORMTestCase):
         pkgbase = os.path.join(cls.tmpormdir.name, cls.MODEL_PACKAGE)
         # Set up the package for testing Django models
         os.mkdir(pkgbase)
-        open(os.path.join(pkgbase, '__init__.py'), 'w').close()
-        with open(os.path.join(pkgbase, 'apps.py'), 'wt') as f:
+        open(os.path.join(pkgbase, "__init__.py"), "w").close()
+        with open(os.path.join(pkgbase, "apps.py"), "wt") as f:
             print(
                 APPS_PY.format(name=cls.MODEL_PACKAGE),
                 file=f,
             )
 
-        with open(os.path.join(pkgbase, 'settings.py'), 'wt') as f:
+        with open(os.path.join(pkgbase, "settings.py"), "wt") as f:
             cargs = cls.get_connect_args(database=cls.get_database_name())
             print(
                 SETTINGS_PY.format(
@@ -815,7 +880,7 @@ class DjangoTestCase(ORMTestCase):
                 file=f,
             )
 
-        models = os.path.join(pkgbase, 'models.py')
+        models = os.path.join(pkgbase, "models.py")
         gen = DjangoModGen(out=models)
         gen.render_models(cls.spec)
 
@@ -829,6 +894,140 @@ def gen_lock_key():
     return os.getpid() * 1000 + _lock_cnt
 
 
-if os.environ.get('USE_UVLOOP'):
+def typecheck(func):
+    wrapped = inspect.unwrap(func)
+    is_async = inspect.iscoroutinefunction(wrapped)
+
+    source_code = inspect.getsource(wrapped)
+    lines = source_code.splitlines()
+    body_offset: int
+    for lineno, line in enumerate(lines):
+        if line.strip().startswith("def "):
+            body_offset = lineno
+            break
+    else:
+        raise RuntimeError(f"couldn't extract source of {func}")
+
+    source_code = "\n".join(lines[body_offset + 1 :])
+    dedented_body = textwrap.dedent(source_code)
+
+    source_code = f"""\
+import unittest
+import typing
+
+import gel
+
+if not typing.TYPE_CHECKING:
+    def reveal_type(_: typing.Any) -> str:
+        return ''
+
+class TestModel(unittest.TestCase):
+    if typing.TYPE_CHECKING:
+    {
+        "       client: gel.AsyncIOClient = gel.create_async_client()"
+        if is_async
+        else "       client: gel.Client = gel.create_client()"
+    }
+
+    {"async " if is_async else ""}def test_model(self) -> None:
+{textwrap.indent(dedented_body, "    " * 2)}
+    """
+
+    def run(self):
+        d = type(self).tmp_model_dir.name
+
+        testfn = pathlib.Path(d) / "test.py"
+        inifn = pathlib.Path(d) / "mypy.ini"
+
+        with open(testfn, "wt") as f:
+            f.write(source_code)
+
+        with open(inifn, "wt") as f:
+            f.write(
+                textwrap.dedent(f"""\
+                [mypy]
+                strict = True
+                ignore_errors = False
+                follow_imports = normal
+                show_error_codes = True
+                local_partial_types = True
+            """)
+            )
+
+        try:
+            cmd = [
+                sys.executable,
+                "-m",
+                "mypy",
+                "--strict",
+                "--no-strict-equality",
+                "--config-file",
+                inifn,
+                testfn,
+            ]
+
+            res = subprocess.run(
+                cmd,
+                capture_output=True,
+                check=False,
+                cwd=inifn.parent,
+            )
+        finally:
+            inifn.unlink()
+            testfn.unlink()
+
+        if res.returncode != 0:
+            lines = source_code.split("\n")
+            pad_width = max(2, len(str(len(lines))))
+            source_code_numbered = "\n".join(
+                f"{i + 1:0{pad_width}d}: {line}"
+                for i, line in enumerate(lines)
+            )
+
+            raise RuntimeError(
+                f"mypy check failed for {func.__name__} "
+                f"\n\ntest code:\n{source_code_numbered}"
+                f"\n\nmypy stdout:\n{res.stdout.decode()}"
+                f"\n\nmypy stderr:\n{res.stderr.decode()}"
+            )
+
+        types = []
+
+        out = res.stdout.decode().split("\n")
+        for line in out:
+            if m := re.match(r'.*Revealed type is "(?P<name>[^"]+)".*', line):
+                types.append(m.group("name"))
+
+        def reveal_type(_, *, ncalls=[0], types=types):  # noqa: B006
+            ncalls[0] += 1
+            try:
+                return types[ncalls[0] - 1]
+            except IndexError:
+                return None
+
+        func.__globals__["reveal_type"] = reveal_type
+        return func(self)
+
+    if is_async:
+
+        async def runner(run=run):
+            await run()
+
+        return runner
+
+    else:
+        return run
+
+
+def must_fail(f):
+    return unittest.expectedFailure(f)
+
+
+def to_be_fixed(f):
+    return unittest.expectedFailure(f)
+
+
+if os.environ.get("USE_UVLOOP"):
     import uvloop
+
     uvloop.install()

@@ -17,6 +17,9 @@
 #
 
 
+from __future__ import annotations
+from typing import Any
+
 import asyncio
 import contextlib
 import logging
@@ -33,9 +36,7 @@ from .protocol import asyncio_proto
 from .protocol.protocol import InputLanguage, OutputFormat
 
 
-__all__ = (
-    'create_async_client', 'AsyncIOClient'
-)
+__all__ = ("create_async_client", "AsyncIOClient")
 
 
 logger = logging.getLogger(__name__)
@@ -101,7 +102,7 @@ class AsyncIOConnection(base_client.BaseConnection):
                     raise con_utils.wrap_error(e) from e
                 else:
                     con_utils.check_alpn_protocol(
-                        tr.get_extra_info('ssl_object')
+                        tr.get_extra_info("ssl_object")
                     )
         except socket.gaierror as e:
             # All name resolution errors are considered temporary
@@ -151,7 +152,7 @@ class _PoolConnectionHolder(base_client.PoolConnectionHolder):
 
 
 class _AsyncIOPoolImpl(base_client.BasePoolImpl):
-    __slots__ = ('_loop',)
+    __slots__ = ("_loop",)
     _holder_class = _PoolConnectionHolder
 
     def __init__(
@@ -163,9 +164,10 @@ class _AsyncIOPoolImpl(base_client.BasePoolImpl):
     ):
         if not issubclass(connection_class, AsyncIOConnection):
             raise TypeError(
-                f'connection_class is expected to be a subclass of '
-                f'gel.asyncio_client.AsyncIOConnection, '
-                f'got {connection_class}')
+                f"connection_class is expected to be a subclass of "
+                f"gel.asyncio_client.AsyncIOConnection, "
+                f"got {connection_class}"
+            )
         self._loop = None
         super().__init__(
             connect_args,
@@ -205,20 +207,18 @@ class _AsyncIOPoolImpl(base_client.BasePoolImpl):
                 return proxy
 
         if self._closing:
-            raise errors.InterfaceError('pool is closing')
+            raise errors.InterfaceError("pool is closing")
 
         if timeout is None:
             return await _acquire_impl()
         else:
-            return await asyncio.wait_for(
-                _acquire_impl(), timeout=timeout)
+            return await asyncio.wait_for(_acquire_impl(), timeout=timeout)
 
     async def _release(self, holder):
-
         if not isinstance(holder._con, AsyncIOConnection):
             raise errors.InterfaceError(
-                f'release() received invalid connection: '
-                f'{holder._con!r} does not belong to any connection pool'
+                f"release() received invalid connection: "
+                f"{holder._con!r} does not belong to any connection pool"
             )
 
         timeout = None
@@ -250,14 +250,13 @@ class _AsyncIOPoolImpl(base_client.BasePoolImpl):
 
         try:
             warning_callback = self._loop.call_later(
-                60, self._warn_on_long_close)
+                60, self._warn_on_long_close
+            )
 
-            release_coros = [
-                ch.wait_until_released() for ch in self._holders]
+            release_coros = [ch.wait_until_released() for ch in self._holders]
             await asyncio.gather(*release_coros)
 
-            close_coros = [
-                ch.close() for ch in self._holders]
+            close_coros = [ch.close() for ch in self._holders]
             await asyncio.gather(*close_coros)
 
         except (Exception, asyncio.CancelledError):
@@ -271,14 +270,14 @@ class _AsyncIOPoolImpl(base_client.BasePoolImpl):
 
     def _warn_on_long_close(self):
         logger.warning(
-            'AsyncIOClient.aclose() is taking over 60 seconds to complete. '
-            'Check if you have any unreleased connections left. '
-            'Use asyncio.wait_for() to set a timeout for '
-            'AsyncIOClient.aclose().')
+            "AsyncIOClient.aclose() is taking over 60 seconds to complete. "
+            "Check if you have any unreleased connections left. "
+            "Use asyncio.wait_for() to set a timeout for "
+            "AsyncIOClient.aclose()."
+        )
 
 
 class AsyncIOIteration(transaction.BaseTransaction, abstract.AsyncIOExecutor):
-
     __slots__ = ("_managed", "_locked")
 
     def __init__(self, retry, client, iteration):
@@ -289,7 +288,8 @@ class AsyncIOIteration(transaction.BaseTransaction, abstract.AsyncIOExecutor):
     async def __aenter__(self):
         if self._managed:
             raise errors.InterfaceError(
-                'cannot enter context: already in an `async with` block')
+                "cannot enter context: already in an `async with` block"
+            )
         self._managed = True
         return self
 
@@ -329,7 +329,6 @@ class AsyncIOIteration(transaction.BaseTransaction, abstract.AsyncIOExecutor):
 
 
 class AsyncIORetry(transaction.BaseRetry):
-
     def __aiter__(self):
         return self
 
@@ -342,6 +341,131 @@ class AsyncIORetry(transaction.BaseRetry):
             await asyncio.sleep(self._next_backoff)
         self._done = True
         iteration = AsyncIOIteration(self, self._owner, self._iteration)
+        self._iteration += 1
+        return iteration
+
+
+class AsyncIOBatchIteration(transaction.BaseTransaction):
+    __slots__ = ("_managed", "_locked", "_batched_ops")
+
+    def __init__(self, retry, client, iteration):
+        super().__init__(retry, client, iteration)
+        self._managed = False
+        self._locked = False
+        self._batched_ops = []
+
+    async def __aenter__(self):
+        if self._managed:
+            raise errors.InterfaceError(
+                "cannot enter context: already in an `async with` block"
+            )
+        self._managed = True
+        return self
+
+    async def __aexit__(self, extype, ex, tb):
+        await self.wait()
+        with self._exclusive():
+            self._managed = False
+            return await self._exit(extype, ex)
+
+    async def _ensure_transaction(self):
+        if not self._managed:
+            raise errors.InterfaceError(
+                "Only managed retriable transactions are supported. "
+                "Use `async with transaction:`"
+            )
+        await super()._ensure_transaction()
+
+    @contextlib.contextmanager
+    def _exclusive(self):
+        if self._locked:
+            raise errors.InterfaceError(
+                "concurrent queries within the same transaction "
+                "are not allowed"
+            )
+        self._locked = True
+        try:
+            yield
+        finally:
+            self._locked = False
+
+    async def send_query(self, query: str, *args, **kwargs) -> None:
+        self._batched_ops.append(
+            abstract.QueryContext(
+                query=abstract.QueryWithArgs(query, None, args, kwargs),
+                cache=self._client._get_query_cache(),
+                query_options=abstract._query_opts,
+                retry_options=None,
+                state=self._client._get_state(),
+                transaction_options=None,
+                warning_handler=self._client._get_warning_handler(),
+                annotations=self._client._get_annotations(),
+            )
+        )
+
+    async def send_query_single(self, query: str, *args, **kwargs) -> None:
+        self._batched_ops.append(
+            abstract.QueryContext(
+                query=abstract.QueryWithArgs(query, None, args, kwargs),
+                cache=self._client._get_query_cache(),
+                query_options=abstract._query_single_opts,
+                retry_options=None,
+                state=self._client._get_state(),
+                transaction_options=None,
+                warning_handler=self._client._get_warning_handler(),
+                annotations=self._client._get_annotations(),
+            )
+        )
+
+    async def send_query_required_single(
+        self, query: str, *args, **kwargs
+    ) -> None:
+        self._batched_ops.append(
+            abstract.QueryContext(
+                query=abstract.QueryWithArgs(query, None, args, kwargs),
+                cache=self._client._get_query_cache(),
+                query_options=abstract._query_required_single_opts,
+                retry_options=None,
+                state=self._client._get_state(),
+                transaction_options=None,
+                warning_handler=self._client._get_warning_handler(),
+                annotations=self._client._get_annotations(),
+            )
+        )
+
+    async def send_execute(self, commands: str, *args, **kwargs) -> None:
+        self._batched_ops.append(
+            abstract.ExecuteContext(
+                query=abstract.QueryWithArgs(commands, None, args, kwargs),
+                cache=self._client._get_query_cache(),
+                retry_options=None,
+                state=self._client._get_state(),
+                transaction_options=None,
+                warning_handler=self._client._get_warning_handler(),
+                annotations=self._client._get_annotations(),
+            )
+        )
+
+    async def wait(self) -> list[Any]:
+        with self._exclusive():
+            await self._ensure_transaction()
+            ops, self._batched_ops[:] = self._batched_ops[:], []
+            return await self._connection.batch_query(ops)
+
+
+class AsyncIOBatch(transaction.BaseRetry):
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self):
+        # Note: when changing this code consider also
+        # updating Batch.__next__.
+        if self._done:
+            raise StopAsyncIteration
+        if self._next_backoff:
+            await asyncio.sleep(self._next_backoff)
+        self._done = True
+        iteration = AsyncIOBatchIteration(self, self._owner, self._iteration)
         self._iteration += 1
         return iteration
 
@@ -384,6 +508,9 @@ class AsyncIOClient(base_client.BaseClient, abstract.AsyncIOExecutor):
     def transaction(self) -> AsyncIORetry:
         return AsyncIORetry(self)
 
+    def _batch(self) -> AsyncIOBatch:
+        return AsyncIOBatch(self)
+
     async def __aenter__(self):
         return await self.ensure_connected()
 
@@ -399,14 +526,16 @@ class AsyncIOClient(base_client.BaseClient, abstract.AsyncIOExecutor):
         output_format: OutputFormat = OutputFormat.BINARY,
         expect_one: bool = False,
     ) -> abstract.DescribeResult:
-        return await self._describe(abstract.DescribeContext(
-            query=query,
-            state=self._get_state(),
-            inject_type_names=inject_type_names,
-            input_language=input_language,
-            output_format=output_format,
-            expect_one=expect_one,
-        ))
+        return await self._describe(
+            abstract.DescribeContext(
+                query=query,
+                state=self._get_state(),
+                inject_type_names=inject_type_names,
+                input_language=input_language,
+                output_format=output_format,
+                expect_one=expect_one,
+            )
+        )
 
 
 def create_async_client(
@@ -431,7 +560,6 @@ def create_async_client(
     return AsyncIOClient(
         connection_class=AsyncIOConnection,
         max_concurrency=max_concurrency,
-
         # connect arguments
         dsn=dsn,
         host=host,

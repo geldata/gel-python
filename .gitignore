@@ -23,11 +23,14 @@ docs/_build
 /.coverage*
 !/.coveragerc
 /.vscode
-/.pytest_cache
-/.mypy_cache
+.pytest_cache
+.mypy_cache
+.ruff_cache
+.dmypy.json
 /reflog.txt
 /edgedb/**/*.html
 /tmp
 /wheelhouse
 /env*
 /.venv
+/uv.lock

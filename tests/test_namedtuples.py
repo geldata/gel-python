@@ -19,7 +19,7 @@
 
 from collections import namedtuple, UserDict
 
-import edgedb
+import gel
 from gel import _testbase as tb
 
 
@@ -41,12 +41,12 @@ class TestNamedTupleTypes(tb.SyncQueryTestCase):
     async def test_namedtuple_02(self):
         NT1 = namedtuple('NT2', ['x', 'z'])
 
-        with self.assertRaisesRegex(edgedb.InvalidArgumentError, 'is missing'):
+        with self.assertRaisesRegex(gel.InvalidArgumentError, 'is missing'):
             self.client.query_single('''
                 select <tuple<x: int64, y: str>>$0
             ''', dict(x=20, z='test'))
 
-        with self.assertRaisesRegex(edgedb.InvalidArgumentError, 'is missing'):
+        with self.assertRaisesRegex(gel.InvalidArgumentError, 'is missing'):
             self.client.query_single('''
                 select <tuple<x: int64, y: str>>$0
             ''', NT1(x=20, z='test'))

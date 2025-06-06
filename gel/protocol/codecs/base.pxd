@@ -28,7 +28,7 @@ cdef class BaseCodec:
         return self.tid
 
     cdef encode(self, WriteBuffer buf, object obj)
-    cdef decode(self, FRBuffer *buf)
+    cdef decode(self, object return_type, FRBuffer *buf)
 
     cdef dump(self, int level=?)
 

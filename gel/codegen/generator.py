@@ -29,11 +29,13 @@ import gel
 from gel import abstract
 from gel import describe
 from gel.con_utils import find_gel_project_dir
-from gel.color import get_color
+from gel._internal._color import get_color
 
 
 C = get_color()
-SYS_VERSION_INFO = os.getenv("EDGEDB_PYTHON_CODEGEN_PY_VER")
+SYS_VERSION_INFO = os.getenv("GEL_PYTHON_CODEGEN_PY_VER") or os.getenv(
+    "EDGEDB_PYTHON_CODEGEN_PY_VER"
+)
 if SYS_VERSION_INFO:
     SYS_VERSION_INFO = tuple(map(int, SYS_VERSION_INFO.split(".")))[:2]
 else:
@@ -288,7 +290,7 @@ class Generator:
                 f.write(buf.getvalue())
 
     def _write_comments(
-        self, f: io.TextIOBase, src: typing.List[pathlib.Path]
+        self, f: io.TextIOBase, src: list[pathlib.Path]
     ):
         src_str = map(
             lambda p: repr(p.relative_to(self._project_dir).as_posix()), src
@@ -418,7 +420,7 @@ class Generator:
 
     def _generate_code(
         self,
-        type_: typing.Optional[describe.AnyType],
+        type_: describe.AnyType | None,
         name_hint: str,
         is_input: bool = False,
     ) -> str:
@@ -426,7 +428,7 @@ class Generator:
             return "None"
 
         if (type_.desc_id, is_input) in self._cache:
-            return self._cache[(type_.desc_id, is_input)]
+            return self._cache[type_.desc_id, is_input]
 
         imports = INPUT_TYPE_IMPORTS if is_input else TYPE_IMPORTS
         mapping = INPUT_TYPE_MAPPING if is_input else TYPE_MAPPING
@@ -529,12 +531,12 @@ class Generator:
         else:
             rv = "??"
 
-        self._cache[(type_.desc_id, is_input)] = rv
+        self._cache[type_.desc_id, is_input] = rv
         return rv
 
     def _generate_code_with_cardinality(
         self,
-        type_: typing.Optional[describe.AnyType],
+        type_: describe.AnyType | None,
         name_hint: str,
         cardinality: gel.Cardinality,
         keyword_argument: bool = False,
@@ -553,8 +555,7 @@ class Generator:
 
     def _find_name(self, name: str) -> str:
         default_prefix = f"{self._default_module}::"
-        if name.startswith(default_prefix):
-            name = name[len(default_prefix) :]
+        name = name.removeprefix(default_prefix)
         mod, _, name = name.rpartition("::")
         name = self._snake_to_camel(name)
         name = mod.title() + name
@@ -578,7 +579,7 @@ class Generator:
             return name
 
     def _to_unique_idents(
-        self, names: typing.Iterable[typing.Tuple[str, str]]
+        self, names: typing.Iterable[tuple[str, str]]
     ) -> typing.Iterator[str]:
         dedup = set()
         for name in names:

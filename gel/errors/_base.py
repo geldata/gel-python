@@ -24,16 +24,16 @@ import unicodedata
 import warnings
 
 __all__ = (
-    'EdgeDBError', 'EdgeDBMessage',
+    "EdgeDBError",
+    "EdgeDBMessage",
 )
 
 
 class Meta(type):
-
     def __new__(mcls, name, bases, dct):
         cls = super().__new__(mcls, name, bases, dct)
 
-        code = dct.get('_code')
+        code = dct.get("_code")
         if code is not None:
             mcls._index[code] = cls
 
@@ -46,13 +46,11 @@ class Meta(type):
 
 
 class EdgeDBMessageMeta(Meta):
-
     _base_class_index = {}
     _index = {}
 
 
 class EdgeDBMessage(Warning, metaclass=EdgeDBMessageMeta):
-
     _code = None
 
     def __init__(self, severity, message):
@@ -77,13 +75,11 @@ class EdgeDBMessage(Warning, metaclass=EdgeDBMessageMeta):
 
 
 class EdgeDBErrorMeta(Meta):
-
     _base_class_index = {}
     _index = {}
 
 
 class EdgeDBError(Exception, metaclass=EdgeDBErrorMeta):
-
     _code = None
     _query = None
     tags = frozenset()
@@ -133,7 +129,7 @@ class EdgeDBError(Exception, metaclass=EdgeDBErrorMeta):
     def _read_str_field(self, key, default=None):
         val = self._attrs.get(key)
         if isinstance(val, bytes):
-            return val.decode('utf-8')
+            return val.decode("utf-8")
         elif val is not None:
             return val
         return default
@@ -153,7 +149,7 @@ class EdgeDBError(Exception, metaclass=EdgeDBErrorMeta):
 
     @staticmethod
     def _from_json(data):
-        exc = EdgeDBError._from_code(data['code'], data['message'])
+        exc = EdgeDBError._from_code(data["code"], data["message"])
         exc._attrs = {
             field: data[name]
             for name, field in _JSON_FIELDS.items()
@@ -225,23 +221,23 @@ def _lookup_message_cls(code: int):
 
 
 def _decode(code: int):
-    return tuple(code.to_bytes(4, 'big'))
+    return tuple(code.to_bytes(4, "big"))
 
 
 def _severity_name(severity):
     if severity <= EDGE_SEVERITY_DEBUG:
-        return 'DEBUG'
+        return "DEBUG"
     if severity <= EDGE_SEVERITY_INFO:
-        return 'INFO'
+        return "INFO"
     if severity <= EDGE_SEVERITY_NOTICE:
-        return 'NOTICE'
+        return "NOTICE"
     if severity <= EDGE_SEVERITY_WARNING:
-        return 'WARNING'
+        return "WARNING"
     if severity <= EDGE_SEVERITY_ERROR:
-        return 'ERROR'
+        return "ERROR"
     if severity <= EDGE_SEVERITY_FATAL:
-        return 'FATAL'
-    return 'PANIC'
+        return "FATAL"
+    return "PANIC"
 
 
 def _format_error(msg, query, start, offset, line, col, hint, details):
@@ -277,8 +273,10 @@ def _format_error(msg, query, start, offset, line, col, hint, details):
             rv.write(f"{c.FAIL}{line}{c.ENDC}{LINESEP}")
             if start >= 0:
                 # Multi-line error starts
-                rv.write(f"{c.BLUE}{'':>{num_len}} │ "
-                         f"{c.FAIL}╭─{'─' * start}^{c.ENDC}{LINESEP}")
+                rv.write(
+                    f"{c.BLUE}{'':>{num_len}} │ "
+                    f"{c.FAIL}╭─{'─' * start}^{c.ENDC}{LINESEP}"
+                )
             offset -= length
             start = -1  # mark multi-line
         else:
@@ -289,12 +287,16 @@ def _format_error(msg, query, start, offset, line, col, hint, details):
             size = _unicode_width(first_half)
             if start >= 0:
                 # Mark single-line error
-                rv.write(f"{c.BLUE}{'':>{num_len}} │   {' ' * start}"
-                         f"{c.FAIL}{'^' * size} {hint}{c.ENDC}")
+                rv.write(
+                    f"{c.BLUE}{'':>{num_len}} │   {' ' * start}"
+                    f"{c.FAIL}{'^' * size} {hint}{c.ENDC}"
+                )
             else:
                 # End of multi-line error
-                rv.write(f"{c.BLUE}{'':>{num_len}} │ "
-                         f"{c.FAIL}╰─{'─' * (size - 1)}^ {hint}{c.ENDC}")
+                rv.write(
+                    f"{c.BLUE}{'':>{num_len}} │ "
+                    f"{c.FAIL}╰─{'─' * (size - 1)}^ {hint}{c.ENDC}"
+                )
             break
 
     if details:
@@ -304,9 +306,14 @@ def _format_error(msg, query, start, offset, line, col, hint, details):
 
 
 def _unicode_width(text):
-    return sum(0 if unicodedata.category(c) in ('Mn', 'Cf') else
-               2 if unicodedata.east_asian_width(c) == "W" else 1
-               for c in text)
+    return sum(
+        0
+        if unicodedata.category(c) in ("Mn", "Cf")
+        else 2
+        if unicodedata.east_asian_width(c) == "W"
+        else 1
+        for c in text
+    )
 
 
 FIELD_HINT = 0x_00_01
@@ -337,12 +344,12 @@ EDGE_SEVERITY_PANIC = 255
 
 # Fields to include in the json dump of the type
 _JSON_FIELDS = {
-    'hint': FIELD_HINT,
-    'details': FIELD_DETAILS,
-    'start': FIELD_CHARACTER_START,
-    'end': FIELD_CHARACTER_END,
-    'line': FIELD_LINE_START,
-    'col': FIELD_COLUMN_START,
+    "hint": FIELD_HINT,
+    "details": FIELD_DETAILS,
+    "start": FIELD_CHARACTER_START,
+    "end": FIELD_CHARACTER_END,
+    "line": FIELD_LINE_START,
+    "col": FIELD_COLUMN_START,
 }
 
 
@@ -360,4 +367,4 @@ except KeyError:
     SHOW_HINT = False
 
 
-from gel.color import get_color
+from gel._internal._color import get_color
