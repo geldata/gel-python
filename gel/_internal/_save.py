@@ -1,10 +1,16 @@
 from __future__ import annotations
 
+import collections
 import dataclasses
 
-from typing import TYPE_CHECKING, NamedTuple, TypeAlias, TypeVar, Generic
+from typing import TYPE_CHECKING, Any, NamedTuple, TypeVar, Generic
 
-from gel._internal._qbmodel._pydantic._models import GelModel, ProxyModel
+from gel._internal._qbmodel._pydantic._models import (
+    GelModel,
+    ProxyModel,
+    GelPointers,
+    Pointer,
+)
 from gel._internal._dlist import DistinctList
 from gel._internal._unsetid import UNSET_UUID
 from gel._internal._edgeql import PointerKind, quote_ident
@@ -15,50 +21,163 @@ if TYPE_CHECKING:
     from collections.abc import Iterable, Iterator, Callable
     from typing import TypeGuard
 
+    from gel._internal._qbmodel._abstract import GelType
+
+
+from typing_extensions import TypeAliasType
+
 
 T = TypeVar("T")
+V = TypeVar("V")
 
 _unset = object()
 
 
-class MultiLinkChanges(NamedTuple):
-    name: str
-    added: Iterable[GelModel]
-    removed: Iterable[GelModel]
+LinkPropertiesValues = TypeAliasType(
+    "LinkPropertiesValues", dict[str, object | None]
+)
 
 
-class ModelChanges(NamedTuple):
+@dataclasses.dataclass(frozen=True)
+class SingleLinkChange:
+    link_name: str
+    info: Pointer
+
+    target: GelModel | None
+
+    lps_info: GelPointers | None = None
+    props: LinkPropertiesValues | None = None
+
+    def __post_init__(self) -> None:
+        assert not isinstance(self.target, ProxyModel)
+
+
+@dataclasses.dataclass(frozen=True)
+class MultiLinkChange:
+    link_name: str
+    info: Pointer
+
+    added: Iterable[GelModel] | None = None
+    added_props: Iterable[LinkPropertiesValues] | None = None
+
+    removed: Iterable[GelModel] | None = None
+
+    lps_info: GelPointers | None = None
+
+    def __post_init__(self) -> None:
+        if self.added:
+            assert not any(isinstance(o, ProxyModel) for o in self.added)
+        if self.removed:
+            assert not any(isinstance(o, ProxyModel) for o in self.removed)
+
+
+@dataclasses.dataclass(frozen=True)
+class PropertyChange:
+    prop_name: str
+    info: Pointer
+
+    value: object | None
+
+
+# Changes are organized by pointer name. Each pointer can have
+# have multiple ops.
+PropertyChanges = TypeAliasType("PropertyChanges", dict[str, PropertyChange])
+SingleLinkChanges = TypeAliasType(
+    "SingleLinkChanges", dict[str, SingleLinkChange]
+)
+MultiLinkChanges = TypeAliasType(
+    "MultiLinkChanges", dict[str, MultiLinkChange]
+)
+AllMultiLinkChanges = TypeAliasType(
+    "AllMultiLinkChanges", dict[str, list[MultiLinkChange]]
+)
+
+
+@dataclasses.dataclass
+class ModelChange:
     model: GelModel
-    fields: Iterable[str]
-    multi_links: Iterable[MultiLinkChanges]
+    props: PropertyChanges | None = None
+    single_links: SingleLinkChanges | None = None
+    multi_links: MultiLinkChanges | None = None
+
+    def __post_init__(self) -> None:
+        assert not isinstance(self.model, ProxyModel)
 
 
-CreateBatch: TypeAlias = list[GelModel]
-QueryWithArgs: TypeAlias = tuple[str, dict[str, object]]
+ChangeBatch = TypeAliasType("ChangeBatch", list[ModelChange])
 
 
-class IDTracker(Generic[T]):
-    _seen: dict[int, T]
+class SavePlan(NamedTuple):
+    # Lists of lists of queries to create new objects.
+    # Every list of query is safe to executute in a "batch" --
+    # basically send them all at once. Follow up lists of queries
+    # will use objects inserted by the previous batches.
+    insert_batches: list[ChangeBatch]
 
-    def __init__(self, initial_set: Iterable[T] | None = None, /):
+    # Optional links of newly inserted objects and changes to
+    # links between existing objects.
+    uodate_batch: ChangeBatch
+
+
+QueryWithArgs = TypeAliasType("QueryWithArgs", tuple[str, dict[str, object]])
+
+
+def shift_dict_list(inp: dict[str, list[T]]) -> dict[str, T]:
+    ret: dict[str, T] = {}
+    for key, lst in list(inp.items()):
+        if not lst:
+            continue
+        ret[key] = lst.pop(0)
+        if not lst:
+            inp.pop(key)
+    return ret
+
+
+class IDTracker(Generic[T, V]):
+    _seen: dict[int, tuple[T, V | None]]
+
+    def __init__(
+        self, initial_set: Iterable[T] | Iterable[tuple[T, V]] | None = None, /
+    ):
         if initial_set is not None:
-            self._seen = {id(x): x for x in initial_set}
+            self._seen = {
+                id(y[0]): y
+                for y in (
+                    x if isinstance(x, tuple) else (x, None)
+                    for x in initial_set
+                )
+            }
         else:
             self._seen = {}
 
-    def track(self, obj: T) -> None:
-        self._seen[id(obj)] = obj
+    def track(self, obj: T, value: V | None = None, /) -> None:
+        self._seen[id(obj)] = (obj, value)
 
     def untrack(self, obj: T) -> None:
         self._seen.pop(id(obj), None)
 
-    def track_many(self, more: Iterable[T], /) -> None:
+    def track_many(self, more: Iterable[T] | Iterable[tuple[T, V]], /) -> None:
         for obj in more:
-            self._seen[id(obj)] = obj
+            ret = (obj, None) if not isinstance(obj, tuple) else obj
+            self._seen[id(ret[0])] = ret
 
     def untrack_many(self, more: Iterable[T], /) -> None:
         for obj in more:
             self._seen.pop(id(obj), None)
+
+    def __getitem__(self, obj: T) -> V | None:
+        try:
+            return self._seen[id(obj)][1]
+        except KeyError:
+            raise KeyError((id(obj), obj)) from None
+
+    def get_not_none(self, obj: T) -> V:
+        try:
+            v = self._seen[id(obj)][1]
+        except KeyError:
+            raise KeyError((id(obj), obj)) from None
+        assert v is not None
+        return v
 
     def __contains__(self, obj: T) -> bool:
         return id(obj) in self._seen
@@ -70,7 +189,8 @@ class IDTracker(Generic[T]):
         return bool(self._seen)
 
     def __iter__(self) -> Iterator[T]:
-        yield from self._seen.values()
+        for t, _ in self._seen.values():
+            yield t
 
 
 def is_dlist(val: object) -> TypeGuard[DistinctList[GelModel]]:
@@ -87,13 +207,29 @@ def unwrap_proxy(val: GelModel) -> GelModel:
         return val
 
 
+def unwrap_dlist(val: Iterable[GelModel]) -> list[GelModel]:
+    return [unwrap_proxy(o) for o in val]
+
+
+def unwrap(val: GelModel) -> tuple[ProxyModel[GelModel] | None, GelModel]:
+    if isinstance(val, ProxyModel):
+        assert isinstance(val._p__obj__, GelModel)
+        return val, val._p__obj__
+    else:
+        return None, val
+
+
 def iter_graph(objs: Iterable[GelModel]) -> Iterable[GelModel]:
     # Simple recursive traverse of a model
 
-    visited: IDTracker[GelModel] = IDTracker()
+    visited: IDTracker[GelModel, None] = IDTracker()
 
-    def _traverse(obj: GelModel) -> Iterable[GelModel]:
-        if not isinstance(obj, GelModel) or obj in visited:
+    def _traverse(
+        parent_obj: GelModel | None, parent_link: str | None, obj: GelModel
+    ) -> Iterable[GelModel]:
+        obj = unwrap_proxy(obj)
+
+        if obj in visited:
             return
 
         visited.track(obj)
@@ -116,17 +252,17 @@ def iter_graph(objs: Iterable[GelModel]) -> Iterable[GelModel]:
             if prop.cardinality.is_multi():
                 assert is_dlist(linked)
                 for ref in linked:
-                    yield from _traverse(unwrap_proxy(ref))
+                    yield from _traverse(obj, prop.name, ref)
             else:
                 assert isinstance(linked, GelModel)
-                yield from _traverse(unwrap_proxy(linked))
+                yield from _traverse(obj, prop.name, linked)
 
     for o in objs:
-        yield from _traverse(o)
+        yield from _traverse(None, None, o)
 
 
 def get_linked_new_objects(obj: GelModel) -> Iterable[GelModel]:
-    visited: IDTracker[GelModel] = IDTracker()
+    visited: IDTracker[GelModel, None] = IDTracker()
     visited.track(obj)
 
     for prop in type(obj).__gel_pointers__().values():
@@ -161,11 +297,17 @@ def get_linked_new_objects(obj: GelModel) -> Iterable[GelModel]:
                 yield unwrapped
 
 
-def compute_ops(
-    objs: Iterable[GelModel],
-) -> tuple[list[CreateBatch], list[ModelChanges]]:
-    new_objects: list[GelModel] = []
-    update_ops: list[ModelChanges] = []
+def type_to_ql(tp: type[GelType]) -> str:
+    return quote_ident(tp.__gel_reflection__.name.as_schema_name())
+
+
+def obj_to_name_ql(obj: GelModel) -> str:
+    return quote_ident(type(obj).__gel_reflection__.name.as_schema_name())
+
+
+def make_plan(objs: Iterable[GelModel]) -> SavePlan:
+    insert_ops: ChangeBatch = []
+    update_ops: ChangeBatch = []
 
     for obj in iter_graph(objs):
         pointers = type(obj).__gel_pointers__()
@@ -174,67 +316,306 @@ def compute_ops(
         # Capture changes in *properties* and *single links*
         field_changes = obj.__gel_get_changed_fields__()
 
-        # Compute changes in *multi links* (for existing objects)
-        link_changes: list[MultiLinkChanges] = []
+        prop_changes: PropertyChanges = {}
+
+        req_single_link_changes: SingleLinkChanges = {}
+        opt_single_link_changes: SingleLinkChanges = {}
+
+        req_multi_link_changes: AllMultiLinkChanges = collections.defaultdict(
+            list
+        )
+        opt_multi_link_changes: AllMultiLinkChanges = collections.defaultdict(
+            list
+        )
+
         for prop in pointers.values():
+            # Skip computeds, we can't update them.
+            if prop.computed:
+                continue
+
+            # Iterate through changes of *propertes* and *single links*.
+            if prop.name in field_changes:
+                # Since there was a change and we don't implement `del`,
+                # the attribute must be set
+                val = getattr(obj, prop.name)
+                if prop.kind is PointerKind.Property:
+                    # Property
+                    assert not isinstance(val, GelModel)
+                    prop_changes[prop.name] = PropertyChange(
+                        prop_name=prop.name,
+                        value=val,
+                        info=prop,
+                    )
+                else:
+                    # Link
+                    assert prop.kind is PointerKind.Link
+                    assert isinstance(val, GelModel)
+                    assert not prop.cardinality.is_multi()
+
+                    if prop.has_props and isinstance(val, ProxyModel):
+                        # Link with link properties
+
+                        link_changed_fields = (
+                            val.__linkprops__.__gel_get_changed_fields__()
+                        )
+
+                        props = {
+                            n: getattr(val.__linkprops__, n)
+                            for n in link_changed_fields
+                        }
+
+                        sch = SingleLinkChange(
+                            link_name=prop.name,
+                            info=prop,
+                            target=unwrap_proxy(val),
+                            props=props,
+                            lps_info=type(val).__lprops__.__gel_pointers__(),
+                        )
+                    else:
+                        # Link without link properties
+                        sch = SingleLinkChange(
+                            link_name=prop.name,
+                            info=prop,
+                            target=val,
+                        )
+
+                    if prop.cardinality.is_optional():
+                        opt_single_link_changes[prop.name] = sch
+                    else:
+                        req_single_link_changes[prop.name] = sch
+
+                continue
+
             if (
-                prop.computed
-                or prop.kind is not PointerKind.Link
+                prop.kind is not PointerKind.Link
                 or not prop.cardinality.is_multi()
             ):
-                # See _get_all_deps for explanation.
+                # We handle changes to properties and single links above;
+                # getting here means there was no change for this field.
+                assert prop.name not in field_changes
                 continue
+
+            # Let's unwind multi link changes.
 
             linked = getattr(obj, prop.name, _unset)
-            if linked is _unset or linked is None:
+            if linked is _unset:
+                # The link wasn't fetched at all
                 continue
 
-            assert is_dlist(linked)
+            # `linked` should be either an empty DistinctList or
+            # a non-empty one
+            assert linked is not None
+            assert is_dlist(linked), (
+                f"`linked` is not dlist, it is {type(linked)}"
+            )
+            assert issubclass(prop.type, DistinctList)
+
+            # Objects that were added or removed from this link
             added = linked.__gel_get_added__()
             removed = linked.__gel_get_removed__()
 
-            if added or removed:
-                link_changes.append(
-                    MultiLinkChanges(prop.name, added, removed)
+            # No changes for this link? Continue to the next one.
+            if not (added or removed):
+                continue
+
+            # Simple case -- no link props!
+            if not prop.has_props:
+                mch = MultiLinkChange(
+                    link_name=prop.name,
+                    info=prop,
+                    added=unwrap_dlist(added),
+                    removed=unwrap_dlist(removed),
                 )
 
-        if is_new:
-            new_objects.append(obj)
-            # schedule optional links to be applied post-insert
-            optional_fields: list[str] = []
-            optional_links: list[MultiLinkChanges] = []
-            for prop in pointers.values():
-                # only optional links
-                if (
-                    prop.kind is not PointerKind.Link
-                    or not prop.cardinality.is_optional()
-                ):
-                    continue
-                val = getattr(obj, prop.name, _unset)
-                if val is _unset:
-                    continue
-                if prop.cardinality.is_multi():
-                    assert is_dlist(val)
-                    if val:
-                        optional_links.append(
-                            MultiLinkChanges(prop.name, list(val), [])
-                        )
+                if prop.cardinality.is_optional():
+                    opt_multi_link_changes[prop.name].append(mch)
                 else:
-                    optional_fields.append(prop.name)
+                    req_multi_link_changes[prop.name].append(mch)
 
-            if optional_fields or optional_links:
-                update_ops.append(
-                    ModelChanges(obj, optional_fields, optional_links)
+                continue
+
+            # OK, we have to deal with link props.
+            assert prop.has_props
+
+            # First, we iterate through the list of added new objects
+            # to the list. All of them should be ProxyModels
+            # (as we use UpcastingDistinctList for links with props.)
+            # Our goal is to segregate different combinations of
+            # set link properties into separate groups.
+            props_map: dict[
+                frozenset[str],
+                list[tuple[GelModel, LinkPropertiesValues]],
+            ] = collections.defaultdict(list)
+            for link in added:
+                assert isinstance(link, ProxyModel)
+
+                link_changed_fields = (
+                    link.__linkprops__.__gel_get_changed_fields__()
+                )
+                if link_changed_fields is None:
+                    # For this specific link no link property was
+                    # ever set or changed
+                    props_map[frozenset()].append((link, {}))
+                else:
+                    link_changed_fields = frozenset(link_changed_fields)
+                    lps = {
+                        n: getattr(link.__linkprops__, n)
+                        for n in link_changed_fields
+                    }
+                    props_map[link_changed_fields].append((link, lps))
+
+            link_tp = prop.type
+            assert issubclass(link_tp.type, ProxyModel)
+            lps_info = link_tp.type.__lprops__.__gel_pointers__()
+
+            if len(props_map) == 1:
+                # We have one pattern of link props - means we can combine
+                # additions and removals in one MultiLinkChange operation --
+                # one EdgeQL query.
+
+                link_fields, link_upd = next(iter(props_map.items()))
+
+                link_added = [unwrap_proxy(upd[0]) for upd in link_upd]
+                if len(link_fields):
+                    link_added_props = [upd[1] for upd in link_upd]
+                else:
+                    link_added_props = None
+
+                mch = MultiLinkChange(
+                    link_name=prop.name,
+                    info=prop,
+                    added=link_added,
+                    added_props=link_added_props,
+                    lps_info=lps_info if link_added_props else None,
+                    removed=unwrap_dlist(removed) if removed else None,
                 )
 
-        elif field_changes or link_changes:
-            update_ops.append(ModelChanges(obj, field_changes, link_changes))
+                if prop.cardinality.is_optional():
+                    opt_multi_link_changes[prop.name].append(mch)
+                else:
+                    req_multi_link_changes[prop.name].append(mch)
 
-    # Compute batch creation of new objects
+                continue
 
-    batches: list[list[GelModel]] = []
-    inserted: IDTracker[GelModel] = IDTracker()
-    remaining_to_make: IDTracker[GelModel] = IDTracker(new_objects)
+            # Alright we have multiple patterns of link properties --
+            # generate a MultiLinkChange op for every distinct pattern.
+            for link_fields, link_upd in props_map.items():
+                link_added = [unwrap_proxy(upd[0]) for upd in link_upd]
+                if len(link_fields):
+                    link_added_props = [upd[1] for upd in link_upd]
+                else:
+                    link_added_props = None
+
+                mch = MultiLinkChange(
+                    link_name=prop.name,
+                    info=prop,
+                    added=link_added,
+                    added_props=link_added_props,
+                    lps_info=lps_info if link_added_props else None,
+                )
+
+                if prop.cardinality.is_optional():
+                    opt_multi_link_changes[prop.name].append(mch)
+                else:
+                    req_multi_link_changes[prop.name].append(mch)
+
+            # And a separate MultiLinkChange for removed.
+            if removed:
+                mch = MultiLinkChange(
+                    link_name=prop.name,
+                    info=prop,
+                    removed=unwrap_dlist(removed),
+                )
+
+                if prop.cardinality.is_optional():
+                    opt_multi_link_changes[prop.name].append(mch)
+                else:
+                    req_multi_link_changes[prop.name].append(mch)
+
+        # After all this work we found no changes -- move on to the next obj.
+        if not (
+            is_new
+            or prop_changes
+            or opt_single_link_changes
+            or req_single_link_changes
+            or opt_multi_link_changes
+            or req_single_link_changes
+        ):
+            continue
+
+        # If the object is new, we want to do the bare minimum to insert it,
+        # so we create a minimal insert op for it -- properties and
+        # required links.
+        #
+        # Note that for required multilinks we only have to
+        # create at least one link -- that's why we're OK with getting just
+        # one "batch" out of `req_multi_link_changes`
+        if is_new:
+            insert_ops.append(
+                ModelChange(
+                    model=obj,
+                    props=prop_changes,
+                    single_links=req_single_link_changes,
+                    multi_links=shift_dict_list(req_multi_link_changes),
+                )
+            )
+
+            prop_changes = {}
+            req_single_link_changes = {}
+
+        # Now let's create ops for all the remaning changes
+        while (
+            prop_changes
+            or req_multi_link_changes
+            or opt_multi_link_changes
+            or req_single_link_changes
+            or opt_single_link_changes
+        ):
+            change = ModelChange(
+                model=obj,
+            )
+
+            if prop_changes:
+                change.props = prop_changes
+                prop_changes = {}
+
+            if req_single_link_changes:
+                change.single_links = req_single_link_changes
+                req_single_link_changes = {}
+
+            if opt_single_link_changes:
+                if change.single_links is not None:
+                    change.single_links |= opt_single_link_changes
+                else:
+                    change.single_links = opt_single_link_changes
+                opt_single_link_changes = {}
+
+            if req_multi_link_changes:
+                change.multi_links = shift_dict_list(req_multi_link_changes)
+
+            if opt_multi_link_changes:
+                if change.multi_links is not None:
+                    change.multi_links |= shift_dict_list(
+                        opt_multi_link_changes
+                    )
+                else:
+                    change.multi_links = shift_dict_list(
+                        opt_multi_link_changes
+                    )
+
+            update_ops.append(change)
+
+    # Plan batch inserts of new objects -- we have to insert objects
+    # in batches respecting their required cross-dependencies.
+
+    insert_batches: list[ChangeBatch] = []
+    inserted: IDTracker[GelModel, ModelChange] = IDTracker()
+    remaining_to_make: IDTracker[GelModel, ModelChange] = IDTracker(
+        (ch.model, ch) for ch in insert_ops
+    )
+    obj_model_index: IDTracker[GelModel, ModelChange] = IDTracker(
+        (ch.model, ch) for ch in insert_ops
+    )
 
     while remaining_to_make:
         ready = [
@@ -248,11 +629,13 @@ def compute_ops(
                 f"among objects: {remaining_to_make}"
             )
 
-        batches.append(ready)
+        insert_batches.append(
+            [obj_model_index.get_not_none(mod) for mod in ready]
+        )
         inserted.track_many(ready)
         remaining_to_make.untrack_many(ready)
 
-    return batches, update_ops
+    return SavePlan(insert_batches, update_ops)
 
 
 class ParamBuilder:
@@ -263,21 +646,21 @@ class ParamBuilder:
 
     def __call__(self) -> str:
         self._param_cnt += 1
-        return f"p_{self._param_cnt}"
+        return f"__p_{self._param_cnt}"
 
 
 def make_save_executor_constructor(
     objs: tuple[GelModel, ...],
 ) -> Callable[[], SaveExecutor]:
-    create_batches, updates = compute_ops(objs)
+    create_batches, updates = make_plan(objs)
     return lambda: SaveExecutor(objs, create_batches, updates)
 
 
 @dataclasses.dataclass
 class SaveExecutor:
     objs: tuple[GelModel, ...]
-    create_batches: list[CreateBatch]
-    updates: list[ModelChanges]
+    create_batches: list[ChangeBatch]
+    updates: ChangeBatch
 
     object_ids: dict[int, uuid.UUID] = dataclasses.field(init=False)
     param_builder: ParamBuilder = dataclasses.field(init=False)
@@ -295,10 +678,15 @@ class SaveExecutor:
         if self.iter_index < len(self.create_batches):
             batch = self.create_batches[self.iter_index]
             self.iter_index += 1
-            return [self._compile_insert(obj) for obj in batch]
+            return [
+                self._compile_change(obj, for_insert=True) for obj in batch
+            ]
         elif self.iter_index == len(self.create_batches):
             self.iter_index += 1
-            return [self._compile_update(change) for change in self.updates]
+            return [
+                self._compile_change(change, for_insert=False)
+                for change in self.updates
+            ]
         else:
             raise StopIteration
 
@@ -306,15 +694,15 @@ class SaveExecutor:
         if self.iter_index > len(self.create_batches):
             return
 
-        for obj_id, obj in zip(
+        for obj_id, change in zip(
             obj_ids, self.create_batches[self.iter_index - 1], strict=True
         ):
-            self.object_ids[id(obj)] = obj_id
+            self.object_ids[id(change.model)] = obj_id
 
     def commit(self) -> None:
         assert self.iter_index == len(self.create_batches) + 1
 
-        visited: IDTracker[GelModel] = IDTracker()
+        visited: IDTracker[GelModel, None] = IDTracker()
 
         def _traverse(obj: GelModel) -> None:
             if not isinstance(obj, GelModel) or obj in visited:
@@ -356,162 +744,131 @@ class SaveExecutor:
         else:
             return self.object_ids[id(obj)]
 
-    def _compile_insert(self, obj: GelModel) -> QueryWithArgs:
-        assert obj.id is UNSET_UUID
-        # Prepare metadata for insert
-        pointers = type(obj).__gel_pointers__()
-        type_name = type(obj).__gel_reflection__.name.as_schema_name()
-        q_type_name = quote_ident(type_name)
+    def _compile_link_prop_expr(
+        self,
+        proxy: ProxyModel[GelModel],
+        obj_ql: str,
+    ) -> str:
+        if proxy is None:
+            return obj_ql
 
-        args: dict[str, object] = {}
+        changes = proxy.__gel_get_changed_fields__()
+        if not changes:
+            return obj_ql
+
+        # for field_name in changes:
+        raise RuntimeError
+
+    def _compile_change(
+        self, change: ModelChange, /, *, for_insert: bool
+    ) -> QueryWithArgs:
         shape_parts: list[str] = []
+        with_clauses: list[str] = []
+        args: dict[str, object] = {}
 
-        for prop_name, prop in pointers.items():
-            if prop.computed:
-                continue
+        def add_arg(type_ql: str, value: Any, /) -> str:
+            arg = self.param_builder()
+            with_clauses.append(f"{arg} := <{type_ql}>${arg}")
+            args[arg] = value
+            return arg
 
-            val = getattr(obj, prop_name, _unset)
-            if val is _unset or val is None:
-                continue
+        obj = change.model
+        type_name = obj_to_name_ql(obj)
 
-            q_name = quote_ident(prop_name)
+        if change.props:
+            for pch in change.props.values():
+                arg = add_arg(type_to_ql(pch.info.type), pch.value)
+                shape_parts.append(f"{quote_ident(pch.prop_name)} := {arg}")
 
-            if prop.kind is PointerKind.Property:
-                scalar_type = (
-                    prop.type.__gel_reflection__.name.as_schema_name()
-                )
-                q_scalar_type = quote_ident(scalar_type)
-                arg = self.param_builder()
-                args[arg] = val
-                shape_parts.append(f"{q_name} := <{q_scalar_type}>${arg}")
-
-            else:
-                assert prop.kind is PointerKind.Link
-                if prop.cardinality.is_optional():
-                    # We populate optional links via update operations
+        if change.single_links:
+            for sch in change.single_links.values():
+                if sch.target is None:
+                    shape_parts.append(f"{quote_ident(sch.link_name)} := {{}}")
                     continue
 
-                if prop.cardinality.is_multi():
-                    items: list[str] = []
-                    assert is_dlist(val)
-                    for linked in val:
-                        u = unwrap_proxy(linked)
-                        arg = self.param_builder()
-                        args[arg] = self._get_id(u)
-                        t_name = type(
-                            u
-                        ).__gel_reflection__.name.as_schema_name()
-                        q_t = quote_ident(t_name)
-                        items.append(f"<{q_t}><uuid>${arg}")
+                tid = self._get_id(sch.target)
+                linked_name = obj_to_name_ql(sch.target)
+
+                if sch.props:
+                    assert sch.lps_info is not None
+
+                    els: list[Any] = [tid]
+                    els_ql = ["std::uuid"]
+
+                    subq_shape: list[str] = []
+
+                    for pname, pval in sch.props.items():
+                        els.append(pval)
+                        els_ql.append(type_to_ql(sch.lps_info[pname].type))
+
+                    arg = add_arg(f"tuple<{', '.join(els_ql)}>", tuple(els))
+
+                    for idx, pname in enumerate(sch.props):
+                        subq_shape.append(
+                            f"@{quote_ident(pname)} := {arg}.{idx + 1}"
+                        )
+
                     shape_parts.append(
-                        f"{q_name} := assert_distinct({{{', '.join(items)}}})"
+                        f"{quote_ident(sch.link_name)} := "
+                        f"(select (<{linked_name}>{arg}.0) {{ "
+                        f"  {', '.join(subq_shape)}"
+                        f"}})"
                     )
 
                 else:
-                    assert isinstance(val, GelModel)
-                    u = unwrap_proxy(val)
-                    arg = self.param_builder()
-                    args[arg] = self._get_id(u)
-                    t_name = type(u).__gel_reflection__.name.as_schema_name()
-                    q_t = quote_ident(t_name)
-                    shape_parts.append(f"{q_name} := <{q_t}><uuid>${arg}")
+                    arg = add_arg("std::uuid", tid)
+                    shape_parts.append(
+                        f"{quote_ident(sch.link_name)} := "
+                        f"<{linked_name}><uuid>{arg}"
+                    )
 
-        shape = ", ".join(shape_parts)
-        query = f"insert {q_type_name} {{ {shape} }}"
-        return query, args
+        if change.multi_links:
+            for mch in change.multi_links.values():
+                if mch.removed:
+                    assert not for_insert
 
-    def _compile_update(self, change: ModelChanges) -> QueryWithArgs:
-        obj = change.model
-        pointers = type(obj).__gel_pointers__()
-        # prepare type name and quoted identifier
-        type_name = type(obj).__gel_reflection__.name.as_schema_name()
+                    arg = add_arg(
+                        "array<uuid>", [self._get_id(o) for o in mch.removed]
+                    )
+
+                    assert issubclass(mch.info.type, DistinctList)
+
+                    shape_parts.append(
+                        f"{quote_ident(mch.link_name)} -= "
+                        f"<{type_to_ql(mch.info.type.type)}>array_unpack({arg})"
+                    )
+
+                if mch.added:
+                    if mch.added_props:
+                        1 / 0
+                    else:
+                        arg = add_arg(
+                            "array<uuid>",
+                            [self._get_id(o) for o in mch.added],
+                        )
+
+                        assert issubclass(mch.info.type, DistinctList)
+
+                        shape_parts.append(
+                            f"{quote_ident(mch.link_name)} += "
+                            f"<{type_to_ql(mch.info.type.type)}>array_unpack({arg})"
+                        )
+
         q_type_name = quote_ident(type_name)
 
-        args: dict[str, object] = {}
-        assignments: list[str] = []
+        shape = ", ".join(shape_parts)
+        query: str
+        if for_insert:
+            query = f"insert {q_type_name} {{ {shape} }}"
+        else:
+            query = f"""\
+                update {q_type_name}
+                filter .id = <uuid>$id
+                set {{ {shape} }}
+            """  # noqa: S608
+            args["id"] = self._get_id(obj)
 
-        # filter by id
-        args["id"] = self._get_id(obj)
-
-        # `change.fields` contains changes to properties and single links
-        for name in change.fields:
-            prop = pointers[name]
-            q_name = quote_ident(name)
-            val = getattr(obj, name)
-            if prop.kind is PointerKind.Property:
-                scalar_type = (
-                    prop.type.__gel_reflection__.name.as_schema_name()
-                )
-                q_scalar_type = quote_ident(scalar_type)
-                param = self.param_builder()
-                args[param] = val
-                assignments.append(f"{q_name} := <{q_scalar_type}>${param}")
-            else:
-                assert prop.kind is PointerKind.Link
-
-                if val is None:
-                    assignments.append(f"{q_name} := {{}}")
-                else:
-                    u = unwrap_proxy(val)
-                    param = self.param_builder()
-                    args[param] = self._get_id(u)
-                    t_name = type(u).__gel_reflection__.name.as_schema_name()
-                    q_t = quote_ident(t_name)
-                    assignments.append(f"{q_name} := <{q_t}><uuid>${param}")
-
-        # multi links: perform add/remove updates
-        for ml in change.multi_links:
-            name = ml.name
-            prop = pointers[name]
-            q_name = quote_ident(name)
-
-            if ml.added:
-                items_add: list[str] = []
-                for linked in ml.added:
-                    u = unwrap_proxy(linked)
-                    param = self.param_builder()
-                    args[param] = self._get_id(u)
-                    t_name = type(u).__gel_reflection__.name.as_schema_name()
-                    q_t = quote_ident(t_name)
-                    items_add.append(f"<{q_t}><uuid>${param}")
-                assignments.append(f"{q_name} += {{{', '.join(items_add)}}}")
-
-            if ml.removed:
-                items_rm: list[str] = []
-                for linked in ml.removed:
-                    u = unwrap_proxy(linked)
-                    param = self.param_builder()
-                    args[param] = self._get_id(u)
-                    t_name = type(u).__gel_reflection__.name.as_schema_name()
-                    q_t = quote_ident(t_name)
-                    items_rm.append(f"<{q_t}><uuid>${param}")
-                assignments.append(f"{q_name} -= {{{', '.join(items_rm)}}}")
-
-        assert assignments
-
-        shape = ", ".join(assignments)
-        query = f"""\
-            update {q_type_name}
-            filter .id = <uuid>$id
-            set {{ {shape} }}
-        """  # noqa: S608
+        if with_clauses:
+            query = f"with\n{', '.join(with_clauses)}\n\n{query}"
 
         return query, args
-
-
-if TYPE_CHECKING:
-    from gel import Client
-
-
-def _save(*objs: GelModel, client: Client) -> None:
-    make_executor = make_save_executor_constructor(objs)
-
-    executor = make_executor()
-
-    for batch in executor:
-        ids = []
-        for query, args in batch:
-            ids.append(client.query_required_single(query, **args).id)
-        executor.feed_ids(ids)
-
-    executor.commit()

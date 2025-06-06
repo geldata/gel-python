@@ -330,7 +330,6 @@ class GelBaseModel(pydantic.BaseModel, metaclass=GelModelMeta):
 
     def __init__(self, /, **kwargs: Any) -> None:
         super().__init__(**kwargs)
-        # enable change tracking after init
         _setattr(
             self, "__gel_changed_fields__", set(self.__pydantic_fields_set__)
         )
@@ -455,7 +454,7 @@ class GelModel(
 
     def __repr_name__(self) -> str:
         cls = type(self)
-        return f"{cls.__module__}.{cls.__qualname__}"
+        return f"{cls.__module__}.{cls.__qualname__} <{id(self)}>"
 
 
 _T_co = TypeVar("_T_co", covariant=True)
@@ -507,6 +506,11 @@ class ProxyModel(GelModel, Generic[_MT_co]):
         __lprops__: ClassVar[type[GelLinkModel]]
 
     def __init__(self, obj: _MT_co, /) -> None:
+        if isinstance(obj, ProxyModel):
+            raise TypeError(
+                f"ProxyModel {type(self).__qualname__} cannot wrap "
+                f"another ProxyModel {type(obj).__qualname__}"
+            )
         if not isinstance(obj, self.__proxy_of__):
             # A long time of debugging revealed that it's very important to
             # check `obj` being of a correct type. Pydantic can instantiate

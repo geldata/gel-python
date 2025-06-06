@@ -509,13 +509,13 @@ class TestModelGenerator(tb.ModelTestCase):
                     select Post
                     filter .author.name = 'New Alice' and
                             .body = "I'm Alice the 5th"
-                )),
+                ), message := 'more than one post'),
                 alice := assert_single((
                     select User {name} filter .name = 'Alice the 5th'
-                )),
+                ), message := 'more than one alice'),
                 new_alice := assert_single((
                     select User {name} filter .name = 'New Alice'
-                ))
+                ), message := 'more than one new_alice')
 
             select {
                 post := post {body, author: {name}},

@@ -115,9 +115,10 @@ class DistinctList(
             self._unhashables_impl = {}
         return self._unhashables_impl
 
-    @classmethod
-    def _check_value(cls, value: Any) -> T:
+    def _check_value(self, value: Any) -> T:
         """Ensure `value` is of type T and return it."""
+        cls = type(self)
+
         if isinstance(value, cls.type):
             return value
 
@@ -126,10 +127,9 @@ class DistinctList(
             f"got {type(value)!r}",
         )
 
-    @classmethod
-    def _check_values(cls, values: Iterable[Any]) -> list[T]:
+    def _check_values(self, values: Iterable[Any]) -> list[T]:
         """Ensure `values` is an iterable of type T and return it as a list."""
-        return [cls._check_value(value) for value in values]
+        return [self._check_value(value) for value in values]
 
     def __len__(self) -> int:
         return len(self._items)
@@ -220,7 +220,7 @@ class DistinctList(
         if value in self:
             return
 
-        self._check_value(value)
+        value = self._check_value(value)
         self._ensure_snapshot()
 
         # clamp index
@@ -247,7 +247,7 @@ class DistinctList(
             self.append(v)
 
     def append(self, value: T) -> None:  # type: ignore [misc]
-        self._check_value(value)
+        value = self._check_value(value)
         self._ensure_snapshot()
         self._append_no_check(value)
 

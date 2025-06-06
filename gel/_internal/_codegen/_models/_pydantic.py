@@ -2220,11 +2220,9 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             with self._class_def("__lprops__", lprops_bases):
                 assert ptr.pointers
                 lprops = []
-                lprop_assign = []
                 for lprop in ptr.pointers:
                     if lprop.name in {"source", "target"}:
                         continue
-                    lprop_assign.append(f"{lprop.name}={lprop.name}")
                     ttype = self._types[lprop.target_id]
                     assert reflection.is_scalar_type(ttype)
                     ptr_type = self.get_type(ttype, import_time=import_time)
@@ -2241,33 +2239,39 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                     lprops.append(lprop_line)
 
             self.write()
-            args = [f"obj: {target}", "/", "*", *lprops]
-            with self._method_def("__init__", args):
-                if is_forward_decl:
+            if is_forward_decl:
+                args = [f"obj: {target}", "/", "*", *lprops]
+                with self._method_def("__init__", args):
                     self.write("...")
-                else:
+            else:
+                # It's important to just forward '**link_props' to
+                # the constructor of `__lprops__` -- otherwise pydantic's
+                # tracking and our's own tracking would assume that argument
+                # defaults (Nones in this case) were explicitly set by the user
+                # leading to inefficient queries in save().
+                args = [f"obj", "/", "**link_props"]
+                with self._method_def("__init__", args):
                     obj = self.import_name("builtins", "object")
                     self.write(f"{proxymodel_t}.__init__(self, obj)")
                     self.write(
-                        self.format_list(
-                            "lprops = self.__class__.__lprops__({list})",
-                            lprop_assign,
-                        )
+                        "lprops = self.__class__.__lprops__(**link_props)"
                     )
                     self.write(
                         f'{obj}.__setattr__(self, "__linkprops__", lprops)'
                     )
 
             self.write()
-            args = [f"obj: {target}", "/", "*", *lprops]
-            with self._classmethod_def("link", args, self_t):
-                if is_forward_decl:
+            if is_forward_decl:
+                args = [f"obj: {target}", "/", "*", *lprops]
+                with self._classmethod_def("link", args, self_t):
                     self.write("...")
-                else:
+            else:
+                args = [f"obj", "/", "**link_props"]
+                with self._classmethod_def("link", args, self_t):
                     self.write(
                         self.format_list(
                             "return cls({list})",
-                            ["obj", *lprop_assign],
+                            ["obj", "**link_props"],
                         ),
                     )
 
