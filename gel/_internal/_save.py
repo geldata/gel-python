@@ -124,7 +124,7 @@ class SavePlan(NamedTuple):
     uodate_batch: ChangeBatch
 
 
-QueryWithArgs = TypeAliasType("QueryWithArgs", tuple[str, dict[str, object]])
+QueryWithArgs = TypeAliasType("QueryWithArgs", tuple[str, list[object]])
 
 
 def shift_dict_list(inp: dict[str, list[T]]) -> dict[str, T]:
@@ -761,13 +761,13 @@ class SaveExecutor:
     ) -> QueryWithArgs:
         shape_parts: list[str] = []
         with_clauses: list[str] = []
-        args: dict[str, object] = {}
+        args: list[object] = []
 
         def add_arg(type_ql: str, value: Any, /) -> str:
-            arg = self.param_builder()
-            with_clauses.append(f"{arg} := <{type_ql}>${arg}")
-            args[arg] = value
-            return arg
+            arg = str(len(args))
+            with_clauses.append(f"__a_{arg} := <{type_ql}>${arg}")
+            args.append(value)
+            return f"__a_{arg}"
 
         obj = change.model
         type_name = obj_to_name_ql(obj)
@@ -883,7 +883,8 @@ class SaveExecutor:
                     shape_parts.append(
                         f"{quote_ident(op.link_name)} += ("
                         f"for tup in array_unpack({arg}) union ("
-                        f"select (<{type_to_ql(op.info.type.type)}>tup.0) {{ {lp_assign}"
+                        f"select (<{type_to_ql(op.info.type.type)}>tup.0) {{ "
+                        f"{lp_assign}"
                         f"}}))"
                     )
 
@@ -907,12 +908,12 @@ class SaveExecutor:
         if for_insert:
             query = f"insert {q_type_name} {{ {shape} }}"
         else:
+            arg = add_arg("std::uuid", self._get_id(obj))
             query = f"""\
                 update {q_type_name}
-                filter .id = <uuid>$id
+                filter .id = {arg}
                 set {{ {shape} }}
             """  # noqa: S608
-            args["id"] = self._get_id(obj)
 
         if with_clauses:
             query = f"with\n{', '.join(with_clauses)}\n\n{query}"
