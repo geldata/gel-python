@@ -422,9 +422,9 @@ class BatchIteration(transaction.BaseTransaction):
 
     def __exit__(self, extype, ex, tb):
         with self._exclusive():
-            self._client._iter_coroutine(self._wait())
+            iter_coroutine(self._wait())
             self._managed = False
-            return self._client._iter_coroutine(self._exit(extype, ex))
+            return iter_coroutine(self._exit(extype, ex))
 
     async def _ensure_transaction(self):
         if not self._managed:
@@ -503,7 +503,7 @@ class BatchIteration(transaction.BaseTransaction):
 
     def wait(self) -> list[Any]:
         with self._exclusive():
-            return self._client._iter_coroutine(self._wait())
+            return iter_coroutine(self._wait())
 
     async def _wait(self) -> list[Any]:
         await self._ensure_transaction()
