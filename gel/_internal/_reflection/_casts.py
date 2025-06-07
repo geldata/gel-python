@@ -151,10 +151,10 @@ def fetch_casts(
         )
 
     return CastMatrix(
-        explicit_casts_from=casts_from,
-        explicit_casts_to=casts_to,
-        implicit_casts_from=all_implicit_casts_from,
-        implicit_casts_to=all_implicit_casts_to,
-        assignment_casts_from=all_assignment_casts_from,
-        assignment_casts_to=all_assignment_casts_to,
+        explicit_casts_from=dict(casts_from),
+        explicit_casts_to=dict(casts_to),
+        implicit_casts_from=dict(all_implicit_casts_from),
+        implicit_casts_to=dict(all_implicit_casts_to),
+        assignment_casts_from=dict(all_assignment_casts_from),
+        assignment_casts_to=dict(all_assignment_casts_to),
     )

@@ -129,7 +129,7 @@ def fetch_operators(
             other_ops.append(opv)
 
     return OperatorMatrix(
-        binary_ops=binary_ops,
-        unary_ops=unary_ops,
+        binary_ops=dict(binary_ops),
+        unary_ops=dict(unary_ops),
         other_ops=other_ops,
     )
