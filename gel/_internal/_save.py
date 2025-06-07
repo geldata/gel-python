@@ -800,25 +800,23 @@ class SaveExecutor:
                 if sch.props:
                     assert sch.props_info is not None
 
-                    els: list[Any] = [tid]
-                    els_ql = ["std::uuid"]
+                    id_arg = add_arg("std::uuid", tid)
 
                     subq_shape: list[str] = []
 
                     for pname, pval in sch.props.items():
-                        els.append(pval)
-                        els_ql.append(type_to_ql(sch.props_info[pname].type))
-
-                    arg = add_arg(f"tuple<{', '.join(els_ql)}>", tuple(els))
-
-                    for idx, pname in enumerate(sch.props):
-                        subq_shape.append(
-                            f"@{quote_ident(pname)} := {arg}.{idx + 1}"
+                        parg = add_arg(
+                            type_to_ql(sch.props_info[pname].type),
+                            pval,
+                            optional=sch.props_info[
+                                pname
+                            ].cardinality.is_optional(),
                         )
+                        subq_shape.append(f"@{quote_ident(pname)} := {parg}")
 
                     shape_parts.append(
                         f"{quote_ident(sch.link_name)} := "
-                        f"(select (<{linked_name}>{arg}.0) {{ "
+                        f"(select (<{linked_name}>{id_arg}) {{ "
                         f"  {', '.join(subq_shape)}"
                         f"}})"
                     )
