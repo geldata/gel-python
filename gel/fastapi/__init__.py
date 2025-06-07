@@ -23,7 +23,7 @@ try:
 except ImportError:
     warnings.warn("FastAPI is not installed.")
 else:
-    from .client import gelify, Client
+    from .client import gelify, Client, BlockingIOClient
 
 
-__all__ = ["gelify", "Client"]
+__all__ = ["gelify", "Client", "BlockingIOClient"]
