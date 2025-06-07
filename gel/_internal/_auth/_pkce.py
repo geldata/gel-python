@@ -17,7 +17,7 @@
 #
 
 from __future__ import annotations
-from typing import Generic, TypeVar, Union
+from typing import Generic, TypeVar
 
 import base64
 import dataclasses
@@ -33,7 +33,7 @@ from . import _token_data as token_data
 
 
 logger = logging.getLogger("gel.auth")
-C = TypeVar("C", bound=Union[httpx.Client, httpx.AsyncClient])
+C = TypeVar("C", bound=httpx.Client | httpx.AsyncClient)
 
 
 class BasePKCE(Generic[C]):

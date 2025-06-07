@@ -17,16 +17,17 @@
 #
 
 from __future__ import annotations
-from typing import Generic, TypeVar, Union
+from typing import Any, Generic, TYPE_CHECKING, TypeVar
 
 import dataclasses
 import logging
 
 import httpx
 
-import gel
+if TYPE_CHECKING:
+    import gel
+    from . import _pkce as pkce_mod
 
-from . import _pkce as pkce_mod
 
 logger = logging.getLogger("gel.auth")
 
@@ -37,11 +38,13 @@ class BaseServerFailedResponse:
     message: str
 
 
-C = TypeVar("C", bound=Union[httpx.Client, httpx.AsyncClient])
+C = TypeVar("C", bound=httpx.Client | httpx.AsyncClient)
 
 
 class BaseClient(Generic[C]):
-    def __init__(self, *, connection_info: gel.ConnectionInfo, **kwargs):
+    def __init__(
+        self, *, connection_info: gel.ConnectionInfo, **kwargs: Any
+    ) -> None:
         if "base_url" not in kwargs:
             params = connection_info.params
             scheme = "http" if params.tls_security == "insecure" else "https"
@@ -57,13 +60,13 @@ class BaseClient(Generic[C]):
             kwargs["verify"] = connection_info.params.make_ssl_ctx()
         self._client = self._init_http_client(**kwargs)
 
-    def _init_http_client(self, **kwargs) -> C:
+    def _init_http_client(self, **kwargs: Any) -> C:
         raise NotImplementedError()
 
-    def _generate_pkce(self) -> pkce_mod.BasePKCE:
+    def _generate_pkce(self) -> pkce_mod.BasePKCE[C]:
         raise NotImplementedError()
 
-    def _pkce_from_verifier(self, verifier: str) -> pkce_mod.BasePKCE:
+    def _pkce_from_verifier(self, verifier: str) -> pkce_mod.BasePKCE[C]:
         raise NotImplementedError()
 
     async def _send_http_request(
@@ -71,7 +74,7 @@ class BaseClient(Generic[C]):
     ) -> httpx.Response:
         raise NotImplementedError()
 
-    async def _http_request(self, *args, **kwargs) -> httpx.Response:
+    async def _http_request(self, *args: Any, **kwargs: Any) -> httpx.Response:
         request = self._client.build_request(*args, **kwargs)
         try:
             logger.debug(

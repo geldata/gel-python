@@ -17,10 +17,12 @@
 #
 
 from __future__ import annotations
-from typing import Optional
+from typing import Optional, TYPE_CHECKING
 
 import dataclasses
-import uuid
+
+if TYPE_CHECKING:
+    import uuid
 
 
 @dataclasses.dataclass

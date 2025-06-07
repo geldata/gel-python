@@ -17,11 +17,10 @@
 #
 
 from __future__ import annotations
-from typing import Optional, Type, TypeVar, Union
+from typing import Any, Optional, TYPE_CHECKING, TypeVar
 
 import dataclasses
 import logging
-import uuid
 
 import httpx
 
@@ -31,6 +30,10 @@ from gel import blocking_client
 from . import _token_data as td_mod
 from . import _pkce as pkce_mod
 from ._base import BaseServerFailedResponse, BaseClient
+
+if TYPE_CHECKING:
+    import uuid
+
 
 logger = logging.getLogger("gel.auth")
 
@@ -53,11 +56,11 @@ class SignUpFailedResponse(BaseServerFailedResponse):
     verifier: str
 
 
-SignUpResponse = Union[
-    SignUpCompleteResponse,
-    SignUpVerificationRequiredResponse,
-    SignUpFailedResponse,
-]
+SignUpResponse = (
+    SignUpCompleteResponse
+    | SignUpVerificationRequiredResponse
+    | SignUpFailedResponse
+)
 
 
 @dataclasses.dataclass
@@ -78,11 +81,11 @@ class SignInFailedResponse(BaseServerFailedResponse):
     verifier: str
 
 
-SignInResponse = Union[
-    SignInCompleteResponse,
-    SignInVerificationRequiredResponse,
-    SignInFailedResponse,
-]
+SignInResponse = (
+    SignInCompleteResponse
+    | SignInVerificationRequiredResponse
+    | SignInFailedResponse
+)
 
 
 @dataclasses.dataclass
@@ -98,11 +101,11 @@ class EmailVerificationFailedResponse(BaseServerFailedResponse):
     pass
 
 
-EmailVerificationResponse = Union[
-    EmailVerificationCompleteResponse,
-    EmailVerificationMissingProofResponse,
-    EmailVerificationFailedResponse,
-]
+EmailVerificationResponse = (
+    EmailVerificationCompleteResponse
+    | EmailVerificationMissingProofResponse
+    | EmailVerificationFailedResponse
+)
 
 
 @dataclasses.dataclass
@@ -115,10 +118,10 @@ class SendPasswordResetEmailFailedResponse(BaseServerFailedResponse):
     verifier: str
 
 
-SendPasswordResetEmailResponse = Union[
-    SendPasswordResetEmailCompleteResponse,
-    SendPasswordResetEmailFailedResponse,
-]
+SendPasswordResetEmailResponse = (
+    SendPasswordResetEmailCompleteResponse
+    | SendPasswordResetEmailFailedResponse
+)
 
 
 @dataclasses.dataclass
@@ -134,18 +137,19 @@ class PasswordResetFailedResponse(BaseServerFailedResponse):
     pass
 
 
-PasswordResetResponse = Union[
-    PasswordResetCompleteResponse,
-    PasswordResetMissingProofResponse,
-    PasswordResetFailedResponse,
-]
+PasswordResetResponse = (
+    PasswordResetCompleteResponse
+    | PasswordResetMissingProofResponse
+    | PasswordResetFailedResponse
+)
 
-
-C = TypeVar("C", bound=Union[httpx.Client, httpx.AsyncClient])
+C = TypeVar("C", bound=httpx.Client | httpx.AsyncClient)
 
 
 class BaseEmailPassword(BaseClient[C]):
-    def __init__(self, *, connection_info: gel.ConnectionInfo, **kwargs):
+    def __init__(
+        self, *, connection_info: gel.ConnectionInfo, **kwargs: Any
+    ) -> None:
         self.provider = "builtin::local_emailpassword"
         super().__init__(connection_info=connection_info, **kwargs)
 
@@ -385,13 +389,13 @@ class BaseEmailPassword(BaseClient[C]):
 
 
 class EmailPassword(BaseEmailPassword[httpx.Client]):
-    def _init_http_client(self, **kwargs) -> httpx.Client:
+    def _init_http_client(self, **kwargs: Any) -> httpx.Client:
         return httpx.Client(**kwargs)
 
-    def _generate_pkce(self) -> pkce_mod.BasePKCE:
+    def _generate_pkce(self) -> pkce_mod.PKCE:
         return pkce_mod.generate_pkce(self._client)
 
-    def _pkce_from_verifier(self, verifier: str) -> pkce_mod.BasePKCE:
+    def _pkce_from_verifier(self, verifier: str) -> pkce_mod.PKCE:
         return pkce_mod.PKCE(self._client, verifier)
 
     async def _send_http_request(
@@ -432,19 +436,19 @@ class EmailPassword(BaseEmailPassword[httpx.Client]):
 
 
 def make(
-    client: gel.Client, *, cls: Type[EmailPassword] = EmailPassword
+    client: gel.Client, *, cls: type[EmailPassword] = EmailPassword
 ) -> EmailPassword:
     return cls(connection_info=client.check_connection())
 
 
 class AsyncEmailPassword(BaseEmailPassword[httpx.AsyncClient]):
-    def _init_http_client(self, **kwargs) -> httpx.AsyncClient:
+    def _init_http_client(self, **kwargs: Any) -> httpx.AsyncClient:
         return httpx.AsyncClient(**kwargs)
 
-    def _generate_pkce(self) -> pkce_mod.BasePKCE:
+    def _generate_pkce(self) -> pkce_mod.AsyncPKCE:
         return pkce_mod.generate_async_pkce(self._client)
 
-    def _pkce_from_verifier(self, verifier: str) -> pkce_mod.BasePKCE:
+    def _pkce_from_verifier(self, verifier: str) -> pkce_mod.AsyncPKCE:
         return pkce_mod.AsyncPKCE(self._client, verifier)
 
     async def _send_http_request(
@@ -481,6 +485,6 @@ class AsyncEmailPassword(BaseEmailPassword[httpx.AsyncClient]):
 async def make_async(
     client: gel.AsyncIOClient,
     *,
-    cls: Type[AsyncEmailPassword] = AsyncEmailPassword,
+    cls: type[AsyncEmailPassword] = AsyncEmailPassword,
 ) -> AsyncEmailPassword:
     return cls(connection_info=await client.check_connection())

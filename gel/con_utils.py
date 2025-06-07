@@ -391,7 +391,7 @@ class ResolvedConnectConfig:
         self._ssl_ctx.set_alpn_protocols(["edgedb-binary"])
         return self._ssl_ctx
 
-    def make_ssl_ctx(self):
+    def make_ssl_ctx(self) -> ssl.SSLContext:
         ssl_ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
 
         if self._tls_ca_data:

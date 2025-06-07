@@ -17,18 +17,18 @@
 #
 
 from __future__ import annotations
-from typing import Type, TypeVar, Union
+from typing import Any, TYPE_CHECKING, TypeVar
 
 import dataclasses
 import logging
 
 import httpx
 
-import gel
-
 from . import _base as base
 from . import _pkce as pkce_mod
 
+if TYPE_CHECKING:
+    import gel
 
 logger = logging.getLogger("gel.auth")
 
@@ -39,7 +39,7 @@ class BuiltinUIResponse:
     redirect_url: str
 
 
-C = TypeVar("C", bound=Union[httpx.Client, httpx.AsyncClient])
+C = TypeVar("C", bound=httpx.Client | httpx.AsyncClient)
 
 
 class BaseBuiltinUI(base.BaseClient[C]):
@@ -69,32 +69,32 @@ class BaseBuiltinUI(base.BaseClient[C]):
 
 
 class BuiltinUI(BaseBuiltinUI[httpx.Client]):
-    def _init_http_client(self, **kwargs) -> httpx.Client:
+    def _init_http_client(self, **kwargs: Any) -> httpx.Client:
         return httpx.Client(**kwargs)
 
-    def _generate_pkce(self) -> pkce_mod.BasePKCE:
+    def _generate_pkce(self) -> pkce_mod.PKCE:
         return pkce_mod.generate_pkce(self._client)
 
-    def _pkce_from_verifier(self, verifier: str) -> pkce_mod.BasePKCE:
+    def _pkce_from_verifier(self, verifier: str) -> pkce_mod.PKCE:
         return pkce_mod.PKCE(self._client, verifier)
 
 
-def make(client: gel.Client, *, cls: Type[BuiltinUI] = BuiltinUI) -> BuiltinUI:
+def make(client: gel.Client, *, cls: type[BuiltinUI] = BuiltinUI) -> BuiltinUI:
     return cls(connection_info=client.check_connection())
 
 
 class AsyncBuiltinUI(BaseBuiltinUI[httpx.AsyncClient]):
-    def _init_http_client(self, **kwargs) -> httpx.AsyncClient:
+    def _init_http_client(self, **kwargs: Any) -> httpx.AsyncClient:
         return httpx.AsyncClient(**kwargs)
 
-    def _generate_pkce(self) -> pkce_mod.BasePKCE:
+    def _generate_pkce(self) -> pkce_mod.AsyncPKCE:
         return pkce_mod.generate_async_pkce(self._client)
 
-    def _pkce_from_verifier(self, verifier: str) -> pkce_mod.BasePKCE:
+    def _pkce_from_verifier(self, verifier: str) -> pkce_mod.AsyncPKCE:
         return pkce_mod.AsyncPKCE(self._client, verifier)
 
 
 async def make_async(
-    client: gel.AsyncIOClient, *, cls: Type[AsyncBuiltinUI] = AsyncBuiltinUI
+    client: gel.AsyncIOClient, *, cls: type[AsyncBuiltinUI] = AsyncBuiltinUI
 ) -> AsyncBuiltinUI:
     return cls(connection_info=await client.check_connection())
