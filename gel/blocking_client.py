@@ -558,9 +558,7 @@ class Client(base_client.BaseClient, abstract.Executor):
                         print()
                         print(query, "|||||", args)
                         print()
-                        ids.append(
-                            self.query_required_single(query, **args).id
-                        )
+                        ids.append(tx.query_required_single(query, **args).id)
                     executor.feed_ids(ids)
 
                 executor.commit()

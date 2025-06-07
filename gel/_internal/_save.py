@@ -3,7 +3,7 @@ from __future__ import annotations
 import collections
 import dataclasses
 
-from typing import TYPE_CHECKING, Any, NamedTuple, TypeVar, Generic
+from typing import TYPE_CHECKING, Any, NamedTuple, TypeVar, Generic, cast
 
 from gel._internal._qbmodel._pydantic._models import (
     GelModel,
@@ -18,7 +18,12 @@ from gel._internal._edgeql import PointerKind, quote_ident
 if TYPE_CHECKING:
     import uuid
 
-    from collections.abc import Iterable, Iterator, Callable
+    from collections.abc import (
+        Iterable,
+        Iterator,
+        Callable,
+        Mapping,
+    )
     from typing import TypeGuard
 
     from gel._internal._qbmodel._abstract import GelType
@@ -45,7 +50,7 @@ class SingleLinkChange:
 
     target: GelModel | None
 
-    lps_info: GelPointers | None = None
+    props_info: GelPointers | None = None
     props: LinkPropertiesValues | None = None
 
     def __post_init__(self) -> None:
@@ -53,22 +58,28 @@ class SingleLinkChange:
 
 
 @dataclasses.dataclass(frozen=True)
-class MultiLinkChange:
+class MultiLinkAdd:
     link_name: str
     info: Pointer
 
-    added: Iterable[GelModel] | None = None
+    added: Iterable[GelModel]
+
     added_props: Iterable[LinkPropertiesValues] | None = None
-
-    removed: Iterable[GelModel] | None = None
-
-    lps_info: GelPointers | None = None
+    props_info: GelPointers | None = None
 
     def __post_init__(self) -> None:
-        if self.added:
-            assert not any(isinstance(o, ProxyModel) for o in self.added)
-        if self.removed:
-            assert not any(isinstance(o, ProxyModel) for o in self.removed)
+        assert not any(isinstance(o, ProxyModel) for o in self.added)
+
+
+@dataclasses.dataclass(frozen=True)
+class MultiLinkRemove:
+    link_name: str
+    info: Pointer
+
+    removed: Iterable[GelModel]
+
+    def __post_init__(self) -> None:
+        assert not any(isinstance(o, ProxyModel) for o in self.removed)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -85,12 +96,6 @@ PropertyChanges = TypeAliasType("PropertyChanges", dict[str, PropertyChange])
 SingleLinkChanges = TypeAliasType(
     "SingleLinkChanges", dict[str, SingleLinkChange]
 )
-MultiLinkChanges = TypeAliasType(
-    "MultiLinkChanges", dict[str, MultiLinkChange]
-)
-AllMultiLinkChanges = TypeAliasType(
-    "AllMultiLinkChanges", dict[str, list[MultiLinkChange]]
-)
 
 
 @dataclasses.dataclass
@@ -98,7 +103,7 @@ class ModelChange:
     model: GelModel
     props: PropertyChanges | None = None
     single_links: SingleLinkChanges | None = None
-    multi_links: MultiLinkChanges | None = None
+    multi_links: dict[str, MultiLinkAdd | MultiLinkRemove] | None = None
 
     def __post_init__(self) -> None:
         assert not isinstance(self.model, ProxyModel)
@@ -321,12 +326,14 @@ def make_plan(objs: Iterable[GelModel]) -> SavePlan:
         req_single_link_changes: SingleLinkChanges = {}
         opt_single_link_changes: SingleLinkChanges = {}
 
-        req_multi_link_changes: AllMultiLinkChanges = collections.defaultdict(
-            list
+        req_multi_link_adds: dict[str, list[MultiLinkAdd]] = (
+            collections.defaultdict(list)
         )
-        opt_multi_link_changes: AllMultiLinkChanges = collections.defaultdict(
-            list
+        opt_multi_link_adds: dict[str, list[MultiLinkAdd]] = (
+            collections.defaultdict(list)
         )
+
+        multi_link_rems: dict[str, MultiLinkRemove] = {}
 
         for prop in pointers.values():
             # Skip computeds, we can't update them.
@@ -369,7 +376,7 @@ def make_plan(objs: Iterable[GelModel]) -> SavePlan:
                             info=prop,
                             target=unwrap_proxy(val),
                             props=props,
-                            lps_info=type(val).__lprops__.__gel_pointers__(),
+                            props_info=type(val).__lprops__.__gel_pointers__(),
                         )
                     else:
                         # Link without link properties
@@ -410,33 +417,38 @@ def make_plan(objs: Iterable[GelModel]) -> SavePlan:
             )
             assert issubclass(prop.type, DistinctList)
 
-            # Objects that were added or removed from this link
-            added = linked.__gel_get_added__()
             removed = linked.__gel_get_removed__()
+            if removed:
+                m_rem = MultiLinkRemove(
+                    link_name=prop.name,
+                    info=prop,
+                    removed=unwrap_dlist(removed),
+                )
 
-            # No changes for this link? Continue to the next one.
-            if not (added or removed):
+                multi_link_rems[prop.name] = m_rem
+
+            added = linked.__gel_get_added__()
+            # No adds for this link? Continue to the next one.
+            if not added:
                 continue
 
             # Simple case -- no link props!
             if not prop.has_props:
-                mch = MultiLinkChange(
+                mch = MultiLinkAdd(
                     link_name=prop.name,
                     info=prop,
                     added=unwrap_dlist(added),
-                    removed=unwrap_dlist(removed),
                 )
 
                 if prop.cardinality.is_optional():
-                    opt_multi_link_changes[prop.name].append(mch)
+                    opt_multi_link_adds[prop.name].append(mch)
                 else:
-                    req_multi_link_changes[prop.name].append(mch)
+                    req_multi_link_adds[prop.name].append(mch)
 
                 continue
 
             # OK, we have to deal with link props.
-            assert prop.has_props
-
+            #
             # First, we iterate through the list of added new objects
             # to the list. All of them should be ProxyModels
             # (as we use UpcastingDistinctList for links with props.)
@@ -466,39 +478,10 @@ def make_plan(objs: Iterable[GelModel]) -> SavePlan:
 
             link_tp = prop.type
             assert issubclass(link_tp.type, ProxyModel)
-            lps_info = link_tp.type.__lprops__.__gel_pointers__()
+            props_info = link_tp.type.__lprops__.__gel_pointers__()
 
-            if len(props_map) == 1:
-                # We have one pattern of link props - means we can combine
-                # additions and removals in one MultiLinkChange operation --
-                # one EdgeQL query.
-
-                link_fields, link_upd = next(iter(props_map.items()))
-
-                link_added = [unwrap_proxy(upd[0]) for upd in link_upd]
-                if len(link_fields):
-                    link_added_props = [upd[1] for upd in link_upd]
-                else:
-                    link_added_props = None
-
-                mch = MultiLinkChange(
-                    link_name=prop.name,
-                    info=prop,
-                    added=link_added,
-                    added_props=link_added_props,
-                    lps_info=lps_info if link_added_props else None,
-                    removed=unwrap_dlist(removed) if removed else None,
-                )
-
-                if prop.cardinality.is_optional():
-                    opt_multi_link_changes[prop.name].append(mch)
-                else:
-                    req_multi_link_changes[prop.name].append(mch)
-
-                continue
-
-            # Alright we have multiple patterns of link properties --
-            # generate a MultiLinkChange op for every distinct pattern.
+            # Generate a MultiLinkAdd op for every distinct
+            # link props pattern.
             for link_fields, link_upd in props_map.items():
                 link_added = [unwrap_proxy(upd[0]) for upd in link_upd]
                 if len(link_fields):
@@ -506,31 +489,18 @@ def make_plan(objs: Iterable[GelModel]) -> SavePlan:
                 else:
                     link_added_props = None
 
-                mch = MultiLinkChange(
+                mch = MultiLinkAdd(
                     link_name=prop.name,
                     info=prop,
                     added=link_added,
                     added_props=link_added_props,
-                    lps_info=lps_info if link_added_props else None,
+                    props_info=props_info if link_added_props else None,
                 )
 
                 if prop.cardinality.is_optional():
-                    opt_multi_link_changes[prop.name].append(mch)
+                    opt_multi_link_adds[prop.name].append(mch)
                 else:
-                    req_multi_link_changes[prop.name].append(mch)
-
-            # And a separate MultiLinkChange for removed.
-            if removed:
-                mch = MultiLinkChange(
-                    link_name=prop.name,
-                    info=prop,
-                    removed=unwrap_dlist(removed),
-                )
-
-                if prop.cardinality.is_optional():
-                    opt_multi_link_changes[prop.name].append(mch)
-                else:
-                    req_multi_link_changes[prop.name].append(mch)
+                    req_multi_link_adds[prop.name].append(mch)
 
         # After all this work we found no changes -- move on to the next obj.
         if not (
@@ -538,8 +508,9 @@ def make_plan(objs: Iterable[GelModel]) -> SavePlan:
             or prop_changes
             or opt_single_link_changes
             or req_single_link_changes
-            or opt_multi_link_changes
-            or req_single_link_changes
+            or opt_multi_link_adds
+            or req_multi_link_adds
+            or multi_link_rems
         ):
             continue
 
@@ -556,7 +527,10 @@ def make_plan(objs: Iterable[GelModel]) -> SavePlan:
                     model=obj,
                     props=prop_changes,
                     single_links=req_single_link_changes,
-                    multi_links=shift_dict_list(req_multi_link_changes),
+                    multi_links=cast(
+                        "dict[str, MultiLinkAdd | MultiLinkRemove]",
+                        shift_dict_list(req_multi_link_adds),
+                    ),
                 )
             )
 
@@ -566,10 +540,11 @@ def make_plan(objs: Iterable[GelModel]) -> SavePlan:
         # Now let's create ops for all the remaning changes
         while (
             prop_changes
-            or req_multi_link_changes
-            or opt_multi_link_changes
+            or req_multi_link_adds
+            or opt_multi_link_adds
             or req_single_link_changes
             or opt_single_link_changes
+            or multi_link_rems
         ):
             change = ModelChange(
                 model=obj,
@@ -590,18 +565,40 @@ def make_plan(objs: Iterable[GelModel]) -> SavePlan:
                     change.single_links = opt_single_link_changes
                 opt_single_link_changes = {}
 
-            if req_multi_link_changes:
-                change.multi_links = shift_dict_list(req_multi_link_changes)
+            if req_multi_link_adds:
+                mlinks = cast(
+                    "dict[str, MultiLinkAdd | MultiLinkRemove]",
+                    shift_dict_list(req_multi_link_adds),
+                )
 
-            if opt_multi_link_changes:
-                if change.multi_links is not None:
-                    change.multi_links |= shift_dict_list(
-                        opt_multi_link_changes
+                if opt_multi_link_adds:
+                    mlinks |= cast(
+                        "dict[str, MultiLinkAdd | MultiLinkRemove]",
+                        shift_dict_list(opt_multi_link_adds),
                     )
-                else:
-                    change.multi_links = shift_dict_list(
-                        opt_multi_link_changes
-                    )
+
+                if multi_link_rems and not (
+                    mlinks.keys() & multi_link_rems.keys()
+                ):
+                    mlinks |= multi_link_rems
+                    multi_link_rems = {}
+
+                change.multi_links = mlinks
+
+            elif opt_multi_link_adds:
+                change.multi_links = cast(
+                    "dict[str, MultiLinkAdd | MultiLinkRemove]",
+                    shift_dict_list(
+                        opt_multi_link_adds,
+                    ),
+                )
+
+            elif multi_link_rems:
+                change.multi_links = cast(
+                    "dict[str, MultiLinkAdd | MultiLinkRemove]",
+                    multi_link_rems,
+                )
+                multi_link_rems = {}
 
             update_ops.append(change)
 
@@ -790,7 +787,7 @@ class SaveExecutor:
                 linked_name = obj_to_name_ql(sch.target)
 
                 if sch.props:
-                    assert sch.lps_info is not None
+                    assert sch.props_info is not None
 
                     els: list[Any] = [tid]
                     els_ql = ["std::uuid"]
@@ -799,7 +796,7 @@ class SaveExecutor:
 
                     for pname, pval in sch.props.items():
                         els.append(pval)
-                        els_ql.append(type_to_ql(sch.lps_info[pname].type))
+                        els_ql.append(type_to_ql(sch.props_info[pname].type))
 
                     arg = add_arg(f"tuple<{', '.join(els_ql)}>", tuple(els))
 
@@ -823,35 +820,36 @@ class SaveExecutor:
                     )
 
         if change.multi_links:
-            for mch in change.multi_links.values():
-                if mch.removed:
+            for op in change.multi_links.values():
+                if isinstance(op, MultiLinkRemove):
                     assert not for_insert
 
                     arg = add_arg(
-                        "array<uuid>", [self._get_id(o) for o in mch.removed]
+                        "array<uuid>", [self._get_id(o) for o in op.removed]
                     )
 
-                    assert issubclass(mch.info.type, DistinctList)
+                    assert issubclass(op.info.type, DistinctList)
 
                     shape_parts.append(
-                        f"{quote_ident(mch.link_name)} -= "
-                        f"<{type_to_ql(mch.info.type.type)}>array_unpack({arg})"
+                        f"{quote_ident(op.link_name)} -= "
+                        f"<{type_to_ql(op.info.type.type)}>array_unpack({arg})"
                     )
+                else:
+                    assert isinstance(op, MultiLinkAdd)
 
-                if mch.added:
-                    if mch.added_props:
+                    if op.added_props:
                         1 / 0
                     else:
                         arg = add_arg(
                             "array<uuid>",
-                            [self._get_id(o) for o in mch.added],
+                            [self._get_id(o) for o in op.added],
                         )
 
-                        assert issubclass(mch.info.type, DistinctList)
+                        assert issubclass(op.info.type, DistinctList)
 
                         shape_parts.append(
-                            f"{quote_ident(mch.link_name)} += "
-                            f"<{type_to_ql(mch.info.type.type)}>array_unpack({arg})"
+                            f"{quote_ident(op.link_name)} += "
+                            f"<{type_to_ql(op.info.type.type)}>array_unpack({arg})"
                         )
 
         q_type_name = quote_ident(type_name)
