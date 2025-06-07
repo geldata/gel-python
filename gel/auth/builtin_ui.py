@@ -48,7 +48,7 @@ class BaseBuiltinUI(BaseClient[C]):
         logger.info("starting sign-in flow")
         pkce = self._generate_pkce()
         redirect_url = self._client.base_url.join(
-            f"/ui/signin?challenge={pkce.challenge}"
+            f"ui/signin?challenge={pkce.challenge}"
         )
 
         return BuiltinUIResponse(
@@ -60,18 +60,13 @@ class BaseBuiltinUI(BaseClient[C]):
         logger.info("starting sign-up flow")
         pkce = self._generate_pkce()
         redirect_url = self._client.base_url.join(
-            f"/ui/signup?challenge={pkce.challenge}"
+            f"ui/signup?challenge={pkce.challenge}"
         )
 
         return BuiltinUIResponse(
             verifier=pkce.verifier,
             redirect_url=str(redirect_url),
         )
-
-    async def _get_token(self, *, verifier: str, code: str) -> td_mod.TokenData:
-        pkce = self._pkce_from_verifier(verifier)
-        logger.info("exchanging code for token: %s", code)
-        return await pkce.internal_exchange_code_for_token(code)
 
 
 class BuiltinUI(BaseBuiltinUI[httpx.Client]):
@@ -83,11 +78,6 @@ class BuiltinUI(BaseBuiltinUI[httpx.Client]):
 
     def _pkce_from_verifier(self, verifier: str) -> pkce_mod.BasePKCE:
         return pkce_mod.PKCE(self._client, verifier)
-
-    def get_token(self, *, verifier: str, code: str) -> td_mod.TokenData:
-        return blocking_client.iter_coroutine(
-            self._get_token(verifier=verifier, code=code)
-        )
 
 
 def make(client: gel.Client, *, cls: Type[BuiltinUI] = BuiltinUI) -> BuiltinUI:
@@ -103,9 +93,6 @@ class AsyncBuiltinUI(BaseBuiltinUI[httpx.AsyncClient]):
 
     def _pkce_from_verifier(self, verifier: str) -> pkce_mod.BasePKCE:
         return pkce_mod.AsyncPKCE(self._client, verifier)
-
-    async def get_token(self, *, verifier: str, code: str) -> td_mod.TokenData:
-        return await self._get_token(verifier=verifier, code=code)
 
 
 async def make_async(
