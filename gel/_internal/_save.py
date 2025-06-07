@@ -356,7 +356,7 @@ def make_plan(objs: Iterable[GelModel]) -> SavePlan:
                 else:
                     # Link
                     assert prop.kind is PointerKind.Link
-                    assert isinstance(val, GelModel)
+                    assert val is None or isinstance(val, GelModel)
                     assert not prop.cardinality.is_multi()
 
                     if prop.has_props and isinstance(val, ProxyModel):
@@ -824,7 +824,11 @@ class SaveExecutor:
                     )
 
                 else:
-                    arg = add_arg("std::uuid", tid)
+                    arg = add_arg(
+                        "std::uuid",
+                        tid,
+                        optional=sch.info.cardinality.is_optional(),
+                    )
                     shape_parts.append(
                         f"{quote_ident(sch.link_name)} := "
                         f"<{linked_name}><uuid>{arg}"
