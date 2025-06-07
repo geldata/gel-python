@@ -485,8 +485,11 @@ class AsyncIOClient(base_client.BaseClient, abstract.AsyncIOExecutor):
     __slots__ = ()
     _impl_class = _AsyncIOPoolImpl
 
+    async def check_connection(self) -> base_client.ConnectionInfo:
+        return await self._impl.ensure_connected()
+
     async def ensure_connected(self):
-        await self._impl.ensure_connected()
+        await self.check_connection()
         return self
 
     async def aclose(self):

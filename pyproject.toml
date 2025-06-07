@@ -51,7 +51,8 @@ doc = [
     'sphinxcontrib-asyncio~=0.3.0',
     'sphinx_rtd_theme~=1.0.0',
 ]
-ai = ['httpx~=0.27.0', 'httpx-sse~=0.4.0']
+ai = ['httpx>=0.27.0', 'httpx-sse~=0.4.0']
+auth = ['httpx>=0.27.0']
 
 [project.urls]
 homepage = "https://www.geldata.com"
