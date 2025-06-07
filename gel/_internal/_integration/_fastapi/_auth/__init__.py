@@ -3,23 +3,26 @@
 # SPDX-FileCopyrightText: Copyright Gel Data Inc. and the contributors.
 
 from __future__ import annotations
-from typing import Callable, cast, Iterator, Optional, TYPE_CHECKING
+from typing import cast, Optional, TYPE_CHECKING
 
 import contextlib
 import datetime
-import enum
-import uuid
 
 import fastapi
 import jwt
 from fastapi import security, params
 
-import gel
-from gel import auth as core
 
-from .. import client as client_mod, utils
+from .. import _client as client_mod
+from .. import _utils as utils
 
 if TYPE_CHECKING:
+    import enum
+    import uuid
+    from collections.abc import Callable, Iterator
+
+    import gel
+    from gel import auth as core
     from .email_password import EmailPassword
     from .builtin_ui import BuiltinUI
 
@@ -37,7 +40,7 @@ class GelAuth(client_mod.Extension):
     auth_path_prefix: str = "/auth"
     auth_cookie_name: str = "gel_auth_token"
     verifier_cookie_name: str = "gel_verifier"
-    tags: list[str | enum.Enum] = ["Gel Auth"]
+    tags: list[str | enum.Enum]
     secure_cookie: bool = True
     email_password: EmailPassword
     builtin_ui: BuiltinUI
@@ -55,9 +58,10 @@ class GelAuth(client_mod.Extension):
     _insts: dict[str, Installable]
 
     def _post_init(self) -> None:
-        from .email_password import EmailPassword
-        from .builtin_ui import BuiltinUI
+        from .email_password import EmailPassword  # noqa: PLC0415
+        from .builtin_ui import BuiltinUI  # noqa: PLC0415
 
+        self.tags = ["Gel Auth"]
         self.email_password = EmailPassword(self)
         self.builtin_ui = BuiltinUI(self)
 
@@ -111,7 +115,7 @@ class GelAuth(client_mod.Extension):
         return self._lifespan.client
 
     def _make_auth_token_dependency(
-        self, auto_error: bool, cache_name: str
+        self, *, auto_error: bool, cache_name: str
     ) -> params.Depends:
         auth_token_cookie = getattr(self, cache_name, None)
         if auth_token_cookie is None:
@@ -156,7 +160,7 @@ class GelAuth(client_mod.Extension):
             else:
                 dec = self._lifespan.with_global("ext::auth::client_token")
                 dep = dec(lambda: token_data.auth_token).dependency
-                call = cast(Callable[[fastapi.Request], Iterator[None]], dep)
+                call = cast("Callable[[fastapi.Request], Iterator[None]]", dep)
                 ctx = contextlib.contextmanager(call)
                 with ctx(request):
                     response = await self.on_new_identity.call(request, result)

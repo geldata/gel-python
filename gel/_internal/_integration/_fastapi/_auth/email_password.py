@@ -15,7 +15,7 @@ from fastapi import responses
 from gel.auth import email_password as core
 
 from . import GelAuth, Installable
-from .. import utils
+from .. import _utils as utils
 
 
 logger = logging.getLogger("gel.auth")
@@ -49,7 +49,7 @@ class EmailPassword(Installable):
     redirect_to_page_name: Optional[str] = None
     error_page_name: str = "error_page"
     sign_in_page_name: str = "sign_in_page"
-    reset_password_page_name: str = "reset_password_page"
+    reset_password_page_name: str = "reset_password_page"  # noqa: S105
 
     _auth: GelAuth
 
@@ -102,11 +102,11 @@ class EmailPassword(Installable):
     ] = utils.Hook("email_verification")
 
     # Send password reset
-    send_password_reset_email_path: str = "/send-password-reset"
+    send_password_reset_email_path: str = "/send-password-reset"  # noqa: S105
     send_password_reset_email_name: str = (
-        "gel.auth.email_password.send_password_reset"
+        "gel.auth.email_password.send_password_reset"  # noqa: S105
     )
-    send_password_reset_email_summary: str = "Send a password reset email"
+    send_password_reset_email_summary: str = "Send a password reset email"  # noqa: S105
     send_password_reset_email_default_response_class = (
         responses.RedirectResponse
     )
@@ -119,9 +119,9 @@ class EmailPassword(Installable):
     ] = utils.Hook("send_password_reset_email")
 
     # Reset password
-    reset_password_path: str = "/reset-password"
-    reset_password_name: str = "gel.auth.email_password.reset_password"
-    reset_password_summary: str = "Reset the password"
+    reset_password_path: str = "/reset-password"  # noqa: S105
+    reset_password_name: str = "gel.auth.email_password.reset_password"  # noqa: S105
+    reset_password_summary: str = "Reset the password"  # noqa: S105
     reset_password_default_response_class = responses.RedirectResponse
     reset_password_default_status_code = http.HTTPStatus.SEE_OTHER
     on_reset_password_complete: utils.Hook[

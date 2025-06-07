@@ -6,10 +6,8 @@ from __future__ import annotations
 from typing import (
     Any,
     Annotated,
-    Callable,
     cast,
     Concatenate,
-    Iterator,
     Optional,
     ParamSpec,
     TYPE_CHECKING,
@@ -20,14 +18,17 @@ from starlette import concurrency
 from typing_extensions import Self
 
 import asyncio
+import importlib.util
 import inspect
-import types
 
 import fastapi
 import gel
 from fastapi import params
 
 if TYPE_CHECKING:
+    import types
+    from collections.abc import Callable, Iterator
+
     from .auth import GelAuth
 
 
@@ -81,15 +82,19 @@ class GelLifespan:
         await self._client.ensure_connected()
         await concurrency.run_in_threadpool(self._bio_client.ensure_connected)
 
-        if self._auto_auth and self._auth is None:
-            try:
-                import httpx, jwt
-            except ImportError:
-                pass
-            else:
-                from .auth import GelAuth
+        if (
+            self._auto_auth
+            and self._auth is None
+            and all(
+                [
+                    importlib.util.find_spec("httpx"),
+                    importlib.util.find_spec("jwt"),
+                ]
+            )
+        ):
+            from ._auth import GelAuth  # noqa: PLC0415
 
-                self._auth = GelAuth(self)
+            self._auth = GelAuth(self)
 
         for ext in [self._auth]:
             if ext is not None:
@@ -181,14 +186,14 @@ class GelLifespan:
                     *inspect.signature(func).parameters.values(),
                 ]
             )
-            return cast(params.Depends, fastapi.Depends(wrapper))
+            return cast("params.Depends", fastapi.Depends(wrapper))
 
         return decorator
 
     @property
     def auth(self) -> GelAuth:
         if self._auth is None:
-            from .auth import GelAuth
+            from ._auth import GelAuth  # noqa: PLC0415
 
             self._auth = GelAuth(self)
 
@@ -226,12 +231,12 @@ def _make_gelify(
 
 def _get_client(request: fastapi.Request) -> gel.AsyncIOClient:
     state_name, _ = getattr(request.state, GEL_STATE_NAMES_STATE)
-    return cast(gel.AsyncIOClient, getattr(request.state, state_name))
+    return cast("gel.AsyncIOClient", getattr(request.state, state_name))
 
 
 def _get_bio_client(request: fastapi.Request) -> gel.Client:
     _, state_name = getattr(request.state, GEL_STATE_NAMES_STATE)
-    return cast(gel.Client, getattr(request.state, state_name))
+    return cast("gel.Client", getattr(request.state, state_name))
 
 
 gelify = _make_gelify(gel.create_async_client, gel.create_client, GelLifespan)

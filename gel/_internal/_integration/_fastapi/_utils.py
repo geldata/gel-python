@@ -5,14 +5,13 @@
 from __future__ import annotations
 from typing import (
     Any,
-    Callable,
     cast,
     Generic,
     Optional,
     overload,
     Protocol,
+    TYPE_CHECKING,
     TypeVar,
-    Union,
 )
 from typing_extensions import Self
 
@@ -24,15 +23,18 @@ import warnings
 
 import fastapi
 from fastapi import exceptions, responses, routing, types, utils
-from fastapi._compat import ModelField
 from fastapi.datastructures import Default, DefaultPlaceholder
 from fastapi.dependencies import models, utils as dep_utils
 from starlette import concurrency
 
+if TYPE_CHECKING:
+    from collections.abc import Callable
+    from fastapi._compat import ModelField
+
 
 T = TypeVar("T")
 T_contra = TypeVar("T_contra", contravariant=True)
-O = TypeVar("O")
+C = TypeVar("C")
 
 
 class Handler(Protocol[T_contra]):
@@ -53,11 +55,11 @@ class Hook(Generic[T]):
     def __get__(self, instance: None, owner: type[Any]) -> Self: ...
 
     @overload
-    def __get__(self, instance: O, owner: type[O]) -> HookInstance[T]: ...
+    def __get__(self, instance: C, owner: type[C]) -> HookInstance[T]: ...
 
     def __get__(
-        self, instance: Optional[O], owner: type[O]
-    ) -> Union[Self, HookInstance[T]]:
+        self, instance: Optional[C], owner: type[C]
+    ) -> Self | HookInstance[T]:
         if instance is not None:
             prop = f"_{self._hook_name}"
             rv: Optional[HookInstance[T]] = getattr(instance, prop, None)
@@ -148,7 +150,7 @@ class HookInstance(Generic[T]):
         self,
         f: Optional[Handler[T]] = None,
         *,
-        response_model: Any = Default(None),
+        response_model: Any = Default(None),  # noqa: B008
         status_code: Optional[int] = None,
         response_model_include: Optional[types.IncEx] = None,
         response_model_exclude: Optional[types.IncEx] = None,
@@ -156,21 +158,21 @@ class HookInstance(Generic[T]):
         response_model_exclude_unset: bool = False,
         response_model_exclude_defaults: bool = False,
         response_model_exclude_none: bool = False,
-        response_class: type[fastapi.Response] = Default(
+        response_class: type[fastapi.Response] = Default(  # noqa: B008
             responses.JSONResponse
         ),
-    ) -> Union[Handler[T], Callable[[Handler[T]], Handler[T]]]:
+    ) -> Handler[T] | Callable[[Handler[T]], Handler[T]]:
         if self._is_set:
             warnings.warn(
                 f"overwriting an existing hook handler: {self._func}",
-                RuntimeWarning,
+                stacklevel=2,
             )
 
         def wrapper(func: Handler[T]) -> Handler[T]:
             dependant = dep_utils.get_dependant(
                 path=self._path,
                 name=self._name,
-                call=functools.partial(func, cast(T, None)),
+                call=functools.partial(func, cast("T", None)),
             )
 
             if dependant.path_params:
@@ -186,9 +188,9 @@ class HookInstance(Generic[T]):
 
             is_coroutine = asyncio.iscoroutinefunction(func)
             if response_model:
-                assert utils.is_body_allowed_for_status_code(
-                    status_code
-                ), f"Status code {status_code} must not have a response body"
+                assert utils.is_body_allowed_for_status_code(status_code), (
+                    f"Status code {status_code} must not have a response body"
+                )
                 response_name = "Response_" + re.sub(r"\W", "_", self._name)
                 response_field = dep_utils.create_model_field(  # type: ignore [attr-defined]
                     name=response_name,
