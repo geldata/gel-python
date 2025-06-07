@@ -834,23 +834,71 @@ class SaveExecutor:
                         f"{quote_ident(op.link_name)} -= "
                         f"<{type_to_ql(op.info.type.type)}>array_unpack({arg})"
                     )
+
+                    continue
+
+                assert isinstance(op, MultiLinkAdd)
+
+                if op.added_props:
+                    assert op.props_info is not None
+
+                    link_args: list[tuple[Any, ...]] = []
+                    prop_order = None
+                    tuple_subt: list[str] | None = None
+
+                    for addo, addp in zip(
+                        op.added, op.added_props, strict=True
+                    ):
+                        if prop_order is None:
+                            prop_order = addp.keys()
+                            tuple_subt = [
+                                type_to_ql(op.props_info[k].type)
+                                for k in prop_order
+                            ]
+
+                        assert prop_order == addp.keys()
+
+                        link_args.append(
+                            (
+                                self._get_id(addo),
+                                *(addp[k] for k in prop_order),
+                            )
+                        )
+
+                    assert prop_order
+                    assert tuple_subt
+
+                    arg = add_arg(
+                        f"array<tuple<std::uuid, {','.join(tuple_subt)}>>",
+                        link_args,
+                    )
+
+                    lp_assign = ", ".join(
+                        f"@{p} := tup.{i + 1}"
+                        for i, p in enumerate(prop_order)
+                    )
+
+                    assert issubclass(op.info.type, DistinctList)
+
+                    shape_parts.append(
+                        f"{quote_ident(op.link_name)} += ("
+                        f"for tup in array_unpack({arg}) union ("
+                        f"select (<{type_to_ql(op.info.type.type)}>tup.0) {{ {lp_assign}"
+                        f"}}))"
+                    )
+
                 else:
-                    assert isinstance(op, MultiLinkAdd)
+                    arg = add_arg(
+                        "array<uuid>",
+                        [self._get_id(o) for o in op.added],
+                    )
 
-                    if op.added_props:
-                        1 / 0
-                    else:
-                        arg = add_arg(
-                            "array<uuid>",
-                            [self._get_id(o) for o in op.added],
-                        )
+                    assert issubclass(op.info.type, DistinctList)
 
-                        assert issubclass(op.info.type, DistinctList)
-
-                        shape_parts.append(
-                            f"{quote_ident(op.link_name)} += "
-                            f"<{type_to_ql(op.info.type.type)}>array_unpack({arg})"
-                        )
+                    shape_parts.append(
+                        f"{quote_ident(op.link_name)} += "
+                        f"<{type_to_ql(op.info.type.type)}>array_unpack({arg})"
+                    )
 
         q_type_name = quote_ident(type_name)
 
