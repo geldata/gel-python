@@ -28,6 +28,7 @@ import gel
 
 from gel import abstract
 from gel import _testbase as tb
+from gel import blocking_client
 from gel.protocol import protocol
 
 
@@ -795,7 +796,7 @@ class TestSyncQuery(tb.SyncQueryTestCase):
 
     def test_json_elements(self):
         self.client.ensure_connected()
-        result = self.client._iter_coroutine(
+        result = blocking_client.iter_coroutine(
             self.client.connection.raw_query(
                 abstract.QueryContext(
                     query=abstract.QueryWithArgs(

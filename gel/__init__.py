@@ -38,6 +38,7 @@ from .abstract import (
     ReadOnlyExecutor,
     AsyncIOReadOnlyExecutor,
 )
+from .base_client import ConnectionInfo
 
 from .asyncio_client import create_async_client, AsyncIOClient
 
@@ -57,6 +58,7 @@ __all__ = [
     "Cardinality",
     "Client",
     "ConfigMemory",
+    "ConnectionInfo",
     "DateDuration",
     "EdgeDBError",
     "EdgeDBMessage",
