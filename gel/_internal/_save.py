@@ -763,9 +763,16 @@ class SaveExecutor:
         with_clauses: list[str] = []
         args: list[object] = []
 
-        def add_arg(type_ql: str, value: Any, /) -> str:
+        def add_arg(
+            type_ql: str,
+            value: Any,
+            /,
+            *,
+            optional: bool = False,
+        ) -> str:
             arg = str(len(args))
-            with_clauses.append(f"__a_{arg} := <{type_ql}>${arg}")
+            opt = "optional " if optional else ""
+            with_clauses.append(f"__a_{arg} := <{opt}{type_ql}>${arg}")
             args.append(value)
             return f"__a_{arg}"
 
@@ -774,7 +781,11 @@ class SaveExecutor:
 
         if change.props:
             for pch in change.props.values():
-                arg = add_arg(type_to_ql(pch.info.type), pch.value)
+                arg = add_arg(
+                    type_to_ql(pch.info.type),
+                    pch.value,
+                    optional=pch.info.cardinality.is_optional(),
+                )
                 shape_parts.append(f"{quote_ident(pch.prop_name)} := {arg}")
 
         if change.single_links:
@@ -890,7 +901,7 @@ class SaveExecutor:
 
                 else:
                     arg = add_arg(
-                        "array<uuid>",
+                        "array<std::uuid>",
                         [self._get_id(o) for o in op.added],
                     )
 
