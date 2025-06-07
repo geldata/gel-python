@@ -16,11 +16,13 @@
 # limitations under the License.
 #
 
+from . import builtin_ui
 from . import email_password
 from .token_data import TokenData
 from .pkce import PKCE, generate_pkce, AsyncPKCE, generate_async_pkce
 
 __all__ = [
+    "builtin_ui",
     "email_password",
     "TokenData",
     "PKCE",

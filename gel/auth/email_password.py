@@ -30,14 +30,9 @@ from gel import blocking_client
 
 from . import token_data as td_mod
 from . import pkce as pkce_mod
+from .base import BaseServerFailedResponse, BaseClient
 
 logger = logging.getLogger("gel.auth")
-
-
-@dataclasses.dataclass
-class BaseServerFailedResponse:
-    status_code: int
-    message: str
 
 
 @dataclasses.dataclass
@@ -149,57 +144,10 @@ PasswordResetResponse = Union[
 C = TypeVar("C", bound=Union[httpx.Client, httpx.AsyncClient])
 
 
-class BaseEmailPassword(Generic[C]):
+class BaseEmailPassword(BaseClient[C]):
     def __init__(self, *, connection_info: gel.ConnectionInfo, **kwargs):
         self.provider = "builtin::local_emailpassword"
-        if "base_url" not in kwargs:
-            params = connection_info.params
-            scheme = "http" if params.tls_security == "insecure" else "https"
-            base_url = httpx.URL(
-                scheme=scheme,
-                host=connection_info.host,
-                port=connection_info.port,
-            )
-            kwargs["base_url"] = base_url.join(
-                f"branch/{params.branch}/ext/auth"
-            )
-        if "verify" not in kwargs:
-            kwargs["verify"] = connection_info.params.make_ssl_ctx()
-        self._client = self._init_http_client(**kwargs)
-
-    def _init_http_client(self, **kwargs) -> C:
-        raise NotImplementedError()
-
-    def _generate_pkce(self) -> pkce_mod.BasePKCE:
-        raise NotImplementedError()
-
-    def _pkce_from_verifier(self, verifier: str) -> pkce_mod.BasePKCE:
-        raise NotImplementedError()
-
-    async def _send_http_request(
-        self, request: httpx.Request
-    ) -> httpx.Response:
-        raise NotImplementedError()
-
-    async def _http_request(self, *args, **kwargs) -> httpx.Response:
-        request = self._client.build_request(*args, **kwargs)
-        try:
-            logger.debug(
-                "sending HTTP %s to %r: %r",
-                request.method,
-                request.url,
-                request.content,
-            )
-        except httpx.RequestNotRead:
-            logger.debug("sending HTTP %s to %r", request.method, request.url)
-        response = await self._send_http_request(request)
-        logger.debug(
-            "%r returned response: [%d] %s",
-            request.url,
-            response.status_code,
-            response.text,
-        )
-        return response
+        super().__init__(connection_info=connection_info, **kwargs)
 
     async def _sign_up(
         self, email: str, password: str, *, verify_url: str
