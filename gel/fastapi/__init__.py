@@ -24,3 +24,6 @@ except ImportError:
     warnings.warn("FastAPI is not installed.")
 else:
     from .client import gelify, Client
+
+
+__all__ = ["gelify", "Client"]
