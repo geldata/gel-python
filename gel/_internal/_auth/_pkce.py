@@ -29,7 +29,7 @@ import httpx
 
 from gel import blocking_client
 
-from . import token_data
+from . import _token_data as token_data
 
 
 logger = logging.getLogger("gel.auth")

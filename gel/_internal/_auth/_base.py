@@ -26,7 +26,7 @@ import httpx
 
 import gel
 
-from . import pkce as pkce_mod
+from . import _pkce as pkce_mod
 
 logger = logging.getLogger("gel.auth")
 

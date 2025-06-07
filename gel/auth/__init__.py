@@ -16,10 +16,24 @@
 # limitations under the License.
 #
 
-from . import builtin_ui
-from . import email_password
-from .token_data import TokenData
-from .pkce import PKCE, generate_pkce, AsyncPKCE, generate_async_pkce
+
+import importlib.util
+import warnings
+
+
+if importlib.util.find_spec("httpx") is None:
+    warnings.warn("The 'httpx' package is not installed.", stacklevel=1)
+else:
+    from gel._internal._auth._token_data import TokenData
+    from gel._internal._auth._pkce import (
+        PKCE,
+        generate_pkce,
+        AsyncPKCE,
+        generate_async_pkce,
+    )
+
+    from . import builtin_ui
+    from . import email_password
 
 __all__ = [
     "builtin_ui",
