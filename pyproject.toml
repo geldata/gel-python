@@ -39,6 +39,8 @@ test = [
     'pytest>=3.6.0',
     'ruff~=0.11.0',
     'uvloop>=0.15.1; platform_system != "Windows"',
+    'fastapi',
+    'pyjwt',
 ]
 sqltest = [
     'SQLAlchemy>=2.0.0',
@@ -53,6 +55,7 @@ doc = [
 ]
 ai = ['httpx>=0.27.0', 'httpx-sse~=0.4.0']
 auth = ['httpx>=0.27.0']
+fastapi = ['fastapi', 'python-multipart', 'pyjwt']
 
 [project.urls]
 homepage = "https://www.geldata.com"

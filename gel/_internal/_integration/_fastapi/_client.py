@@ -88,6 +88,7 @@ class GelLifespan:
             and all(
                 [
                     importlib.util.find_spec("httpx"),
+                    importlib.util.find_spec("python_multipart"),
                     importlib.util.find_spec("jwt"),
                 ]
             )
