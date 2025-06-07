@@ -225,10 +225,10 @@ class _OptionalLink(_abstract.OptionalLinkDescriptor[_MT_co, _BMT_co]):
         cls,
         value: Any,
         generic_args: tuple[type[Any], type[Any]],
-    ) -> _MT_co:
+    ) -> _MT_co | None:
         mt, bmt = generic_args
-        if isinstance(value, mt):
-            return value  # type: ignore [no-any-return]
+        if value is None or isinstance(value, mt):
+            return value
         elif isinstance(value, bmt):
             return mt(value)  # type: ignore [no-any-return]
         else:
