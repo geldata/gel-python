@@ -2165,7 +2165,9 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         name = type_name.name
 
         self_t = self.import_name("typing_extensions", "Self")
+        classvar_t = self.import_name("typing", "ClassVar")
         proxymodel_t = self.import_name(BASE_IMPL, "ProxyModel")
+        prop_desc_t = self.import_name(BASE_IMPL, "LinkPropsDescriptor")
 
         if target_aspect is None:
             target_aspect = self.current_aspect
@@ -2238,6 +2240,10 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                     lprop_line = f"{lprop.name}: {pytype} | None = None"
                     lprops.append(lprop_line)
 
+            self.write(
+                f"__linkprops__: {classvar_t}[{prop_desc_t}[__lprops__]]"
+                f" = {prop_desc_t}()"
+            )
             self.write()
             if is_forward_decl:
                 args = [f"obj: {target}", "/", "*", *lprops]
