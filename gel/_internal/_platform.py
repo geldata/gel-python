@@ -3,6 +3,7 @@
 # SPDX-FileCopyrightText: Copyright Gel Data Inc. and the contributors.
 
 
+import functools
 import os
 import pathlib
 import sys
@@ -25,6 +26,7 @@ elif sys.platform == "win32":
 
     _CSIDL_LOCAL_APPDATA = 28
 
+    @functools.cache
     def _app_data_dir() -> pathlib.Path:
         path_buf = ctypes.create_unicode_buffer(255)
         windll.shell32.SHGetFolderPathW(
@@ -33,10 +35,10 @@ elif sys.platform == "win32":
         return pathlib.Path(path_buf.value)
 
     def config_dir() -> pathlib.Path:
-        return _app_data_dir / "EdgeDB" / "config"
+        return _app_data_dir() / "EdgeDB" / "config"
 
     def cache_dir() -> pathlib.Path:
-        return _app_data_dir / "GelData" / "gel-python" / "cache"
+        return _app_data_dir() / "GelData" / "gel-python" / "cache"
 
     IS_WINDOWS = True
 
