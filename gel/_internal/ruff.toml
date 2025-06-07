@@ -50,5 +50,7 @@ extend-ignore = [
     "PLR6301", # no-self-use
     "PLW3201", # bad-dunder-method-name
     "S101",    # assert
+    "S404",    # suspicious-subprocess-import
+    "S603",    # subprocess-without-shell-equals-true
     "SIM117",  # multiple-with-statements
 ]
