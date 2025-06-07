@@ -17,28 +17,25 @@
 #
 
 from __future__ import annotations
-from typing import Awaitable, Callable, Optional, TYPE_CHECKING
+from typing import Callable, cast, Iterator, Optional, TYPE_CHECKING
 
+import contextlib
 import datetime
+import enum
 import uuid
 
 import fastapi
 import jwt
-from fastapi import security
+from fastapi import security, params
 
 import gel
 from gel import auth as core
 
-from .. import client as client_mod
+from .. import client as client_mod, utils
 
 if TYPE_CHECKING:
     from .email_password import EmailPassword
     from .builtin_ui import BuiltinUI
-
-OnNewIdentity = Callable[
-    [gel.AsyncIOClient, uuid.UUID, Optional[core.TokenData]],
-    Awaitable[Optional[fastapi.Response]],
-]
 
 
 class Installable:
@@ -46,19 +43,29 @@ class Installable:
         raise NotImplementedError
 
 
+class _NoopResponse(fastapi.Response):
+    pass
+
+
 class GelAuth(client_mod.Extension):
     auth_path_prefix: str = "/auth"
     auth_cookie_name: str = "gel_auth_token"
     verifier_cookie_name: str = "gel_verifier"
-    tags: list[str] = ["Gel Auth"]
+    tags: list[str | enum.Enum] = ["Gel Auth"]
     secure_cookie: bool = True
     email_password: EmailPassword
     builtin_ui: BuiltinUI
 
+    _on_new_identity_path: str = "/"
+    _on_new_identity_name: str = "gel.fastapi.auth.on_new_identity"
+    _on_new_identity_default_response_class = _NoopResponse
+    on_new_identity: utils.Hook[tuple[uuid.UUID, Optional[core.TokenData]]] = (
+        utils.Hook("_on_new_identity")
+    )
+
     _pkce_verifier: Optional[security.APIKeyCookie] = None
     _maybe_auth_token: Optional[security.APIKeyCookie] = None
     _auth_token: Optional[security.APIKeyCookie] = None
-    _on_new_identity: Optional[OnNewIdentity] = None
     _insts: dict[str, Installable]
 
     def _post_init(self) -> None:
@@ -117,53 +124,60 @@ class GelAuth(client_mod.Extension):
     def client(self) -> gel.AsyncIOClient:
         return self._lifespan.client
 
-    def client_with_auth_token(
-        self, auth_token: Optional[str]
-    ) -> gel.AsyncIOClient:
-        if auth_token:
-            return self.client.with_globals(
-                {"ext::auth::client_token": auth_token}
-            )
-        else:
-            return self.client
-
-    @property
-    def maybe_auth_token_cookie(self) -> security.APIKeyCookie:
-        if self._maybe_auth_token is None:
-            self._maybe_auth_token = security.APIKeyCookie(
+    def _make_auth_token_dependency(
+        self, auto_error: bool, cache_name: str
+    ) -> params.Depends:
+        auth_token_cookie = getattr(self, cache_name, None)
+        if auth_token_cookie is None:
+            auth_token_cookie = security.APIKeyCookie(
                 name=self.auth_cookie_name,
                 description="The cookie as the authentication token",
-                auto_error=False,
+                auto_error=auto_error,
             )
-        return self._maybe_auth_token
+            setattr(self, cache_name, auth_token_cookie)
+
+        def get_auth_token(
+            auth_token: Optional[str] = fastapi.Depends(auth_token_cookie),
+        ) -> Optional[str]:
+            return auth_token
+
+        return self._lifespan.with_global("ext::auth::client_token")(
+            get_auth_token
+        )
 
     @property
-    def auth_token_cookie(self) -> security.APIKeyCookie:
-        if self._auth_token is None:
-            self._auth_token = security.APIKeyCookie(
-                name=self.auth_cookie_name,
-                description="The cookie as the authentication token",
-                auto_error=True,
-            )
-        return self._auth_token
+    def maybe_auth_token(self) -> params.Depends:
+        return self._make_auth_token_dependency(
+            auto_error=False, cache_name="_maybe_auth_token"
+        )
 
-    def on_new_identity(self, func: OnNewIdentity) -> OnNewIdentity:
-        self._on_new_identity = func
-        return func
+    @property
+    def auth_token(self) -> params.Depends:
+        return self._make_auth_token_dependency(
+            auto_error=True, cache_name="_auth_token"
+        )
 
     async def handle_new_identity(
-        self, identity_id: uuid.UUID, token_data: Optional[core.TokenData]
+        self,
+        request: fastapi.Request,
+        identity_id: uuid.UUID,
+        token_data: Optional[core.TokenData],
     ) -> Optional[fastapi.Response]:
-        if self._on_new_identity is None:
-            return None
-        else:
-            return await self._on_new_identity(
-                self.client_with_auth_token(
-                    None if token_data is None else token_data.auth_token
-                ),
-                identity_id,
-                token_data,
-            )
+        if self.on_new_identity.is_set():
+            result = (identity_id, token_data)
+            if token_data is None:
+                response = await self.on_new_identity.call(request, result)
+            else:
+                dec = self._lifespan.with_global("ext::auth::client_token")
+                dep = dec(lambda: token_data.auth_token).dependency
+                call = cast(Callable[[fastapi.Request], Iterator[None]], dep)
+                ctx = contextlib.contextmanager(call)
+                with ctx(request):
+                    response = await self.on_new_identity.call(request, result)
+            if not isinstance(response, _NoopResponse):
+                return response
+
+        return None
 
     async def on_startup(self, app: fastapi.FastAPI) -> None:
         router = fastapi.APIRouter(
@@ -180,12 +194,13 @@ class GelAuth(client_mod.Extension):
             }
             """
         )
-        for provider in config.providers:
-            inst = self._insts.get(provider.name)
-            if inst is not None:
-                inst.install(router)
+        if config:
+            for provider in config.providers:
+                inst = self._insts.get(provider.name)
+                if inst is not None:
+                    inst.install(router)
 
-        if config.ui is not None:
-            self.builtin_ui.install(router)
+            if config.ui is not None:
+                self.builtin_ui.install(router)
 
         app.include_router(router)

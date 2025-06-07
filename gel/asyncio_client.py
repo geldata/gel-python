@@ -19,6 +19,7 @@
 
 from __future__ import annotations
 from typing import Any
+from typing_extensions import Self
 
 import asyncio
 import contextlib
@@ -488,11 +489,11 @@ class AsyncIOClient(base_client.BaseClient, abstract.AsyncIOExecutor):
     async def check_connection(self) -> base_client.ConnectionInfo:
         return await self._impl.ensure_connected()
 
-    async def ensure_connected(self):
+    async def ensure_connected(self) -> Self:
         await self.check_connection()
         return self
 
-    async def aclose(self):
+    async def aclose(self) -> None:
         """Attempt to gracefully close all connections in the pool.
 
         Wait until all pool connections are released, close them and

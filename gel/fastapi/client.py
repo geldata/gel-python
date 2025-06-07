@@ -21,27 +21,23 @@ from typing import (
     Any,
     Annotated,
     Callable,
+    cast,
+    Concatenate,
+    Iterator,
     Optional,
+    ParamSpec,
     TYPE_CHECKING,
     TypeVar,
 )
-
-try:
-    # Python < 3.10
-    from typing_extensions import ParamSpec, Concatenate
-except ImportError:
-    from typing import ParamSpec, Concatenate  # type: ignore
-try:
-    # Python < 3.11
-    from typing_extensions import Self
-except ImportError:
-    from typing import Self  # type: ignore
+from typing_extensions import Self
 
 import asyncio
-import functools
+import inspect
+import types
 
 import fastapi
 import gel
+from fastapi import params
 
 if TYPE_CHECKING:
     from .auth import GelAuth
@@ -78,7 +74,9 @@ class GelLifespan:
     _auth: Optional[GelAuth] = None
     _auto_auth: bool = True
 
-    def __init__(self, app: fastapi.FastAPI, client: gel.AsyncIOClient) -> None:
+    def __init__(
+        self, app: fastapi.FastAPI, client: gel.AsyncIOClient
+    ) -> None:
         self._app = app
         self._client = client
         self._shutdown_timeout = None
@@ -107,7 +105,12 @@ class GelLifespan:
             GEL_STATE_NAME_STATE: self._state_name,
         }
 
-    async def __aexit__(self, exc_type, exc_val, exc_tb):
+    async def __aexit__(
+        self,
+        exc_type: Optional[type[BaseException]],
+        exc_val: Optional[BaseException],
+        exc_tb: Optional[types.TracebackType],
+    ) -> None:
         for ext in [self._auth]:
             if ext is not None:
                 await ext.on_shutdown(self._app)
@@ -139,18 +142,32 @@ class GelLifespan:
 
     def with_global(
         self, name: str
-    ) -> Callable[[Callable[P, str]], Callable[P, gel.AsyncIOClient]]:
-        def decorator(
-            func: Callable[P, str],
-        ) -> Callable[P, gel.AsyncIOClient]:
-            @functools.wraps(func)
+    ) -> Callable[[Callable[P, Optional[str]]], params.Depends]:
+        def decorator(func: Callable[P, Optional[str]]) -> params.Depends:
             def wrapper(
-                *args: P.args, **kwargs: P.kwargs
-            ) -> gel.AsyncIOClient:
-                return self._client.with_globals({name: func(*args, **kwargs)})
+                request: fastapi.Request, *args: P.args, **kwargs: P.kwargs
+            ) -> Iterator[None]:
+                state_name = getattr(request.state, GEL_STATE_NAME_STATE)
+                old_client = getattr(request.state, state_name)
+                value = func(*args, **kwargs)
+                if value is None:
+                    yield
+                else:
+                    new_client = self._client.with_globals({name: value})
+                    setattr(request.state, state_name, new_client)
+                    try:
+                        yield
+                    finally:
+                        setattr(request.state, state_name, old_client)
 
-            wrapper.__annotations__["return"] = type(self._client)
-            return wrapper
+            sig = inspect.signature(wrapper)
+            wrapper.__signature__ = sig.replace(  # type: ignore[attr-defined]
+                parameters=[
+                    next(iter(sig.parameters.values())),
+                    *inspect.signature(func).parameters.values(),
+                ]
+            )
+            return cast(params.Depends, fastapi.Depends(wrapper))
 
         return decorator
 
@@ -166,6 +183,7 @@ class GelLifespan:
     def without_auth(self) -> Self:
         self._auth = None
         self._auto_auth = False
+        return self
 
 
 def _make_gelify(

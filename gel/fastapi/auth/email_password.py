@@ -17,7 +17,7 @@
 #
 
 from __future__ import annotations
-from typing import Annotated, Awaitable, Callable, Optional, Type
+from typing import Annotated, Optional
 
 import http
 import logging
@@ -29,6 +29,7 @@ from fastapi import responses
 from gel.auth import email_password as core
 
 from . import GelAuth, Installable
+from .. import utils
 
 
 logger = logging.getLogger("gel.auth")
@@ -57,55 +58,7 @@ class ResetPasswordBody(pydantic.BaseModel):
     password: str
 
 
-OnSignUpComplete = Callable[
-    [core.SignUpCompleteResponse], Awaitable[fastapi.Response]
-]
-OnSignUpVerificationRequired = Callable[
-    [core.SignUpVerificationRequiredResponse], Awaitable[fastapi.Response]
-]
-OnSignUpFailed = Callable[
-    [core.SignUpFailedResponse], Awaitable[fastapi.Response]
-]
-OnSignInComplete = Callable[
-    [core.SignInCompleteResponse], Awaitable[fastapi.Response]
-]
-OnSignInVerificationRequired = Callable[
-    [core.SignInVerificationRequiredResponse], Awaitable[fastapi.Response]
-]
-OnSignInFailed = Callable[
-    [core.SignInFailedResponse], Awaitable[fastapi.Response]
-]
-OnEmailVerificationComplete = Callable[
-    [core.EmailVerificationCompleteResponse], Awaitable[fastapi.Response]
-]
-OnEmailVerificationMissingProof = Callable[
-    [core.EmailVerificationMissingProofResponse], Awaitable[fastapi.Response]
-]
-OnEmailVerificationFailed = Callable[
-    [core.EmailVerificationFailedResponse], Awaitable[fastapi.Response]
-]
-OnSendPasswordResetEmailComplete = Callable[
-    [core.SendPasswordResetEmailCompleteResponse], Awaitable[fastapi.Response]
-]
-OnSendPasswordResetEmailFailed = Callable[
-    [core.SendPasswordResetEmailFailedResponse], Awaitable[fastapi.Response]
-]
-OnResetPasswordComplete = Callable[
-    [core.PasswordResetCompleteResponse], Awaitable[fastapi.Response]
-]
-OnResetPasswordMissingProof = Callable[
-    [core.PasswordResetMissingProofResponse], Awaitable[fastapi.Response]
-]
-OnResetPasswordFailed = Callable[
-    [core.PasswordResetFailedResponse], Awaitable[fastapi.Response]
-]
-
-
 class EmailPassword(Installable):
-    redirect_class: Type[responses.RedirectResponse] = (
-        responses.RedirectResponse
-    )
-    redirect_code: int = http.HTTPStatus.SEE_OTHER
     redirect_to: Optional[str] = "/"
     redirect_to_page_name: Optional[str] = None
     error_page_name: str = "error_page"
@@ -118,33 +71,49 @@ class EmailPassword(Installable):
     sign_up_path: str = "/register"
     sign_up_name: str = "gel.auth.email_password.sign_up"
     sign_up_summary: str = "Sign up with email and password"
-    _on_sign_up_complete: Optional[OnSignUpComplete] = None
-    _on_sign_up_verification_required: Optional[
-        OnSignUpVerificationRequired
-    ] = None
-    _on_sign_up_failed: Optional[OnSignUpFailed] = None
+    sign_up_default_response_class = responses.RedirectResponse
+    sign_up_default_status_code = http.HTTPStatus.SEE_OTHER
+    on_sign_up_complete: utils.Hook[core.SignUpCompleteResponse] = utils.Hook(
+        "sign_up"
+    )
+    on_sign_up_verification_required: utils.Hook[
+        core.SignUpVerificationRequiredResponse
+    ] = utils.Hook("sign_up")
+    on_sign_up_failed: utils.Hook[core.SignUpFailedResponse] = utils.Hook(
+        "sign_up"
+    )
 
     # Sign-in
     sign_in_path: str = "/authenticate"
     sign_in_name: str = "gel.auth.email_password.sign_in"
     sign_in_summary: str = "Sign in with email and password"
-    _on_sign_in_complete: Optional[OnSignInComplete] = None
-    _on_sign_in_verification_required: Optional[
-        OnSignInVerificationRequired
-    ] = None
-    _on_sign_in_failed: Optional[OnSignInFailed] = None
+    sign_in_default_response_class = responses.RedirectResponse
+    sign_in_default_status_code = http.HTTPStatus.SEE_OTHER
+    on_sign_in_complete: utils.Hook[core.SignInCompleteResponse] = utils.Hook(
+        "sign_in"
+    )
+    on_sign_in_verification_required: utils.Hook[
+        core.SignInVerificationRequiredResponse
+    ] = utils.Hook("sign_in")
+    on_sign_in_failed: utils.Hook[core.SignInFailedResponse] = utils.Hook(
+        "sign_in"
+    )
 
     # Email verification
     email_verification_path: str = "/verify"
     email_verification_name: str = "gel.auth.email_password.email_verification"
     email_verification_summary: str = "Verify the email address"
-    _on_email_verification_complete: Optional[OnEmailVerificationComplete] = (
-        None
-    )
-    _on_email_verification_missing_proof: Optional[
-        OnEmailVerificationMissingProof
-    ] = None
-    _on_email_verification_failed: Optional[OnEmailVerificationFailed] = None
+    email_verification_default_response_class = responses.RedirectResponse
+    email_verification_default_status_code = http.HTTPStatus.SEE_OTHER
+    on_email_verification_complete: utils.Hook[
+        core.EmailVerificationCompleteResponse
+    ] = utils.Hook("email_verification")
+    on_email_verification_missing_proof: utils.Hook[
+        core.EmailVerificationMissingProofResponse
+    ] = utils.Hook("email_verification")
+    on_email_verification_failed: utils.Hook[
+        core.EmailVerificationFailedResponse
+    ] = utils.Hook("email_verification")
 
     # Send password reset
     send_password_reset_email_path: str = "/send-password-reset"
@@ -152,22 +121,32 @@ class EmailPassword(Installable):
         "gel.auth.email_password.send_password_reset"
     )
     send_password_reset_email_summary: str = "Send a password reset email"
-    _on_send_password_reset_email_complete: Optional[
-        OnSendPasswordResetEmailComplete
-    ] = None
-    _on_send_password_reset_email_failed: Optional[
-        OnSendPasswordResetEmailFailed
-    ] = None
+    send_password_reset_email_default_response_class = (
+        responses.RedirectResponse
+    )
+    send_password_reset_email_default_status_code = http.HTTPStatus.SEE_OTHER
+    on_send_password_reset_email_complete: utils.Hook[
+        core.SendPasswordResetEmailCompleteResponse
+    ] = utils.Hook("send_password_reset_email")
+    on_send_password_reset_email_failed: utils.Hook[
+        core.SendPasswordResetEmailFailedResponse
+    ] = utils.Hook("send_password_reset_email")
 
     # Reset password
     reset_password_path: str = "/reset-password"
     reset_password_name: str = "gel.auth.email_password.reset_password"
     reset_password_summary: str = "Reset the password"
-    _on_reset_password_complete: Optional[OnResetPasswordComplete] = None
-    _on_reset_password_missing_proof: Optional[OnResetPasswordMissingProof] = (
-        None
+    reset_password_default_response_class = responses.RedirectResponse
+    reset_password_default_status_code = http.HTTPStatus.SEE_OTHER
+    on_reset_password_complete: utils.Hook[
+        core.PasswordResetCompleteResponse
+    ] = utils.Hook("reset_password")
+    on_reset_password_missing_proof: utils.Hook[
+        core.PasswordResetMissingProofResponse
+    ] = utils.Hook("reset_password")
+    on_reset_password_failed: utils.Hook[core.PasswordResetFailedResponse] = (
+        utils.Hook("reset_password")
     )
-    _on_reset_password_failed: Optional[OnResetPasswordFailed] = None
 
     def __init__(self, auth: GelAuth):
         self._auth = auth
@@ -181,17 +160,23 @@ class EmailPassword(Installable):
     def _redirect_success(
         self,
         request: fastapi.Request,
+        key: str,
+        *,
         method: str,
     ) -> fastapi.Response:
+        response_class: type[responses.RedirectResponse] = getattr(
+            self, f"{key}_default_response_class"
+        )
+        response_code = getattr(self, f"{key}_default_status_code")
         if self.redirect_to_page_name is not None:
-            return self.redirect_class(
+            return response_class(
                 url=request.url_for(self.redirect_to_page_name),
-                status_code=self.redirect_code,
+                status_code=response_code,
             )
         elif self.redirect_to is not None:
-            return self.redirect_class(
+            return response_class(
                 url=self.redirect_to,
-                status_code=self.redirect_code,
+                status_code=response_code,
             )
         else:
             return self._not_implemented(method)
@@ -199,30 +184,34 @@ class EmailPassword(Installable):
     def _redirect_error(
         self,
         request: fastapi.Request,
+        key: str,
         **query_params: str,
     ) -> fastapi.Response:
-        return self.redirect_class(
+        response_class: type[responses.RedirectResponse] = getattr(
+            self, f"{key}_default_response_class"
+        )
+        return response_class(
             url=request.url_for(self.error_page_name).include_query_params(
                 **query_params
             ),
-            status_code=self.redirect_code,
+            status_code=getattr(self, f"{key}_default_status_code"),
         )
 
     def _redirect_sign_in(
         self,
         request: fastapi.Request,
+        key: str,
         **query_params: str,
     ) -> fastapi.Response:
-        return self.redirect_class(
+        response_class: type[responses.RedirectResponse] = getattr(
+            self, f"{key}_default_response_class"
+        )
+        return response_class(
             url=request.url_for(self.sign_in_page_name).include_query_params(
                 **query_params
             ),
-            status_code=self.redirect_code,
+            status_code=getattr(self, f"{key}_default_status_code"),
         )
-
-    def on_sign_up_complete(self, func: OnSignUpComplete) -> OnSignUpComplete:
-        self._on_sign_up_complete = func
-        return func
 
     async def handle_sign_up_complete(
         self,
@@ -230,45 +219,40 @@ class EmailPassword(Installable):
         result: core.SignUpCompleteResponse,
     ) -> fastapi.Response:
         response = await self._auth.handle_new_identity(
-            result.identity_id, result.token_data
+            request, result.identity_id, result.token_data
         )
         if response is None:
-            if self._on_sign_up_complete is None:
-                response = self._redirect_success(
-                    request, "on_sign_up_complete"
-                )
+            if self.on_sign_up_complete.is_set():
+                response = await self.on_sign_up_complete.call(request, result)
             else:
-                response = await self._on_sign_up_complete(result)
+                response = self._redirect_success(
+                    request, "sign_up", method="on_sign_up_complete"
+                )
         self._auth.set_auth_cookie(result.token_data.auth_token, response)
         return response
-
-    def on_sign_up_verification_required(
-        self, func: OnSignUpVerificationRequired
-    ) -> OnSignUpVerificationRequired:
-        self._on_sign_up_verification_required = func
-        return func
 
     async def handle_sign_up_verification_required(
         self,
         request: fastapi.Request,
         result: core.SignUpVerificationRequiredResponse,
     ) -> fastapi.Response:
-        response = await self._auth.handle_new_identity(
-            result.identity_id, None
-        )
+        if result.identity_id:
+            response = await self._auth.handle_new_identity(
+                request, result.identity_id, None
+            )
+        else:
+            response = None
         if response is None:
-            if self._on_sign_up_verification_required is None:
-                response = self._redirect_sign_in(
-                    request, incomplete="verification_required"
+            if self.on_sign_up_verification_required.is_set():
+                response = await self.on_sign_up_verification_required.call(
+                    request, result
                 )
             else:
-                response = await self._on_sign_up_verification_required(result)
+                response = self._redirect_sign_in(
+                    request, "sign_up", incomplete="verification_required"
+                )
         self._auth.set_verifier_cookie(result.verifier, response)
         return response
-
-    def on_sign_up_failed(self, func: OnSignUpFailed) -> OnSignUpFailed:
-        self._on_sign_up_failed = func
-        return func
 
     async def handle_sign_up_failed(
         self,
@@ -280,10 +264,12 @@ class EmailPassword(Installable):
         )
         logger.debug("%r", result)
 
-        if self._on_sign_up_failed is None:
-            response = self._redirect_error(request, error=result.message)
+        if self.on_sign_up_failed.is_set():
+            response = await self.on_sign_up_failed.call(request, result)
         else:
-            response = await self._on_sign_up_failed(result)
+            response = self._redirect_error(
+                request, "sign_up", error=result.message
+            )
         self._auth.set_verifier_cookie(result.verifier, response)
         return response
 
@@ -303,56 +289,47 @@ class EmailPassword(Installable):
                 sign_up_body.password,
                 verify_url=str(request.url_for(self.email_verification_name)),
             )
-            if isinstance(result, core.SignUpCompleteResponse):
-                return await self.handle_sign_up_complete(request, result)
-            elif isinstance(result, core.SignUpVerificationRequiredResponse):
-                return await self.handle_sign_up_verification_required(
-                    request, result
-                )
-            elif isinstance(result, core.SignUpFailedResponse):
-                return await self.handle_sign_up_failed(request, result)
-            else:
-                raise AssertionError("Invalid sign up response")
-
-    def on_sign_in_complete(self, func: OnSignInComplete) -> OnSignInComplete:
-        self._on_sign_in_complete = func
-        return func
+            match result:
+                case core.SignUpCompleteResponse():
+                    return await self.handle_sign_up_complete(request, result)
+                case core.SignUpVerificationRequiredResponse():
+                    return await self.handle_sign_up_verification_required(
+                        request, result
+                    )
+                case core.SignUpFailedResponse():
+                    return await self.handle_sign_up_failed(request, result)
+                case _:
+                    raise AssertionError("Invalid sign up response")
 
     async def handle_sign_in_complete(
         self,
         request: fastapi.Request,
         result: core.SignInCompleteResponse,
     ) -> fastapi.Response:
-        if self._on_sign_in_complete is None:
-            response = self._redirect_success(request, "on_sign_in_complete")
+        if self.on_sign_in_complete.is_set():
+            response = await self.on_sign_in_complete.call(request, result)
         else:
-            response = await self._on_sign_in_complete(result)
+            response = self._redirect_success(
+                request, "sign_in", method="on_sign_in_complete"
+            )
         self._auth.set_auth_cookie(result.token_data.auth_token, response)
         return response
-
-    def on_sign_in_verification_required(
-        self, func: OnSignInVerificationRequired
-    ) -> OnSignInVerificationRequired:
-        self._on_sign_in_verification_required = func
-        return func
 
     async def handle_sign_in_verification_required(
         self,
         request: fastapi.Request,
         result: core.SignInVerificationRequiredResponse,
     ) -> fastapi.Response:
-        if self._on_sign_in_verification_required is None:
-            response = self._redirect_sign_in(
-                request, incomplete="verification_required"
+        if self.on_sign_in_verification_required.is_set():
+            response = await self.on_sign_in_verification_required.call(
+                request, result
             )
         else:
-            response = await self._on_sign_in_verification_required(result)
+            response = self._redirect_sign_in(
+                request, "sign_in", incomplete="verification_required"
+            )
         self._auth.set_verifier_cookie(result.verifier, response)
         return response
-
-    def on_sign_in_failed(self, func: OnSignInFailed) -> OnSignInFailed:
-        self._on_sign_in_failed = func
-        return func
 
     async def handle_sign_in_failed(
         self,
@@ -364,10 +341,12 @@ class EmailPassword(Installable):
         )
         logger.debug("%r", result)
 
-        if self._on_sign_in_failed is None:
-            response = self._redirect_error(request, error=result.message)
+        if self.on_sign_in_failed.is_set():
+            response = await self.on_sign_in_failed.call(request, result)
         else:
-            response = await self._on_sign_in_failed(result)
+            response = self._redirect_error(
+                request, "sign_in", error=result.message
+            )
         self._auth.set_verifier_cookie(result.verifier, response)
         return response
 
@@ -380,61 +359,52 @@ class EmailPassword(Installable):
         async def sign_in(
             sign_in_body: Annotated[SignInBody, fastapi.Form()],
             request: fastapi.Request,
-        ):
+        ) -> fastapi.Response:
             client = await core.make_async(self._auth.client)
             result = await client.sign_in(
                 sign_in_body.email, sign_in_body.password
             )
-            if isinstance(result, core.SignInCompleteResponse):
-                return await self.handle_sign_in_complete(request, result)
-            elif isinstance(result, core.SignInVerificationRequiredResponse):
-                return await self.handle_sign_in_verification_required(
-                    request, result
-                )
-            elif isinstance(result, core.SignInFailedResponse):
-                return await self.handle_sign_in_failed(request, result)
-            else:
-                raise AssertionError("Invalid sign in response")
-
-    def on_email_verification_complete(
-        self, func: OnEmailVerificationComplete
-    ) -> OnEmailVerificationComplete:
-        self._on_email_verification_complete = func
-        return func
+            match result:
+                case core.SignInCompleteResponse():
+                    return await self.handle_sign_in_complete(request, result)
+                case core.SignInVerificationRequiredResponse():
+                    return await self.handle_sign_in_verification_required(
+                        request, result
+                    )
+                case core.SignInFailedResponse():
+                    return await self.handle_sign_in_failed(request, result)
+                case _:
+                    raise AssertionError("Invalid sign in response")
 
     async def handle_email_verification_complete(
         self,
         request: fastapi.Request,
         result: core.EmailVerificationCompleteResponse,
     ) -> fastapi.Response:
-        if self._on_email_verification_complete is None:
-            return self._redirect_success(
-                request, "on_email_verification_complete"
+        if self.on_email_verification_complete.is_set():
+            return await self.on_email_verification_complete.call(
+                request, result
             )
         else:
-            return await self._on_email_verification_complete(result)
-
-    def on_email_verification_missing_proof(
-        self, func: OnEmailVerificationMissingProof
-    ) -> OnEmailVerificationMissingProof:
-        self._on_email_verification_missing_proof = func
-        return func
+            return self._redirect_success(
+                request,
+                "email_verification",
+                method="on_email_verification_complete",
+            )
 
     async def handle_email_verification_missing_proof(
         self,
         request: fastapi.Request,
         result: core.EmailVerificationMissingProofResponse,
     ) -> fastapi.Response:
-        if self._on_email_verification_missing_proof is None:
-            return self._redirect_sign_in(request, incomplete="verify")
+        if self.on_email_verification_missing_proof.is_set():
+            return await self.on_email_verification_missing_proof.call(
+                request, result
+            )
         else:
-            return await self._on_email_verification_missing_proof(result)
-
-    def on_email_verification_failed(
-        self, func: OnEmailVerificationFailed
-    ) -> OnEmailVerificationFailed:
-        self._on_email_verification_failed = func
-        return func
+            return self._redirect_sign_in(
+                request, "email_verification", incomplete="verify"
+            )
 
     async def handle_email_verification_failed(
         self,
@@ -448,10 +418,14 @@ class EmailPassword(Installable):
         )
         logger.debug("%r", result)
 
-        if self._on_email_verification_failed is None:
-            return self._redirect_error(request, error=result.message)
+        if self.on_email_verification_failed.is_set():
+            return await self.on_email_verification_failed.call(
+                request, result
+            )
         else:
-            return await self._on_email_verification_failed(result)
+            return self._redirect_error(
+                request, "email_verification", error=result.message
+            )
 
     def install_email_verification(self, router: fastapi.APIRouter) -> None:
         @router.get(
@@ -470,50 +444,39 @@ class EmailPassword(Installable):
             result = await client.verify_email(
                 verify_body.verification_token, verifier
             )
-            if isinstance(result, core.EmailVerificationCompleteResponse):
-                return await self.handle_email_verification_complete(
-                    request, result
-                )
-            elif isinstance(
-                result, core.EmailVerificationMissingProofResponse
-            ):
-                return await self.handle_email_verification_missing_proof(
-                    request, result
-                )
-            elif isinstance(result, core.EmailVerificationFailedResponse):
-                return await self.handle_email_verification_failed(
-                    request, result
-                )
-            else:
-                raise AssertionError("Invalid email verification response")
-
-    def on_send_password_reset_email_complete(
-        self, func: OnSendPasswordResetEmailComplete
-    ) -> OnSendPasswordResetEmailComplete:
-        self._on_send_password_reset_email_complete = func
-        return func
+            match result:
+                case core.EmailVerificationCompleteResponse():
+                    return await self.handle_email_verification_complete(
+                        request, result
+                    )
+                case core.EmailVerificationMissingProofResponse():
+                    return await self.handle_email_verification_missing_proof(
+                        request, result
+                    )
+                case core.EmailVerificationFailedResponse():
+                    return await self.handle_email_verification_failed(
+                        request, result
+                    )
+                case _:
+                    raise AssertionError("Invalid email verification response")
 
     async def handle_send_password_reset_email_complete(
         self,
         request: fastapi.Request,
         result: core.SendPasswordResetEmailCompleteResponse,
     ) -> fastapi.Response:
-        if self._on_send_password_reset_email_complete is None:
-            response = self._redirect_sign_in(
-                request, incomplete="password_reset_sent"
+        if self.on_send_password_reset_email_complete.is_set():
+            response = await self.on_send_password_reset_email_complete.call(
+                request, result
             )
         else:
-            response = await self._on_send_password_reset_email_complete(
-                result
+            response = self._redirect_sign_in(
+                request,
+                "send_password_reset_email",
+                incomplete="password_reset_sent",
             )
         self._auth.set_verifier_cookie(result.verifier, response)
         return response
-
-    def on_send_password_reset_email_failed(
-        self, func: OnSendPasswordResetEmailFailed
-    ) -> OnSendPasswordResetEmailFailed:
-        self._on_send_password_reset_email_failed = func
-        return func
 
     async def handle_send_password_reset_email_failed(
         self,
@@ -527,10 +490,14 @@ class EmailPassword(Installable):
         )
         logger.debug("%r", result)
 
-        if self._on_send_password_reset_email_failed is None:
-            response = self._redirect_error(request, error=result.message)
+        if self.on_send_password_reset_email_failed.is_set():
+            response = await self.on_send_password_reset_email_failed.call(
+                request, result
+            )
         else:
-            response = await self._on_send_password_reset_email_failed(result)
+            response = self._redirect_error(
+                request, "send_password_reset_email", error=result.message
+            )
         self._auth.set_verifier_cookie(result.verifier, response)
         return response
 
@@ -551,56 +518,47 @@ class EmailPassword(Installable):
                 send_password_reset_body.email,
                 reset_url=str(request.url_for(self.reset_password_page_name)),
             )
-            if isinstance(result, core.SendPasswordResetEmailCompleteResponse):
-                return await self.handle_send_password_reset_email_complete(
-                    request, result
-                )
-            elif isinstance(result, core.SendPasswordResetEmailFailedResponse):
-                return await self.handle_send_password_reset_email_failed(
-                    request, result
-                )
-            else:
-                raise AssertionError("Invalid send password reset response")
-
-    def on_reset_password_complete(
-        self, func: OnResetPasswordComplete
-    ) -> OnResetPasswordComplete:
-        self._on_reset_password_complete = func
-        return func
+            match result:
+                case core.SendPasswordResetEmailCompleteResponse():
+                    return (
+                        await self.handle_send_password_reset_email_complete(
+                            request, result
+                        )
+                    )
+                case core.SendPasswordResetEmailFailedResponse():
+                    return await self.handle_send_password_reset_email_failed(
+                        request, result
+                    )
+                case _:
+                    raise AssertionError(
+                        "Invalid send password reset response"
+                    )
 
     async def handle_reset_password_complete(
         self,
         request: fastapi.Request,
         result: core.PasswordResetCompleteResponse,
     ) -> fastapi.Response:
-        if self._on_reset_password_complete is None:
-            return self._redirect_success(
-                request, "on_reset_password_complete"
-            )
+        if self.on_reset_password_complete.is_set():
+            return await self.on_reset_password_complete.call(request, result)
         else:
-            return await self._on_reset_password_complete(result)
-
-    def on_reset_password_missing_proof(
-        self, func: OnResetPasswordMissingProof
-    ) -> OnResetPasswordMissingProof:
-        self._on_reset_password_missing_proof = func
-        return func
+            return self._redirect_success(
+                request, "reset_password", method="on_reset_password_complete"
+            )
 
     async def handle_reset_password_missing_proof(
         self,
         request: fastapi.Request,
         result: core.PasswordResetMissingProofResponse,
     ) -> fastapi.Response:
-        if self._on_reset_password_missing_proof is None:
-            return self._redirect_sign_in(request, incomplete="reset_password")
+        if self.on_reset_password_missing_proof.is_set():
+            return await self.on_reset_password_missing_proof.call(
+                request, result
+            )
         else:
-            return await self._on_reset_password_missing_proof(result)
-
-    def on_reset_password_failed(
-        self, func: OnResetPasswordFailed
-    ) -> OnResetPasswordFailed:
-        self._on_reset_password_failed = func
-        return func
+            return self._redirect_sign_in(
+                request, "reset_password", incomplete="reset_password"
+            )
 
     async def handle_reset_password_failed(
         self,
@@ -614,10 +572,12 @@ class EmailPassword(Installable):
         )
         logger.debug("%r", result)
 
-        if self._on_reset_password_failed is None:
-            return self._redirect_error(request, error=result.message)
+        if self.on_reset_password_failed.is_set():
+            return await self.on_reset_password_failed.call(request, result)
         else:
-            return await self._on_reset_password_failed(result)
+            return self._redirect_error(
+                request, "reset_password", error=result.message
+            )
 
     def install_reset_password(self, router: fastapi.APIRouter) -> None:
         @router.post(
@@ -631,25 +591,28 @@ class EmailPassword(Installable):
             verifier: Optional[str] = fastapi.Depends(
                 self._auth.pkce_verifier
             ),
-        ):
+        ) -> fastapi.Response:
             client = await core.make_async(self._auth.client)
             result = await client.reset_password(
                 reset_token=reset_password_body.reset_token,
                 verifier=verifier,
                 password=reset_password_body.password,
             )
-            if isinstance(result, core.PasswordResetCompleteResponse):
-                return await self.handle_reset_password_complete(
-                    request, result
-                )
-            elif isinstance(result, core.PasswordResetMissingProofResponse):
-                return await self.handle_reset_password_missing_proof(
-                    request, result
-                )
-            elif isinstance(result, core.PasswordResetFailedResponse):
-                return await self.handle_reset_password_failed(request, result)
-            else:
-                raise AssertionError("Invalid reset password response")
+            match result:
+                case core.PasswordResetCompleteResponse():
+                    return await self.handle_reset_password_complete(
+                        request, result
+                    )
+                case core.PasswordResetMissingProofResponse():
+                    return await self.handle_reset_password_missing_proof(
+                        request, result
+                    )
+                case core.PasswordResetFailedResponse():
+                    return await self.handle_reset_password_failed(
+                        request, result
+                    )
+                case _:
+                    raise AssertionError("Invalid reset password response")
 
     def install(self, router: fastapi.APIRouter) -> None:
         self.install_sign_up(router)
