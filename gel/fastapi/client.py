@@ -29,6 +29,8 @@ from typing import (
     TYPE_CHECKING,
     TypeVar,
 )
+
+from starlette import concurrency
 from typing_extensions import Self
 
 import asyncio
@@ -43,7 +45,7 @@ if TYPE_CHECKING:
     from .auth import GelAuth
 
 
-GEL_STATE_NAME_STATE = "_gel_state_name"
+GEL_STATE_NAMES_STATE = "_gel_state_names"
 P = ParamSpec("P")
 Lifespan_T = TypeVar("Lifespan_T", bound="GelLifespan")
 
@@ -67,24 +69,31 @@ class Extension:
 
 class GelLifespan:
     _state_name: str = "gel_client"
+    _bio_state_name: str = "gel_blocking_io_client"
     _shutdown_timeout: Optional[float]
     _app: fastapi.FastAPI
     _client: gel.AsyncIOClient
+    _bio_client: gel.Client
 
     _auth: Optional[GelAuth] = None
     _auto_auth: bool = True
 
     def __init__(
-        self, app: fastapi.FastAPI, client: gel.AsyncIOClient
+        self,
+        app: fastapi.FastAPI,
+        client: gel.AsyncIOClient,
+        bio_client: gel.Client,
     ) -> None:
         self._app = app
         self._client = client
+        self._bio_client = bio_client
         self._shutdown_timeout = None
 
         self._auth = None
 
     async def __aenter__(self) -> dict[str, Any]:
         await self._client.ensure_connected()
+        await concurrency.run_in_threadpool(self._bio_client.ensure_connected)
 
         if self._auto_auth and self._auth is None:
             try:
@@ -102,7 +111,8 @@ class GelLifespan:
 
         return {
             self._state_name: self._client,
-            GEL_STATE_NAME_STATE: self._state_name,
+            self._bio_state_name: self._bio_client,
+            GEL_STATE_NAMES_STATE: (self._state_name, self._bio_state_name),
         }
 
     async def __aexit__(
@@ -121,6 +131,9 @@ class GelLifespan:
             await asyncio.wait_for(
                 self._client.aclose(), timeout=self._shutdown_timeout
             )
+        await concurrency.run_in_threadpool(
+            self._bio_client.close, timeout=self._shutdown_timeout
+        )
 
     def __call__(self, app: fastapi.FastAPI) -> Self:
         return self
@@ -129,12 +142,19 @@ class GelLifespan:
     def client(self) -> gel.AsyncIOClient:
         return self._client
 
+    @property
+    def blocking_io_client(self) -> gel.Client:
+        return self._bio_client
+
     def shutdown_timeout(self, timeout: Optional[float]) -> Self:
         self._shutdown_timeout = timeout
         return self
 
-    def state_name(self, name: str) -> Self:
-        self._state_name = name
+    def state_name(self, name: str, *, is_async: bool = True) -> Self:
+        if is_async:
+            self._state_name = name
+        else:
+            self._bio_state_name = name
         return self
 
     def install(self) -> None:
@@ -147,18 +167,26 @@ class GelLifespan:
             def wrapper(
                 request: fastapi.Request, *args: P.args, **kwargs: P.kwargs
             ) -> Iterator[None]:
-                state_name = getattr(request.state, GEL_STATE_NAME_STATE)
-                old_client = getattr(request.state, state_name)
                 value = func(*args, **kwargs)
                 if value is None:
                     yield
                 else:
+                    state_name, bio_state_name = getattr(
+                        request.state, GEL_STATE_NAMES_STATE
+                    )
+                    old_client = getattr(request.state, state_name)
+                    old_bio_client = getattr(request.state, bio_state_name)
                     new_client = self._client.with_globals({name: value})
+                    new_bio_client = self._bio_client.with_globals(
+                        {name: value}
+                    )
                     setattr(request.state, state_name, new_client)
+                    setattr(request.state, bio_state_name, new_bio_client)
                     try:
                         yield
                     finally:
                         setattr(request.state, state_name, old_client)
+                        setattr(request.state, bio_state_name, old_bio_client)
 
             sig = inspect.signature(wrapper)
             wrapper.__signature__ = sig.replace(  # type: ignore[attr-defined]
@@ -188,7 +216,10 @@ class GelLifespan:
 
 def _make_gelify(
     client_creator: Callable[P, gel.AsyncIOClient],
-    lifespan_class: Callable[[fastapi.FastAPI, gel.AsyncIOClient], Lifespan_T],
+    bio_client_creator: Callable[P, gel.Client],
+    lifespan_class: Callable[
+        [fastapi.FastAPI, gel.AsyncIOClient, gel.Client], Lifespan_T
+    ],
 ) -> Callable[Concatenate[fastapi.FastAPI, P], Lifespan_T]:
     def gelify(
         app: fastapi.FastAPI,
@@ -196,17 +227,27 @@ def _make_gelify(
         *args: P.args,
         **kwargs: P.kwargs,
     ) -> Lifespan_T:
-        lifespan = lifespan_class(app, client_creator(*args, **kwargs))
+        lifespan = lifespan_class(
+            app,
+            client_creator(*args, **kwargs),
+            bio_client_creator(*args, **kwargs),
+        )
         lifespan.install()
         return lifespan
 
     return gelify
 
 
-def _get_client(request: fastapi.Request) -> Any:
-    state_name = getattr(request.state, GEL_STATE_NAME_STATE)
-    return getattr(request.state, state_name)
+def _get_client(request: fastapi.Request) -> gel.AsyncIOClient:
+    state_name, _ = getattr(request.state, GEL_STATE_NAMES_STATE)
+    return cast(gel.AsyncIOClient, getattr(request.state, state_name))
 
 
-gelify = _make_gelify(gel.create_async_client, GelLifespan)
+def _get_bio_client(request: fastapi.Request) -> gel.Client:
+    _, state_name = getattr(request.state, GEL_STATE_NAMES_STATE)
+    return cast(gel.Client, getattr(request.state, state_name))
+
+
+gelify = _make_gelify(gel.create_async_client, gel.create_client, GelLifespan)
 Client = Annotated[gel.AsyncIOClient, fastapi.Depends(_get_client)]
+BlockingIOClient = Annotated[gel.Client, fastapi.Depends(_get_bio_client)]
