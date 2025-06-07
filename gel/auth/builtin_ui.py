@@ -48,7 +48,7 @@ class BaseBuiltinUI(BaseClient[C]):
         logger.info("starting sign-in flow")
         pkce = self._generate_pkce()
         redirect_url = self._client.base_url.join(
-            f"/ui/signin?challenge={pkce.challenge}"
+            f"ui/signin?challenge={pkce.challenge}"
         )
 
         return BuiltinUIResponse(
@@ -60,7 +60,7 @@ class BaseBuiltinUI(BaseClient[C]):
         logger.info("starting sign-up flow")
         pkce = self._generate_pkce()
         redirect_url = self._client.base_url.join(
-            f"/ui/signup?challenge={pkce.challenge}"
+            f"ui/signup?challenge={pkce.challenge}"
         )
 
         return BuiltinUIResponse(
