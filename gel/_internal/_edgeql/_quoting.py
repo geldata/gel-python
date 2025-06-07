@@ -48,7 +48,7 @@ def dollar_quote_literal(text: str) -> str:
     qq = 0
 
     while quote in text:
-        if qq % 16 < 10:  # noqa: PLR2004
+        if qq % 16 < 10:
             qq += 10 - qq % 16
 
         quote = f"${qq:x}$"[::-1]

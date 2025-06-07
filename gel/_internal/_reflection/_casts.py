@@ -17,32 +17,35 @@ import dataclasses
 import uuid
 from collections import ChainMap, defaultdict
 
+from gel._internal import _dataclass_extras
+
 from . import _enums
 from . import _types
 from . import _query
+from ._struct import struct
 
 if TYPE_CHECKING:
     from gel import abstract
 
 
-@dataclasses.dataclass(frozen=True)
+@struct
 class Cast:
-    id: uuid.UUID
+    id: str
     from_type: _types.TypeRef
     to_type: _types.TypeRef
     allow_implicit: bool
     allow_assignment: bool
 
 
-CastMap = TypeAliasType("CastMap", MutableMapping[uuid.UUID, list[uuid.UUID]])
+CastMap = TypeAliasType("CastMap", MutableMapping[str, list[str]])
 
 
 def _trace_all_casts(
-    from_type: uuid.UUID,
+    from_type: str,
     cast_map: CastMap,
     *,
-    _seen: set[uuid.UUID] | None = None,
-) -> set[uuid.UUID]:
+    _seen: set[str] | None = None,
+) -> set[str]:
     if _seen is None:
         _seen = set()
     if from_type in _seen:
@@ -109,9 +112,12 @@ def fetch_casts(
     implicit_casts_to: CastMap = defaultdict(list)
     assignment_casts_from: CastMap = defaultdict(list)
     assignment_casts_to: CastMap = defaultdict(list)
-    types: set[uuid.UUID] = set()
+    types: set[str] = set()
 
-    for cast in casts:
+    for raw_cast in casts:
+        cast = _dataclass_extras.coerce_to_dataclass(
+            Cast, raw_cast, cast_map={str: (uuid.UUID,)}
+        )
         types.add(cast.from_type.id)
         types.add(cast.to_type.id)
         casts_from[cast.from_type.id].append(cast.to_type.id)
@@ -145,10 +151,10 @@ def fetch_casts(
         )
 
     return CastMatrix(
-        explicit_casts_from=casts_from,
-        explicit_casts_to=casts_to,
-        implicit_casts_from=all_implicit_casts_from,
-        implicit_casts_to=all_implicit_casts_to,
-        assignment_casts_from=all_assignment_casts_from,
-        assignment_casts_to=all_assignment_casts_to,
+        explicit_casts_from=dict(casts_from),
+        explicit_casts_to=dict(casts_to),
+        implicit_casts_from=dict(all_implicit_casts_from),
+        implicit_casts_to=dict(all_implicit_casts_to),
+        assignment_casts_from=dict(all_assignment_casts_from),
+        assignment_casts_to=dict(all_assignment_casts_to),
     )

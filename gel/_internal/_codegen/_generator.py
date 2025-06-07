@@ -38,6 +38,7 @@ class AbstractCodeGenerator:
     ):
         self._default_module = "default"
         self._async = False
+        self._no_cache = args.no_cache
 
         self._interactive = interactive
         self._stderr: TextIO
