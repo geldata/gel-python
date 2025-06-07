@@ -25,11 +25,10 @@ import logging
 import httpx
 
 import gel
-from gel import blocking_client
 
-from . import token_data as td_mod
+from . import base
 from . import pkce as pkce_mod
-from .base import BaseClient
+
 
 logger = logging.getLogger("gel.auth")
 
@@ -43,7 +42,7 @@ class BuiltinUIResponse:
 C = TypeVar("C", bound=Union[httpx.Client, httpx.AsyncClient])
 
 
-class BaseBuiltinUI(BaseClient[C]):
+class BaseBuiltinUI(base.BaseClient[C]):
     def start_sign_in(self) -> BuiltinUIResponse:
         logger.info("starting sign-in flow")
         pkce = self._generate_pkce()

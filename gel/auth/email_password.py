@@ -17,7 +17,7 @@
 #
 
 from __future__ import annotations
-from typing import Generic, Optional, Type, TypeVar, Union
+from typing import Optional, Type, TypeVar, Union
 
 import dataclasses
 import logging
@@ -197,8 +197,7 @@ class BaseEmailPassword(BaseClient[C]):
             )
         else:
             logger.info(
-                "no code in register response, "
-                "assuming verification required"
+                "no code in register response, assuming verification required"
             )
             logger.debug("PKCE verifier: %s", pkce.verifier)
             return SignUpVerificationRequiredResponse(

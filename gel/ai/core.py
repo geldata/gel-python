@@ -64,9 +64,7 @@ class BaseRAGClient:
         if params.password is not None:
             args["auth"] = (params.user, params.password)
         elif params.secret_key is not None:
-            args["headers"] = {
-                "Authorization": f"Bearer {params.secret_key}"
-            }
+            args["headers"] = {"Authorization": f"Bearer {params.secret_key}"}
         self._init_client(**args)
 
     def _init_client(self, **kwargs):
