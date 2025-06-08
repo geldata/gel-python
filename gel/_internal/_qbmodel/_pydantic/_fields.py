@@ -565,6 +565,24 @@ MultiLink = TypeAliasType(
     type_params=(_MT_co,),
 )
 
+RequiredMultiLink = TypeAliasType(
+    "RequiredMultiLink",
+    Annotated[
+        _MultiLink[_MT_co, _MT_co],
+        pydantic.Field(
+            default_factory=list,
+            # Force validate call to convert the empty list
+            # to a properly typed one.
+            validate_default=True,
+        ),
+        _abstract.PointerInfo(
+            cardinality=_edgeql.Cardinality.AtLeastOne,
+            kind=_edgeql.PointerKind.Link,
+        ),
+    ],
+    type_params=(_MT_co,),
+)
+
 ComputedMultiLink = TypeAliasType(
     "ComputedMultiLink",
     Annotated[
@@ -597,6 +615,25 @@ MultiLinkWithProps = TypeAliasType(
         _abstract.PointerInfo(
             has_props=True,
             cardinality=_edgeql.Cardinality.Many,
+            kind=_edgeql.PointerKind.Link,
+        ),
+    ],
+    type_params=(_PT_co, _MT_co),
+)
+
+RequiredMultiLinkWithProps = TypeAliasType(
+    "RequiredMultiLinkWithProps",
+    Annotated[
+        _MultiLinkWithProps[_PT_co, _MT_co],
+        pydantic.Field(
+            default_factory=list,
+            # Force validate call to convert the empty list
+            # to a properly typed one.
+            validate_default=True,
+        ),
+        _abstract.PointerInfo(
+            has_props=True,
+            cardinality=_edgeql.Cardinality.AtLeastOne,
             kind=_edgeql.PointerKind.Link,
         ),
     ],

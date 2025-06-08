@@ -920,12 +920,15 @@ class SaveExecutor:
 
                     assert issubclass(op.info.type, DistinctList)
 
+                    assign_op = ":=" if for_insert else "+="
+
                     shape_parts.append(
-                        f"{quote_ident(op.link_name)} += ("
+                        f"{quote_ident(op.link_name)} {assign_op} "
+                        f"assert_distinct(("
                         f"for tup in array_unpack({arg}) union ("
                         f"select (<{type_to_ql(op.info.type.type)}>tup.0) {{ "
                         f"{lp_assign}"
-                        f"}}))"
+                        f"}})))"
                     )
 
                 else:
@@ -936,9 +939,13 @@ class SaveExecutor:
 
                     assert issubclass(op.info.type, DistinctList)
 
+                    assign_op = ":=" if for_insert else "+="
+
                     shape_parts.append(
-                        f"{quote_ident(op.link_name)} += "
+                        f"{quote_ident(op.link_name)} {assign_op} "
+                        f"assert_distinct("
                         f"<{type_to_ql(op.info.type.type)}>array_unpack({arg})"
+                        f")"
                     )
 
         q_type_name = quote_ident(type_name)

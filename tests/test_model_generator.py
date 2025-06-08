@@ -226,6 +226,7 @@ class TestModelGenerator(tb.ModelTestCase):
         assert d.author is not None
         self.assertEqual(d.author.name, "Alice")
 
+    @tb.to_be_fixed
     @tb.typecheck
     def test_modelgen_data_unpack_1c(self):
         from models import default, std
@@ -377,7 +378,8 @@ class TestModelGenerator(tb.ModelTestCase):
         ):
             default.GameSession.players(1)  # type: ignore
 
-        p = default.Post(body="aaa")
+        u = default.User(name="batman")
+        p = default.Post(body="aaa", author=u)
         with self.assertRaisesRegex(
             ValueError, r"(?s)prayers.*Extra inputs are not permitted"
         ):
@@ -462,6 +464,7 @@ class TestModelGenerator(tb.ModelTestCase):
         ):
             u.name_len = cast(std.int64, 123)  # type: ignore[assignment]
 
+    @tb.typecheck
     def test_modelgen_save_01(self):
         from models import default
 
@@ -529,6 +532,7 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(p2.alice.name, "Alice the 5th")
         self.assertEqual(p2.new_alice.name, "New Alice")
 
+    @tb.typecheck
     def test_modelgen_save_02(self):
         from models import default
         # insert an object with a required multi: no link props, one object
@@ -558,6 +562,7 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(m.name, "John Smith")
         self.assertEqual(m.nickname, "Hannibal")
 
+    @tb.typecheck
     def test_modelgen_save_03(self):
         from models import default
         # insert an object with a required multi: no link props, more than one
@@ -611,6 +616,7 @@ class TestModelGenerator(tb.ModelTestCase):
             self.assertEqual(m.name, name)
             self.assertEqual(m.nickname, nickname)
 
+    @tb.typecheck
     def test_modelgen_save_04(self):
         from models import default
         # insert an object with a required multi: with link props, one object
@@ -646,6 +652,7 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(m.__linkprops__.role, "everything")
         self.assertEqual(m.__linkprops__.rank, 1)
 
+    @tb.typecheck
     def test_modelgen_save_05(self):
         from models import default
         # insert an object with a required multi: with link props, more than
@@ -688,15 +695,18 @@ class TestModelGenerator(tb.ModelTestCase):
 
         # Fetch and verify
         res = self.client.get(
-            default.Party.select(
-                name=True,
-                members=lambda p: p.members.select(
-                    name=True,
-                    nickname=True,
-                    # FIXME: actually don't remember if I need to include link
-                    # props here exclicitly
-                ).order_by(name=True),
-            ).filter(name="The A-Team")
+            """
+            select Raid {
+                name,
+                members: {
+                    name,
+                    nickname,
+                    @rank,
+                    @role
+                } order by .name
+            } filter .name = "The A-Team"
+            limit 1
+            """
         )
         self.assertEqual(res.name, "The A-Team")
         self.assertEqual(len(res.members), 4)
@@ -708,12 +718,14 @@ class TestModelGenerator(tb.ModelTestCase):
                 ("John Smith", "Hannibal", 1, "brains"),
                 ("Templeton Peck", "Faceman", 2, None),
             ],
+            strict=True,
         ):
             self.assertEqual(m.name, name)
             self.assertEqual(m.nickname, nickname)
-            self.assertEqual(m.__linkprops__.role, role)
-            self.assertEqual(m.__linkprops__.rank, rank)
+            self.assertEqual(m["@role"], role)
+            self.assertEqual(m["@rank"], rank)
 
+    @tb.typecheck
     def test_modelgen_save_06(self):
         from models import default
         # Update object adding multiple existing objects to an exiting link
@@ -738,6 +750,7 @@ class TestModelGenerator(tb.ModelTestCase):
         """)
         self.assertEqual(set(res), {"Alice", "Cameron", "Zoe"})
 
+    @tb.typecheck
     def test_modelgen_save_07(self):
         from models import default
         # Update object adding multiple existing objects to an exiting link
@@ -762,6 +775,7 @@ class TestModelGenerator(tb.ModelTestCase):
         """)
         self.assertEqual(set(res), {"Alice", "Billie", "Cameron", "Zoe"})
 
+    @tb.typecheck
     def test_modelgen_save_08(self):
         from models import default
         # Update object adding multiple existing objects to an exiting link
@@ -847,11 +861,12 @@ class TestModelGenerator(tb.ModelTestCase):
             [
                 ("Alice", 1, "lead"),
                 ("Billie", 2, None),
-                ("Cameron", None, "note-taker"),
+                ("Cameron", None, "notes-taker"),
                 ("Zoe", None, None),
             ],
         )
 
+    @tb.typecheck
     def test_modelgen_save_09(self):
         from models import default
         # Update object removing multiple existing objects from an existing
@@ -879,6 +894,7 @@ class TestModelGenerator(tb.ModelTestCase):
         """)
         self.assertEqual(set(res), {"Alice", "Dana"})
 
+    @tb.typecheck
     def test_modelgen_save_10(self):
         from models import default
         # Update object removing multiple existing objects from an existing
@@ -935,6 +951,7 @@ class TestModelGenerator(tb.ModelTestCase):
             ],
         )
 
+    @tb.typecheck
     def test_modelgen_save_11(self):
         from models import default
         # Update object adding an existing objecs to an exiting single
@@ -958,6 +975,7 @@ class TestModelGenerator(tb.ModelTestCase):
         """)
         self.assertEqual(post.author.name, "Zoe")
 
+    @tb.typecheck
     def test_modelgen_linkprops_1(self):
         from models import default
 

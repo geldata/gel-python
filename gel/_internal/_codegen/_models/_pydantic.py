@@ -2542,21 +2542,29 @@ class GeneratedSchemaModule(BaseGeneratedModule):
     ) -> str:
         if reflection.is_link(prop):
             match (
-                cardinality.is_multi(),
-                cardinality.is_optional(),
+                prop.card in {"AtLeastOne", "Many"},  # is multi
+                prop.card in {"AtMostOne", "Many", "Empty"},  # is optional
                 bool(prop.pointers),
                 prop.is_computed,
             ):
-                case True, _, True, False:
+                case True, True, True, False:
                     desc = self.import_name(BASE_IMPL, "MultiLinkWithProps")
+                    pytype = f"{desc}[{narrow_type}, {broad_type}]"
+                case True, False, True, False:
+                    desc = self.import_name(
+                        BASE_IMPL, "RequiredMultiLinkWithProps"
+                    )
                     pytype = f"{desc}[{narrow_type}, {broad_type}]"
                 case True, _, True, True:
                     desc = self.import_name(
                         BASE_IMPL, "ComputedMultiLinkWithProps"
                     )
                     pytype = f"{desc}[{narrow_type}, {broad_type}]"
-                case True, _, False, False:
+                case True, True, False, False:
                     desc = self.import_name(BASE_IMPL, "MultiLink")
+                    pytype = f"{desc}[{narrow_type}]"
+                case True, False, False, False:
+                    desc = self.import_name(BASE_IMPL, "RequiredMultiLink")
                     pytype = f"{desc}[{narrow_type}]"
                 case True, _, False, True:
                     desc = self.import_name(BASE_IMPL, "ComputedMultiLink")

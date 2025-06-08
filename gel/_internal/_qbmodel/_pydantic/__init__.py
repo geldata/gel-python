@@ -10,6 +10,8 @@ from ._fields import (
     ComputedProperty,
     IdProperty,
     MultiLink,
+    RequiredMultiLink,
+    RequiredMultiLinkWithProps,
     MultiLinkWithProps,
     OptionalComputedLink,
     OptionalComputedLinkWithProps,
@@ -62,5 +64,7 @@ __all__ = (
     "ProxyModel",
     "PyTypeScalar",
     "Range",
+    "RequiredMultiLink",
+    "RequiredMultiLinkWithProps",
     "Tuple",
 )
