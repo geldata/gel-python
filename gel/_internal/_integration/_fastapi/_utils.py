@@ -32,13 +32,20 @@ if TYPE_CHECKING:
     from fastapi._compat import ModelField
 
 
+class ConfigSubject(Protocol):
+    installed: bool
+
+
+S = TypeVar("S", bound=ConfigSubject)
 T = TypeVar("T")
 T_contra = TypeVar("T_contra", contravariant=True)
-C = TypeVar("C")
 
 
 class Handler(Protocol[T_contra]):
     def __call__(self, result: T_contra, *args: Any, **kwargs: Any) -> Any: ...
+
+
+H = TypeVar("H", bound=Handler[Any])
 
 
 class Hook(Generic[T]):
@@ -55,33 +62,40 @@ class Hook(Generic[T]):
     def __get__(self, instance: None, owner: type[Any]) -> Self: ...
 
     @overload
-    def __get__(self, instance: C, owner: type[C]) -> HookInstance[T]: ...
+    def __get__(self, instance: S, owner: type[S]) -> HookInstance[T, S]: ...
 
     def __get__(
-        self, instance: Optional[C], owner: type[C]
-    ) -> Self | HookInstance[T]:
-        if instance is not None:
-            prop = f"_{self._hook_name}"
-            rv: Optional[HookInstance[T]] = getattr(instance, prop, None)
-            if rv is None:
-                rv = HookInstance(
-                    path=getattr(instance, f"{self._key}_path"),
-                    name=getattr(instance, f"{self._key}_name") + prop,
-                    default_response_class=getattr(
-                        instance,
-                        f"{self._key}_default_response_class",
-                        responses.JSONResponse,
-                    ),
-                    default_status_code=getattr(
-                        instance, f"{self._key}_default_status_code", None
-                    ),
-                )
-                setattr(instance, prop, rv)
-            return rv
-        return self
+        self, instance: Optional[S], owner: type[S]
+    ) -> Self | HookInstance[T, S]:
+        if instance is None:
+            return self
+
+        prop = f"_{self._hook_name}"
+        rv: Optional[HookInstance[T, S]] = getattr(instance, prop, None)
+        if rv is None:
+            cls_key = f"{self._key}_default_response_class"
+            if hasattr(instance, cls_key):
+                default_response_class = getattr(instance, cls_key).value
+            else:
+                default_response_class = responses.JSONResponse
+            code_key = f"{self._key}_default_status_code"
+            if hasattr(instance, code_key):
+                default_status_code = getattr(instance, code_key).value
+            else:
+                default_status_code = None
+            rv = HookInstance(
+                instance,
+                path=getattr(instance, f"{self._key}_path"),
+                name=getattr(instance, f"{self._key}_name") + prop,
+                default_response_class=default_response_class,
+                default_status_code=default_status_code,
+            )
+            setattr(instance, prop, rv)
+        return rv
 
 
-class HookInstance(Generic[T]):
+class HookInstance(Generic[T, S]):
+    _subject: S
     _is_set: bool = False
     _path: str
     _name: str
@@ -104,12 +118,14 @@ class HookInstance(Generic[T]):
 
     def __init__(
         self,
+        subject: S,
         *,
         path: str,
         name: str,
         default_response_class: type[fastapi.Response],
         default_status_code: Optional[int],
     ) -> None:
+        self._subject = subject
         self._path = path
         self._name = name
         self._default_response_class = default_response_class
@@ -128,12 +144,12 @@ class HookInstance(Generic[T]):
         response_model_exclude_defaults: bool = ...,
         response_model_exclude_none: bool = ...,
         response_class: type[fastapi.Response] = ...,
-    ) -> Callable[[Handler[T]], Handler[T]]: ...
+    ) -> Callable[[H], H]: ...
 
     @overload
     def __call__(
         self,
-        f: Handler[T],
+        f: H,
         *,
         response_model: Any = ...,
         status_code: Optional[int] = ...,
@@ -144,11 +160,11 @@ class HookInstance(Generic[T]):
         response_model_exclude_defaults: bool = ...,
         response_model_exclude_none: bool = ...,
         response_class: type[fastapi.Response] = ...,
-    ) -> Handler[T]: ...
+    ) -> H: ...
 
     def __call__(
         self,
-        f: Optional[Handler[T]] = None,
+        f: Optional[H] = None,
         *,
         response_model: Any = Default(None),  # noqa: B008
         status_code: Optional[int] = None,
@@ -161,14 +177,16 @@ class HookInstance(Generic[T]):
         response_class: type[fastapi.Response] = Default(  # noqa: B008
             responses.JSONResponse
         ),
-    ) -> Handler[T] | Callable[[Handler[T]], Handler[T]]:
+    ) -> H | Callable[[H], H]:
+        if self._subject.installed:
+            raise ValueError("cannot set a hook handler after installation")
         if self._is_set:
             warnings.warn(
                 f"overwriting an existing hook handler: {self._func}",
                 stacklevel=2,
             )
 
-        def wrapper(func: Handler[T]) -> Handler[T]:
+        def wrapper(func: H) -> H:
             dependant = dep_utils.get_dependant(
                 path=self._path,
                 name=self._name,
@@ -298,3 +316,59 @@ class HookInstance(Generic[T]):
                 "dependencies-with-yield/#dependencies-with-yield-and-except"
             )
         return response
+
+
+class Config(Generic[T]):
+    _default: T
+    _config_name: str
+
+    def __init__(self, default: T) -> None:
+        self._default = default
+
+    def __set_name__(self, owner: type[Any], name: str) -> None:
+        self._config_name = name
+
+    @overload
+    def __get__(self, instance: None, owner: type[Any]) -> Self: ...
+
+    @overload
+    def __get__(self, instance: S, owner: type[S]) -> ConfigInstance[T, S]: ...
+
+    def __get__(
+        self, instance: Optional[S], owner: type[S]
+    ) -> Self | ConfigInstance[T, S]:
+        if instance is None:
+            return self
+        prop = f"_{self._config_name}"
+        rv: Optional[ConfigInstance[T, S]] = getattr(instance, prop, None)
+        if rv is None:
+            rv = ConfigInstance(self, instance)
+            setattr(instance, prop, rv)
+        return rv
+
+    @property
+    def default(self) -> T:
+        return self._default
+
+
+class ConfigInstance(Generic[T, S]):
+    _default: Callable[[], T]
+    _subject: S
+    _value: T
+
+    def __init__(self, config: Config[T], subject: S) -> None:
+        self._default = lambda: config.default
+        self._subject = subject
+
+    def __call__(self, value: T) -> S:
+        if self._subject.installed:
+            raise ValueError("cannot set config value after installation")
+        self._value = value
+        return self._subject
+
+    @property
+    def value(self) -> T:
+        try:
+            return self._value
+        except AttributeError:
+            return self._default()

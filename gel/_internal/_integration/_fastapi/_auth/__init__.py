@@ -28,8 +28,10 @@ if TYPE_CHECKING:
 
 
 class Installable:
+    installed: bool = False
+
     def install(self, router: fastapi.APIRouter) -> None:
-        raise NotImplementedError
+        self.installed = True
 
 
 class _NoopResponse(fastapi.Response):
@@ -37,17 +39,20 @@ class _NoopResponse(fastapi.Response):
 
 
 class GelAuth(client_mod.Extension):
-    auth_path_prefix: str = "/auth"
-    auth_cookie_name: str = "gel_auth_token"
-    verifier_cookie_name: str = "gel_verifier"
-    tags: list[str | enum.Enum]
-    secure_cookie: bool = True
+    auth_path_prefix = utils.Config("/auth")
+    auth_cookie_name = utils.Config("gel_auth_token")
+    verifier_cookie_name = utils.Config("gel_verifier")
+    tags: utils.Config[list[str | enum.Enum]] = utils.Config(["Gel Auth"])
+    secure_cookie = utils.Config(True)  # noqa: FBT003
+
     email_password: EmailPassword
     builtin_ui: BuiltinUI
 
-    _on_new_identity_path: str = "/"
-    _on_new_identity_name: str = "gel.fastapi.auth.on_new_identity"
-    _on_new_identity_default_response_class = _NoopResponse
+    _on_new_identity_path = utils.Config("/")
+    _on_new_identity_name = utils.Config("gel.fastapi.auth.on_new_identity")
+    _on_new_identity_default_response_class: utils.Config[
+        type[fastapi.Response]
+    ] = utils.Config(_NoopResponse)
     on_new_identity: utils.Hook[tuple[uuid.UUID, Optional[core.TokenData]]] = (
         utils.Hook("_on_new_identity")
     )
@@ -61,7 +66,6 @@ class GelAuth(client_mod.Extension):
         from .email_password import EmailPassword  # noqa: PLC0415
         from .builtin_ui import BuiltinUI  # noqa: PLC0415
 
-        self.tags = ["Gel Auth"]
         self.email_password = EmailPassword(self)
         self.builtin_ui = BuiltinUI(self)
 
@@ -80,10 +84,10 @@ class GelAuth(client_mod.Extension):
     def set_auth_cookie(self, token: str, response: fastapi.Response) -> None:
         exp = self.get_unchecked_exp(token)
         response.set_cookie(
-            key=self.auth_cookie_name,
+            key=self.auth_cookie_name.value,
             value=token,
             httponly=True,
-            secure=self.secure_cookie,
+            secure=self.secure_cookie.value,
             samesite="lax",
             expires=exp,
         )
@@ -92,10 +96,10 @@ class GelAuth(client_mod.Extension):
         self, verifier: str, response: fastapi.Response
     ) -> None:
         response.set_cookie(
-            key=self.verifier_cookie_name,
+            key=self.verifier_cookie_name.value,
             value=verifier,
             httponly=True,
-            secure=self.secure_cookie,
+            secure=self.secure_cookie.value,
             samesite="lax",
             expires=int(datetime.timedelta(days=7).total_seconds()),
         )
@@ -104,7 +108,7 @@ class GelAuth(client_mod.Extension):
     def pkce_verifier(self) -> security.APIKeyCookie:
         if self._pkce_verifier is None:
             self._pkce_verifier = security.APIKeyCookie(
-                name=self.verifier_cookie_name,
+                name=self.verifier_cookie_name.value,
                 description="The cookie as the PKCE verifier",
                 auto_error=False,
             )
@@ -120,7 +124,7 @@ class GelAuth(client_mod.Extension):
         auth_token_cookie = getattr(self, cache_name, None)
         if auth_token_cookie is None:
             auth_token_cookie = security.APIKeyCookie(
-                name=self.auth_cookie_name,
+                name=self.auth_cookie_name.value,
                 description="The cookie as the authentication token",
                 auto_error=auto_error,
             )
@@ -171,8 +175,8 @@ class GelAuth(client_mod.Extension):
 
     async def on_startup(self, app: fastapi.FastAPI) -> None:
         router = fastapi.APIRouter(
-            prefix=self.auth_path_prefix,
-            tags=self.tags,
+            prefix=self.auth_path_prefix.value,
+            tags=self.tags.value,
         )
         config = await self._lifespan.client.query_single(
             """
@@ -194,3 +198,4 @@ class GelAuth(client_mod.Extension):
                 self.builtin_ui.install(router)
 
         app.include_router(router)
+        await super().on_startup(app)

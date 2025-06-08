@@ -110,6 +110,7 @@ local_partial_types = true
 module = [
     "gel.integration.*",
     "gel.models.*",
+    "gel.fastapi.*",
     "gel._internal.*",
     "gel._internal._auth.*",
     "gel._internal._integration.*",

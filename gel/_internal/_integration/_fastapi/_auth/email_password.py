@@ -45,20 +45,20 @@ class ResetPasswordBody(pydantic.BaseModel):
 
 
 class EmailPassword(Installable):
-    redirect_to: Optional[str] = "/"
-    redirect_to_page_name: Optional[str] = None
-    error_page_name: str = "error_page"
-    sign_in_page_name: str = "sign_in_page"
-    reset_password_page_name: str = "reset_password_page"  # noqa: S105
+    redirect_to: utils.Config[Optional[str]] = utils.Config("/")
+    redirect_to_page_name: utils.Config[Optional[str]] = utils.Config(None)
+    error_page_name = utils.Config("error_page")
+    sign_in_page_name = utils.Config("sign_in_page")
+    reset_password_page_name = utils.Config("reset_password_page")
 
     _auth: GelAuth
 
     # Sign-up
-    sign_up_path: str = "/register"
-    sign_up_name: str = "gel.auth.email_password.sign_up"
-    sign_up_summary: str = "Sign up with email and password"
-    sign_up_default_response_class = responses.RedirectResponse
-    sign_up_default_status_code = http.HTTPStatus.SEE_OTHER
+    sign_up_path = utils.Config("/register")
+    sign_up_name = utils.Config("gel.auth.email_password.sign_up")
+    sign_up_summary = utils.Config("Sign up with email and password")
+    sign_up_default_response_class = utils.Config(responses.RedirectResponse)
+    sign_up_default_status_code = utils.Config(http.HTTPStatus.SEE_OTHER)
     on_sign_up_complete: utils.Hook[core.SignUpCompleteResponse] = utils.Hook(
         "sign_up"
     )
@@ -70,11 +70,11 @@ class EmailPassword(Installable):
     )
 
     # Sign-in
-    sign_in_path: str = "/authenticate"
-    sign_in_name: str = "gel.auth.email_password.sign_in"
-    sign_in_summary: str = "Sign in with email and password"
-    sign_in_default_response_class = responses.RedirectResponse
-    sign_in_default_status_code = http.HTTPStatus.SEE_OTHER
+    sign_in_path = utils.Config("/authenticate")
+    sign_in_name = utils.Config("gel.auth.email_password.sign_in")
+    sign_in_summary = utils.Config("Sign in with email and password")
+    sign_in_default_response_class = utils.Config(responses.RedirectResponse)
+    sign_in_default_status_code = utils.Config(http.HTTPStatus.SEE_OTHER)
     on_sign_in_complete: utils.Hook[core.SignInCompleteResponse] = utils.Hook(
         "sign_in"
     )
@@ -86,11 +86,17 @@ class EmailPassword(Installable):
     )
 
     # Email verification
-    email_verification_path: str = "/verify"
-    email_verification_name: str = "gel.auth.email_password.email_verification"
-    email_verification_summary: str = "Verify the email address"
-    email_verification_default_response_class = responses.RedirectResponse
-    email_verification_default_status_code = http.HTTPStatus.SEE_OTHER
+    email_verification_path = utils.Config("/verify")
+    email_verification_name = utils.Config(
+        "gel.auth.email_password.email_verification"
+    )
+    email_verification_summary = utils.Config("Verify the email address")
+    email_verification_default_response_class = utils.Config(
+        responses.RedirectResponse
+    )
+    email_verification_default_status_code = utils.Config(
+        http.HTTPStatus.SEE_OTHER
+    )
     on_email_verification_complete: utils.Hook[
         core.EmailVerificationCompleteResponse
     ] = utils.Hook("email_verification")
@@ -102,15 +108,19 @@ class EmailPassword(Installable):
     ] = utils.Hook("email_verification")
 
     # Send password reset
-    send_password_reset_email_path: str = "/send-password-reset"  # noqa: S105
-    send_password_reset_email_name: str = (
-        "gel.auth.email_password.send_password_reset"  # noqa: S105
+    send_password_reset_email_path = utils.Config("/send-password-reset")
+    send_password_reset_email_name = utils.Config(
+        "gel.auth.email_password.send_password_reset"
     )
-    send_password_reset_email_summary: str = "Send a password reset email"  # noqa: S105
-    send_password_reset_email_default_response_class = (
+    send_password_reset_email_summary = utils.Config(
+        "Send a password reset email"
+    )
+    send_password_reset_email_default_response_class = utils.Config(
         responses.RedirectResponse
     )
-    send_password_reset_email_default_status_code = http.HTTPStatus.SEE_OTHER
+    send_password_reset_email_default_status_code = utils.Config(
+        http.HTTPStatus.SEE_OTHER
+    )
     on_send_password_reset_email_complete: utils.Hook[
         core.SendPasswordResetEmailCompleteResponse
     ] = utils.Hook("send_password_reset_email")
@@ -119,11 +129,17 @@ class EmailPassword(Installable):
     ] = utils.Hook("send_password_reset_email")
 
     # Reset password
-    reset_password_path: str = "/reset-password"  # noqa: S105
-    reset_password_name: str = "gel.auth.email_password.reset_password"  # noqa: S105
-    reset_password_summary: str = "Reset the password"  # noqa: S105
-    reset_password_default_response_class = responses.RedirectResponse
-    reset_password_default_status_code = http.HTTPStatus.SEE_OTHER
+    reset_password_path = utils.Config("/reset-password")
+    reset_password_name = utils.Config(
+        "gel.auth.email_password.reset_password"
+    )
+    reset_password_summary = utils.Config("Reset the password")
+    reset_password_default_response_class = utils.Config(
+        responses.RedirectResponse
+    )
+    reset_password_default_status_code = utils.Config(
+        http.HTTPStatus.SEE_OTHER
+    )
     on_reset_password_complete: utils.Hook[
         core.PasswordResetCompleteResponse
     ] = utils.Hook("reset_password")
@@ -152,18 +168,17 @@ class EmailPassword(Installable):
     ) -> fastapi.Response:
         response_class: type[responses.RedirectResponse] = getattr(
             self, f"{key}_default_response_class"
-        )
-        response_code = getattr(self, f"{key}_default_status_code")
-        if self.redirect_to_page_name is not None:
+        ).value
+        response_code = getattr(self, f"{key}_default_status_code").value
+        redirect_to = self.redirect_to.value
+        redirect_to_page_name = self.redirect_to_page_name.value
+        if redirect_to_page_name is not None:
             return response_class(
-                url=request.url_for(self.redirect_to_page_name),
+                url=request.url_for(redirect_to_page_name),
                 status_code=response_code,
             )
-        elif self.redirect_to is not None:
-            return response_class(
-                url=self.redirect_to,
-                status_code=response_code,
-            )
+        elif redirect_to is not None:
+            return response_class(url=redirect_to, status_code=response_code)
         else:
             return self._not_implemented(method)
 
@@ -175,12 +190,12 @@ class EmailPassword(Installable):
     ) -> fastapi.Response:
         response_class: type[responses.RedirectResponse] = getattr(
             self, f"{key}_default_response_class"
-        )
+        ).value
         return response_class(
-            url=request.url_for(self.error_page_name).include_query_params(
-                **query_params
-            ),
-            status_code=getattr(self, f"{key}_default_status_code"),
+            url=request.url_for(
+                self.error_page_name.value
+            ).include_query_params(**query_params),
+            status_code=getattr(self, f"{key}_default_status_code").value,
         )
 
     def _redirect_sign_in(
@@ -191,12 +206,12 @@ class EmailPassword(Installable):
     ) -> fastapi.Response:
         response_class: type[responses.RedirectResponse] = getattr(
             self, f"{key}_default_response_class"
-        )
+        ).value
         return response_class(
-            url=request.url_for(self.sign_in_page_name).include_query_params(
-                **query_params
-            ),
-            status_code=getattr(self, f"{key}_default_status_code"),
+            url=request.url_for(
+                self.sign_in_page_name.value
+            ).include_query_params(**query_params),
+            status_code=getattr(self, f"{key}_default_status_code").value,
         )
 
     async def handle_sign_up_complete(
@@ -261,9 +276,9 @@ class EmailPassword(Installable):
 
     def install_sign_up(self, router: fastapi.APIRouter) -> None:
         @router.post(
-            self.sign_up_path,
-            name=self.sign_up_name,
-            summary=self.sign_up_summary,
+            self.sign_up_path.value,
+            name=self.sign_up_name.value,
+            summary=self.sign_up_summary.value,
         )
         async def sign_up(
             sign_up_body: Annotated[SignUpBody, fastapi.Form()],
@@ -273,7 +288,9 @@ class EmailPassword(Installable):
             result = await client.sign_up(
                 sign_up_body.email,
                 sign_up_body.password,
-                verify_url=str(request.url_for(self.email_verification_name)),
+                verify_url=str(
+                    request.url_for(self.email_verification_name.value)
+                ),
             )
             match result:
                 case core.SignUpCompleteResponse():
@@ -338,9 +355,9 @@ class EmailPassword(Installable):
 
     def install_sign_in(self, router: fastapi.APIRouter) -> None:
         @router.post(
-            self.sign_in_path,
-            name=self.sign_in_name,
-            summary=self.sign_in_summary,
+            self.sign_in_path.value,
+            name=self.sign_in_name.value,
+            summary=self.sign_in_summary.value,
         )
         async def sign_in(
             sign_in_body: Annotated[SignInBody, fastapi.Form()],
@@ -415,9 +432,9 @@ class EmailPassword(Installable):
 
     def install_email_verification(self, router: fastapi.APIRouter) -> None:
         @router.get(
-            self.email_verification_path,
-            name=self.email_verification_name,
-            summary=self.email_verification_summary,
+            self.email_verification_path.value,
+            name=self.email_verification_name.value,
+            summary=self.email_verification_summary.value,
         )
         async def verify(
             request: fastapi.Request,
@@ -489,9 +506,9 @@ class EmailPassword(Installable):
 
     def install_send_password_reset(self, router: fastapi.APIRouter) -> None:
         @router.post(
-            self.send_password_reset_email_path,
-            name=self.send_password_reset_email_name,
-            summary=self.send_password_reset_email_summary,
+            self.send_password_reset_email_path.value,
+            name=self.send_password_reset_email_name.value,
+            summary=self.send_password_reset_email_summary.value,
         )
         async def send_password_reset(
             send_password_reset_body: Annotated[
@@ -502,7 +519,9 @@ class EmailPassword(Installable):
             client = await core.make_async(self._auth.client)
             result = await client.send_password_reset_email(
                 send_password_reset_body.email,
-                reset_url=str(request.url_for(self.reset_password_page_name)),
+                reset_url=str(
+                    request.url_for(self.reset_password_page_name.value)
+                ),
             )
             match result:
                 case core.SendPasswordResetEmailCompleteResponse():
@@ -567,9 +586,9 @@ class EmailPassword(Installable):
 
     def install_reset_password(self, router: fastapi.APIRouter) -> None:
         @router.post(
-            self.reset_password_path,
-            name=self.reset_password_name,
-            summary=self.reset_password_summary,
+            self.reset_password_path.value,
+            name=self.reset_password_name.value,
+            summary=self.reset_password_summary.value,
         )
         async def reset_password(
             request: fastapi.Request,
@@ -606,3 +625,4 @@ class EmailPassword(Installable):
         self.install_email_verification(router)
         self.install_send_password_reset(router)
         self.install_reset_password(router)
+        super().install(router)

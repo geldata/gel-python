@@ -28,8 +28,7 @@ from fastapi import params
 if TYPE_CHECKING:
     import types
     from collections.abc import Callable, Iterator
-
-    from .auth import GelAuth
+    from ._auth import GelAuth
 
 
 GEL_STATE_NAMES_STATE = "_gel_state_names"
@@ -38,6 +37,7 @@ Lifespan_T = TypeVar("Lifespan_T", bound="GelLifespan")
 
 
 class Extension:
+    installed: bool = False
     _lifespan: GelLifespan
 
     def __init__(self, lifespan: GelLifespan) -> None:
@@ -48,7 +48,7 @@ class Extension:
         pass
 
     async def on_startup(self, app: fastapi.FastAPI) -> None:
-        pass
+        self.installed = True
 
     async def on_shutdown(self, app: fastapi.FastAPI) -> None:
         pass
