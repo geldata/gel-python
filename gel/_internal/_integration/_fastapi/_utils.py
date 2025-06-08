@@ -85,8 +85,8 @@ class Hook(Generic[T]):
                 default_status_code = None
             rv = HookInstance(
                 instance,
-                path=getattr(instance, f"{self._key}_path"),
-                name=getattr(instance, f"{self._key}_name") + prop,
+                path=getattr(instance, f"{self._key}_path").value,
+                name=getattr(instance, f"{self._key}_name").value + prop,
                 default_response_class=default_response_class,
                 default_status_code=default_status_code,
             )

@@ -25,6 +25,8 @@ import fastapi
 import gel
 from fastapi import params
 
+from . import _utils as utils
+
 if TYPE_CHECKING:
     import types
     from collections.abc import Callable, Iterator
@@ -55,9 +57,11 @@ class Extension:
 
 
 class GelLifespan:
-    _state_name: str = "gel_client"
-    _bio_state_name: str = "gel_blocking_io_client"
-    _shutdown_timeout: Optional[float]
+    installed: bool = False
+    state_name = utils.Config("gel_client")
+    blocking_io_state_name = utils.Config("gel_blocking_io_client")
+    shutdown_timeout: utils.Config[Optional[float]] = utils.Config(None)
+
     _app: fastapi.FastAPI
     _client: gel.AsyncIOClient
     _bio_client: gel.Client
@@ -74,7 +78,6 @@ class GelLifespan:
         self._app = app
         self._client = client
         self._bio_client = bio_client
-        self._shutdown_timeout = None
 
         self._auth = None
 
@@ -101,10 +104,14 @@ class GelLifespan:
             if ext is not None:
                 await ext.on_startup(self._app)
 
+        self.installed = True
         return {
-            self._state_name: self._client,
-            self._bio_state_name: self._bio_client,
-            GEL_STATE_NAMES_STATE: (self._state_name, self._bio_state_name),
+            self.state_name.value: self._client,
+            self.blocking_io_state_name.value: self._bio_client,
+            GEL_STATE_NAMES_STATE: (
+                self.state_name.value,
+                self.blocking_io_state_name.value,
+            ),
         }
 
     async def __aexit__(
@@ -116,15 +123,14 @@ class GelLifespan:
         for ext in [self._auth]:
             if ext is not None:
                 await ext.on_shutdown(self._app)
+        timeout = self.shutdown_timeout.value
         if hasattr(asyncio, "timeout"):
-            async with asyncio.timeout(self._shutdown_timeout):
+            async with asyncio.timeout(timeout):
                 await self._client.aclose()
         else:
-            await asyncio.wait_for(
-                self._client.aclose(), timeout=self._shutdown_timeout
-            )
+            await asyncio.wait_for(self._client.aclose(), timeout=timeout)
         await concurrency.run_in_threadpool(
-            self._bio_client.close, timeout=self._shutdown_timeout
+            self._bio_client.close, timeout=timeout
         )
 
     def __call__(self, app: fastapi.FastAPI) -> Self:
@@ -137,17 +143,6 @@ class GelLifespan:
     @property
     def blocking_io_client(self) -> gel.Client:
         return self._bio_client
-
-    def shutdown_timeout(self, timeout: Optional[float]) -> Self:
-        self._shutdown_timeout = timeout
-        return self
-
-    def state_name(self, name: str, *, is_async: bool = True) -> Self:
-        if is_async:
-            self._state_name = name
-        else:
-            self._bio_state_name = name
-        return self
 
     def install(self) -> None:
         self._app.include_router(fastapi.APIRouter(lifespan=self))
@@ -194,13 +189,25 @@ class GelLifespan:
     @property
     def auth(self) -> GelAuth:
         if self._auth is None:
+            if self.installed:
+                raise ValueError("Cannot enable auth after installation")
+
             from ._auth import GelAuth  # noqa: PLC0415
 
             self._auth = GelAuth(self)
 
         return self._auth
 
+    def with_auth(self, **kwargs: Any) -> Self:
+        auth = self.auth
+        for key, value in kwargs.items():
+            getattr(auth, key)(value)
+        return self
+
     def without_auth(self) -> Self:
+        if self.installed:
+            raise ValueError("Cannot disable auth after installation")
+
         self._auth = None
         self._auto_auth = False
         return self
