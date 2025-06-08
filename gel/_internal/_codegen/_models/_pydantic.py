@@ -2240,10 +2240,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                     lprop_line = f"{lprop.name}: {pytype} | None = None"
                     lprops.append(lprop_line)
 
-            self.write(
-                f"__linkprops__: {classvar_t}[{prop_desc_t}[__lprops__]]"
-                f" = {prop_desc_t}()"
-            )
+            self.write(f"__linkprops__: __lprops__")
             self.write()
             if is_forward_decl:
                 args = [f"obj: {target}", "/", "*", *lprops]
