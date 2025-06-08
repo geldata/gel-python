@@ -529,6 +529,7 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(p2.alice.name, "Alice the 5th")
         self.assertEqual(p2.new_alice.name, "New Alice")
 
+    @tb.typecheck
     def test_modelgen_linkprops_1(self):
         from models import default
 
@@ -554,6 +555,7 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(p.name, "Zoe")
         self.assertEqual(p.__linkprops__.is_tall_enough, True)
 
+    @tb.typecheck
     def test_modelgen_linkprops_2(self):
         from models import default
 
@@ -590,6 +592,7 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(p.name, "Elsa")
         self.assertEqual(p.__linkprops__.is_tall_enough, False)
 
+    @tb.typecheck
     def test_modelgen_linkprops_3(self):
         from models import default
 
