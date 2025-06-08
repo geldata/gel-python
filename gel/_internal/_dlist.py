@@ -77,6 +77,7 @@ class DistinctList(
 
             self._items = iterable
         else:
+            self._initial_items = []
             self._items = []
             for item in iterable:
                 self.append(item)

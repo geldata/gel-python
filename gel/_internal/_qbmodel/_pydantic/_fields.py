@@ -440,12 +440,8 @@ class _MultiLinkBase(_abstract.LinkDescriptor[_MT_co, _BMT_co]):
     ) -> pydantic_core.CoreSchema:
         if _typing_inspect.is_generic_alias(source_type):
             args = typing.get_args(source_type)
-            item_type = args[0]
-            return core_schema.no_info_after_validator_function(
+            return core_schema.no_info_plain_validator_function(
                 functools.partial(cls._validate, generic_args=args),
-                schema=core_schema.list_schema(
-                    items_schema=handler.generate_schema(item_type),
-                ),
                 serialization=core_schema.plain_serializer_function_ser_schema(
                     list,
                 ),

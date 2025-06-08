@@ -353,9 +353,19 @@ def make_plan(objs: Iterable[GelModel]) -> SavePlan:
                         value=val,
                         info=prop,
                     )
-                else:
-                    # Link
-                    assert prop.kind is PointerKind.Link
+                    continue
+
+                elif (
+                    prop.kind is PointerKind.Link
+                    and not prop.cardinality.is_multi()
+                ):
+                    # Single link.
+                    #
+                    # (Multi links are more complicated
+                    # as they can be changed without being picked up by
+                    # `__gel_get_changed_fields__()`, se we process them
+                    # separately).
+
                     assert val is None or isinstance(val, GelModel)
                     assert not prop.cardinality.is_multi()
 
@@ -393,8 +403,7 @@ def make_plan(objs: Iterable[GelModel]) -> SavePlan:
                         opt_single_link_changes[prop.name] = sch
                     else:
                         req_single_link_changes[prop.name] = sch
-
-                continue
+                    continue
 
             if (
                 prop.kind is not PointerKind.Link

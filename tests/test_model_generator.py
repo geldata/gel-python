@@ -529,18 +529,14 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(p2.alice.name, "Alice the 5th")
         self.assertEqual(p2.new_alice.name, "New Alice")
 
-    @tb.to_be_fixed
     def test_modelgen_linkprops_1(self):
         from models import default
 
         # Create a new GameSession and add a player
-        u = self.client.get(default.User.filter(name='Zoe'))
+        u = self.client.get(default.User.filter(name="Zoe"))
         gs = default.GameSession(
             num=1001,
-            players=[
-                default.GameSession.players.link(
-                    u, is_tall_enough=True)
-            ]
+            players=[default.GameSession.players.link(u, is_tall_enough=True)],
         )
         self.client.save(gs)
 
@@ -555,15 +551,14 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(len(res.players), 1)
         p = res.players[0]
 
-        self.assertEqual(p.name, 'Zoe')
+        self.assertEqual(p.name, "Zoe")
         self.assertEqual(p.__linkprops__.is_tall_enough, True)
 
-    @tb.to_be_fixed
     def test_modelgen_linkprops_2(self):
         from models import default
 
         # Create a new GameSession and add a player
-        u = self.client.get(default.User.filter(name='Elsa'))
+        u = self.client.get(default.User.filter(name="Elsa"))
         gs = default.GameSession(num=1002)
         gs.players.append(u)
         self.client.save(gs)
@@ -592,10 +587,9 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(len(res.players), 1)
         p = res.players[0]
 
-        self.assertEqual(p.name, 'Elsa')
+        self.assertEqual(p.name, "Elsa")
         self.assertEqual(p.__linkprops__.is_tall_enough, False)
 
-    @tb.to_be_fixed
     def test_modelgen_linkprops_3(self):
         from models import default
 
@@ -610,12 +604,12 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(len(res.players), 1)
         p0 = res.players[0]
 
-        self.assertEqual(p0.name, 'Dana')
+        self.assertEqual(p0.name, "Dana")
         self.assertEqual(p0.nickname, None)
         self.assertEqual(p0.__linkprops__.is_tall_enough, True)
 
-        p0.name = 'Dana?'
-        p0.nickname = 'HACKED'
+        p0.name = "Dana?"
+        p0.nickname = "HACKED"
         p0.__linkprops__.is_tall_enough = False
 
         self.client.save(res)
@@ -626,8 +620,8 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(len(upd.players), 1)
         p1 = upd.players[0]
 
-        self.assertEqual(p1.name, 'Dana?')
-        self.assertEqual(p1.nickname, 'HACKED')
+        self.assertEqual(p1.name, "Dana?")
+        self.assertEqual(p1.nickname, "HACKED")
         self.assertEqual(p1.__linkprops__.is_tall_enough, False)
 
     def test_modelgen_reflection_1(self):
@@ -733,5 +727,5 @@ class TestModelGenerator(tb.ModelTestCase):
         ntup_t = default.sub.TypeInSub.__gel_pointers__()["ntup"].type
         self.assertEqual(
             ntup_t.__gel_reflection__.name.as_schema_name(),
-            "tuple<a:std::str, b:tuple<c:std::int64, d:std::str>>"
+            "tuple<a:std::str, b:tuple<c:std::int64, d:std::str>>",
         )
