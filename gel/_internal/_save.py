@@ -643,17 +643,6 @@ def make_plan(objs: Iterable[GelModel]) -> SavePlan:
     return SavePlan(insert_batches, update_ops)
 
 
-class ParamBuilder:
-    _param_cnt: int
-
-    def __init__(self) -> None:
-        self._param_cnt = 0
-
-    def __call__(self) -> str:
-        self._param_cnt += 1
-        return f"__p_{self._param_cnt}"
-
-
 def make_save_executor_constructor(
     objs: tuple[GelModel, ...],
 ) -> Callable[[], SaveExecutor]:
@@ -668,12 +657,10 @@ class SaveExecutor:
     updates: ChangeBatch
 
     object_ids: dict[int, uuid.UUID] = dataclasses.field(init=False)
-    param_builder: ParamBuilder = dataclasses.field(init=False)
     iter_index: int = dataclasses.field(init=False)
 
     def __post_init__(self) -> None:
         self.object_ids = {}
-        self.param_builder = ParamBuilder()
         self.iter_index = 0
 
     def __iter__(self) -> Iterator[list[QueryWithArgs]]:
