@@ -824,7 +824,7 @@ class SaveExecutor:
                     )
                     shape_parts.append(
                         f"{quote_ident(sch.link_name)} := "
-                        f"<{linked_name}><uuid>{arg}"
+                        f"<{linked_name}><std::uuid>{arg}"
                     )
 
         if change.multi_links:
@@ -833,7 +833,8 @@ class SaveExecutor:
                     assert not for_insert
 
                     arg = add_arg(
-                        "array<uuid>", [self._get_id(o) for o in op.removed]
+                        "array<std::uuid>",
+                        [self._get_id(o) for o in op.removed],
                     )
 
                     assert issubclass(op.info.type, DistinctList)
@@ -859,8 +860,27 @@ class SaveExecutor:
                     ):
                         if prop_order is None:
                             prop_order = addp.keys()
+                            # As a workaround for the current limitation
+                            # of EdgeQL (tuple arguments can't have empty
+                            # sets as elements, and free objects input
+                            # hasn't yet landed), we represent empty set
+                            # as an empty array, and non-empty values as
+                            # an array of one element. More specifically,
+                            # if a link property has type `<optional T>`, then
+                            # its value will be represented here as
+                            # `<array<tuple<T>>`. When the value is empty
+                            # set, the argument will be an empty array,
+                            # when it's non-empty, it will be a one-element
+                            # array with a one-element tuple. Then to unpack:
+                            #
+                            #    @prop := (array_unpack(val).0 limit 1)
+                            #
+                            # The nested tuple indirection is needed to support
+                            # link props that have types of arrays.
                             tuple_subt = [
-                                f"array<{type_to_ql(op.props_info[k].type)}>"
+                                f"array<tuple<{
+                                    type_to_ql(op.props_info[k].type)
+                                }>>"
                                 for k in prop_order
                             ]
 
@@ -870,7 +890,7 @@ class SaveExecutor:
                             (
                                 self._get_id(addo),
                                 *(
-                                    [] if addp[k] is None else [addp[k]]
+                                    [] if addp[k] is None else [(addp[k],)]
                                     for k in prop_order
                                 ),
                             )
@@ -885,7 +905,7 @@ class SaveExecutor:
                     )
 
                     lp_assign = ", ".join(
-                        f"@{p} := (select array_unpack(tup.{i + 1}) limit 1)"
+                        f"@{p} := (select array_unpack(tup.{i + 1}).0 limit 1)"
                         for i, p in enumerate(prop_order)
                     )
 
