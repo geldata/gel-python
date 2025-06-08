@@ -359,16 +359,19 @@ def make_plan(objs: Iterable[GelModel]) -> SavePlan:
                     assert val is None or isinstance(val, GelModel)
                     assert not prop.cardinality.is_multi()
 
-                    if prop.has_props and isinstance(val, ProxyModel):
-                        # Link with link properties
-
-                        link_changed_fields = (
+                    link_prop_variant = False
+                    if prop.has_props:
+                        assert isinstance(val, ProxyModel)
+                        link_prop_variant = bool(
                             val.__linkprops__.__gel_get_changed_fields__()
                         )
 
+                    if link_prop_variant:
+                        # Link with link properties
+
                         props = {
-                            n: getattr(val.__linkprops__, n)
-                            for n in link_changed_fields
+                            n: getattr(val.__linkprops__, n, None)
+                            for n in val.__lprops__.__gel_pointers__()
                         }
 
                         sch = SingleLinkChange(
@@ -427,13 +430,43 @@ def make_plan(objs: Iterable[GelModel]) -> SavePlan:
 
                 multi_link_rems[prop.name] = m_rem
 
+            # __gel_get_added__() will return *new* links, but we also
+            # have to take care about link property updates on *existing*
+            # links too. So we first get the list of the new ones, and then
+            # we iterate through *all* linked objects checking if their link
+            # props got any updates.
+            #
+            # - Why we mixed everything into the `added` list? Because it
+            #   doesn't matter -- the syntax for inserting a new multi link
+            #   or updating link props on the existing one is still the same:
+            #   `+=`
+            #
+            # - Why aern't we capturing which link props have changes
+            #   specifically? Becuse with EdgeQL we don't have a mechanism
+            #   (yet) to update a specific link prop -- we'll have to submit
+            #   all of them.
             added = linked.__gel_get_added__()
-            # No adds for this link? Continue to the next one.
+            if prop.has_props:
+                added_index = IDTracker[ProxyModel[GelModel], None]()
+                added_index.track_many(
+                    cast("list[ProxyModel[GelModel]]", added)
+                )
+                for el in linked:
+                    assert isinstance(el, ProxyModel)
+                    if el in added_index:
+                        continue
+                    if el.__linkprops__.__gel_get_changed_fields__():
+                        added.append(el)
+
+            # No adds or changes for this link? Continue to the next one.
             if not added:
                 continue
 
             # Simple case -- no link props!
-            if not prop.has_props:
+            if not prop.has_props or all(
+                not link.__linkprops__.__gel_get_changed_fields__()
+                for link in cast("list[ProxyModel[GelModel]]", added)
+            ):
                 mch = MultiLinkAdd(
                     link_name=prop.name,
                     info=prop,
@@ -447,60 +480,35 @@ def make_plan(objs: Iterable[GelModel]) -> SavePlan:
 
                 continue
 
-            # OK, we have to deal with link props.
+            # OK, we have to deal with link props
             #
             # First, we iterate through the list of added new objects
             # to the list. All of them should be ProxyModels
             # (as we use UpcastingDistinctList for links with props.)
             # Our goal is to segregate different combinations of
             # set link properties into separate groups.
-            props_map: dict[
-                frozenset[str],
-                list[tuple[GelModel, LinkPropertiesValues]],
-            ] = collections.defaultdict(list)
-            for link in added:
-                assert isinstance(link, ProxyModel)
-
-                link_changed_fields = (
-                    link.__linkprops__.__gel_get_changed_fields__()
-                )
-                if link_changed_fields is None:
-                    # For this specific link no link property was
-                    # ever set or changed
-                    props_map[frozenset()].append((link, {}))
-                else:
-                    link_changed_fields = frozenset(link_changed_fields)
-                    lps = {
-                        n: getattr(link.__linkprops__, n)
-                        for n in link_changed_fields
-                    }
-                    props_map[link_changed_fields].append((link, lps))
-
             link_tp = prop.type
             assert issubclass(link_tp.type, ProxyModel)
             props_info = link_tp.type.__lprops__.__gel_pointers__()
 
-            # Generate a MultiLinkAdd op for every distinct
-            # link props pattern.
-            for link_fields, link_upd in props_map.items():
-                link_added = [unwrap_proxy(upd[0]) for upd in link_upd]
-                if len(link_fields):
-                    link_added_props = [upd[1] for upd in link_upd]
-                else:
-                    link_added_props = None
+            mch = MultiLinkAdd(
+                link_name=prop.name,
+                info=prop,
+                added=unwrap_dlist(added),
+                added_props=[
+                    {
+                        k: getattr(link.__linkprops__, k, None)
+                        for k in props_info
+                    }
+                    for link in cast("list[ProxyModel[GelModel]]", added)
+                ],
+                props_info=props_info,
+            )
 
-                mch = MultiLinkAdd(
-                    link_name=prop.name,
-                    info=prop,
-                    added=link_added,
-                    added_props=link_added_props,
-                    props_info=props_info if link_added_props else None,
-                )
-
-                if prop.cardinality.is_optional():
-                    opt_multi_link_adds[prop.name].append(mch)
-                else:
-                    req_multi_link_adds[prop.name].append(mch)
+            if prop.cardinality.is_optional():
+                opt_multi_link_adds[prop.name].append(mch)
+            else:
+                req_multi_link_adds[prop.name].append(mch)
 
         # After all this work we found no changes -- move on to the next obj.
         if not (
@@ -865,7 +873,7 @@ class SaveExecutor:
                         if prop_order is None:
                             prop_order = addp.keys()
                             tuple_subt = [
-                                type_to_ql(op.props_info[k].type)
+                                f"array<{type_to_ql(op.props_info[k].type)}>"
                                 for k in prop_order
                             ]
 
@@ -874,7 +882,10 @@ class SaveExecutor:
                         link_args.append(
                             (
                                 self._get_id(addo),
-                                *(addp[k] for k in prop_order),
+                                *(
+                                    [] if addp[k] is None else [addp[k]]
+                                    for k in prop_order
+                                ),
                             )
                         )
 
@@ -887,7 +898,7 @@ class SaveExecutor:
                     )
 
                     lp_assign = ", ".join(
-                        f"@{p} := tup.{i + 1}"
+                        f"@{p} := (select array_unpack(tup.{i + 1}) limit 1)"
                         for i, p in enumerate(prop_order)
                     )
 

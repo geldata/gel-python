@@ -85,9 +85,9 @@ class DistinctList(
         if self._initial_items is None:
             self._initial_items = list(self._items)
 
-    def __gel_get_added__(self) -> Iterable[T]:
+    def __gel_get_added__(self) -> list[T]:
         if self._initial_items is None:
-            return ()
+            return []
         return [
             item for item in self._items if item not in self._initial_items
         ]
