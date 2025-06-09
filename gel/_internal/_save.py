@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-import collections
 import dataclasses
 
 from typing import TYPE_CHECKING, Any, NamedTuple, TypeVar, Generic, cast
 
 from gel._internal._qbmodel._abstract import GelPrimitiveType
 from gel._internal._qbmodel._pydantic._models import (
+    GelBaseModel,
     GelModel,
     ProxyModel,
     GelPointers,
@@ -253,14 +253,19 @@ def unwrap(val: GelModel) -> tuple[ProxyModel[GelModel] | None, GelModel]:
         return None, val
 
 
+def get_pointers(tp: type[GelBaseModel]) -> Iterable[Pointer]:
+    # We sort pointers to produce similar queies regardless of Python
+    # hashing -- this is to maximize the probability of a generated
+    # uodate/insert query to hit the Gel's compiled cache.
+    return sorted(tp.__gel_pointers__().values(), key=lambda p: p.name)
+
+
 def iter_graph(objs: Iterable[GelModel]) -> Iterable[GelModel]:
     # Simple recursive traverse of a model
 
     visited: IDTracker[GelModel, None] = IDTracker()
 
-    def _traverse(
-        parent_obj: GelModel | None, parent_link: str | None, obj: GelModel
-    ) -> Iterable[GelModel]:
+    def _traverse(obj: GelModel) -> Iterable[GelModel]:
         obj = unwrap_proxy(obj)
 
         if obj in visited:
@@ -269,7 +274,7 @@ def iter_graph(objs: Iterable[GelModel]) -> Iterable[GelModel]:
         visited.track(obj)
         yield obj
 
-        for prop in type(obj).__gel_pointers__().values():
+        for prop in get_pointers(type(obj)):
             if prop.computed or prop.kind is not PointerKind.Link:
                 # We don't want to traverse computeds (they don't form the
                 # actual dependency graph, real links do)
@@ -286,20 +291,20 @@ def iter_graph(objs: Iterable[GelModel]) -> Iterable[GelModel]:
             if prop.cardinality.is_multi():
                 assert is_link_list(linked)
                 for ref in linked:
-                    yield from _traverse(obj, prop.name, ref)
+                    yield from _traverse(ref)
             else:
                 assert isinstance(linked, GelModel)
-                yield from _traverse(obj, prop.name, linked)
+                yield from _traverse(linked)
 
     for o in objs:
-        yield from _traverse(None, None, o)
+        yield from _traverse(o)
 
 
 def get_linked_new_objects(obj: GelModel) -> Iterable[GelModel]:
     visited: IDTracker[GelModel, None] = IDTracker()
     visited.track(obj)
 
-    for prop in type(obj).__gel_pointers__().values():
+    for prop in get_pointers(type(obj)):
         # Skip computed, non-link, and optional links;
         # only required links determine batch order
         if (
@@ -344,7 +349,7 @@ def make_plan(objs: Iterable[GelModel]) -> SavePlan:
     update_ops: ChangeBatch = []
 
     for obj in iter_graph(objs):
-        pointers = type(obj).__gel_pointers__()
+        pointers = get_pointers(type(obj))
         is_new = obj.id is UNSET_UUID
 
         # Capture changes in *properties* and *single links*
@@ -361,7 +366,7 @@ def make_plan(objs: Iterable[GelModel]) -> SavePlan:
         opt_multi_link_adds: dict[str, MultiLinkAdd] = {}
         multi_link_rems: dict[str, MultiLinkRemove] = {}
 
-        for prop in pointers.values():
+        for prop in pointers:
             # Skip computeds, we can't update them.
             if prop.computed:
                 continue
@@ -410,10 +415,11 @@ def make_plan(objs: Iterable[GelModel]) -> SavePlan:
 
                     if link_prop_variant:
                         # Link with link properties
+                        ptrs = get_pointers(val.__lprops__)
 
                         props = {
-                            n: getattr(val.__linkprops__, n, None)
-                            for n in val.__lprops__.__gel_pointers__()
+                            p.name: getattr(val.__linkprops__, p.name, None)
+                            for p in ptrs
                         }
 
                         sch = SingleLinkChange(
@@ -421,7 +427,7 @@ def make_plan(objs: Iterable[GelModel]) -> SavePlan:
                             info=prop,
                             target=unwrap_proxy(val),
                             props=props,
-                            props_info=type(val).__lprops__.__gel_pointers__(),
+                            props_info={p.name: p for p in ptrs},
                         )
                     else:
                         # Link without link properties
@@ -552,7 +558,7 @@ def make_plan(objs: Iterable[GelModel]) -> SavePlan:
             # set link properties into separate groups.
             link_tp = prop.type
             assert issubclass(link_tp.type, ProxyModel)
-            props_info = link_tp.type.__lprops__.__gel_pointers__()
+            props_info = get_pointers(link_tp.type.__lprops__)
 
             mch = MultiLinkAdd(
                 link_name=prop.name,
@@ -560,12 +566,12 @@ def make_plan(objs: Iterable[GelModel]) -> SavePlan:
                 added=unwrap_dlist(added),
                 added_props=[
                     {
-                        k: getattr(link.__linkprops__, k, None)
-                        for k in props_info
+                        p.name: getattr(link.__linkprops__, p.name, None)
+                        for p in props_info
                     }
                     for link in cast("list[ProxyModel[GelModel]]", added)
                 ],
-                props_info=props_info,
+                props_info={p.name: p for p in props_info},
             )
 
             if prop.cardinality.is_optional():
@@ -812,7 +818,7 @@ class SaveExecutor:
             unwrapped = unwrap_proxy(obj)
             unwrapped.__gel_commit__(self.object_ids.get(id(unwrapped)))
 
-            for prop in type(obj).__gel_pointers__().values():
+            for prop in get_pointers(type(obj)):
                 if prop.computed:
                     # (1) we don't want to traverse computeds (they don't
                     #     form the actual dependency graph, real links do)
