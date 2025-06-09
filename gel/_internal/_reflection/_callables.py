@@ -4,11 +4,10 @@
 
 # Type annotations must be visible in coerce_to_dataclass()
 #
-# ruff: noqa: TC001, TC003
+# ruff: noqa: TC001
 
 from __future__ import annotations
 
-import uuid
 import dataclasses
 
 from . import _types
@@ -26,9 +25,9 @@ class CallableParam:
 
 @dataclasses.dataclass(frozen=True, kw_only=True)
 class Callable:
-    id: uuid.UUID
+    id: str
     name: str
-    description: str
+    description: str | None
     return_type: _types.TypeRef
     return_typemod: _enums.TypeModifier
     params: list[CallableParam]
