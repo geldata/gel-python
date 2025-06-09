@@ -706,9 +706,11 @@ class ModelTestCase(SyncQueryTestCase):
 
         cls.orm_debug = os.environ.get("GEL_PYTHON_TEST_ORM") in {"1", "true"}
 
-        cls.tmp_model_dir = tempfile.TemporaryDirectory(
-            delete=not cls.orm_debug
-        )
+        td_kwargs = {}
+        if sys.version_info >= (3, 12):
+            td_kwargs["delete"] = not cls.orm_debug
+
+        cls.tmp_model_dir = tempfile.TemporaryDirectory(**td_kwargs)
         if cls.orm_debug:
             print(cls.tmp_model_dir.name)
 
