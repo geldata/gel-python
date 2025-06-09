@@ -1033,9 +1033,8 @@ class SaveExecutor:
                             # The nested tuple indirection is needed to support
                             # link props that have types of arrays.
                             tuple_subt = [
-                                f"array<tuple<{
-                                    type_to_ql(op.props_info[k].type)
-                                }>>"
+                                f"array<tuple<"
+                                f"{type_to_ql(op.props_info[k].type)}>>"
                                 for k in prop_order
                             ]
 
