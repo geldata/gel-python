@@ -252,8 +252,9 @@ class AbstractDowncastingList(Generic[_T_co, _BT]):
     supertype: ClassVar[type[_BT]]  # type: ignore [misc]
     type: ClassVar[type[_T_co]]  # type: ignore [misc]
 
-    @classmethod
-    def _check_value(cls, value: Any) -> _T_co:
+    def _check_value(self, value: Any) -> _T_co:
+        cls = type(self)
+
         t = cls.type
         bt = cls.supertype
         if isinstance(value, cls.type):
