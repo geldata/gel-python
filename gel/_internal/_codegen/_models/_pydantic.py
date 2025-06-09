@@ -2595,19 +2595,31 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                     pytype = f"{desc}[{narrow_type}]"
                 case False, False, False, False:
                     pytype = narrow_type
-        elif cardinality.is_multi():
-            pytype = f"list[{broad_type}]"  # XXX: this is wrong
-        elif cardinality.is_optional():
-            if prop.is_computed:
-                desc = self.import_name(BASE_IMPL, "OptionalComputedProperty")
-            else:
-                desc = self.import_name(BASE_IMPL, "OptionalProperty")
-            pytype = f"{desc}[{narrow_type}, {broad_type}]"
-        elif prop.is_computed:
-            desc = self.import_name(BASE_IMPL, "ComputedProperty")
-            pytype = f"{desc}[{narrow_type}, {broad_type}]"
         else:
-            pytype = narrow_type
+            match (
+                cardinality.is_multi(),
+                cardinality.is_optional(),
+                prop.is_computed,
+            ):
+                case True, _, False:
+                    desc = self.import_name(BASE_IMPL, "MultiProperty")
+                    pytype = f"{desc}[{narrow_type}, {broad_type}]"
+                case True, _, True:
+                    desc = self.import_name(BASE_IMPL, "ComputedMultiProperty")
+                    pytype = f"{desc}[{narrow_type}, {broad_type}]"
+                case False, True, False:
+                    desc = self.import_name(BASE_IMPL, "OptionalProperty")
+                    pytype = f"{desc}[{narrow_type}, {broad_type}]"
+                case False, True, True:
+                    desc = self.import_name(
+                        BASE_IMPL, "OptionalComputedProperty"
+                    )
+                    pytype = f"{desc}[{narrow_type}, {broad_type}]"
+                case False, False, True:
+                    desc = self.import_name(BASE_IMPL, "ComputedProperty")
+                    pytype = f"{desc}[{narrow_type}, {broad_type}]"
+                case False, False, False:
+                    pytype = narrow_type
 
         return pytype  # pyright: ignore [reportPossiblyUnboundVariable]  # pyright match block no bueno
 
