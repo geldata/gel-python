@@ -29,7 +29,7 @@ if TYPE_CHECKING:
     from ._abstract import Expr
 
 
-OP_OVERLOADS = frozenset(
+_OP_OVERLOADS = frozenset(
     {
         "__add__",
         "__and__",
@@ -55,6 +55,25 @@ OP_OVERLOADS = frozenset(
 )
 """Operators that are overloaded on types"""
 
+_SWAPPED_OP_OVERLOADS = frozenset(
+    {
+        "__radd__",
+        "__rand__",
+        "__rfloordiv__",
+        "__rlshift__",
+        "__rmatmul__",
+        "__rmod__",
+        "__rmul__",
+        "__ror__",
+        "__rpow__",
+        "__rrshift__",
+        "__rsub__",
+        "__rtruediv__",
+        "__rxor__",
+    }
+)
+"""Operators that are overloaded on types (swapped versions)"""
+
 
 SPECIAL_EXPR_METHODS = frozenset(
     {
@@ -70,10 +89,18 @@ class BaseAliasMeta(type):
         bases: tuple[type[Any], ...],
         namespace: dict[str, Any],
     ) -> BaseAliasMeta:
-        for op in OP_OVERLOADS:
+        for op in _OP_OVERLOADS:
             namespace.setdefault(
                 op,
                 lambda self, other, op=op: self.__infix_op__(op, other),
+            )
+
+        for op in _SWAPPED_OP_OVERLOADS:
+            namespace.setdefault(
+                op,
+                lambda self, other, op=op: self.__infix_op__(
+                    op, other, swapped=True
+                ),
             )
 
         return super().__new__(mcls, name, bases, namespace)
@@ -141,7 +168,9 @@ class BaseAlias(metaclass=BaseAliasMeta):
     def __edgeql_qb_expr__(self) -> Expr:
         return self.__gel_metadata__
 
-    def __infix_op__(self, op: str, operand: Any) -> Any:
+    def __infix_op__(
+        self, op: str, operand: Any, *, swapped: bool = False
+    ) -> Any:
         if op == "__eq__" and operand is self:
             return True
 
@@ -164,18 +193,15 @@ class BaseAlias(metaclass=BaseAliasMeta):
         metadata = expr.__gel_metadata__
         assert isinstance(metadata, InfixOp)
         self_expr = edgeql_qb_expr(self)
-        if hasattr(operand, "__edgeql_qb_expr__"):
-            expr.__gel_metadata__ = dataclasses.replace(
-                metadata,
-                lexpr=self_expr,
-                rexpr=edgeql_qb_expr(operand),
-            )
-        else:
-            expr.__gel_metadata__ = dataclasses.replace(
-                metadata,
-                lexpr=self_expr,
-            )
+        op1, op2 = ("rexpr", "lexpr") if swapped else ("lexpr", "rexpr")
+        replacements = {op1: self_expr}
 
+        if hasattr(operand, "__edgeql_qb_expr__"):
+            replacements[op2] = edgeql_qb_expr(operand)
+        expr.__gel_metadata__ = dataclasses.replace(
+            metadata,
+            **replacements,  # type: ignore [arg-type]
+        )
         return expr
 
     def __edgeql__(self) -> tuple[type, str]:

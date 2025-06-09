@@ -1481,8 +1481,9 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             rtype_rt = self.render_callable_runtime_return_type(
                 ret_type, op.return_typemod
             )
+            meth = op.py_magic[0]
             with self._method_def(
-                op.py_magic,
+                meth,
                 ["cls"],
                 rtype,
                 implicit_param=False,
@@ -1517,7 +1518,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         ops: list[reflection.Operator],
     ) -> None:
         opmap: defaultdict[
-            tuple[str, str],
+            tuple[tuple[str, ...], str],
             defaultdict[
                 tuple[reflection.AnyType, reflection.TypeModifier],
                 set[reflection.AnyType],
@@ -1558,7 +1559,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             opmap[op_key][r_key].update(union)
 
         py_cast_rankings: defaultdict[
-            tuple[str, str],
+            tuple[tuple[str, ...], str],
             dict[
                 tuple[str, str],
                 tuple[tuple[int, int], int, reflection.ScalarType],
@@ -1595,7 +1596,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                                 py_cast_ranking[py_type] = (rank, i, stype)
 
         py_casts: defaultdict[
-            tuple[str, str],
+            tuple[tuple[str, ...], str],
             defaultdict[int, dict[tuple[str, str], reflection.ScalarType]],
         ] = defaultdict(lambda: defaultdict(dict))
 
@@ -1608,9 +1609,16 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                 py_casts[op_key][overload_idx][py_type] = canon_type
 
         for op_key, overloads in opmap.items():
-            meth, opname = op_key
+            py_magic, opname = op_key
+            meth = py_magic[0]
             param_py_types_map = py_casts[op_key]
             overload = len(overloads) > 1
+            swapped_overloads: list[
+                tuple[
+                    dict[str, str],
+                    tuple[reflection.AnyType, str, str],
+                ]
+            ] = []
             for i, ((ret_type, ret_typemod), other_types) in enumerate(
                 overloads.items()
             ):
@@ -1623,13 +1631,13 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                     ret_typemod,
                 )
                 other_type_union: list[str] = []
-                param_py_types = param_py_types_map.get(i)
                 for t in other_types:
                     tstr = self.get_type(t, import_time=ImportTime.typecheck)
                     other_type_union.append(f"{type_}[{tstr}]")
                     if reflection.is_primitive_type(t):
                         other_type_union.append(tstr)
 
+                param_py_types = param_py_types_map.get(i)
                 if param_py_types:
                     py_coerce_map: dict[str, str] = {}
                     for py_type, stype in param_py_types.items():
@@ -1650,6 +1658,14 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                         f"{py_tname}()": f"other = {s_tname}(other)"
                         for py_tname, s_tname in py_coerce_map.items()
                     }
+
+                    if len(py_magic) > 1:
+                        swapped_overloads.append(
+                            (
+                                py_coerce_map,
+                                (ret_type, rtype, rtype_rt),
+                            )
+                        )
                 else:
                     coerce_cases = None
 
@@ -1703,6 +1719,72 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                         f"  # type: ignore [no-any-return]"
                     )
                 self.write()
+
+            num_swapped_overloads = len(swapped_overloads)
+            if num_swapped_overloads > 0:
+                expr_compat = self.import_name(BASE_IMPL, "ExprCompatible")
+                assert len(py_magic) > 1
+                rmeth = py_magic[1]
+                for py_coerce_map, (
+                    ret_type,
+                    rtype,
+                    rtype_rt,
+                ) in swapped_overloads:
+                    rev_op_type = " | ".join(sorted(py_coerce_map))
+                    with self._method_def(
+                        rmeth,
+                        ["cls", f"other: {rev_op_type}"],
+                        rtype,
+                        overload=num_swapped_overloads > 1,
+                        line_comment="type: ignore [override, unused-ignore]",
+                        implicit_param=False,
+                    ):
+                        self.write(f"operand: {expr_compat}")
+                        coerce_cases = {
+                            f"{py_tname}()": f"operand = {s_tname}(other)"
+                            for py_tname, s_tname in py_coerce_map.items()
+                        }
+                        coerce_cases["_"] = "operand = other"
+                        self.write("match other:")
+                        with self.indented():
+                            for cond, code in coerce_cases.items():
+                                self.write(f"case {cond}:")
+                                with self.indented():
+                                    self.write(code)
+
+                        args = [
+                            "lexpr=operand",
+                            f'op="{opname}"',
+                            "rexpr=cls",
+                            f"type_={self._render_obj_schema_path(ret_type)}",
+                        ]
+                        self.write(
+                            self.format_list(f"op = {infxop}({{list}})", args)
+                        )
+                        self.write(
+                            self.format_list(
+                                f"return {aexpr}({{list}})",
+                                [rtype_rt, "op"],
+                                first_line_comment=(
+                                    "type: ignore [return-value]"
+                                ),
+                            )
+                        )
+                    self.write()
+
+                if num_swapped_overloads > 1:
+                    dispatch = self.import_name(BASE_IMPL, "dispatch_overload")
+                    with self._method_def(
+                        rmeth,
+                        ["cls", f"*args: {any_}", f"**kwargs: {any_}"],
+                        type_,
+                        implicit_param=False,
+                    ):
+                        self.write(
+                            f"return {dispatch}(cls.{meth}, *args, **kwargs)"
+                            f"  # type: ignore [no-any-return]"
+                        )
+                    self.write()
 
     def write_object_types(
         self,

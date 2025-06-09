@@ -203,14 +203,17 @@ class TestModelGenerator(tb.ModelTestCase):
 
     @tb.typecheck
     def test_modelgen_data_unpack_1b(self):
-        from models import default
+        from models import default, std
 
         q = (
             default.Post.select(
                 body=True,
                 author=lambda p: p.author.select(name=True),
             )
-            .filter(lambda p: p.body == "Hello")
+            .filter(
+                lambda p: p.body == "Hello",
+                lambda p: 1 * std.len(p.body) == 5,
+            )
             .limit(1)
         )
         d = self.client.get(q)
