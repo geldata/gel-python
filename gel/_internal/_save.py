@@ -1105,4 +1105,6 @@ class SaveExecutor:
         if with_clauses:
             query = f"with\n{', '.join(with_clauses)}\n\n{query}"
 
+        query = f"with Q := ({query}) select Q.id"
+
         return query, args
