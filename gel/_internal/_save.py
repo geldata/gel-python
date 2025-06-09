@@ -434,7 +434,7 @@ def make_plan(objs: Iterable[GelModel]) -> SavePlan:
                         sch = SingleLinkChange(
                             link_name=prop.name,
                             info=prop,
-                            target=val,
+                            target=unwrap_proxy(val),
                         )
 
                     if prop.cardinality.is_optional():

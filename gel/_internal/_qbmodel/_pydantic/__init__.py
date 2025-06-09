@@ -5,11 +5,13 @@
 """Pydantic implementation of the query builder model"""
 
 from ._fields import (
+    ComputedLinkWithProps,
     ComputedMultiLink,
     ComputedMultiLinkWithProps,
     ComputedMultiProperty,
     ComputedProperty,
     IdProperty,
+    LinkWithProps,
     MultiLink,
     RequiredMultiLink,
     RequiredMultiLinkWithProps,
@@ -44,6 +46,7 @@ from ._types import (
 
 __all__ = (
     "Array",
+    "ComputedLinkWithProps",
     "ComputedMultiLink",
     "ComputedMultiLinkWithProps",
     "ComputedMultiProperty",
@@ -54,6 +57,7 @@ __all__ = (
     "IdProperty",
     "LinkClassNamespace",
     "LinkPropsDescriptor",
+    "LinkWithProps",
     "MultiLink",
     "MultiLinkWithProps",
     "MultiProperty",

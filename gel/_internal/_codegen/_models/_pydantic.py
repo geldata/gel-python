@@ -2757,14 +2757,10 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                     )
                     pytype = f"{desc}[{narrow_type}, {broad_type}]"
                 case False, False, True, False:
-                    # XXX
-                    desc = self.import_name(BASE_IMPL, "RequiredLinkWithProps")
+                    desc = self.import_name(BASE_IMPL, "LinkWithProps")
                     pytype = f"{desc}[{narrow_type}, {broad_type}]"
                 case False, False, True, True:
-                    # XXX
-                    desc = self.import_name(
-                        BASE_IMPL, "RequiredComputedLinkWithProps"
-                    )
+                    desc = self.import_name(BASE_IMPL, "ComputedLinkWithProps")
                     pytype = f"{desc}[{narrow_type}, {broad_type}]"
                 case False, True, False, False:
                     desc = self.import_name(BASE_IMPL, "OptionalLink")
