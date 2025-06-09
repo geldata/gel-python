@@ -1073,6 +1073,23 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(p1.nickname, "HACKED")
         self.assertEqual(p1.__linkprops__.is_tall_enough, False)
 
+    def test_modelgen_multiprops_1(self):
+        from models import default
+
+        ks = default.KitchenSink(mstr=["1", "222"], name="aaa")
+        self.client.save(ks)
+
+        ks2 = self.client.get(default.KitchenSink.filter(name="aaa"))
+        self.assertEqual(sorted(ks2.mstr), ["1", "222"])
+
+        ks2.mstr.append("zzz")
+        ks2.mstr.append("zzz")
+        ks2.mstr.remove("1")
+        self.client.save(ks2)
+
+        ks3 = self.client.get(default.KitchenSink.filter(name="aaa"))
+        self.assertEqual(sorted(ks3.mstr), ["222", "zzz", "zzz"])
+
     def test_modelgen_reflection_1(self):
         from models import default, std
 

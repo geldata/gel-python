@@ -89,7 +89,7 @@ class ModelFieldDescriptor(_qb.AbstractFieldDescriptor):
         if t is not None:
             if not isinstance(t, type) or not issubclass(t, GelType):
                 raise AssertionError(
-                    f"{self._fqname} type argument is not a GelType: {t}"
+                    f"{self._fqname} type argument is not a GelType: {t} ({type(t)})"
                 )
             self.__gel_resolved_type__ = t
 

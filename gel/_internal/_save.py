@@ -5,13 +5,19 @@ import dataclasses
 
 from typing import TYPE_CHECKING, Any, NamedTuple, TypeVar, Generic, cast
 
+from gel._internal._qbmodel._abstract import GelPrimitiveType
 from gel._internal._qbmodel._pydantic._models import (
     GelModel,
     ProxyModel,
     GelPointers,
     Pointer,
 )
-from gel._internal._dlist import DistinctList
+from gel._internal._dlist import (
+    AbstractDowncastingList,
+    TrackedList,
+    DowncastingTrackedList,
+    DistinctList,
+)
 from gel._internal._unsetid import UNSET_UUID
 from gel._internal._edgeql import PointerKind, quote_ident
 
@@ -22,7 +28,6 @@ if TYPE_CHECKING:
         Iterable,
         Iterator,
         Callable,
-        Mapping,
     )
     from typing import TypeGuard
 
@@ -55,6 +60,7 @@ class SingleLinkChange:
 
     def __post_init__(self) -> None:
         assert not isinstance(self.target, ProxyModel)
+        assert not self.info.cardinality.is_multi()
 
 
 @dataclasses.dataclass(frozen=True)
@@ -69,6 +75,7 @@ class MultiLinkAdd:
 
     def __post_init__(self) -> None:
         assert not any(isinstance(o, ProxyModel) for o in self.added)
+        assert self.info.cardinality.is_multi()
 
 
 @dataclasses.dataclass(frozen=True)
@@ -80,6 +87,7 @@ class MultiLinkRemove:
 
     def __post_init__(self) -> None:
         assert not any(isinstance(o, ProxyModel) for o in self.removed)
+        assert self.info.cardinality.is_multi()
 
 
 @dataclasses.dataclass(frozen=True)
@@ -88,6 +96,31 @@ class PropertyChange:
     info: Pointer
 
     value: object | None
+
+    def __post_init__(self) -> None:
+        assert not self.info.cardinality.is_multi()
+
+
+@dataclasses.dataclass(frozen=True)
+class MultiPropAdd:
+    prop_name: str
+    info: Pointer
+
+    added: Iterable[object]
+
+    def __post_init__(self) -> None:
+        assert self.info.cardinality.is_multi()
+
+
+@dataclasses.dataclass(frozen=True)
+class MultiPropRemove:
+    prop_name: str
+    info: Pointer
+
+    removed: Iterable[object]
+
+    def __post_init__(self) -> None:
+        assert self.info.cardinality.is_multi()
 
 
 # Changes are organized by pointer name. Each pointer can have
@@ -102,6 +135,7 @@ SingleLinkChanges = TypeAliasType(
 class ModelChange:
     model: GelModel
     props: PropertyChanges | None = None
+    multi_props: dict[str, MultiPropAdd | MultiPropRemove] | None = None
     single_links: SingleLinkChanges | None = None
     multi_links: dict[str, MultiLinkAdd | MultiLinkRemove] | None = None
 
@@ -125,17 +159,6 @@ class SavePlan(NamedTuple):
 
 
 QueryWithArgs = TypeAliasType("QueryWithArgs", tuple[str, list[object]])
-
-
-def shift_dict_list(inp: dict[str, list[T]]) -> dict[str, T]:
-    ret: dict[str, T] = {}
-    for key, lst in list(inp.items()):
-        if not lst:
-            continue
-        ret[key] = lst.pop(0)
-        if not lst:
-            inp.pop(key)
-    return ret
 
 
 class IDTracker(Generic[T, V]):
@@ -198,7 +221,13 @@ class IDTracker(Generic[T, V]):
             yield t
 
 
-def is_dlist(val: object) -> TypeGuard[DistinctList[GelModel]]:
+def is_prop_list(val: object) -> TypeGuard[TrackedList[GelPrimitiveType]]:
+    return isinstance(
+        val, (TrackedList, DowncastingTrackedList)
+    ) and issubclass(type(val).type, GelPrimitiveType)  # type: ignore [misc]
+
+
+def is_link_list(val: object) -> TypeGuard[DistinctList[GelModel]]:
     return isinstance(val, DistinctList) and issubclass(
         type(val).type, GelModel
     )
@@ -255,7 +284,7 @@ def iter_graph(objs: Iterable[GelModel]) -> Iterable[GelModel]:
                 continue
 
             if prop.cardinality.is_multi():
-                assert is_dlist(linked)
+                assert is_link_list(linked)
                 for ref in linked:
                     yield from _traverse(obj, prop.name, ref)
             else:
@@ -287,7 +316,7 @@ def get_linked_new_objects(obj: GelModel) -> Iterable[GelModel]:
             continue
 
         if prop.cardinality.is_multi():
-            assert is_dlist(linked)
+            assert is_link_list(linked)
             for ref in linked:
                 unwrapped = unwrap_proxy(ref)
                 if unwrapped.id is UNSET_UUID and unwrapped not in visited:
@@ -322,17 +351,14 @@ def make_plan(objs: Iterable[GelModel]) -> SavePlan:
         field_changes = obj.__gel_get_changed_fields__()
 
         prop_changes: PropertyChanges = {}
+        multi_prop_adds: dict[str, MultiPropAdd] = {}
+        multi_prop_rems: dict[str, MultiPropRemove] = {}
 
         req_single_link_changes: SingleLinkChanges = {}
         opt_single_link_changes: SingleLinkChanges = {}
 
-        req_multi_link_adds: dict[str, list[MultiLinkAdd]] = (
-            collections.defaultdict(list)
-        )
-        opt_multi_link_adds: dict[str, list[MultiLinkAdd]] = (
-            collections.defaultdict(list)
-        )
-
+        req_multi_link_adds: dict[str, MultiLinkAdd] = {}
+        opt_multi_link_adds: dict[str, MultiLinkAdd] = {}
         multi_link_rems: dict[str, MultiLinkRemove] = {}
 
         for prop in pointers.values():
@@ -345,8 +371,14 @@ def make_plan(objs: Iterable[GelModel]) -> SavePlan:
                 # Since there was a change and we don't implement `del`,
                 # the attribute must be set
                 val = getattr(obj, prop.name)
-                if prop.kind is PointerKind.Property:
-                    # Property
+                if (
+                    prop.kind is PointerKind.Property
+                    and not prop.cardinality.is_multi()
+                ):
+                    # Single property.
+                    #
+                    # Multi properties, like multi links, will
+                    # be preocessed separately.
                     assert not isinstance(val, GelModel)
                     prop_changes[prop.name] = PropertyChange(
                         prop_name=prop.name,
@@ -406,6 +438,28 @@ def make_plan(objs: Iterable[GelModel]) -> SavePlan:
                     continue
 
             if (
+                prop.kind is PointerKind.Property
+                and prop.cardinality.is_multi()
+            ):
+                val = getattr(obj, prop.name, _unset)
+                if val is None or val is _unset:
+                    continue
+
+                assert is_prop_list(val)
+
+                if mp_added := val.__gel_get_added__():
+                    multi_prop_adds[prop.name] = MultiPropAdd(
+                        prop_name=prop.name, info=prop, added=mp_added
+                    )
+
+                if mp_removed := val.__gel_get_removed__():
+                    multi_prop_rems[prop.name] = MultiPropRemove(
+                        prop_name=prop.name, info=prop, removed=mp_removed
+                    )
+
+                continue
+
+            if (
                 prop.kind is not PointerKind.Link
                 or not prop.cardinality.is_multi()
             ):
@@ -424,7 +478,7 @@ def make_plan(objs: Iterable[GelModel]) -> SavePlan:
             # `linked` should be either an empty DistinctList or
             # a non-empty one
             assert linked is not None
-            assert is_dlist(linked), (
+            assert is_link_list(linked), (
                 f"`linked` is not dlist, it is {type(linked)}"
             )
             assert issubclass(prop.type, DistinctList)
@@ -483,9 +537,9 @@ def make_plan(objs: Iterable[GelModel]) -> SavePlan:
                 )
 
                 if prop.cardinality.is_optional():
-                    opt_multi_link_adds[prop.name].append(mch)
+                    opt_multi_link_adds[prop.name] = mch
                 else:
-                    req_multi_link_adds[prop.name].append(mch)
+                    req_multi_link_adds[prop.name] = mch
 
                 continue
 
@@ -515,9 +569,9 @@ def make_plan(objs: Iterable[GelModel]) -> SavePlan:
             )
 
             if prop.cardinality.is_optional():
-                opt_multi_link_adds[prop.name].append(mch)
+                opt_multi_link_adds[prop.name] = mch
             else:
-                req_multi_link_adds[prop.name].append(mch)
+                req_multi_link_adds[prop.name] = mch
 
         # After all this work we found no changes -- move on to the next obj.
         if not (
@@ -528,8 +582,22 @@ def make_plan(objs: Iterable[GelModel]) -> SavePlan:
             or opt_multi_link_adds
             or req_multi_link_adds
             or multi_link_rems
+            or multi_prop_adds
+            or multi_prop_rems
         ):
             continue
+
+        # New objects should not have multi prop/link removal operations.
+        assert not is_new or (
+            is_new and not (multi_link_rems or multi_prop_rems)
+        )
+
+        # There can't be a situation when a "multi prop" is initilized with
+        # a value and there exists "+=" or "-=" operation on top of that.
+        assert not (
+            (prop_changes.keys() & multi_prop_adds.keys())
+            or (prop_changes.keys() & multi_prop_rems.keys())
+        )
 
         # If the object is new, we want to do the bare minimum to insert it,
         # so we create a minimal insert op for it -- properties and
@@ -543,16 +611,22 @@ def make_plan(objs: Iterable[GelModel]) -> SavePlan:
                 ModelChange(
                     model=obj,
                     props=prop_changes,
+                    multi_props=cast(
+                        "dict[str, MultiPropAdd | MultiPropRemove]",
+                        multi_prop_adds,
+                    ),
                     single_links=req_single_link_changes,
                     multi_links=cast(
                         "dict[str, MultiLinkAdd | MultiLinkRemove]",
-                        shift_dict_list(req_multi_link_adds),
+                        req_multi_link_adds,
                     ),
                 )
             )
 
             prop_changes = {}
+            multi_prop_adds = {}
             req_single_link_changes = {}
+            req_multi_link_adds = {}
 
         # Now let's create ops for all the remaning changes
         while (
@@ -562,6 +636,8 @@ def make_plan(objs: Iterable[GelModel]) -> SavePlan:
             or req_single_link_changes
             or opt_single_link_changes
             or multi_link_rems
+            or multi_prop_adds
+            or multi_prop_rems
         ):
             change = ModelChange(
                 model=obj,
@@ -570,6 +646,28 @@ def make_plan(objs: Iterable[GelModel]) -> SavePlan:
             if prop_changes:
                 change.props = prop_changes
                 prop_changes = {}
+
+            if (
+                multi_prop_adds
+                and multi_prop_rems
+                and not (multi_prop_adds.keys() & multi_prop_rems.keys())
+            ):
+                change.multi_props = multi_prop_adds | multi_prop_rems
+                multi_prop_adds = {}
+                multi_prop_rems = {}
+
+            if multi_prop_adds:
+                change.multi_props = cast(
+                    "dict[str, MultiPropAdd | MultiPropRemove]",
+                    multi_prop_adds,
+                )
+                multi_prop_adds = {}
+            elif multi_prop_rems:
+                change.multi_props = cast(
+                    "dict[str, MultiPropAdd | MultiPropRemove]",
+                    multi_prop_rems,
+                )
+                multi_prop_rems = {}
 
             if req_single_link_changes:
                 change.single_links = req_single_link_changes
@@ -585,19 +683,21 @@ def make_plan(objs: Iterable[GelModel]) -> SavePlan:
             if req_multi_link_adds:
                 mlinks = cast(
                     "dict[str, MultiLinkAdd | MultiLinkRemove]",
-                    shift_dict_list(req_multi_link_adds),
+                    req_multi_link_adds,
                 )
+                req_multi_link_adds = {}
 
                 if opt_multi_link_adds:
-                    mlinks |= cast(
-                        "dict[str, MultiLinkAdd | MultiLinkRemove]",
-                        shift_dict_list(opt_multi_link_adds),
-                    )
+                    mlinks |= opt_multi_link_adds
+                    opt_multi_link_adds = {}
 
                 if multi_link_rems and not (
                     mlinks.keys() & multi_link_rems.keys()
                 ):
-                    mlinks |= multi_link_rems
+                    mlinks |= cast(
+                        "dict[str, MultiLinkAdd | MultiLinkRemove]",
+                        multi_link_rems,
+                    )
                     multi_link_rems = {}
 
                 change.multi_links = mlinks
@@ -605,10 +705,9 @@ def make_plan(objs: Iterable[GelModel]) -> SavePlan:
             elif opt_multi_link_adds:
                 change.multi_links = cast(
                     "dict[str, MultiLinkAdd | MultiLinkRemove]",
-                    shift_dict_list(
-                        opt_multi_link_adds,
-                    ),
+                    opt_multi_link_adds,
                 )
+                opt_multi_link_adds = {}
 
             elif multi_link_rems:
                 change.multi_links = cast(
@@ -714,27 +813,41 @@ class SaveExecutor:
             unwrapped.__gel_commit__(self.object_ids.get(id(unwrapped)))
 
             for prop in type(obj).__gel_pointers__().values():
-                if prop.computed or prop.kind is not PointerKind.Link:
-                    # We don't want to traverse computeds (they don't form the
-                    # actual dependency graph, real links do)
+                if prop.computed:
+                    # (1) we don't want to traverse computeds (they don't
+                    #     form the actual dependency graph, real links do)
+                    #
+                    # (2) we need to commit changes to multi props and
+                    #     multi links
                     continue
 
                 linked = getattr(obj, prop.name, _unset)
                 if linked is _unset or linked is None:
-                    # If users mess-up with user-defined types and smoe
+                    # If users mess-up with user-defined types and some
                     # of the data isn't fetched, we don't want to crash
                     # with an AttributeErorr, it's not critical here.
                     # Not fetched means not used, which is good for save().
                     continue
 
-                if prop.cardinality.is_multi():
-                    assert is_dlist(linked)
-                    for ref in linked:
-                        _traverse(unwrap_proxy(ref))
-                    linked.__gel_commit__()
+                if prop.kind is PointerKind.Link:
+                    if prop.cardinality.is_multi():
+                        assert is_link_list(linked)
+                        for ref in linked:
+                            if isinstance(ref, ProxyModel):
+                                ref.__linkprops__.__gel_commit__()
+                                _traverse(unwrap_proxy(ref))
+                            else:
+                                _traverse(ref)
+                        linked.__gel_commit__()
+                    else:
+                        assert isinstance(linked, GelModel)
+                        _traverse(unwrap_proxy(linked))
+
                 else:
-                    assert isinstance(linked, GelModel)
-                    _traverse(unwrap_proxy(linked))
+                    assert prop.kind is PointerKind.Property
+                    if prop.cardinality.is_multi():
+                        assert is_prop_list(linked)
+                        linked.__gel_commit__()
 
         for o in self.objs:
             _traverse(o)
@@ -791,6 +904,33 @@ class SaveExecutor:
                     optional=pch.info.cardinality.is_optional(),
                 )
                 shape_parts.append(f"{quote_ident(pch.prop_name)} := {arg}")
+
+        if change.multi_props:
+            for mop in change.multi_props.values():
+                assert issubclass(mop.info.type, AbstractDowncastingList)
+                # Since we're passing a set of values packed into an array
+                # we need to wrap elements in tuples to allow multi props
+                # or arrays etc.
+                arg_t = f"array<tuple<{type_to_ql(mop.info.type.type)}>>"
+
+                if isinstance(mop, MultiPropRemove):
+                    assert not for_insert
+
+                    arg = add_arg(arg_t, [(el,) for el in mop.removed])
+                    shape_parts.append(
+                        f"{quote_ident(mop.prop_name)} -= "
+                        f"array_unpack({arg}).0"
+                    )
+                else:
+                    assert isinstance(mop, MultiPropAdd)
+
+                    assign_op = ":=" if for_insert else "+="
+
+                    arg = add_arg(arg_t, [(el,) for el in mop.added])
+                    shape_parts.append(
+                        f"{quote_ident(mop.prop_name)} {assign_op} "
+                        f"array_unpack({arg}).0"
+                    )
 
         if change.single_links:
             for sch in change.single_links.values():

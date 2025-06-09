@@ -94,3 +94,8 @@ type LinearPath {
         }
     }
 }
+
+type KitchenSink {
+    name: str;
+    multi mstr: str;
+}
