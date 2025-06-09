@@ -1526,14 +1526,19 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         ] = defaultdict(lambda: defaultdict(set))
 
         aexpr = self.import_name(BASE_IMPL, "AnnotatedExpr")
-        infxop = self.import_name(BASE_IMPL, "InfixOp")
+        expr_compat = self.import_name(BASE_IMPL, "ExprCompatible")
         type_ = self.import_name("builtins", "type")
         any_ = self.import_name("typing", "Any")
 
+        op_map = {
+            "[]": "IndexOp",
+        }
+
+        op_classes_to_import: dict[str, str] = {}
+
         explicit_rparams: defaultdict[str, set[str]] = defaultdict(set)
         for op in ops:
-            opname = reflection.parse_name(op.name).name
-            explicit_rparams[opname].add(op.params[1].type.id)
+            explicit_rparams[op.schemapath.name].add(op.params[1].type.id)
 
         for op in ops:
             if op.py_magic is None:
@@ -1541,7 +1546,8 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             if op.operator_kind != reflection.OperatorKind.Infix:
                 raise AssertionError(f"expected {op} to be an infix operator")
 
-            opname = reflection.parse_name(op.name).name
+            opname = op.schemapath.name
+            op_classes_to_import[opname] = op_map.get(opname, "InfixOp")
             ret_type = self._types[op.return_type.id]
             right_param = op.params[1]
             right_type_id = right_param.type.id
@@ -1557,6 +1563,15 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             op_key = op.py_magic, opname
             r_key = ret_type, op.return_typemod
             opmap[op_key][r_key].update(union)
+
+        op_classes: dict[str, str] = {}
+        imported: dict[str, str] = {}
+        for opname, opclsname in op_classes_to_import.items():
+            opcls = imported.get(opname)
+            if opcls is None:
+                opcls = self.import_name(BASE_IMPL, opclsname)
+                imported[opname] = opcls
+            op_classes[opname] = opcls
 
         py_cast_rankings: defaultdict[
             tuple[tuple[str, ...], str],
@@ -1610,6 +1625,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
 
         for op_key, overloads in opmap.items():
             py_magic, opname = op_key
+            opcls = op_classes[opname]
             meth = py_magic[0]
             param_py_types_map = py_casts[op_key]
             overload = len(overloads) > 1
@@ -1687,15 +1703,22 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                                 self.write(f"case {cond}:")
                                 with self.indented():
                                     self.write(code)
+                    if any(reflection.is_tuple_type(ot) for ot in other_types):
+                        self.write(
+                            f"rexpr: {expr_compat} = other"
+                            f"  # type: ignore [assignment]"
+                        )
+                    else:
+                        self.write(f"rexpr: {expr_compat} = other")
 
                     args = [
                         "lexpr=cls",
                         f'op="{opname}"',
-                        "rexpr=other",
+                        "rexpr=rexpr",
                         f"type_={self._render_obj_schema_path(ret_type)}",
                     ]
                     self.write(
-                        self.format_list(f"op = {infxop}({{list}})", args)
+                        self.format_list(f"op = {opcls}({{list}})", args)
                     )
                     self.write(
                         self.format_list(
@@ -1759,7 +1782,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                             f"type_={self._render_obj_schema_path(ret_type)}",
                         ]
                         self.write(
-                            self.format_list(f"op = {infxop}({{list}})", args)
+                            self.format_list(f"op = {opcls}({{list}})", args)
                         )
                         self.write(
                             self.format_list(

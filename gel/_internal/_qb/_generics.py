@@ -9,6 +9,7 @@ from __future__ import annotations
 from typing import (
     TYPE_CHECKING,
     Any,
+    TypedDict,
     get_args,
 )
 
@@ -16,16 +17,23 @@ from typing import (
 import dataclasses
 import functools
 
+from gel._internal import _edgeql
 from gel._internal import _typing_inspect
 from gel._internal import _utils
 
 from ._abstract import AbstractFieldDescriptor
-from ._expressions import InfixOp, Path, Variable, toplevel_edgeql
-from ._protocols import TypeClassProto, edgeql_qb_expr, is_exprmethod
+from ._expressions import BinaryOp, Path, Variable, toplevel_edgeql
+from ._protocols import (
+    TypeClassProto,
+    assert_edgeql_qb_expr,
+    edgeql_qb_expr,
+    is_exprmethod,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
 
+    from gel._internal._reflection import SchemaPath
     from ._abstract import Expr
 
 
@@ -37,6 +45,7 @@ _OP_OVERLOADS = frozenset(
         "__eq__",
         "__floordiv__",
         "__ge__",
+        "__getitem__",
         "__gt__",
         "__le__",
         "__lshift__",
@@ -73,6 +82,13 @@ _SWAPPED_OP_OVERLOADS = frozenset(
     }
 )
 """Operators that are overloaded on types (swapped versions)"""
+
+
+class _BinaryOpKwargs(TypedDict, total=False):
+    lexpr: Expr
+    rexpr: Expr
+    op: _edgeql.Token
+    type_: SchemaPath
 
 
 SPECIAL_EXPR_METHODS = frozenset(
@@ -169,7 +185,11 @@ class BaseAlias(metaclass=BaseAliasMeta):
         return self.__gel_metadata__
 
     def __infix_op__(
-        self, op: str, operand: Any, *, swapped: bool = False
+        self,
+        op: str,
+        operand: BaseAlias | type[TypeClassProto],
+        *,
+        swapped: bool = False,
     ) -> Any:
         if op == "__eq__" and operand is self:
             return True
@@ -191,17 +211,24 @@ class BaseAlias(metaclass=BaseAliasMeta):
         expr = op_impl(this_operand, other_operand)
         assert isinstance(expr, ExprAlias)
         metadata = expr.__gel_metadata__
-        assert isinstance(metadata, InfixOp)
+        assert isinstance(metadata, BinaryOp)
         self_expr = edgeql_qb_expr(self)
-        op1, op2 = ("rexpr", "lexpr") if swapped else ("lexpr", "rexpr")
-        replacements = {op1: self_expr}
 
-        if hasattr(operand, "__edgeql_qb_expr__"):
-            replacements[op2] = edgeql_qb_expr(operand)
-        expr.__gel_metadata__ = dataclasses.replace(
-            metadata,
-            **replacements,  # type: ignore [arg-type]
-        )
+        if isinstance(operand, BaseAlias):
+            other_expr = assert_edgeql_qb_expr(operand)
+        else:
+            other_expr = metadata.lexpr if swapped else metadata.rexpr
+
+        replacements: _BinaryOpKwargs = {}
+        if swapped:
+            replacements["rexpr"] = self_expr
+            replacements["lexpr"] = other_expr
+        else:
+            replacements["lexpr"] = self_expr
+            replacements["rexpr"] = other_expr
+
+        expr.__gel_metadata__ = dataclasses.replace(metadata, **replacements)
+
         return expr
 
     def __edgeql__(self) -> tuple[type, str]:

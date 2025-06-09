@@ -17,6 +17,7 @@ from ._abstract import (
 )
 
 from ._expressions import (
+    BinaryOp,
     BoolLiteral,
     BytesLiteral,
     DecimalLiteral,
@@ -28,6 +29,7 @@ from ._expressions import (
     FloatLiteral,
     ForStmt,
     FuncCall,
+    IndexOp,
     InfixOp,
     IntLiteral,
     Limit,
@@ -79,6 +81,7 @@ __all__ = (
     "AnnotatedPath",
     "AnnotatedVar",
     "BaseAlias",
+    "BinaryOp",
     "BoolLiteral",
     "BytesLiteral",
     "DecimalLiteral",
@@ -94,6 +97,7 @@ __all__ = (
     "FloatLiteral",
     "ForStmt",
     "FuncCall",
+    "IndexOp",
     "InfixOp",
     "IntLiteral",
     "Limit",

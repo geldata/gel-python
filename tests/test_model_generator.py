@@ -213,6 +213,7 @@ class TestModelGenerator(tb.ModelTestCase):
             .filter(
                 lambda p: p.body == "Hello",
                 lambda p: 1 * std.len(p.body) == 5,
+                lambda p: p.body[0] == "H",
             )
             .limit(1)
         )

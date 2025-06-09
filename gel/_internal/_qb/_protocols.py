@@ -154,3 +154,7 @@ def edgeql_qb_expr(
             f"return an Expr instance"
         )
     return expr
+
+
+def assert_edgeql_qb_expr(x: Any) -> Expr:
+    return edgeql_qb_expr(x)
