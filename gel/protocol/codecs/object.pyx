@@ -279,14 +279,12 @@ cdef class ObjectCodec(BaseNamedRecordCodec):
             if flags[i] & datatypes._EDGE_POINTER_IS_LINKPROP:
                 assert name[0] == '@' # XXX fix this
                 lprops_dict[name[1:]] = elem
-            elif flags[i] & datatypes._EDGE_POINTER_IS_LINK:
+            else:
                 dlist_factory = self.cached_return_type_dlists[i]
                 if dlist_factory is tuple:
                     elem = tuple(elem)
                 elif dlist_factory is not None:
                     elem = dlist_factory(elem, __wrap_list__=True)
-                result_dict[name] = elem
-            else:
                 result_dict[name] = elem
 
         if return_type_proxy is not None:
@@ -345,44 +343,44 @@ cdef class ObjectCodec(BaseNamedRecordCodec):
         subs = []
         dlists = []
         for i, name in enumerate(names):
-            if flags[i] & datatypes._EDGE_POINTER_IS_LINK:
-                if flags[i] & datatypes._EDGE_POINTER_IS_LINKPROP:
-                    sub = getattr(lprops_type, name)
-                    subs.append(sub.__gel_origin__)
-                    dlists.append(None)
-                else:
-                    sub = getattr(return_type, name)
-                    subs.append(sub.__gel_origin__)
-
-                    dlist_factory = None
-                    desc = inspect.getattr_static(return_type, name, None)
-                    if desc is not None and hasattr(desc, '__gel_resolved_type__'):
-                        target = desc.get_resolved_type_generic()
-                        if target is not None:
-                            torigin = typing.get_origin(target)
-                            if hasattr(torigin, '__gel_resolve_dlist__'):
-                                dlist_factory = torigin.__gel_resolve_dlist__(
-                                    typing.get_args(target),
-                                )
-
-                                if isinstance(dlist_factory, typing.GenericAlias):
-                                    dlist_factory = typing.get_origin(dlist_factory)
-
-                                if (not (
-                                    isinstance(dlist_factory, type) and (
-                                        issubclass(dlist_factory, _dlist.DistinctList)
-                                        or issubclass(dlist_factory, tuple)
-                                    )
-                                )):
-                                    raise RuntimeError(
-                                        f'invalid type returned from __gel_resolve_dlist__(), '
-                                        f'a DistinctList was expected, got {dlist_factory!r}'
-                                    )
-
-                    dlists.append(dlist_factory)
-            else:
+            if flags[i] & datatypes._EDGE_POINTER_IS_LINKPROP:
+                # sub = getattr(lprops_type, name[1:])
+                # subs.append(sub.__gel_origin__)
                 subs.append(None)
                 dlists.append(None)
+            elif name in {"__tname__", "__tid__"}:
+                subs.append(None)
+                dlists.append(None)
+            else:
+                sub = getattr(return_type, name)
+                subs.append(sub.__gel_origin__)
+
+                dlist_factory = None
+                desc = inspect.getattr_static(return_type, name, None)
+                if desc is not None and hasattr(desc, '__gel_resolved_type__'):
+                    target = desc.get_resolved_type_generic()
+                    if target is not None:
+                        torigin = typing.get_origin(target)
+                        if hasattr(torigin, '__gel_resolve_dlist__'):
+                            dlist_factory = torigin.__gel_resolve_dlist__(
+                                typing.get_args(target),
+                            )
+
+                            if isinstance(dlist_factory, typing.GenericAlias):
+                                dlist_factory = typing.get_origin(dlist_factory)
+
+                            if (not (
+                                isinstance(dlist_factory, type) and (
+                                    issubclass(dlist_factory, _dlist.AbstractTrackedList)
+                                    or issubclass(dlist_factory, tuple)
+                                )
+                            )):
+                                raise RuntimeError(
+                                    f'invalid type returned from __gel_resolve_dlist__(), '
+                                    f'a TrackedList was expected, got {dlist_factory!r}'
+                                )
+
+                dlists.append(dlist_factory)
 
         self.cached_return_type_subcodecs = tuple(subs)
         self.cached_return_type_dlists = tuple(dlists)
