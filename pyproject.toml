@@ -63,7 +63,7 @@ issues = "https://github.com/geldata/gel-python/issues"
 [project.scripts]
 edgedb-py = "gel.codegen.cli:main"
 gel-py = "gel.codegen.cli:main"
-gel-generate = "gel.codegen.cli:generate"
+gel-generate-py = "gel.codegen.cli:generate"
 gel-orm = "gel.orm.cli:main"
 gel = "gel.cli:main"
 
