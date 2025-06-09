@@ -5,6 +5,12 @@ abstract type Named {
     nickname_len := len(.nickname);
 }
 
+abstract type ExclusivelyNamed {
+    required name: str {
+        delegated constraint exclusive;
+    }
+}
+
 type UserGroup extending Named {
     # many-to-many
     multi link users: User;
@@ -53,4 +59,43 @@ module sub {
 }
 
 module emptysub {
+}
+
+# Object with required multi link, no link props
+type Party extending ExclusivelyNamed {
+    required multi members: User;
+}
+
+# Object with required multi link, has link props
+type Raid extending ExclusivelyNamed {
+    required multi members: User {
+        role: str;
+        rank: int64;
+    };
+}
+
+# Object with multi link and several link props
+type Team extending ExclusivelyNamed {
+    multi members: User {
+        role: str;
+        rank: int64;
+    };
+}
+
+# Object with optional link to self, has link props
+type LinearPath {
+    required label: str {
+        constraint exclusive;
+    }
+    next: LinearPath {
+        constraint exclusive;
+        steps: int64 {
+            default := 1
+        }
+    }
+}
+
+type KitchenSink {
+    name: str;
+    multi mstr: str;
 }

@@ -2220,11 +2220,9 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             with self._class_def("__lprops__", lprops_bases):
                 assert ptr.pointers
                 lprops = []
-                lprop_assign = []
                 for lprop in ptr.pointers:
                     if lprop.name in {"source", "target"}:
                         continue
-                    lprop_assign.append(f"{lprop.name}={lprop.name}")
                     ttype = self._types[lprop.target_id]
                     assert reflection.is_scalar_type(ttype)
                     ptr_type = self.get_type(ttype, import_time=import_time)
@@ -2240,34 +2238,41 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                     lprop_line = f"{lprop.name}: {pytype} | None = None"
                     lprops.append(lprop_line)
 
+            self.write("__linkprops__: __lprops__")
             self.write()
-            args = [f"obj: {target}", "/", "*", *lprops]
-            with self._method_def("__init__", args):
-                if is_forward_decl:
+            if is_forward_decl:
+                args = [f"obj: {target}", "/", "*", *lprops]
+                with self._method_def("__init__", args):
                     self.write("...")
-                else:
+            else:
+                # It's important to just forward '**link_props' to
+                # the constructor of `__lprops__` -- otherwise pydantic's
+                # tracking and our's own tracking would assume that argument
+                # defaults (Nones in this case) were explicitly set by the user
+                # leading to inefficient queries in save().
+                args = ["obj", "/", "**link_props"]
+                with self._method_def("__init__", args):
                     obj = self.import_name("builtins", "object")
                     self.write(f"{proxymodel_t}.__init__(self, obj)")
                     self.write(
-                        self.format_list(
-                            "lprops = self.__class__.__lprops__({list})",
-                            lprop_assign,
-                        )
+                        "lprops = self.__class__.__lprops__(**link_props)"
                     )
                     self.write(
                         f'{obj}.__setattr__(self, "__linkprops__", lprops)'
                     )
 
             self.write()
-            args = [f"obj: {target}", "/", "*", *lprops]
-            with self._classmethod_def("link", args, self_t):
-                if is_forward_decl:
+            if is_forward_decl:
+                args = [f"obj: {target}", "/", "*", *lprops]
+                with self._classmethod_def("link", args, self_t):
                     self.write("...")
-                else:
+            else:
+                args = ["obj", "/", "**link_props"]
+                with self._classmethod_def("link", args, self_t):
                     self.write(
                         self.format_list(
                             "return cls({list})",
-                            ["obj", *lprop_assign],
+                            ["obj", "**link_props"],
                         ),
                     )
 
@@ -2535,21 +2540,29 @@ class GeneratedSchemaModule(BaseGeneratedModule):
     ) -> str:
         if reflection.is_link(prop):
             match (
-                cardinality.is_multi(),
-                cardinality.is_optional(),
+                prop.card in {"AtLeastOne", "Many"},  # is multi
+                prop.card in {"AtMostOne", "Many", "Empty"},  # is optional
                 bool(prop.pointers),
                 prop.is_computed,
             ):
-                case True, _, True, False:
+                case True, True, True, False:
                     desc = self.import_name(BASE_IMPL, "MultiLinkWithProps")
+                    pytype = f"{desc}[{narrow_type}, {broad_type}]"
+                case True, False, True, False:
+                    desc = self.import_name(
+                        BASE_IMPL, "RequiredMultiLinkWithProps"
+                    )
                     pytype = f"{desc}[{narrow_type}, {broad_type}]"
                 case True, _, True, True:
                     desc = self.import_name(
                         BASE_IMPL, "ComputedMultiLinkWithProps"
                     )
                     pytype = f"{desc}[{narrow_type}, {broad_type}]"
-                case True, _, False, False:
+                case True, True, False, False:
                     desc = self.import_name(BASE_IMPL, "MultiLink")
+                    pytype = f"{desc}[{narrow_type}]"
+                case True, False, False, False:
+                    desc = self.import_name(BASE_IMPL, "RequiredMultiLink")
                     pytype = f"{desc}[{narrow_type}]"
                 case True, _, False, True:
                     desc = self.import_name(BASE_IMPL, "ComputedMultiLink")
@@ -2580,19 +2593,31 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                     pytype = f"{desc}[{narrow_type}]"
                 case False, False, False, False:
                     pytype = narrow_type
-        elif cardinality.is_multi():
-            pytype = f"list[{broad_type}]"  # XXX: this is wrong
-        elif cardinality.is_optional():
-            if prop.is_computed:
-                desc = self.import_name(BASE_IMPL, "OptionalComputedProperty")
-            else:
-                desc = self.import_name(BASE_IMPL, "OptionalProperty")
-            pytype = f"{desc}[{narrow_type}, {broad_type}]"
-        elif prop.is_computed:
-            desc = self.import_name(BASE_IMPL, "ComputedProperty")
-            pytype = f"{desc}[{narrow_type}, {broad_type}]"
         else:
-            pytype = narrow_type
+            match (
+                cardinality.is_multi(),
+                cardinality.is_optional(),
+                prop.is_computed,
+            ):
+                case True, _, False:
+                    desc = self.import_name(BASE_IMPL, "MultiProperty")
+                    pytype = f"{desc}[{narrow_type}, {broad_type}]"
+                case True, _, True:
+                    desc = self.import_name(BASE_IMPL, "ComputedMultiProperty")
+                    pytype = f"{desc}[{narrow_type}, {broad_type}]"
+                case False, True, False:
+                    desc = self.import_name(BASE_IMPL, "OptionalProperty")
+                    pytype = f"{desc}[{narrow_type}, {broad_type}]"
+                case False, True, True:
+                    desc = self.import_name(
+                        BASE_IMPL, "OptionalComputedProperty"
+                    )
+                    pytype = f"{desc}[{narrow_type}, {broad_type}]"
+                case False, False, True:
+                    desc = self.import_name(BASE_IMPL, "ComputedProperty")
+                    pytype = f"{desc}[{narrow_type}, {broad_type}]"
+                case False, False, False:
+                    pytype = narrow_type
 
         return pytype  # pyright: ignore [reportPossiblyUnboundVariable]  # pyright match block no bueno
 

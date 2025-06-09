@@ -36,6 +36,11 @@ from . import transaction
 from .protocol import asyncio_proto
 from .protocol.protocol import InputLanguage, OutputFormat
 
+from ._internal._save import make_save_executor_constructor
+
+if typing.TYPE_CHECKING:
+    from ._internal._qbmodel._pydantic import GelModel
+
 
 __all__ = ("create_async_client", "AsyncIOClient")
 
@@ -511,6 +516,21 @@ class AsyncIOClient(base_client.BaseClient, abstract.AsyncIOExecutor):
 
     def _batch(self) -> AsyncIOBatch:
         return AsyncIOBatch(self)
+
+    async def save(self, *objs: GelModel) -> None:
+        make_executor = make_save_executor_constructor(objs)
+
+        async for tx in self._batch():
+            async with tx:
+                executor = make_executor()
+
+                for batch in executor:
+                    for query, args in batch:
+                        await tx.send_query_required_single(query, *args)
+                    ids = await tx.wait()
+                    executor.feed_ids(ids)
+
+                executor.commit()
 
     async def __aenter__(self):
         return await self.ensure_connected()

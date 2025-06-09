@@ -546,16 +546,14 @@ class Client(base_client.BaseClient, abstract.Executor):
     def save(self, *objs: GelModel) -> None:
         make_executor = make_save_executor_constructor(objs)
 
-        for tx in self.transaction():
+        for tx in self._batch():
             with tx:
                 executor = make_executor()
 
                 for batch in executor:
-                    ids = []
                     for query, args in batch:
-                        ids.append(
-                            self.query_required_single(query, **args).id
-                        )
+                        tx.send_query_required_single(query, *args)
+                    ids = tx.wait()
                     executor.feed_ids(ids)
 
                 executor.commit()

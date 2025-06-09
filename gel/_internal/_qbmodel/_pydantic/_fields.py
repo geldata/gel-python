@@ -44,8 +44,10 @@ if TYPE_CHECKING:
     from collections.abc import Sequence, Iterable
 
 
+_T_co = TypeVar("_T_co", covariant=True)
+
 _BT_co = TypeVar("_BT_co", covariant=True)
-"""Base Python type"""
+"""Base type"""
 
 _ST_co = TypeVar("_ST_co", bound=_abstract.GelPrimitiveType, covariant=True)
 """Primitive Gel type"""
@@ -58,6 +60,74 @@ _BMT_co = TypeVar("_BMT_co", bound=GelModel, covariant=True)
 
 _PT_co = TypeVar("_PT_co", bound=ProxyModel[GelModel], covariant=True)
 """Proxy model"""
+
+
+class _MultiPointer(_abstract.PointerDescriptor[_T_co, _BT_co]):
+    @classmethod
+    def _validate(
+        cls,
+        value: Any,
+        generic_args: tuple[type[Any], type[Any]],
+    ) -> Any:
+        raise NotImplementedError
+
+    @classmethod
+    def __get_pydantic_core_schema__(
+        cls,
+        source_type: Any,
+        handler: pydantic.GetCoreSchemaHandler,
+    ) -> pydantic_core.CoreSchema:
+        if _typing_inspect.is_generic_alias(source_type):
+            args = typing.get_args(source_type)
+            return core_schema.no_info_plain_validator_function(
+                functools.partial(cls._validate, generic_args=args),
+                serialization=core_schema.plain_serializer_function_ser_schema(
+                    list,
+                ),
+            )
+        else:
+            return handler.generate_schema(source_type)
+
+
+class _ComputedMultiPointer(_abstract.PointerDescriptor[_T_co, _BT_co]):
+    if TYPE_CHECKING:
+
+        @overload
+        def __get__(self, obj: None, objtype: type[Any]) -> type[_T_co]: ...
+
+        @overload
+        def __get__(
+            self, obj: object, objtype: Any = None
+        ) -> tuple[_T_co, ...]: ...
+
+        def __get__(
+            self,
+            obj: Any,
+            objtype: Any = None,
+        ) -> type[_T_co] | tuple[_T_co, ...]: ...
+
+    @classmethod
+    def __gel_resolve_dlist__(
+        cls,
+        type_args: tuple[type[Any]] | tuple[type[Any], type[Any]],
+    ) -> tuple[_BT_co, ...]:
+        return tuple[type_args[0], ...]  # type: ignore [return-value, valid-type]
+
+    @classmethod
+    def __get_pydantic_core_schema__(
+        cls,
+        source_type: Any,
+        handler: pydantic.GetCoreSchemaHandler,
+    ) -> pydantic_core.CoreSchema:
+        if _typing_inspect.is_generic_alias(source_type):
+            args = typing.get_args(source_type)
+            item_type = args[0]
+            return core_schema.tuple_schema(
+                items_schema=[handler.generate_schema(item_type)],
+                variadic_item_index=0,
+            )
+        else:
+            return handler.generate_schema(source_type)
 
 
 class Property(_abstract.PropertyDescriptor[_ST_co, _BT_co]):
@@ -202,6 +272,107 @@ OptionalComputedProperty = TypeAliasType(
 )
 
 
+class _MultiProperty(
+    _MultiPointer[_ST_co, _BT_co],
+    _abstract.PropertyDescriptor[_ST_co, _BT_co],
+):
+    if TYPE_CHECKING:
+
+        @overload
+        def __get__(self, obj: None, objtype: type[Any]) -> type[_ST_co]: ...
+
+        @overload
+        def __get__(
+            self, obj: object, objtype: Any = None
+        ) -> _dlist.DowncastingTrackedList[_ST_co, _BT_co]: ...
+
+        def __get__(
+            self,
+            obj: Any,
+            objtype: Any = None,
+        ) -> (
+            type[_ST_co] | _dlist.DowncastingTrackedList[_ST_co, _BT_co] | None
+        ): ...
+
+        def __set__(
+            self, obj: Any, value: Sequence[_ST_co | _BT_co]
+        ) -> None: ...
+
+    @classmethod
+    def __gel_resolve_dlist__(
+        cls,
+        type_args: tuple[type[Any]] | tuple[type[Any], type[Any]],
+    ) -> _dlist.DowncastingTrackedList[_ST_co, _BT_co]:
+        return _dlist.DowncastingTrackedList[type_args[0], type_args[1]]  # type: ignore [return-value, valid-type]
+
+    @classmethod
+    def _validate(
+        cls,
+        value: Any,
+        generic_args: tuple[type[Any], type[Any]],
+    ) -> _dlist.DowncastingTrackedList[_ST_co, _BT_co]:
+        lt: type[_dlist.DowncastingTrackedList[_ST_co, _BT_co]] = (
+            _dlist.DowncastingTrackedList[
+                generic_args[0],  # type: ignore [valid-type]
+                generic_args[1],  # type: ignore [valid-type]
+            ]
+        )
+        if isinstance(value, lt):
+            return value
+        elif isinstance(value, (list, _dlist.TrackedList)):
+            return lt(value)
+        else:
+            raise TypeError(
+                f"could not convert {type(value)} to {cls.__name__}"
+            )
+
+
+class _ComputedMultiProperty(
+    _ComputedMultiPointer[_ST_co, _BT_co],
+    _abstract.LinkDescriptor[_ST_co, _BT_co],
+):
+    pass
+
+
+MultiProperty = TypeAliasType(
+    "MultiProperty",
+    Annotated[
+        _MultiProperty[_ST_co, _BT_co],
+        pydantic.Field(
+            default_factory=list,
+            # Force validate call to convert the empty list
+            # to a properly typed one.
+            validate_default=True,
+        ),
+        _abstract.PointerInfo(
+            cardinality=_edgeql.Cardinality.Many,
+            kind=_edgeql.PointerKind.Property,
+        ),
+    ],
+    type_params=(_ST_co, _BT_co),
+)
+
+
+ComputedMultiProperty = TypeAliasType(
+    "ComputedMultiProperty",
+    Annotated[
+        _ComputedMultiProperty[_ST_co, _BT_co],
+        pydantic.Field(
+            default_factory=tuple,
+            init=False,
+            frozen=True,
+        ),
+        _abstract.PointerInfo(
+            computed=True,
+            readonly=True,
+            cardinality=_edgeql.Cardinality.Many,
+            kind=_edgeql.PointerKind.Property,
+        ),
+    ],
+    type_params=(_ST_co, _BT_co),
+)
+
+
 class _OptionalLink(_abstract.OptionalLinkDescriptor[_MT_co, _BMT_co]):
     @classmethod
     def __get_pydantic_core_schema__(
@@ -212,9 +383,8 @@ class _OptionalLink(_abstract.OptionalLinkDescriptor[_MT_co, _BMT_co]):
         if _typing_inspect.is_generic_alias(source_type):
             args = typing.get_args(source_type)
             if issubclass(args[0], ProxyModel):
-                return core_schema.no_info_before_validator_function(
+                return core_schema.no_info_plain_validator_function(
                     functools.partial(cls._validate, generic_args=args),
-                    schema=handler.generate_schema(args[0]),
                 )
             else:
                 return handler.generate_schema(args[0])
@@ -226,10 +396,10 @@ class _OptionalLink(_abstract.OptionalLinkDescriptor[_MT_co, _BMT_co]):
         cls,
         value: Any,
         generic_args: tuple[type[Any], type[Any]],
-    ) -> _MT_co:
+    ) -> _MT_co | None:
         mt, bmt = generic_args
-        if isinstance(value, mt):
-            return value  # type: ignore [no-any-return]
+        if value is None or isinstance(value, mt):
+            return value
         elif isinstance(value, bmt):
             return mt(value)  # type: ignore [no-any-return]
         else:
@@ -300,24 +470,64 @@ OptionalComputedLinkWithProps = TypeAliasType(
 class _UpcastingDistinctList(
     _dlist.DistinctList[_MT_co], Generic[_MT_co, _BMT_co]
 ):
-    @classmethod
-    def _check_value(cls, value: Any) -> _MT_co:
-        t = cls.type
-        if isinstance(value, t):
-            return value
-        elif issubclass(t, ProxyModel) and isinstance(value, t.__proxy_of__):
-            return t(value)  # type: ignore [return-value]
+    def _check_value(self, value: Any) -> _MT_co:
+        cls = type(self)
 
-        if issubclass(t, ProxyModel):
-            raise ValueError(
-                f"{cls!r} accepts only values of type {t.__name__} "
-                f"or {t.__proxy_of__.__name__}, got {type(value)!r}",
-            )
-        else:
-            raise ValueError(
-                f"{cls!r} accepts only values of type {t.__name__}, "
-                f"got {type(value)!r}",
-            )
+        t = cls.type
+        assert issubclass(t, ProxyModel)
+
+        if not isinstance(value, t):
+            if not isinstance(value, ProxyModel) and isinstance(
+                value, t.__proxy_of__
+            ):
+                value = t(value)
+            else:
+                raise ValueError(
+                    f"{cls!r} accepts only values of type {t.__name__} "
+                    f"or {t.__proxy_of__.__name__}, got {type(value)!r}",
+                )
+
+        if (
+            sub := self._find_proxied_obj(value)
+        ) is not None and sub is not value:
+            assert isinstance(sub, ProxyModel)
+            if sub.__linkprops__.__dict__ != value.__linkprops__.__dict__:
+                raise ValueError(
+                    f"the list already contains {value!r} with "
+                    f" a different set of link properties"
+                )
+            # Return the already present identical proxy instead of inserting
+            # another one
+            return sub  # type: ignore [return-value]
+
+        return value  # type: ignore [no-any-return]
+
+    def _find_proxied_obj(self, item: _MT_co | _BMT_co) -> _MT_co | None:
+        if isinstance(item, ProxyModel):
+            item = item._p__obj__
+
+        for sub in self._unhashables.values():
+            assert isinstance(sub, ProxyModel)
+            if sub._p__obj__ is item:
+                return sub  # type: ignore [return-value]
+
+        for sub in self._set:
+            assert isinstance(sub, ProxyModel)
+            if sub._p__obj__ is item:
+                return sub  # type: ignore [return-value]
+
+        return None
+
+    def __contains__(self, item: Any) -> bool:
+        if id(item) in self._unhashables:
+            return True
+
+        try:
+            return item in self._set
+        except TypeError:
+            pass
+
+        return self._find_proxied_obj(item) is not None
 
     if TYPE_CHECKING:
 
@@ -343,79 +553,17 @@ class _UpcastingDistinctList(
         def __iadd__(self, other: Iterable[_MT_co | _BMT_co]) -> Self: ...
 
 
-class _MultiComputedLink(_abstract.LinkDescriptor[_MT_co, _BMT_co]):
-    if TYPE_CHECKING:
-
-        @overload
-        def __get__(self, obj: None, objtype: type[Any]) -> type[_MT_co]: ...
-
-        @overload
-        def __get__(
-            self, obj: object, objtype: Any = None
-        ) -> tuple[_MT_co, ...]: ...
-
-        def __get__(
-            self,
-            obj: Any,
-            objtype: Any = None,
-        ) -> type[_MT_co] | tuple[_MT_co, ...]: ...
-
-    @classmethod
-    def __gel_resolve_dlist__(
-        cls,
-        type_args: tuple[type[Any]] | tuple[type[Any], type[Any]],
-    ) -> tuple[_BMT_co, ...]:
-        return tuple[type_args[0], ...]  # type: ignore [return-value, valid-type]
-
-    @classmethod
-    def __get_pydantic_core_schema__(
-        cls,
-        source_type: Any,
-        handler: pydantic.GetCoreSchemaHandler,
-    ) -> pydantic_core.CoreSchema:
-        if _typing_inspect.is_generic_alias(source_type):
-            args = typing.get_args(source_type)
-            item_type = args[0]
-            return core_schema.tuple_schema(
-                items_schema=[handler.generate_schema(item_type)],
-                variadic_item_index=0,
-            )
-        else:
-            return handler.generate_schema(source_type)
+class _ComputedMultiLink(
+    _ComputedMultiPointer[_MT_co, _BMT_co],
+    _abstract.LinkDescriptor[_MT_co, _BMT_co],
+):
+    pass
 
 
-class _MultiLinkBase(_abstract.LinkDescriptor[_MT_co, _BMT_co]):
-    @classmethod
-    def _validate(
-        cls,
-        value: Any,
-        generic_args: tuple[type[Any], type[Any]],
-    ) -> Any:
-        raise NotImplementedError
-
-    @classmethod
-    def __get_pydantic_core_schema__(
-        cls,
-        source_type: Any,
-        handler: pydantic.GetCoreSchemaHandler,
-    ) -> pydantic_core.CoreSchema:
-        if _typing_inspect.is_generic_alias(source_type):
-            args = typing.get_args(source_type)
-            item_type = args[0]
-            return core_schema.no_info_after_validator_function(
-                functools.partial(cls._validate, generic_args=args),
-                schema=core_schema.list_schema(
-                    items_schema=handler.generate_schema(item_type),
-                ),
-                serialization=core_schema.plain_serializer_function_ser_schema(
-                    list,
-                ),
-            )
-        else:
-            return handler.generate_schema(source_type)
-
-
-class _MultiLink(_MultiLinkBase[_MT_co, _BMT_co]):
+class _MultiLink(
+    _MultiPointer[_MT_co, _BMT_co],
+    _abstract.LinkDescriptor[_MT_co, _BMT_co],
+):
     if TYPE_CHECKING:
 
         @overload
@@ -462,7 +610,10 @@ class _MultiLink(_MultiLinkBase[_MT_co, _BMT_co]):
             )
 
 
-class _MultiLinkWithProps(_MultiLinkBase[_MT_co, _BMT_co]):
+class _MultiLinkWithProps(
+    _MultiPointer[_MT_co, _BMT_co],
+    _abstract.LinkDescriptor[_MT_co, _BMT_co],
+):
     if TYPE_CHECKING:
 
         @overload
@@ -530,10 +681,28 @@ MultiLink = TypeAliasType(
     type_params=(_MT_co,),
 )
 
+RequiredMultiLink = TypeAliasType(
+    "RequiredMultiLink",
+    Annotated[
+        _MultiLink[_MT_co, _MT_co],
+        pydantic.Field(
+            default_factory=list,
+            # Force validate call to convert the empty list
+            # to a properly typed one.
+            validate_default=True,
+        ),
+        _abstract.PointerInfo(
+            cardinality=_edgeql.Cardinality.AtLeastOne,
+            kind=_edgeql.PointerKind.Link,
+        ),
+    ],
+    type_params=(_MT_co,),
+)
+
 ComputedMultiLink = TypeAliasType(
     "ComputedMultiLink",
     Annotated[
-        _MultiComputedLink[_MT_co, _MT_co],
+        _ComputedMultiLink[_MT_co, _MT_co],
         pydantic.Field(
             default_factory=tuple,
             init=False,
@@ -568,10 +737,29 @@ MultiLinkWithProps = TypeAliasType(
     type_params=(_PT_co, _MT_co),
 )
 
+RequiredMultiLinkWithProps = TypeAliasType(
+    "RequiredMultiLinkWithProps",
+    Annotated[
+        _MultiLinkWithProps[_PT_co, _MT_co],
+        pydantic.Field(
+            default_factory=list,
+            # Force validate call to convert the empty list
+            # to a properly typed one.
+            validate_default=True,
+        ),
+        _abstract.PointerInfo(
+            has_props=True,
+            cardinality=_edgeql.Cardinality.AtLeastOne,
+            kind=_edgeql.PointerKind.Link,
+        ),
+    ],
+    type_params=(_PT_co, _MT_co),
+)
+
 ComputedMultiLinkWithProps = TypeAliasType(
     "ComputedMultiLinkWithProps",
     Annotated[
-        _MultiComputedLink[_PT_co, _MT_co],
+        _ComputedMultiLink[_PT_co, _MT_co],
         pydantic.Field(
             default_factory=tuple,
             init=False,

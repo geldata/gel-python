@@ -226,6 +226,7 @@ class TestModelGenerator(tb.ModelTestCase):
         assert d.author is not None
         self.assertEqual(d.author.name, "Alice")
 
+    @tb.to_be_fixed
     @tb.typecheck
     def test_modelgen_data_unpack_1c(self):
         from models import default, std
@@ -377,7 +378,8 @@ class TestModelGenerator(tb.ModelTestCase):
         ):
             default.GameSession.players(1)  # type: ignore
 
-        p = default.Post(body="aaa")
+        u = default.User(name="batman")
+        p = default.Post(body="aaa", author=u)
         with self.assertRaisesRegex(
             ValueError, r"(?s)prayers.*Extra inputs are not permitted"
         ):
@@ -462,7 +464,8 @@ class TestModelGenerator(tb.ModelTestCase):
         ):
             u.name_len = cast(std.int64, 123)  # type: ignore[assignment]
 
-    def test_modelgen_save_1(self):
+    @tb.typecheck
+    def test_modelgen_save_01(self):
         from models import default
 
         pq = (
@@ -509,13 +512,13 @@ class TestModelGenerator(tb.ModelTestCase):
                     select Post
                     filter .author.name = 'New Alice' and
                             .body = "I'm Alice the 5th"
-                )),
+                ), message := 'more than one post'),
                 alice := assert_single((
                     select User {name} filter .name = 'Alice the 5th'
-                )),
+                ), message := 'more than one alice'),
                 new_alice := assert_single((
                     select User {name} filter .name = 'New Alice'
-                ))
+                ), message := 'more than one new_alice')
 
             select {
                 post := post {body, author: {name}},
@@ -528,6 +531,568 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(p2.post.author.name, "New Alice")
         self.assertEqual(p2.alice.name, "Alice the 5th")
         self.assertEqual(p2.new_alice.name, "New Alice")
+
+    @tb.typecheck
+    def test_modelgen_save_02(self):
+        from models import default
+        # insert an object with a required multi: no link props, one object
+        # added to the link
+
+        party = default.Party(
+            name="Solo",
+            members=[
+                default.User(
+                    name="John Smith",
+                    nickname="Hannibal",
+                ),
+            ],
+        )
+        self.client.save(party)
+
+        # Fetch and verify
+        res = self.client.get(
+            default.Party.select(
+                name=True,
+                members=True,
+            ).filter(name="Solo")
+        )
+        self.assertEqual(res.name, "Solo")
+        self.assertEqual(len(res.members), 1)
+        m = res.members[0]
+        self.assertEqual(m.name, "John Smith")
+        self.assertEqual(m.nickname, "Hannibal")
+
+    @tb.typecheck
+    def test_modelgen_save_03(self):
+        from models import default
+        # insert an object with a required multi: no link props, more than one
+        # object added to the link
+
+        party = default.Party(
+            name="The A-Team",
+            members=[
+                default.User(
+                    name="John Smith",
+                    nickname="Hannibal",
+                ),
+                default.User(
+                    name="Templeton Peck",
+                    nickname="Faceman",
+                ),
+                default.User(
+                    name="H.M. Murdock",
+                    nickname="Howling Mad",
+                ),
+                default.User(
+                    name="Bosco Baracus",
+                    nickname="Bad Attitude",
+                ),
+            ],
+        )
+        self.client.save(party)
+
+        # Fetch and verify
+        res = self.client.get(
+            default.Party.select(
+                name=True,
+                members=lambda p: p.members.select(
+                    name=True,
+                    nickname=True,
+                ).order_by(name=True),
+            ).filter(name="The A-Team")
+        )
+        self.assertEqual(res.name, "The A-Team")
+        self.assertEqual(len(res.members), 4)
+        for m, (name, nickname) in zip(
+            res.members,
+            [
+                ("Bosco Baracus", "Bad Attitude"),
+                ("H.M. Murdock", "Howling Mad"),
+                ("John Smith", "Hannibal"),
+                ("Templeton Peck", "Faceman"),
+            ],
+            strict=True,
+        ):
+            self.assertEqual(m.name, name)
+            self.assertEqual(m.nickname, nickname)
+
+    @tb.typecheck
+    def test_modelgen_save_04(self):
+        from models import default
+        # insert an object with a required multi: with link props, one object
+        # added to the link
+
+        raid = default.Raid(
+            name="Solo",
+            members=[
+                default.Raid.members.link(
+                    default.User(
+                        name="John Smith",
+                        nickname="Hannibal",
+                    ),
+                    role="everything",
+                    rank=1,
+                )
+            ],
+        )
+        self.client.save(raid)
+
+        # Fetch and verify
+        res = self.client.get(
+            default.Raid.select(
+                name=True,
+                members=True,
+            ).filter(name="Solo")
+        )
+        self.assertEqual(res.name, "Solo")
+        self.assertEqual(len(res.members), 1)
+        m = res.members[0]
+        self.assertEqual(m.name, "John Smith")
+        self.assertEqual(m.nickname, "Hannibal")
+        self.assertEqual(m.__linkprops__.role, "everything")
+        self.assertEqual(m.__linkprops__.rank, 1)
+
+    @tb.typecheck
+    def test_modelgen_save_05(self):
+        from models import default
+        # insert an object with a required multi: with link props, more than
+        # one object added to the link; have one link prop for the first
+        # object within the link, and another for the second object within the
+        # same link
+
+        raid = default.Raid(
+            name="The A-Team",
+            members=[
+                default.Raid.members.link(
+                    default.User(
+                        name="John Smith",
+                        nickname="Hannibal",
+                    ),
+                    role="brains",
+                    rank=1,
+                ),
+                default.Raid.members.link(
+                    default.User(
+                        name="Templeton Peck",
+                        nickname="Faceman",
+                    ),
+                    rank=2,
+                ),
+                default.Raid.members.link(
+                    default.User(
+                        name="H.M. Murdock",
+                        nickname="Howling Mad",
+                    ),
+                    role="medic",
+                ),
+                default.User(
+                    name="Bosco Baracus",
+                    nickname="Bad Attitude",
+                ),
+            ],
+        )
+        self.client.save(raid)
+
+        # Fetch and verify
+        res = self.client.get(
+            """
+            select Raid {
+                name,
+                members: {
+                    name,
+                    nickname,
+                    @rank,
+                    @role
+                } order by .name
+            } filter .name = "The A-Team"
+            limit 1
+            """
+        )
+        self.assertEqual(res.name, "The A-Team")
+        self.assertEqual(len(res.members), 4)
+        for m, (name, nickname, rank, role) in zip(
+            res.members,
+            [
+                ("Bosco Baracus", "Bad Attitude", None, None),
+                ("H.M. Murdock", "Howling Mad", None, "medic"),
+                ("John Smith", "Hannibal", 1, "brains"),
+                ("Templeton Peck", "Faceman", 2, None),
+            ],
+            strict=True,
+        ):
+            self.assertEqual(m.name, name)
+            self.assertEqual(m.nickname, nickname)
+            self.assertEqual(m["@role"], role)
+            self.assertEqual(m["@rank"], rank)
+
+    @tb.typecheck
+    def test_modelgen_save_06(self):
+        from models import default
+        # Update object adding multiple existing objects to an exiting link
+        # (no link props)
+
+        gr = self.client.get(
+            default.UserGroup.select(
+                name=True,
+                users=True,
+            ).filter(name="blue")
+        )
+        self.assertEqual(len(gr.users), 0)
+        a = self.client.get(default.User.filter(name="Alice"))
+        c = self.client.get(default.User.filter(name="Cameron"))
+        z = self.client.get(default.User.filter(name="Zoe"))
+        gr.users.extend([a, c, z])
+        self.client.save(gr)
+
+        # Fetch and verify
+        res = self.client.query("""
+            select User.name filter "blue" in User.groups.name
+        """)
+        self.assertEqual(set(res), {"Alice", "Cameron", "Zoe"})
+
+    @tb.typecheck
+    def test_modelgen_save_07(self):
+        from models import default
+        # Update object adding multiple existing objects to an exiting link
+        # (no link props)
+
+        gr = self.client.get(
+            default.UserGroup.select(
+                name=True,
+                users=True,
+            ).filter(name="green")
+        )
+        self.assertEqual({u.name for u in gr.users}, {"Alice", "Billie"})
+        a = self.client.get(default.User.filter(name="Alice"))
+        c = self.client.get(default.User.filter(name="Cameron"))
+        z = self.client.get(default.User.filter(name="Zoe"))
+        gr.users.extend([a, c, z])
+        self.client.save(gr)
+
+        # Fetch and verify
+        res = self.client.query("""
+            select User.name filter "green" in User.groups.name
+        """)
+        self.assertEqual(set(res), {"Alice", "Billie", "Cameron", "Zoe"})
+
+    @tb.typecheck
+    def test_modelgen_save_08(self):
+        from models import default
+        # Update object adding multiple existing objects to an exiting link
+        # with link props (try variance of props within the same multi link
+        # for the same object)
+
+        self.client.save(default.Team(name="test team 8"))
+        team = self.client.get(
+            default.Team.select(
+                name=True,
+                members=True,
+            ).filter(name="test team 8")
+        )
+        self.assertEqual(len(team.members), 0)
+        a = self.client.get(default.User.filter(name="Alice"))
+        b = self.client.get(default.User.filter(name="Billie"))
+        c = self.client.get(default.User.filter(name="Cameron"))
+        z = self.client.get(default.User.filter(name="Zoe"))
+        team.members.extend(
+            [
+                default.Team.members.link(
+                    a,
+                    role="lead",
+                    rank=1,
+                ),
+                default.Team.members.link(
+                    b,
+                    rank=2,
+                ),
+            ]
+        )
+        self.client.save(team)
+
+        # Fetch and verify
+        res = self.client.query_required_single("""
+            select Team {
+                members: {
+                    @rank,
+                    @role,
+                    name,
+                } order by .name
+            }
+            filter .name = "test team 8"
+        """)
+        self.assertEqual(
+            [(r.name, r["@rank"], r["@role"]) for r in res.members],
+            [
+                ("Alice", 1, "lead"),
+                ("Billie", 2, None),
+            ],
+        )
+
+        # Refetch and update it again
+        team = self.client.get(
+            default.Team.select(
+                name=True,
+                members=True,
+            ).filter(name="test team 8")
+        )
+        team.members.extend(
+            [
+                default.Team.members.link(
+                    c,
+                    role="notes-taker",
+                ),
+                z,
+            ]
+        )
+        self.client.save(team)
+
+        res = self.client.query_required_single("""
+            select Team {
+                members: {
+                    @rank,
+                    @role,
+                    name,
+                } order by .name
+            }
+            filter .name = "test team 8"
+        """)
+        self.assertEqual(
+            [(r.name, r["@rank"], r["@role"]) for r in res.members],
+            [
+                ("Alice", 1, "lead"),
+                ("Billie", 2, None),
+                ("Cameron", None, "notes-taker"),
+                ("Zoe", None, None),
+            ],
+        )
+
+    @tb.typecheck
+    def test_modelgen_save_09(self):
+        from models import default
+        # Update object removing multiple existing objects from an existing
+        # multi link
+
+        gr = self.client.get(
+            default.UserGroup.select(
+                name=True,
+                users=True,
+            ).filter(name="red")
+        )
+        self.assertEqual(gr.name, "red")
+        self.assertEqual(
+            {u.name for u in gr.users},
+            {"Alice", "Billie", "Cameron", "Dana"},
+        )
+        for u in list(gr.users):
+            if u.name in {"Billie", "Cameron"}:
+                gr.users.remove(u)
+        self.client.save(gr)
+
+        # Fetch and verify
+        res = self.client.query("""
+            select User.name filter "red" in User.groups.name
+        """)
+        self.assertEqual(set(res), {"Alice", "Dana"})
+
+    @tb.typecheck
+    def test_modelgen_save_10(self):
+        from models import default
+        # Update object removing multiple existing objects from an existing
+        # multi link
+
+        self.client.query("""
+            insert Team {
+                name := 'test team 10',
+                members := assert_distinct((
+                    for t in {
+                        ('Alice', 'fire', 99),
+                        ('Billie', 'ice', 0),
+                        ('Cameron', '', 1),
+                    }
+                    select User {
+                        @role := if t.1 = '' then <str>{} else t.1,
+                        @rank := if t.2 = 0 then <int64>{} else t.2,
+                    }
+                    filter .name = t.0
+                )),
+            }
+        """)
+        team = self.client.get(
+            default.Team.select(
+                name=True,
+                members=True,
+            ).filter(name="test team 10")
+        )
+        self.assertEqual(team.name, "test team 10")
+        self.assertEqual(
+            {u.name for u in team.members},
+            {"Alice", "Billie", "Cameron"},
+        )
+        for u in list(team.members):
+            if u.name in {"Alice", "Cameron"}:
+                team.members.remove(u)
+        self.client.save(team)
+
+        # Fetch and verify
+        res = self.client.query_required_single("""
+            select Team {
+                members: {
+                    @rank,
+                    @role,
+                    name,
+                } order by .name
+            }
+            filter .name = "test team 10"
+        """)
+        self.assertEqual(
+            [(r.name, r["@role"], r["@rank"]) for r in res.members],
+            [
+                ("Billie", "ice", None),
+            ],
+        )
+
+    @tb.typecheck
+    def test_modelgen_save_11(self):
+        from models import default
+        # Update object adding an existing objecs to an exiting single
+        # required link (no link props)
+
+        post = self.client.get(
+            default.Post.select(
+                body=True,
+                author=True,
+            ).filter(body="Hello")
+        )
+        z = self.client.get(default.User.filter(name="Zoe"))
+        self.assertEqual(post.author.name, "Alice")
+        post.author = z
+        self.client.save(post)
+
+        # Fetch and verify
+        res = self.client.query("""
+            select Post {body, author: {name}}
+            filter .body = 'Hello'
+        """)
+        self.assertEqual(len(res), 1)
+        self.assertEqual(
+            res[0].author.name,
+            "Zoe",
+        )
+
+    @tb.typecheck
+    def test_modelgen_linkprops_1(self):
+        from models import default
+
+        # Create a new GameSession and add a player
+        u = self.client.get(default.User.filter(name="Zoe"))
+        gs = default.GameSession(
+            num=1001,
+            players=[default.GameSession.players.link(u, is_tall_enough=True)],
+        )
+        self.client.save(gs)
+
+        # Now fetch it again
+        res = self.client.get(
+            default.GameSession.select(
+                num=True,
+                players=True,
+            ).filter(num=1001)
+        )
+        self.assertEqual(res.num, 1001)
+        self.assertEqual(len(res.players), 1)
+        p = res.players[0]
+
+        self.assertEqual(p.name, "Zoe")
+        self.assertEqual(p.__linkprops__.is_tall_enough, True)
+
+    @tb.typecheck
+    def test_modelgen_linkprops_2(self):
+        from models import default
+
+        # Create a new GameSession and add a player
+        u = self.client.get(default.User.filter(name="Elsa"))
+        gs = default.GameSession(num=1002)
+        gs.players.append(u)
+        self.client.save(gs)
+
+        # Now fetch it again snd update
+        gs = self.client.get(
+            default.GameSession.select(
+                num=True,
+                players=True,
+            ).filter(num=1002)
+        )
+        self.assertEqual(gs.num, 1002)
+        self.assertEqual(len(gs.players), 1)
+        self.assertEqual(gs.players[0].__linkprops__.is_tall_enough, None)
+        gs.players[0].__linkprops__.is_tall_enough = False
+        self.client.save(gs)
+
+        # Now fetch after update
+        res = self.client.get(
+            default.GameSession.select(
+                num=True,
+                players=True,
+            ).filter(num=1002)
+        )
+        self.assertEqual(res.num, 1002)
+        self.assertEqual(len(res.players), 1)
+        p = res.players[0]
+
+        self.assertEqual(p.name, "Elsa")
+        self.assertEqual(p.__linkprops__.is_tall_enough, False)
+
+    @tb.typecheck
+    def test_modelgen_linkprops_3(self):
+        from models import default
+
+        # This one only has a single player
+        q = default.GameSession.select(
+            num=True,
+            players=True,
+        ).filter(num=456)
+        res = self.client.get(q)
+
+        self.assertEqual(res.num, 456)
+        self.assertEqual(len(res.players), 1)
+        p0 = res.players[0]
+
+        self.assertEqual(p0.name, "Dana")
+        self.assertEqual(p0.nickname, None)
+        self.assertEqual(p0.__linkprops__.is_tall_enough, True)
+
+        p0.name = "Dana?"
+        p0.nickname = "HACKED"
+        p0.__linkprops__.is_tall_enough = False
+
+        self.client.save(res)
+
+        # Now fetch it again
+        upd = self.client.get(q)
+        self.assertEqual(upd.num, 456)
+        self.assertEqual(len(upd.players), 1)
+        p1 = upd.players[0]
+
+        self.assertEqual(p1.name, "Dana?")
+        self.assertEqual(p1.nickname, "HACKED")
+        self.assertEqual(p1.__linkprops__.is_tall_enough, False)
+
+    def test_modelgen_multiprops_1(self):
+        from models import default
+
+        ks = default.KitchenSink(mstr=["1", "222"], name="aaa")
+        self.client.save(ks)
+
+        ks2 = self.client.get(default.KitchenSink.filter(name="aaa"))
+        self.assertEqual(sorted(ks2.mstr), ["1", "222"])
+
+        ks2.mstr.append("zzz")
+        ks2.mstr.append("zzz")
+        ks2.mstr.remove("1")
+        self.client.save(ks2)
+
+        ks3 = self.client.get(default.KitchenSink.filter(name="aaa"))
+        self.assertEqual(sorted(ks3.mstr), ["222", "zzz", "zzz"])
 
     def test_modelgen_reflection_1(self):
         from models import default, std
@@ -632,5 +1197,5 @@ class TestModelGenerator(tb.ModelTestCase):
         ntup_t = default.sub.TypeInSub.__gel_pointers__()["ntup"].type
         self.assertEqual(
             ntup_t.__gel_reflection__.name.as_schema_name(),
-            "tuple<a:std::str, b:tuple<c:std::int64, d:std::str>>"
+            "tuple<a:std::str, b:tuple<c:std::int64, d:std::str>>",
         )

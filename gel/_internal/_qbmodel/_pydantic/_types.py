@@ -164,9 +164,8 @@ class PyTypeScalar(_abstract.PyTypeScalar[_PT_co]):
         if schema is not None:
             return schema()
         elif issubclass(cls.type, CustomType):
-            return core_schema.no_info_after_validator_function(
+            return core_schema.no_info_plain_validator_function(
                 cls.type,
-                handler(cls.type),
             )
         else:
             return core_schema.invalid_schema()

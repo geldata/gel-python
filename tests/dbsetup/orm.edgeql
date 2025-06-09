@@ -25,6 +25,10 @@ insert GameSession {
     num := 456,
     players := (select User filter .name in {'Dana'}),
 };
+update GameSession
+set {
+    players := .players{@is_tall_enough := not contains('AEIOU', .name[0])}
+};
 
 insert Post {
     author := assert_single((select User filter .name = 'Alice')),

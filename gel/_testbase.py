@@ -706,7 +706,11 @@ class ModelTestCase(SyncQueryTestCase):
 
         cls.orm_debug = os.environ.get("GEL_PYTHON_TEST_ORM") in {"1", "true"}
 
-        cls.tmp_model_dir = tempfile.TemporaryDirectory()
+        td_kwargs = {}
+        if sys.version_info >= (3, 12):
+            td_kwargs["delete"] = not cls.orm_debug
+
+        cls.tmp_model_dir = tempfile.TemporaryDirectory(**td_kwargs)
         if cls.orm_debug:
             print(cls.tmp_model_dir.name)
 
@@ -929,7 +933,7 @@ class TestModel(unittest.TestCase):
         else "       client: gel.Client = gel.create_client()"
     }
 
-    {"async " if is_async else ""}def test_model(self) -> None:
+    {"async " if is_async else ""}def {wrapped.__name__}(self) -> None:
 {textwrap.indent(dedented_body, "    " * 2)}
     """
 
