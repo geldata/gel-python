@@ -202,7 +202,7 @@ class AbstractTrackedList(
     __hash__ = None  # type: ignore [assignment]
 
     def __eq__(self, other: object) -> bool:
-        if isinstance(other, TrackedList):
+        if isinstance(other, AbstractTrackedList):
             return self._items == other._items
         elif isinstance(other, list):
             return self._items == other
@@ -210,7 +210,7 @@ class AbstractTrackedList(
             return NotImplemented
 
     def __lt__(self, other: Any) -> bool:
-        if isinstance(other, TrackedList):
+        if isinstance(other, AbstractTrackedList):
             return self._items < other._items
         elif isinstance(other, list):
             return self._items < other
