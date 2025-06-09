@@ -2165,9 +2165,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         name = type_name.name
 
         self_t = self.import_name("typing_extensions", "Self")
-        classvar_t = self.import_name("typing", "ClassVar")
         proxymodel_t = self.import_name(BASE_IMPL, "ProxyModel")
-        prop_desc_t = self.import_name(BASE_IMPL, "LinkPropsDescriptor")
 
         if target_aspect is None:
             target_aspect = self.current_aspect
@@ -2240,7 +2238,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                     lprop_line = f"{lprop.name}: {pytype} | None = None"
                     lprops.append(lprop_line)
 
-            self.write(f"__linkprops__: __lprops__")
+            self.write("__linkprops__: __lprops__")
             self.write()
             if is_forward_decl:
                 args = [f"obj: {target}", "/", "*", *lprops]
@@ -2252,7 +2250,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                 # tracking and our's own tracking would assume that argument
                 # defaults (Nones in this case) were explicitly set by the user
                 # leading to inefficient queries in save().
-                args = [f"obj", "/", "**link_props"]
+                args = ["obj", "/", "**link_props"]
                 with self._method_def("__init__", args):
                     obj = self.import_name("builtins", "object")
                     self.write(f"{proxymodel_t}.__init__(self, obj)")
@@ -2269,7 +2267,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                 with self._classmethod_def("link", args, self_t):
                     self.write("...")
             else:
-                args = [f"obj", "/", "**link_props"]
+                args = ["obj", "/", "**link_props"]
                 with self._classmethod_def("link", args, self_t):
                     self.write(
                         self.format_list(

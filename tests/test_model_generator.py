@@ -973,7 +973,11 @@ class TestModelGenerator(tb.ModelTestCase):
             select Post {body, author: {name}}
             filter .body = 'Hello'
         """)
-        self.assertEqual(post.author.name, "Zoe")
+        self.assertEqual(len(res), 1)
+        self.assertEqual(
+            res[0].author.name,
+            "Zoe",
+        )
 
     @tb.typecheck
     def test_modelgen_linkprops_1(self):
