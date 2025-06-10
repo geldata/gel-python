@@ -21,6 +21,8 @@ import graphlib
 import keyword
 import logging
 import operator
+import pathlib
+import tempfile
 import textwrap
 
 from collections import defaultdict
@@ -32,6 +34,7 @@ from gel import abstract
 from gel import _version as _gel_py_ver
 from gel._internal import _cache
 from gel._internal import _dataclass_extras
+from gel._internal import _dirsync
 from gel._internal import _reflection as reflection
 from gel._internal._qbmodel import _abstract as _qbmodel
 from gel._internal._reflection._enums import SchemaPart
@@ -41,7 +44,6 @@ from .._module import ImportTime, CodeSection, GeneratedModule
 
 if TYPE_CHECKING:
     import io
-    import pathlib
 
     from collections.abc import (
         Callable,
@@ -104,23 +106,29 @@ class PydanticModelsGenerator(AbstractCodeGenerator):
             self.abort(61)
 
         models_root = self._project_dir / "models"
+        tmp_models_root = tempfile.TemporaryDirectory(
+            prefix=".~tmp.models.",
+            dir=self._project_dir,
+        )
+        file_state = self._get_last_state()
 
-        with self._client:
+        with tmp_models_root, self._client:
             db_state = reflection.fetch_branch_state(self._client)
-            file_state = self._get_last_state()
             std_schema: Schema | None = None
+
+            std_gen = SchemaGenerator(
+                self._client,
+                reflection.SchemaPart.STD,
+            )
+
+            outdir = pathlib.Path(tmp_models_root.name)
 
             if (
                 file_state is None
                 or file_state.server_version != db_state.server_version
                 or self._no_cache
             ):
-                std_gen = SchemaGenerator(
-                    self._client,
-                    reflection.SchemaPart.STD,
-                    models_root,
-                )
-                std_schema = std_gen.run()
+                std_schema, std_manifest = std_gen.run(outdir)
                 self._save_std_schema_cache(
                     std_schema, db_state.server_version
                 )
@@ -128,6 +136,7 @@ class PydanticModelsGenerator(AbstractCodeGenerator):
                 std_schema = self._load_std_schema_cache(
                     db_state.server_version,
                 )
+                std_manifest = std_gen.dry_run_manifest()
 
             if (
                 file_state is None
@@ -137,12 +146,13 @@ class PydanticModelsGenerator(AbstractCodeGenerator):
                 usr_gen = SchemaGenerator(
                     self._client,
                     reflection.SchemaPart.USER,
-                    models_root,
                     std_schema=std_schema,
                 )
-                usr_gen.run()
+                usr_gen.run(outdir)
 
-            self._write_state(db_state)
+            self._write_state(db_state, outdir)
+
+            _dirsync.dirsync(outdir, models_root, keep=std_manifest)
 
         self.print_msg(f"{C.GREEN}{C.BOLD}Done.{C.ENDC}")
 
@@ -201,8 +211,12 @@ class PydanticModelsGenerator(AbstractCodeGenerator):
             top_migration=top_migration,
         )
 
-    def _write_state(self, state: reflection.BranchState) -> None:
-        state_json = self._project_dir / "models" / "_state.json"
+    def _write_state(
+        self,
+        state: reflection.BranchState,
+        outdir: pathlib.Path,
+    ) -> None:
+        state_json = outdir / "_state.json"
         try:
             with open(state_json, mode="w", encoding="utf8") as f:
                 json.dump(dataclasses.asdict(state), f)
@@ -215,13 +229,11 @@ class SchemaGenerator:
         self,
         client: abstract.ReadOnlyExecutor,
         schema_part: reflection.SchemaPart,
-        outdir: pathlib.Path,
         std_schema: Schema | None = None,
     ) -> None:
         self._client = client
         self._schema_part = schema_part
         self._basemodule = "models"
-        self._outdir = outdir
         self._modules: dict[reflection.SchemaPath, IntrospectedModule] = {}
         self._std_modules: list[reflection.SchemaPath] = []
         self._types: Mapping[str, reflection.AnyType] = {}
@@ -236,10 +248,38 @@ class SchemaGenerator:
                 "must pass std_schema when reflecting user schemas"
             )
 
-    def run(self) -> Schema:
-        schema = self.introspect_schema()
+    def dry_run_manifest(self) -> set[pathlib.Path]:
+        part = self._schema_part
+        std_modules: dict[reflection.SchemaPath, bool] = dict.fromkeys(
+            (
+                reflection.parse_name(mod)
+                for mod in reflection.fetch_modules(self._client, part)
+            ),
+            False,
+        )
 
-        self._generate_common_types()
+        for mod in list(std_modules):
+            if mod.parent:
+                std_modules[mod.parent] = True
+
+        files = set()
+        for mod, has_submodules in std_modules.items():
+            for aspect in ModuleAspect.__members__.values():
+                modpath = get_modpath(mod, aspect)
+                as_pkg = mod_is_package(modpath, part) or has_submodules
+                files.add(mod_filename(modpath, as_pkg=as_pkg))
+
+        common_modpath = get_common_types_modpath(self._schema_part)
+        as_pkg = mod_is_package(common_modpath, part)
+        files.add(mod_filename(common_modpath, as_pkg=as_pkg))
+
+        return files
+
+    def run(self, outdir: pathlib.Path) -> tuple[Schema, set[pathlib.Path]]:
+        schema = self.introspect_schema()
+        written: set[pathlib.Path] = set()
+
+        written.update(self._generate_common_types(outdir))
         modules: dict[reflection.SchemaPath, GeneratedSchemaModule] = {}
         order = sorted(
             self._modules.items(),
@@ -269,7 +309,7 @@ class SchemaGenerator:
                     and v.has_content()
                 ]
             )
-            module.write_files(self._outdir)
+            written.update(module.write_files(outdir))
             modules[modname] = module
 
         all_modules = list(self._modules)
@@ -287,9 +327,9 @@ class SchemaGenerator:
         default_module = modules.get(reflection.SchemaPath("default"))
         if default_module is not None:
             module.reexport_module(default_module)
-        module.write_files(self._outdir)
+        written.update(module.write_files(outdir))
 
-        return schema
+        return schema, written
 
     def introspect_schema(self) -> Schema:
         for mod in reflection.fetch_modules(self._client, self._schema_part):
@@ -350,10 +390,10 @@ class SchemaGenerator:
     def get_comment_preamble(self) -> str:
         return COMMENT
 
-    def _generate_common_types(self) -> None:
-        mod = reflection.SchemaPath("__types__")
-        if self._schema_part is reflection.SchemaPart.STD:
-            mod = reflection.SchemaPath("std") / mod
+    def _generate_common_types(
+        self, outdir: pathlib.Path
+    ) -> set[pathlib.Path]:
+        mod = get_common_types_modpath(self._schema_part)
         module = GeneratedGlobalModule(
             mod,
             all_types=self._types,
@@ -363,7 +403,7 @@ class SchemaGenerator:
             schema_part=self._schema_part,
         )
         module.process(self._named_tuples)
-        module.write_files(self._outdir)
+        return module.write_files(outdir)
 
 
 class ModuleAspect(enum.Enum):
@@ -391,6 +431,43 @@ def get_modpath(
         modpath = reflection.SchemaPath("__variants__") / "__late__" / modpath
 
     return modpath
+
+
+def get_common_types_modpath(
+    schema_part: reflection.SchemaPart,
+) -> reflection.SchemaPath:
+    mod = reflection.SchemaPath("__types__")
+    if schema_part is reflection.SchemaPart.STD:
+        mod = reflection.SchemaPath("std") / mod
+    return mod
+
+
+def mod_is_package(
+    mod: reflection.SchemaPath,
+    schema_part: reflection.SchemaPart,
+) -> bool:
+    return not mod.parts or (
+        schema_part is reflection.SchemaPart.STD and len(mod.parts) == 1
+    )
+
+
+def mod_filename(
+    modpath: reflection.SchemaPath,
+    *,
+    as_pkg: bool,
+) -> pathlib.Path:
+    if as_pkg:
+        # This is a prefix in another module, thus it is part of a nested
+        # module structure.
+        dirpath = modpath
+        filename = "__init__.py"
+    else:
+        # This is a leaf module, so we just need to create a corresponding
+        # <mod>.py file.
+        dirpath = modpath.parent
+        filename = f"{modpath.name}.py"
+
+    return pathlib.Path(dirpath) / filename
 
 
 def _map_name(
@@ -480,14 +557,7 @@ class BaseGeneratedModule:
         mod: reflection.SchemaPath,
         schema_part: reflection.SchemaPart,
     ) -> bool:
-        return (
-            not mod.parts
-            or bool(self._submodules)
-            or (
-                schema_part is reflection.SchemaPart.STD
-                and len(mod.parts) == 1
-            )
-        )
+        return mod_is_package(mod, schema_part) or bool(self._submodules)
 
     @property
     def py_file(self) -> GeneratedModule:
@@ -539,24 +609,14 @@ class BaseGeneratedModule:
         *,
         as_pkg: bool,
     ) -> Generator[io.TextIOWrapper, None, None]:
-        if as_pkg:
-            # This is a prefix in another module, thus it is part of a nested
-            # module structure.
-            dirpath = modpath
-            filename = "__init__.py"
-        else:
-            # This is a leaf module, so we just need to create a corresponding
-            # <mod>.py file.
-            dirpath = modpath.parent
-            filename = f"{modpath.name}.py"
-
+        mod_fname = mod_filename(modpath, as_pkg=as_pkg)
         # Along the dirpath we need to ensure that all packages are created
         self._init_dir(path)
-        for el in dirpath.parts:
+        for el in mod_fname.parent.parts:
             path /= el
             self._init_dir(path)
 
-        with open(path / filename, "w", encoding="utf8") as f:
+        with open(path / mod_fname.name, "w", encoding="utf8") as f:
             try:
                 yield f
             finally:
@@ -580,7 +640,8 @@ class BaseGeneratedModule:
         # ensure `path` directory contains `__init__.py`
         (path / "__init__.py").touch()
 
-    def write_files(self, path: pathlib.Path) -> None:
+    def write_files(self, path: pathlib.Path) -> set[pathlib.Path]:
+        written: set[pathlib.Path] = set()
         for aspect, py_file in self.py_files.items():
             if not py_file.has_content() and (
                 self._schema_part is not reflection.SchemaPart.STD
@@ -594,6 +655,9 @@ class BaseGeneratedModule:
                 as_pkg=self.is_package,
             ) as f:
                 py_file.output(f)
+                written.add(pathlib.Path(f.name).relative_to(path))
+
+        return written
 
     def write_type_reflection(
         self,
