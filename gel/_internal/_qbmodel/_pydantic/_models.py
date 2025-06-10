@@ -134,8 +134,10 @@ class GelModelMeta(_model_construction.ModelMetaclass, _abstract.GelModelMeta):
             super().__setattr__(name, value)
 
     # Splat qb protocol
-    def __iter__(cls) -> Iterator[_qb.PathAlias]:  # noqa: N805
-        return iter(cls.__gel_eager_pointers__)
+    def __iter__(cls) -> Iterator[_qb.ShapeElement]:  # noqa: N805
+        cls = cast("type[GelModel]", cls)
+        source = cls.__gel_reflection__.name
+        return iter((_qb.ShapeElement.splat(source),))
 
     @_lazyprop.LazyProperty[tuple[_qb.PathAlias, ...]]
     def __gel_eager_pointers__(cls) -> tuple[_qb.PathAlias, ...]:  # noqa: N805

@@ -2188,6 +2188,8 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         builtin_str = self.import_name("builtins", "str", directly=False)
         callable_ = self.import_name("collections.abc", "Callable")
         self_ = self.import_name("typing_extensions", "Self")
+        literal_ = self.import_name("typing", "Literal")
+        literal_star = f'{literal_}["*"]'
         type_ = self.import_name("builtins", "type")
         tuple_ = self.import_name("builtins", "tuple")
         type_self = f"{type_}[{self_}]"
@@ -2199,7 +2201,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             "/",
             f"*exprs: {callable_}[[{type_self}], {type_}[{std_bool}]]",
         ]
-        select_args = ["/", f"*exprs: {pathalias}"]
+        select_args = ["/", f"*exprs: {pathalias} | {literal_star}"]
         update_args = []
         direction = (
             f"{self.import_name(BASE_IMPL, 'Direction')} | {builtin_str}"

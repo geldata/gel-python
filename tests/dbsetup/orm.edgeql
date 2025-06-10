@@ -8,13 +8,16 @@ insert User {name := 'Zoe'};
 insert UserGroup {
     name := 'red',
     users := (select User filter .name not in {'Elsa', 'Zoe'}),
+    mascot := 'dragon',
 };
 insert UserGroup {
     name := 'green',
     users := (select User filter .name in {'Alice', 'Billie'}),
+    mascot := 'wombat',
 };
 insert UserGroup {
     name := 'blue',
+    mascot := 'dolphin',
 };
 
 insert GameSession {
