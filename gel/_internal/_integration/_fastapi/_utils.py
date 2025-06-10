@@ -48,9 +48,6 @@ class Handler(Protocol[T_contra]):
     def __call__(self, result: T_contra, *args: Any, **kwargs: Any) -> Any: ...
 
 
-H = TypeVar("H", bound=Handler[Any])
-
-
 class Hook(Generic[T]):
     _key: str
     _hook_name: str
@@ -72,7 +69,12 @@ class Hook(Generic[T]):
     ) -> Self | HookInstance[T, S]:
         if instance is None:
             return self
+        return self._get(instance)
 
+    def __set__(self, instance: S, value: Handler[T]) -> None:
+        self._get(instance)(value)
+
+    def _get(self, instance: S) -> HookInstance[T, S]:
         prop = f"_{self._hook_name}"
         rv: Optional[HookInstance[T, S]] = getattr(instance, prop, None)
         if rv is None:
@@ -147,12 +149,12 @@ class HookInstance(Generic[T, S]):
         response_model_exclude_defaults: bool = ...,
         response_model_exclude_none: bool = ...,
         response_class: type[fastapi.Response] = ...,
-    ) -> Callable[[H], H]: ...
+    ) -> Callable[[Handler[T]], Handler[T]]: ...
 
     @overload
     def __call__(
         self,
-        f: H,
+        f: Handler[T],
         *,
         response_model: Any = ...,
         status_code: Optional[int] = ...,
@@ -163,11 +165,11 @@ class HookInstance(Generic[T, S]):
         response_model_exclude_defaults: bool = ...,
         response_model_exclude_none: bool = ...,
         response_class: type[fastapi.Response] = ...,
-    ) -> H: ...
+    ) -> Handler[T]: ...
 
     def __call__(
         self,
-        f: Optional[H] = None,
+        f: Optional[Handler[T]] = None,
         *,
         response_model: Any = Default(None),  # noqa: B008
         status_code: Optional[int] = None,
@@ -180,7 +182,7 @@ class HookInstance(Generic[T, S]):
         response_class: type[fastapi.Response] = Default(  # noqa: B008
             responses.JSONResponse
         ),
-    ) -> H | Callable[[H], H]:
+    ) -> Handler[T] | Callable[[Handler[T]], Handler[T]]:
         if self._subject.installed:
             raise ValueError("cannot set a hook handler after installation")
         if self._is_set:
@@ -189,7 +191,7 @@ class HookInstance(Generic[T, S]):
                 stacklevel=2,
             )
 
-        def wrapper(func: H) -> H:
+        def wrapper(func: Handler[T]) -> Handler[T]:
             dependant = dep_utils.get_dependant(
                 path=self._path,
                 name=self._name,
@@ -342,6 +344,12 @@ class Config(Generic[T]):
     ) -> Self | ConfigInstance[T, S]:
         if instance is None:
             return self
+        return self._get(instance)
+
+    def __set__(self, instance: S, value: T) -> None:
+        self._get(instance)(value)
+
+    def _get(self, instance: S) -> ConfigInstance[T, S]:
         prop = f"_{self._config_name}"
         rv: Optional[ConfigInstance[T, S]] = getattr(instance, prop, None)
         if rv is None:
