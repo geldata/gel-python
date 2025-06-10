@@ -43,10 +43,6 @@ class Extension:
 
     def __init__(self, lifespan: GelLifespan) -> None:
         self._lifespan = lifespan
-        self._post_init()
-
-    def _post_init(self) -> None:
-        pass
 
     async def on_startup(self, app: fastapi.FastAPI) -> None:
         self.installed = True
@@ -103,9 +99,7 @@ class GelLifespan:
                 ]
             )
         ):
-            from ._auth import GelAuth  # noqa: PLC0415
-
-            self._auth = GelAuth(self)
+            _ = self.auth
 
         for ext in [self._auth]:
             if ext is not None:
