@@ -343,6 +343,20 @@ class TestModelGenerator(tb.ModelTestCase):
         with self.assertRaisesRegex(AttributeError, r".body. is not set"):
             d.body
 
+    @tb.xfail  # decoder currently unable to cope with polymorphic results
+    @tb.typecheck
+    def test_modelgen_data_unpack_polymorphic(self):
+        from models import default
+
+        q = default.Named.select(
+            "*",
+            *default.UserGroup,
+        )
+
+        for item in self.client.query(q):
+            if isinstance(item, default.UserGroup):
+                self.assertIsNotNone(item.mascot)
+
     @tb.typecheck
     def test_modelgen_assert_single(self):
         from models import default
@@ -604,10 +618,9 @@ class TestModelGenerator(tb.ModelTestCase):
         # Fetch and verify
         res = self.client.get(
             default.Party.select(
-                name=True,
+                "*",
                 members=lambda p: p.members.select(
-                    name=True,
-                    nickname=True,
+                    "*"
                 ).order_by(name=True),
             ).filter(name="The A-Team")
         )

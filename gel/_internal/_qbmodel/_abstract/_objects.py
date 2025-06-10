@@ -5,7 +5,7 @@
 """Base object types used to implement class-based query builders"""
 
 from __future__ import annotations
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar, Literal
 from typing_extensions import Self
 
 import weakref
@@ -13,7 +13,7 @@ import weakref
 from gel._internal import _qb
 from gel._internal._hybridmethod import hybridmethod
 
-from ._base import GelObjectType, GelTypeMeta
+from ._base import GelObjectType, GelObjectTypeMeta
 from ._expressions import (
     add_filter,
     add_limit,
@@ -32,7 +32,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
 
-class GelModelMeta(GelTypeMeta):
+class GelModelMeta(GelObjectTypeMeta):
     __gel_class_registry__: ClassVar[
         weakref.WeakValueDictionary[uuid.UUID, type[Any]]
     ] = weakref.WeakValueDictionary()
@@ -118,7 +118,7 @@ class GelModel(
         def select(
             cls,
             /,
-            *elements: _qb.PathAlias,
+            *elements: _qb.PathAlias | Literal["*"],
             __operand__: _qb.ExprAlias | None = None,
             **kwargs: Any,
         ) -> type[Self]:

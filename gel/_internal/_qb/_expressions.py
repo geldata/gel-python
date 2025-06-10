@@ -9,6 +9,7 @@ from __future__ import annotations
 from typing import (
     TYPE_CHECKING,
 )
+from typing_extensions import Self
 
 import itertools
 import textwrap
@@ -507,7 +508,8 @@ class InsertStmt(Stmt, TypedExpr):
     def _edgeql(self, ctx: ScopeContext) -> str:
         text = f"{self.stmt} {self.type.as_schema_name()}"
         if self.shape is not None:
-            text = f"{text} {_render_shape(self.shape, None, ctx)}"
+            source = SchemaSet(type_=self.type)
+            text = f"{text} {_render_shape(self.shape, source, ctx)}"
         return text
 
 
@@ -574,9 +576,7 @@ class SelectStmt(IteratorStmt):
             elif isinstance(expr, SchemaSet):
                 expr = ShapeOp(
                     iter_expr=expr,
-                    shape=Shape(
-                        star_splat=True,
-                    ),
+                    shape=Shape.splat(source=expr.type),
                 )
                 kwargs["body_scope"] = expr.scope
             expr = SelectStmt(iter_expr=expr, **kwargs)  # type: ignore [arg-type]
@@ -682,43 +682,85 @@ class ForStmt(IteratorExpr):
         )
 
 
+class Splat(_strenum.StrEnum):
+    STAR = "*"
+    DOUBLESTAR = "**"
+
+
 @dataclass(kw_only=True, frozen=True)
-class Shape(Node):
-    elements: dict[str, Expr] = field(default_factory=dict)
-    star_splat: bool = False
-    doublestar_splat: bool = False
+class ShapeElement(Node):
+    name: str | Splat
+    origin: _reflection.SchemaPath
+    expr: Expr | None = None
 
     def subnodes(self) -> Iterable[Node]:
-        return self.elements.values()
+        if self.expr is not None:
+            return (self.expr,)
+        else:
+            return ()
+
+    @classmethod
+    def splat(
+        cls,
+        source: _reflection.SchemaPath,
+        kind: Splat = Splat.STAR,
+    ) -> Self:
+        return cls(name=kind, origin=source)
+
+
+@dataclass(kw_only=True, frozen=True)
+class Shape(Node):
+    elements: list[ShapeElement]
+
+    def subnodes(self) -> Iterable[Node]:
+        return self.elements
+
+    @classmethod
+    def splat(
+        cls,
+        source: _reflection.SchemaPath,
+        kind: Splat = Splat.STAR,
+    ) -> Self:
+        return cls(elements=[ShapeElement.splat(source=source, kind=kind)])
 
 
 def _render_shape(
     shape: Shape,
-    source: Expr | None,
+    source: Expr,
     ctx: ScopeContext | None,
 ) -> str:
     els = []
-    if shape.star_splat:
-        els.append("*")
-    if shape.doublestar_splat:
-        els.append("**")
-    for n, el in shape.elements.items():
-        if (
-            source is not None
-            and isinstance(el, Path)
-            and isinstance(el.source, (SchemaSet, PathPrefix))
-            and el.source.type == source.type
-            and el.name == n
-        ):
-            el_text = _edgeql.quote_ident(n)
+    for el in shape.elements:
+        if isinstance(el.name, Splat):
+            if source.type != el.origin:
+                el_source = el.origin.as_quoted_schema_name()
+                el_text = f"[IS {el_source}].{el.name}"
+            else:
+                el_text = str(el.name)
         else:
-            assign = InfixOp(
-                lexpr=Ident(name=n, type_=el.type),
-                op=_edgeql.Token.ASSIGN,
-                rexpr=el,
-                type_=el.type,
-            )
-            el_text = edgeql(assign, ctx=ctx)
+            el_name = _edgeql.quote_ident(el.name)
+            el_expr = el.expr
+            if el_expr is None:
+                if source.type != el.origin:
+                    el_source = el.origin.as_quoted_schema_name()
+                    el_text = f"[IS {el_source}].{el_name}"
+                else:
+                    el_text = el_name
+            elif (
+                isinstance(el_expr, Path)
+                and isinstance(el_expr.source, (SchemaSet, PathPrefix))
+                and el_expr.source.type == source.type
+                and el_expr.name == el.name
+            ):
+                el_text = _edgeql.quote_ident(el.name)
+            else:
+                assign = InfixOp(
+                    lexpr=Ident(name=el.name, type_=el_expr.type),
+                    op=_edgeql.Token.ASSIGN,
+                    rexpr=el_expr,
+                    type_=el_expr.type,
+                )
+                el_text = edgeql(assign, ctx=ctx)
         els.append(f"{el_text},")
     shape_text = "{\n" + textwrap.indent("\n".join(els), "  ") + "\n}"
     return shape_text
