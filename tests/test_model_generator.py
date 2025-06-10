@@ -204,7 +204,7 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(d.author.name, "Alice")
 
     @unittest.skipIf(
-        sys.version_info <= (3, 10),
+        sys.version_info < (3, 11),
         "dispatch_overload currently broken under Python 3.10",
     )
     @tb.typecheck
