@@ -71,6 +71,7 @@ else:
 
 
 if TYPE_CHECKING:
+
     class GelObjectTypeMeta(GelTypeMeta):
         # Splat qb protocol
         def __iter__(cls) -> Iterator[_qb.ShapeElement]:  # noqa: N805
