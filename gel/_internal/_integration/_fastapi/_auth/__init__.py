@@ -3,7 +3,7 @@
 # SPDX-FileCopyrightText: Copyright Gel Data Inc. and the contributors.
 
 from __future__ import annotations
-from typing import cast, Optional, TYPE_CHECKING
+from typing import cast, Optional, ParamSpec, TYPE_CHECKING
 
 import contextlib
 import datetime
@@ -27,6 +27,9 @@ if TYPE_CHECKING:
     from .builtin_ui import BuiltinUI
 
 
+C = ParamSpec("C")
+
+
 class Installable:
     installed: bool = False
 
@@ -38,15 +41,15 @@ class _NoopResponse(fastapi.Response):
     pass
 
 
-class GelAuth(client_mod.Extension):
+class GelAuth(client_mod.Extension[C]):
     auth_path_prefix = utils.Config("/auth")
     auth_cookie_name = utils.Config("gel_auth_token")
     verifier_cookie_name = utils.Config("gel_verifier")
     tags: utils.Config[list[str | enum.Enum]] = utils.Config(["Gel Auth"])
     secure_cookie = utils.Config(True)  # noqa: FBT003
 
-    email_password: EmailPassword
-    builtin_ui: BuiltinUI
+    email_password: EmailPassword[C]
+    builtin_ui: BuiltinUI[C]
 
     _on_new_identity_path = utils.Config("/")
     _on_new_identity_name = utils.Config("gel.fastapi.auth.on_new_identity")

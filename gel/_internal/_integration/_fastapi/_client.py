@@ -7,9 +7,11 @@ from typing import (
     Any,
     Annotated,
     cast,
-    Concatenate,
+    Generic,
     Optional,
+    overload,
     ParamSpec,
+    Protocol,
     TYPE_CHECKING,
     TypeVar,
 )
@@ -35,14 +37,29 @@ if TYPE_CHECKING:
 
 GEL_STATE_NAMES_STATE = "_gel_state_names"
 P = ParamSpec("P")
-Lifespan_T = TypeVar("Lifespan_T", bound="GelLifespan")
+C = ParamSpec("C")
+R = TypeVar("R", covariant=True)
 
 
-class Extension:
+class LifespanCreator(Protocol[R]):
+    def __call__(self, app: fastapi.FastAPI, **kwargs: Any) -> R: ...
+
+
+class ClientCreator(Protocol[C, R]):
+    @overload
+    def __call__(self) -> R: ...
+
+    @overload
+    def __call__(self, *args: C.args, **kwargs: C.kwargs) -> R: ...
+
+    def __call__(self, *args: C.args, **kwargs: C.kwargs) -> R: ...
+
+
+class Extension(Generic[C]):
     installed: bool = False
-    _lifespan: GelLifespan
+    _lifespan: GelLifespan[C]
 
-    def __init__(self, lifespan: GelLifespan) -> None:
+    def __init__(self, lifespan: GelLifespan[C]) -> None:
         self._lifespan = lifespan
         self._post_init()
 
@@ -56,30 +73,43 @@ class Extension:
         pass
 
 
-class GelLifespan:
+class GelLifespan(Generic[C]):
     installed: bool = False
     state_name = utils.Config("gel_client")
     blocking_io_state_name = utils.Config("gel_blocking_io_client")
     shutdown_timeout: utils.Config[Optional[float]] = utils.Config(None)
 
     _app: fastapi.FastAPI
+    _client_creator: ClientCreator[C, gel.AsyncIOClient]
     _client: gel.AsyncIOClient
+    _bio_client_creator: ClientCreator[C, gel.Client]
     _bio_client: gel.Client
 
-    _auth: Optional[GelAuth] = None
+    _auth: Optional[GelAuth[C]] = None
     _auto_auth: bool = True
 
     def __init__(
         self,
         app: fastapi.FastAPI,
-        client: gel.AsyncIOClient,
-        bio_client: gel.Client,
+        *,
+        client_creator: ClientCreator[C, gel.AsyncIOClient],
+        bio_client_creator: ClientCreator[C, gel.Client],
+        **kwargs: Any,
     ) -> None:
         self._app = app
-        self._client = client
-        self._bio_client = bio_client
-
         self._auth = None
+
+        self._client_creator = client_creator
+        self._client = client_creator()
+        self._bio_client_creator = bio_client_creator
+        self._bio_client = bio_client_creator()
+
+        for key, value in kwargs.items():
+            if hasattr(self, key):
+                getattr(self, key)(value)
+            else:
+                raise ValueError(f"Unknown configuration option: {key}")
+        self._install_lifespan()
 
     async def __aenter__(self) -> dict[str, Any]:
         await self._client.ensure_connected()
@@ -144,8 +174,16 @@ class GelLifespan:
     def blocking_io_client(self) -> gel.Client:
         return self._bio_client
 
-    def install(self) -> None:
+    def _install_lifespan(self) -> None:
         self._app.include_router(fastapi.APIRouter(lifespan=self))
+
+    def with_client_options(self, *args: C.args, **kwargs: C.kwargs) -> Self:
+        if self.installed:
+            raise ValueError("Cannot change client options after installation")
+
+        self._client = self._client_creator(*args, **kwargs)
+        self._bio_client = self._bio_client_creator(*args, **kwargs)
+        return self
 
     def with_global(
         self, name: str
@@ -187,7 +225,7 @@ class GelLifespan:
         return decorator
 
     @property
-    def auth(self) -> GelAuth:
+    def auth(self) -> GelAuth[C]:
         if self._auth is None:
             if self.installed:
                 raise ValueError("Cannot enable auth after installation")
@@ -214,25 +252,16 @@ class GelLifespan:
 
 
 def _make_gelify(
-    client_creator: Callable[P, gel.AsyncIOClient],
-    bio_client_creator: Callable[P, gel.Client],
-    lifespan_class: Callable[
-        [fastapi.FastAPI, gel.AsyncIOClient, gel.Client], Lifespan_T
-    ],
-) -> Callable[Concatenate[fastapi.FastAPI, P], Lifespan_T]:
-    def gelify(
-        app: fastapi.FastAPI,
-        /,
-        *args: P.args,
-        **kwargs: P.kwargs,
-    ) -> Lifespan_T:
-        lifespan = lifespan_class(
+    client_creator: ClientCreator[C, gel.AsyncIOClient],
+    bio_client_creator: ClientCreator[C, gel.Client],
+) -> LifespanCreator[GelLifespan[C]]:
+    def gelify(app: fastapi.FastAPI, **kwargs: Any) -> GelLifespan[C]:
+        return GelLifespan(
             app,
-            client_creator(*args, **kwargs),
-            bio_client_creator(*args, **kwargs),
+            client_creator=client_creator,
+            bio_client_creator=bio_client_creator,
+            **kwargs,
         )
-        lifespan.install()
-        return lifespan
 
     return gelify
 
@@ -247,6 +276,6 @@ def _get_bio_client(request: fastapi.Request) -> gel.Client:
     return cast("gel.Client", getattr(request.state, state_name))
 
 
-gelify = _make_gelify(gel.create_async_client, gel.create_client, GelLifespan)
+gelify = _make_gelify(gel.create_async_client, gel.create_client)
 Client = Annotated[gel.AsyncIOClient, fastapi.Depends(_get_client)]
 BlockingIOClient = Annotated[gel.Client, fastapi.Depends(_get_bio_client)]

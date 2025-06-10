@@ -3,7 +3,7 @@
 # SPDX-FileCopyrightText: Copyright Gel Data Inc. and the contributors.
 
 from __future__ import annotations
-from typing import Annotated, Optional
+from typing import Annotated, Generic, Optional, ParamSpec
 
 import http
 import logging
@@ -19,6 +19,7 @@ from .. import _utils as utils
 
 
 logger = logging.getLogger("gel.auth")
+C = ParamSpec("C")
 
 
 class SignUpBody(pydantic.BaseModel):
@@ -44,14 +45,14 @@ class ResetPasswordBody(pydantic.BaseModel):
     password: str
 
 
-class EmailPassword(Installable):
+class EmailPassword(Installable, Generic[C]):
     redirect_to: utils.Config[Optional[str]] = utils.Config("/")
     redirect_to_page_name: utils.Config[Optional[str]] = utils.Config(None)
     error_page_name = utils.Config("error_page")
     sign_in_page_name = utils.Config("sign_in_page")
     reset_password_page_name = utils.Config("reset_password_page")
 
-    _auth: GelAuth
+    _auth: GelAuth[C]
 
     # Sign-up
     sign_up_path = utils.Config("/register")
@@ -150,7 +151,7 @@ class EmailPassword(Installable):
         utils.Hook("reset_password")
     )
 
-    def __init__(self, auth: GelAuth):
+    def __init__(self, auth: GelAuth[C]):
         self._auth = auth
 
     def _not_implemented(self, method: str) -> fastapi.Response:

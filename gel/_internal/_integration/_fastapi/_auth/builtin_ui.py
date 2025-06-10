@@ -2,6 +2,9 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright Gel Data Inc. and the contributors.
 
+from __future__ import annotations
+from typing import Generic, ParamSpec
+
 import http
 
 import fastapi
@@ -14,8 +17,11 @@ from . import Installable
 from .. import _utils as utils
 
 
-class BuiltinUI(Installable):
-    _auth: GelAuth
+C = ParamSpec("C")
+
+
+class BuiltinUI(Installable, Generic[C]):
+    _auth: GelAuth[C]
 
     sign_in_path = utils.Config("/sign-in")
     sign_in_name = utils.Config("gel.auth.builtin_ui.sign_in")
@@ -29,7 +35,7 @@ class BuiltinUI(Installable):
         "Redirect to the sign-up page of the built-in UI"
     )
 
-    def __init__(self, auth: GelAuth) -> None:
+    def __init__(self, auth: GelAuth[C]) -> None:
         self._auth = auth
 
     def install_sign_in_page(self, router: fastapi.APIRouter) -> None:
