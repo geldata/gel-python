@@ -31,6 +31,7 @@ cdef class ObjectCodec(BaseNamedRecordCodec):
         object cached_return_type_proxy
         object cached_return_type
         object cached_orig_return_type
+        Py_ssize_t cached_tid_index
 
     cdef encode_args(self, WriteBuffer buf, dict obj)
 

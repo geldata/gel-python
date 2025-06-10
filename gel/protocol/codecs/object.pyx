@@ -193,6 +193,7 @@ cdef class ObjectCodec(BaseNamedRecordCodec):
             object result, lprops
             Py_ssize_t elem_count
             Py_ssize_t i
+            Py_ssize_t cached_tid_index
             int32_t elem_len
             BaseCodec elem_codec
             FRBuffer elem_buf
@@ -207,12 +208,15 @@ cdef class ObjectCodec(BaseNamedRecordCodec):
             descriptor = (<BaseNamedRecordCodec>self).descriptor
             dict lprops_dict
             dict result_dict
+            bint is_polymorphic
 
         if self.is_sparse:
             raise NotImplementedError
 
         self.adapt_to_return_type(return_type)
         tid_map = self.cached_tid_map
+        tid_index = self.cached_tid_index
+        is_polymorphic = tid_map is not None and len(tid_map) > 1
         fields_types = self.cached_return_type_subcodecs
         return_type = self.cached_return_type
         return_type_proxy = self.cached_return_type_proxy
@@ -238,29 +242,37 @@ cdef class ObjectCodec(BaseNamedRecordCodec):
         for i in range(elem_count):
             frb_read(buf, 4)  # reserved
             elem_len = hton.unpack_int32(frb_read(buf, 4))
-            if elem_len == -1:
-                elem = None
-            else:
-                elem_codec = <BaseCodec>fields_codecs[i]
-                elem = elem_codec.decode(
-                    fields_types[i],
-                    frb_slice_from(&elem_buf, buf, elem_len)
-                )
-                if frb_get_len(&elem_buf):
-                    raise RuntimeError(
-                        f'unexpected trailing data in buffer after '
-                        f'object element decoding: {frb_get_len(&elem_buf)}')
 
-            name = names[i]
-            if name == "__tid__":
-                if elem is None:
-                    raise RuntimeError('__tid__ is unexepectedly empty')
-                if tid_map is not None and len(tid_map) > 1:
+            if i == tid_index and not is_polymorphic:
+                if elem_len != -1:
+                    # Don't bother with actually reading __tid__ if this isn't
+                    # a polymorphic query scenario
+                    frb_read(buf, elem_len)
+                continue
+            else:
+                if elem_len == -1:
+                    elem = None
+                else:
+                    elem_codec = <BaseCodec>fields_codecs[i]
+                    elem = elem_codec.decode(
+                        fields_types[i],
+                        frb_slice_from(&elem_buf, buf, elem_len)
+                    )
+                    if frb_get_len(&elem_buf):
+                        raise RuntimeError(
+                            f'unexpected trailing data in buffer after '
+                            f'object element decoding: {frb_get_len(&elem_buf)}')
+
+                if i == tid_index:
+                    if elem is None:
+                        raise RuntimeError('__tid__ is unexepectedly empty')
                     try:
                         current_ret_type = tid_map[elem]
                     except KeyError:
                         pass
-            elif flags[i] & datatypes._EDGE_POINTER_IS_LINKPROP:
+
+            name = names[i]
+            if flags[i] & datatypes._EDGE_POINTER_IS_LINKPROP:
                 assert name[0] == '@' # XXX fix this
                 lprops_dict[name[1:]] = elem
             else:
@@ -293,6 +305,7 @@ cdef class ObjectCodec(BaseNamedRecordCodec):
             tuple flags = self.flags
             tuple fields_codecs = (<BaseRecordCodec>self).fields_codecs
             Py_ssize_t fields_codecs_len = len(fields_codecs)
+            Py_ssize_t i
 
         if return_type is None:
             self.cached_tid_map = None
@@ -335,6 +348,7 @@ cdef class ObjectCodec(BaseNamedRecordCodec):
             elif name in {"__tname__", "__tid__"}:
                 subs.append(None)
                 dlists.append(None)
+                self.cached_tid_index = i
             else:
                 sub = getattr(return_type, name)
                 subs.append(sub.__gel_origin__)
