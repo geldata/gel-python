@@ -18,7 +18,7 @@ class UnspecifiedType:
 Unspecified = UnspecifiedType()
 
 
-def type_repr(t: type[Any]) -> str:
+def type_repr(t: Any) -> str:
     if isinstance(t, type):
         if t.__module__ == "builtins":
             return t.__qualname__

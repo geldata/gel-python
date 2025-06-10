@@ -13,29 +13,37 @@ from typing import (
 
 import base64
 import collections
+import dataclasses
 import enum
 import functools
+import json
 import graphlib
 import keyword
 import logging
 import operator
+import pathlib
+import tempfile
 import textwrap
 
 from collections import defaultdict
+from collections.abc import MutableMapping  # noqa: TC003  # pydantic needs it
 from contextlib import contextmanager
 
 import gel
 from gel import abstract
+from gel import _version as _gel_py_ver
+from gel._internal import _cache
+from gel._internal import _dataclass_extras
+from gel._internal import _dirsync
 from gel._internal import _reflection as reflection
 from gel._internal._qbmodel import _abstract as _qbmodel
+from gel._internal._reflection._enums import SchemaPart
 
 from .._generator import C, AbstractCodeGenerator
 from .._module import ImportTime, CodeSection, GeneratedModule
 
 if TYPE_CHECKING:
     import io
-    import pathlib
-    import uuid
 
     from collections.abc import (
         Callable,
@@ -81,6 +89,14 @@ class IntrospectedModule(TypedDict):
     functions: list[reflection.Function]
 
 
+@dataclasses.dataclass(kw_only=True, frozen=True)
+class Schema:
+    types: MutableMapping[str, reflection.AnyType]
+    casts: reflection.CastMatrix
+    operators: reflection.OperatorMatrix
+    functions: list[reflection.Function]
+
+
 class PydanticModelsGenerator(AbstractCodeGenerator):
     def run(self) -> None:
         try:
@@ -89,22 +105,123 @@ class PydanticModelsGenerator(AbstractCodeGenerator):
             logger.exception("could not connect to Gel instance")
             self.abort(61)
 
-        with self._client:
+        models_root = self._project_dir / "models"
+        tmp_models_root = tempfile.TemporaryDirectory(
+            prefix=".~tmp.models.",
+            dir=self._project_dir,
+        )
+        file_state = self._get_last_state()
+
+        with tmp_models_root, self._client:
+            db_state = reflection.fetch_branch_state(self._client)
+            std_schema: Schema | None = None
+
             std_gen = SchemaGenerator(
                 self._client,
                 reflection.SchemaPart.STD,
-                self._project_dir / "models",
             )
-            std_gen.run()
 
-            usr_gen = SchemaGenerator(
-                self._client,
-                reflection.SchemaPart.USER,
-                self._project_dir / "models",
-            )
-            usr_gen.run()
+            outdir = pathlib.Path(tmp_models_root.name)
+
+            if (
+                file_state is None
+                or file_state.server_version != db_state.server_version
+                or self._no_cache
+            ):
+                std_schema, std_manifest = std_gen.run(outdir)
+                self._save_std_schema_cache(
+                    std_schema, db_state.server_version
+                )
+            else:
+                std_schema = self._load_std_schema_cache(
+                    db_state.server_version,
+                )
+                std_manifest = std_gen.dry_run_manifest()
+
+            if (
+                file_state is None
+                or file_state.top_migration != db_state.top_migration
+                or self._no_cache
+            ):
+                usr_gen = SchemaGenerator(
+                    self._client,
+                    reflection.SchemaPart.USER,
+                    std_schema=std_schema,
+                )
+                usr_gen.run(outdir)
+
+            self._write_state(db_state, outdir)
+
+            _dirsync.dirsync(outdir, models_root, keep=std_manifest)
 
         self.print_msg(f"{C.GREEN}{C.BOLD}Done.{C.ENDC}")
+
+    def _cache_key(self, suf: str, sv: reflection.ServerVersion) -> str:
+        return f"gm-c-{_gel_py_ver.__version__}-s-{sv.major}.{sv.minor}-{suf}"
+
+    def _save_std_schema_cache(
+        self, schema: Schema, sv: reflection.ServerVersion
+    ) -> None:
+        _cache.save_json(
+            self._cache_key("std.json", sv),
+            dataclasses.asdict(schema),
+        )
+
+    def _load_std_schema_cache(
+        self, sv: reflection.ServerVersion
+    ) -> Schema | None:
+        schema_data = _cache.load_json(self._cache_key("std.json", sv))
+        if schema_data is None:
+            return None
+
+        if not isinstance(schema_data, dict):
+            return None
+
+        try:
+            return _dataclass_extras.coerce_to_dataclass(Schema, schema_data)
+        except Exception:
+            return None
+
+    def _get_last_state(self) -> reflection.BranchState | None:
+        state_json = self._project_dir / "models" / "_state.json"
+        try:
+            with open(state_json, encoding="utf8") as f:
+                state_data = json.load(f)
+        except (OSError, ValueError, TypeError):
+            return None
+
+        try:
+            server_version = state_data["server_version"]
+            top_migration = state_data["top_migration"]
+        except KeyError:
+            return None
+
+        if (
+            not isinstance(server_version, list)
+            or len(server_version) != 2
+            or not all(isinstance(part, int) for part in server_version)
+        ):
+            return None
+
+        if not isinstance(top_migration, str):
+            return None
+
+        return reflection.BranchState(
+            server_version=reflection.ServerVersion(*server_version),
+            top_migration=top_migration,
+        )
+
+    def _write_state(
+        self,
+        state: reflection.BranchState,
+        outdir: pathlib.Path,
+    ) -> None:
+        state_json = outdir / "_state.json"
+        try:
+            with open(state_json, mode="w", encoding="utf8") as f:
+                json.dump(dataclasses.asdict(state), f)
+        except (OSError, ValueError, TypeError):
+            return None
 
 
 class SchemaGenerator:
@@ -112,25 +229,57 @@ class SchemaGenerator:
         self,
         client: abstract.ReadOnlyExecutor,
         schema_part: reflection.SchemaPart,
-        outdir: pathlib.Path,
+        std_schema: Schema | None = None,
     ) -> None:
         self._client = client
         self._schema_part = schema_part
         self._basemodule = "models"
-        self._outdir = outdir
         self._modules: dict[reflection.SchemaPath, IntrospectedModule] = {}
         self._std_modules: list[reflection.SchemaPath] = []
-        self._types: Mapping[uuid.UUID, reflection.AnyType] = {}
+        self._types: Mapping[str, reflection.AnyType] = {}
         self._casts: reflection.CastMatrix
         self._operators: reflection.OperatorMatrix
         self._functions: list[reflection.Function]
-        self._named_tuples: dict[uuid.UUID, reflection.NamedTupleType] = {}
+        self._named_tuples: dict[str, reflection.NamedTupleType] = {}
         self._wrapped_types: set[str] = set()
+        self._std_schema = std_schema
+        if schema_part is not SchemaPart.STD and std_schema is None:
+            raise ValueError(
+                "must pass std_schema when reflecting user schemas"
+            )
 
-    def run(self) -> None:
-        self.introspect_schema()
+    def dry_run_manifest(self) -> set[pathlib.Path]:
+        part = self._schema_part
+        std_modules: dict[reflection.SchemaPath, bool] = dict.fromkeys(
+            (
+                reflection.parse_name(mod)
+                for mod in reflection.fetch_modules(self._client, part)
+            ),
+            False,
+        )
 
-        self._generate_common_types()
+        for mod in list(std_modules):
+            if mod.parent:
+                std_modules[mod.parent] = True
+
+        files = set()
+        for mod, has_submodules in std_modules.items():
+            for aspect in ModuleAspect.__members__.values():
+                modpath = get_modpath(mod, aspect)
+                as_pkg = mod_is_package(modpath, part) or has_submodules
+                files.add(mod_filename(modpath, as_pkg=as_pkg))
+
+        common_modpath = get_common_types_modpath(self._schema_part)
+        as_pkg = mod_is_package(common_modpath, part)
+        files.add(mod_filename(common_modpath, as_pkg=as_pkg))
+
+        return files
+
+    def run(self, outdir: pathlib.Path) -> tuple[Schema, set[pathlib.Path]]:
+        schema = self.introspect_schema()
+        written: set[pathlib.Path] = set()
+
+        written.update(self._generate_common_types(outdir))
         modules: dict[reflection.SchemaPath, GeneratedSchemaModule] = {}
         order = sorted(
             self._modules.items(),
@@ -160,7 +309,7 @@ class SchemaGenerator:
                     and v.has_content()
                 ]
             )
-            module.write_files(self._outdir)
+            written.update(module.write_files(outdir))
             modules[modname] = module
 
         all_modules = list(self._modules)
@@ -178,9 +327,11 @@ class SchemaGenerator:
         default_module = modules.get(reflection.SchemaPath("default"))
         if default_module is not None:
             module.reexport_module(default_module)
-        module.write_files(self._outdir)
+        written.update(module.write_files(outdir))
 
-    def introspect_schema(self) -> None:
+        return schema, written
+
+    def introspect_schema(self) -> Schema:
         for mod in reflection.fetch_modules(self._client, self._schema_part):
             self._modules[reflection.parse_name(mod)] = {
                 "scalar_types": {},
@@ -200,15 +351,14 @@ class SchemaGenerator:
         self._functions = these_funcs
 
         if self._schema_part is not std_part:
-            std_types = reflection.fetch_types(self._client, std_part)
+            assert self._std_schema is not None
+            std_types = self._std_schema.types
             self._types = collections.ChainMap(std_types, these_types)
-            std_casts = reflection.fetch_casts(self._client, std_part)
+            std_casts = self._std_schema.casts
             self._casts = self._casts.chain(std_casts)
-            std_operators = reflection.fetch_operators(self._client, std_part)
+            std_operators = self._std_schema.operators
             self._operators = self._operators.chain(std_operators)
-            self._functions = these_funcs + reflection.fetch_functions(
-                self._client, std_part
-            )
+            self._functions = these_funcs + self._std_schema.functions
             self._std_modules = [
                 reflection.parse_name(mod)
                 for mod in reflection.fetch_modules(self._client, std_part)
@@ -230,13 +380,20 @@ class SchemaGenerator:
             name = reflection.parse_name(f.name)
             self._modules[name.parent]["functions"].append(f)
 
+        return Schema(
+            types=self._types,
+            casts=self._casts,
+            operators=self._operators,
+            functions=self._functions,
+        )
+
     def get_comment_preamble(self) -> str:
         return COMMENT
 
-    def _generate_common_types(self) -> None:
-        mod = reflection.SchemaPath("__types__")
-        if self._schema_part is reflection.SchemaPart.STD:
-            mod = reflection.SchemaPath("std") / mod
+    def _generate_common_types(
+        self, outdir: pathlib.Path
+    ) -> set[pathlib.Path]:
+        mod = get_common_types_modpath(self._schema_part)
         module = GeneratedGlobalModule(
             mod,
             all_types=self._types,
@@ -246,7 +403,7 @@ class SchemaGenerator:
             schema_part=self._schema_part,
         )
         module.process(self._named_tuples)
-        module.write_files(self._outdir)
+        return module.write_files(outdir)
 
 
 class ModuleAspect(enum.Enum):
@@ -276,6 +433,43 @@ def get_modpath(
     return modpath
 
 
+def get_common_types_modpath(
+    schema_part: reflection.SchemaPart,
+) -> reflection.SchemaPath:
+    mod = reflection.SchemaPath("__types__")
+    if schema_part is reflection.SchemaPart.STD:
+        mod = reflection.SchemaPath("std") / mod
+    return mod
+
+
+def mod_is_package(
+    mod: reflection.SchemaPath,
+    schema_part: reflection.SchemaPart,
+) -> bool:
+    return not mod.parts or (
+        schema_part is reflection.SchemaPart.STD and len(mod.parts) == 1
+    )
+
+
+def mod_filename(
+    modpath: reflection.SchemaPath,
+    *,
+    as_pkg: bool,
+) -> pathlib.Path:
+    if as_pkg:
+        # This is a prefix in another module, thus it is part of a nested
+        # module structure.
+        dirpath = modpath
+        filename = "__init__.py"
+    else:
+        # This is a leaf module, so we just need to create a corresponding
+        # <mod>.py file.
+        dirpath = modpath.parent
+        filename = f"{modpath.name}.py"
+
+    return pathlib.Path(dirpath) / filename
+
+
 def _map_name(
     transform: Callable[[str], str],
     classnames: Iterable[str],
@@ -301,7 +495,7 @@ class BaseGeneratedModule:
         self,
         modname: reflection.SchemaPath,
         *,
-        all_types: Mapping[uuid.UUID, reflection.AnyType],
+        all_types: Mapping[str, reflection.AnyType],
         all_casts: reflection.CastMatrix,
         all_operators: reflection.OperatorMatrix,
         modules: Collection[reflection.SchemaPath],
@@ -363,14 +557,7 @@ class BaseGeneratedModule:
         mod: reflection.SchemaPath,
         schema_part: reflection.SchemaPart,
     ) -> bool:
-        return (
-            not mod.parts
-            or bool(self._submodules)
-            or (
-                schema_part is reflection.SchemaPart.STD
-                and len(mod.parts) == 1
-            )
-        )
+        return mod_is_package(mod, schema_part) or bool(self._submodules)
 
     @property
     def py_file(self) -> GeneratedModule:
@@ -422,24 +609,14 @@ class BaseGeneratedModule:
         *,
         as_pkg: bool,
     ) -> Generator[io.TextIOWrapper, None, None]:
-        if as_pkg:
-            # This is a prefix in another module, thus it is part of a nested
-            # module structure.
-            dirpath = modpath
-            filename = "__init__.py"
-        else:
-            # This is a leaf module, so we just need to create a corresponding
-            # <mod>.py file.
-            dirpath = modpath.parent
-            filename = f"{modpath.name}.py"
-
+        mod_fname = mod_filename(modpath, as_pkg=as_pkg)
         # Along the dirpath we need to ensure that all packages are created
         self._init_dir(path)
-        for el in dirpath.parts:
+        for el in mod_fname.parent.parts:
             path /= el
             self._init_dir(path)
 
-        with open(path / filename, "w", encoding="utf8") as f:
+        with open(path / mod_fname.name, "w", encoding="utf8") as f:
             try:
                 yield f
             finally:
@@ -463,7 +640,8 @@ class BaseGeneratedModule:
         # ensure `path` directory contains `__init__.py`
         (path / "__init__.py").touch()
 
-    def write_files(self, path: pathlib.Path) -> None:
+    def write_files(self, path: pathlib.Path) -> set[pathlib.Path]:
+        written: set[pathlib.Path] = set()
         for aspect, py_file in self.py_files.items():
             if not py_file.has_content() and (
                 self._schema_part is not reflection.SchemaPart.STD
@@ -477,6 +655,9 @@ class BaseGeneratedModule:
                 as_pkg=self.is_package,
             ) as f:
                 py_file.output(f)
+                written.add(pathlib.Path(f.name).relative_to(path))
+
+        return written
 
     def write_type_reflection(
         self,
@@ -498,7 +679,7 @@ class BaseGeneratedModule:
                 base_types,
             ),
         ):
-            self.write(f"id = {uuid}(int={stype.id.int})")
+            self.write(f"id = {uuid}(int={stype.uuid.int})")
             schema_path = ", ".join(repr(p) for p in stype.schemapath.parts)
             self.write(f"name = {schemapath}({schema_path})")
 
@@ -569,7 +750,7 @@ class BaseGeneratedModule:
         t: reflection.NamedTupleType,
     ) -> str:
         names = [elem.name.capitalize() for elem in t.tuple_elements]
-        digest = base64.b64encode(t.id.bytes[:4], altchars=b"__").decode()
+        digest = base64.b64encode(t.uuid.bytes[:4], altchars=b"__").decode()
         return "".join(names) + "_Tuple_" + digest.rstrip("=")
 
     def _resolve_rel_import(
@@ -1025,7 +1206,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         self,
         types: Iterable[InheritingType_T],
     ) -> Iterator[InheritingType_T]:
-        graph: dict[uuid.UUID, set[uuid.UUID]] = {}
+        graph: dict[str, set[str]] = {}
         for t in types:
             graph[t.id] = set()
             t_name = reflection.parse_name(t.name)
@@ -1364,8 +1545,9 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             rtype_rt = self.render_callable_runtime_return_type(
                 ret_type, op.return_typemod
             )
+            meth = op.py_magic[0]
             with self._method_def(
-                op.py_magic,
+                meth,
                 ["cls"],
                 rtype,
                 implicit_param=False,
@@ -1400,7 +1582,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         ops: list[reflection.Operator],
     ) -> None:
         opmap: defaultdict[
-            tuple[str, str],
+            tuple[tuple[str, ...], str],
             defaultdict[
                 tuple[reflection.AnyType, reflection.TypeModifier],
                 set[reflection.AnyType],
@@ -1408,14 +1590,19 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         ] = defaultdict(lambda: defaultdict(set))
 
         aexpr = self.import_name(BASE_IMPL, "AnnotatedExpr")
-        infxop = self.import_name(BASE_IMPL, "InfixOp")
+        expr_compat = self.import_name(BASE_IMPL, "ExprCompatible")
         type_ = self.import_name("builtins", "type")
         any_ = self.import_name("typing", "Any")
 
-        explicit_rparams: defaultdict[str, set[uuid.UUID]] = defaultdict(set)
+        op_map = {
+            "[]": "IndexOp",
+        }
+
+        op_classes_to_import: dict[str, str] = {}
+
+        explicit_rparams: defaultdict[str, set[str]] = defaultdict(set)
         for op in ops:
-            opname = reflection.parse_name(op.name).name
-            explicit_rparams[opname].add(op.params[1].type.id)
+            explicit_rparams[op.schemapath.name].add(op.params[1].type.id)
 
         for op in ops:
             if op.py_magic is None:
@@ -1423,7 +1610,8 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             if op.operator_kind != reflection.OperatorKind.Infix:
                 raise AssertionError(f"expected {op} to be an infix operator")
 
-            opname = reflection.parse_name(op.name).name
+            opname = op.schemapath.name
+            op_classes_to_import[opname] = op_map.get(opname, "InfixOp")
             ret_type = self._types[op.return_type.id]
             right_param = op.params[1]
             right_type_id = right_param.type.id
@@ -1440,8 +1628,17 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             r_key = ret_type, op.return_typemod
             opmap[op_key][r_key].update(union)
 
+        op_classes: dict[str, str] = {}
+        imported: dict[str, str] = {}
+        for opname, opclsname in op_classes_to_import.items():
+            opcls = imported.get(opname)
+            if opcls is None:
+                opcls = self.import_name(BASE_IMPL, opclsname)
+                imported[opname] = opcls
+            op_classes[opname] = opcls
+
         py_cast_rankings: defaultdict[
-            tuple[str, str],
+            tuple[tuple[str, ...], str],
             dict[
                 tuple[str, str],
                 tuple[tuple[int, int], int, reflection.ScalarType],
@@ -1478,7 +1675,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                                 py_cast_ranking[py_type] = (rank, i, stype)
 
         py_casts: defaultdict[
-            tuple[str, str],
+            tuple[tuple[str, ...], str],
             defaultdict[int, dict[tuple[str, str], reflection.ScalarType]],
         ] = defaultdict(lambda: defaultdict(dict))
 
@@ -1491,9 +1688,17 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                 py_casts[op_key][overload_idx][py_type] = canon_type
 
         for op_key, overloads in opmap.items():
-            meth, opname = op_key
+            py_magic, opname = op_key
+            opcls = op_classes[opname]
+            meth = py_magic[0]
             param_py_types_map = py_casts[op_key]
             overload = len(overloads) > 1
+            swapped_overloads: list[
+                tuple[
+                    dict[str, str],
+                    tuple[reflection.AnyType, str, str],
+                ]
+            ] = []
             for i, ((ret_type, ret_typemod), other_types) in enumerate(
                 overloads.items()
             ):
@@ -1506,13 +1711,13 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                     ret_typemod,
                 )
                 other_type_union: list[str] = []
-                param_py_types = param_py_types_map.get(i)
                 for t in other_types:
                     tstr = self.get_type(t, import_time=ImportTime.typecheck)
                     other_type_union.append(f"{type_}[{tstr}]")
                     if reflection.is_primitive_type(t):
                         other_type_union.append(tstr)
 
+                param_py_types = param_py_types_map.get(i)
                 if param_py_types:
                     py_coerce_map: dict[str, str] = {}
                     for py_type, stype in param_py_types.items():
@@ -1533,6 +1738,14 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                         f"{py_tname}()": f"other = {s_tname}(other)"
                         for py_tname, s_tname in py_coerce_map.items()
                     }
+
+                    if len(py_magic) > 1:
+                        swapped_overloads.append(
+                            (
+                                py_coerce_map,
+                                (ret_type, rtype, rtype_rt),
+                            )
+                        )
                 else:
                     coerce_cases = None
 
@@ -1554,15 +1767,22 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                                 self.write(f"case {cond}:")
                                 with self.indented():
                                     self.write(code)
+                    if any(reflection.is_tuple_type(ot) for ot in other_types):
+                        self.write(
+                            f"rexpr: {expr_compat} = other"
+                            f"  # type: ignore [assignment]"
+                        )
+                    else:
+                        self.write(f"rexpr: {expr_compat} = other")
 
                     args = [
                         "lexpr=cls",
                         f'op="{opname}"',
-                        "rexpr=other",
+                        "rexpr=rexpr",
                         f"type_={self._render_obj_schema_path(ret_type)}",
                     ]
                     self.write(
-                        self.format_list(f"op = {infxop}({{list}})", args)
+                        self.format_list(f"op = {opcls}({{list}})", args)
                     )
                     self.write(
                         self.format_list(
@@ -1586,6 +1806,72 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                         f"  # type: ignore [no-any-return]"
                     )
                 self.write()
+
+            num_swapped_overloads = len(swapped_overloads)
+            if num_swapped_overloads > 0:
+                expr_compat = self.import_name(BASE_IMPL, "ExprCompatible")
+                assert len(py_magic) > 1
+                rmeth = py_magic[1]
+                for py_coerce_map, (
+                    ret_type,
+                    rtype,
+                    rtype_rt,
+                ) in swapped_overloads:
+                    rev_op_type = " | ".join(sorted(py_coerce_map))
+                    with self._method_def(
+                        rmeth,
+                        ["cls", f"other: {rev_op_type}"],
+                        rtype,
+                        overload=num_swapped_overloads > 1,
+                        line_comment="type: ignore [override, unused-ignore]",
+                        implicit_param=False,
+                    ):
+                        self.write(f"operand: {expr_compat}")
+                        coerce_cases = {
+                            f"{py_tname}()": f"operand = {s_tname}(other)"
+                            for py_tname, s_tname in py_coerce_map.items()
+                        }
+                        coerce_cases["_"] = "operand = other"
+                        self.write("match other:")
+                        with self.indented():
+                            for cond, code in coerce_cases.items():
+                                self.write(f"case {cond}:")
+                                with self.indented():
+                                    self.write(code)
+
+                        args = [
+                            "lexpr=operand",
+                            f'op="{opname}"',
+                            "rexpr=cls",
+                            f"type_={self._render_obj_schema_path(ret_type)}",
+                        ]
+                        self.write(
+                            self.format_list(f"op = {opcls}({{list}})", args)
+                        )
+                        self.write(
+                            self.format_list(
+                                f"return {aexpr}({{list}})",
+                                [rtype_rt, "op"],
+                                first_line_comment=(
+                                    "type: ignore [return-value]"
+                                ),
+                            )
+                        )
+                    self.write()
+
+                if num_swapped_overloads > 1:
+                    dispatch = self.import_name(BASE_IMPL, "dispatch_overload")
+                    with self._method_def(
+                        rmeth,
+                        ["cls", f"*args: {any_}", f"**kwargs: {any_}"],
+                        type_,
+                        implicit_param=False,
+                    ):
+                        self.write(
+                            f"return {dispatch}(cls.{meth}, *args, **kwargs)"
+                            f"  # type: ignore [no-any-return]"
+                        )
+                    self.write()
 
     def write_object_types(
         self,
@@ -1644,7 +1930,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         refl_t: str,
     ) -> None:
         uuid_t = self.import_name("uuid", "UUID")
-        self.write(f"id={uuid_t}(int={objtype.id.int}),")
+        self.write(f"id={uuid_t}(int={objtype.uuid.int}),")
         self.write(f"name={objtype.name!r},")
         self.write(f"builtin={objtype.builtin!r},")
         self.write(f"internal={objtype.internal!r},")
@@ -1704,7 +1990,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                     base_types,
                 ),
             ):
-                self.write(f"id = {uuid}(int={objtype.id.int})")
+                self.write(f"id = {uuid}(int={objtype.uuid.int})")
                 schema_path = ", ".join(repr(p) for p in type_name.parts)
                 self.write(f"name = {sp}({schema_path})")
                 with self._classmethod_def(
@@ -1747,7 +2033,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         self.write()
 
         class_kwargs = {}
-        class_r_kwargs = {"__gel_type_id__": f"{uuid}(int={objtype.id.int})"}
+        class_r_kwargs = {"__gel_type_id__": f"{uuid}(int={objtype.uuid.int})"}
         if not base_types:
             gel_model = self.import_name(BASE_IMPL, "GelModel")
             vbase_types = [gel_model]
@@ -2332,8 +2618,8 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                 self.write()
 
     def write_functions(self, functions: list[reflection.Function]) -> None:
-        param_map: defaultdict[str, defaultdict[str, set[uuid.UUID]]] = (
-            defaultdict(lambda: defaultdict(set))
+        param_map: defaultdict[str, defaultdict[str, set[str]]] = defaultdict(
+            lambda: defaultdict(set)
         )
         funcmap: defaultdict[str, list[reflection.Function]] = defaultdict(
             list
@@ -2351,7 +2637,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         self,
         fname: str,
         overloads: list[reflection.Function],
-        param_map: defaultdict[str, defaultdict[str, set[uuid.UUID]]],
+        param_map: defaultdict[str, defaultdict[str, set[str]]],
     ) -> None:
         if len(overloads) > 1:
             for overload in overloads:
@@ -2389,7 +2675,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
     def _write_function_overload(
         self,
         function: reflection.Function,
-        param_map: defaultdict[str, defaultdict[str, set[uuid.UUID]]],
+        param_map: defaultdict[str, defaultdict[str, set[str]]],
         *,
         overload: bool,
         generic_signature: bool = False,
@@ -2576,14 +2862,10 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                     )
                     pytype = f"{desc}[{narrow_type}, {broad_type}]"
                 case False, False, True, False:
-                    # XXX
-                    desc = self.import_name(BASE_IMPL, "RequiredLinkWithProps")
+                    desc = self.import_name(BASE_IMPL, "LinkWithProps")
                     pytype = f"{desc}[{narrow_type}, {broad_type}]"
                 case False, False, True, True:
-                    # XXX
-                    desc = self.import_name(
-                        BASE_IMPL, "RequiredComputedLinkWithProps"
-                    )
+                    desc = self.import_name(BASE_IMPL, "ComputedLinkWithProps")
                     pytype = f"{desc}[{narrow_type}, {broad_type}]"
                 case False, True, False, False:
                     desc = self.import_name(BASE_IMPL, "OptionalLink")
@@ -2720,11 +3002,11 @@ class GeneratedSchemaModule(BaseGeneratedModule):
 
 
 class GeneratedGlobalModule(BaseGeneratedModule):
-    def process(self, types: Mapping[uuid.UUID, reflection.AnyType]) -> None:
-        graph: defaultdict[uuid.UUID, set[uuid.UUID]] = defaultdict(set)
+    def process(self, types: Mapping[str, reflection.AnyType]) -> None:
+        graph: defaultdict[str, set[str]] = defaultdict(set)
 
         @functools.singledispatch
-        def type_dispatch(t: reflection.AnyType, ref_t: uuid.UUID) -> None:
+        def type_dispatch(t: reflection.AnyType, ref_t: str) -> None:
             if reflection.is_named_tuple_type(t):
                 graph[ref_t].add(t.id)
                 for elem in t.tuple_elements:

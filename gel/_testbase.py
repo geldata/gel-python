@@ -717,7 +717,7 @@ class ModelTestCase(SyncQueryTestCase):
         from gel._internal._codegen._models import PydanticModelsGenerator
 
         cls.gen = PydanticModelsGenerator(
-            argparse.Namespace(),
+            argparse.Namespace(no_cache=True),
             project_dir=pathlib.Path(cls.tmp_model_dir.name),
             client=cls.client,
             interactive=False,
@@ -1028,6 +1028,10 @@ def must_fail(f):
 
 
 def to_be_fixed(f):
+    return unittest.expectedFailure(f)
+
+
+def xfail(f):
     return unittest.expectedFailure(f)
 
 

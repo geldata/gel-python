@@ -373,7 +373,7 @@ ComputedMultiProperty = TypeAliasType(
 )
 
 
-class _OptionalLink(_abstract.OptionalLinkDescriptor[_MT_co, _BMT_co]):
+class _AnyLink(Generic[_MT_co, _BMT_co]):
     @classmethod
     def __get_pydantic_core_schema__(
         cls,
@@ -406,6 +406,82 @@ class _OptionalLink(_abstract.OptionalLinkDescriptor[_MT_co, _BMT_co]):
             raise TypeError(
                 f"could not convert {type(value)} to {mt.__name__}"
             )
+
+
+class _Link(
+    _AnyLink[_MT_co, _BMT_co], _abstract.LinkDescriptor[_MT_co, _BMT_co]
+):
+    if TYPE_CHECKING:
+
+        @overload
+        def __get__(self, obj: None, objtype: type[Any]) -> type[_MT_co]: ...
+
+        @overload
+        def __get__(
+            self, obj: object, objtype: Any = None
+        ) -> _MT_co | None: ...
+
+        def __get__(
+            self,
+            obj: Any,
+            objtype: Any = None,
+        ) -> type[_MT_co] | _MT_co | None: ...
+
+        def __set__(self, obj: Any, value: _MT_co | _BMT_co) -> None: ...
+
+    @classmethod
+    def _validate(
+        cls,
+        value: Any,
+        generic_args: tuple[type[Any], type[Any]],
+    ) -> _MT_co:
+        mt, bmt = generic_args
+        if isinstance(value, mt):
+            return value  # type: ignore [no-any-return]
+        elif isinstance(value, bmt):
+            return mt(value)  # type: ignore [no-any-return]
+        else:
+            raise TypeError(
+                f"could not convert {type(value)} to {mt.__name__}"
+            )
+
+
+class _OptionalLink(
+    _AnyLink[_MT_co, _BMT_co],
+    _abstract.OptionalLinkDescriptor[_MT_co, _BMT_co],
+):
+    pass
+
+
+LinkWithProps = TypeAliasType(
+    "LinkWithProps",
+    Annotated[
+        _Link[_MT_co, _BMT_co],
+        _abstract.PointerInfo(
+            cardinality=_edgeql.Cardinality.One,
+            kind=_edgeql.PointerKind.Link,
+            has_props=True,
+        ),
+    ],
+    type_params=(_MT_co, _BMT_co),
+)
+
+
+ComputedLinkWithProps = TypeAliasType(
+    "ComputedLinkWithProps",
+    Annotated[
+        _Link[_MT_co, _BMT_co],
+        pydantic.Field(init=False, frozen=True),
+        _abstract.PointerInfo(
+            computed=True,
+            readonly=True,
+            has_props=True,
+            cardinality=_edgeql.Cardinality.One,
+            kind=_edgeql.PointerKind.Link,
+        ),
+    ],
+    type_params=(_MT_co, _BMT_co),
+)
 
 
 OptionalLink = TypeAliasType(

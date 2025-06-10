@@ -256,7 +256,7 @@ class PrefixOp(Op):
 
 
 @dataclass(kw_only=True, frozen=True)
-class InfixOp(Op):
+class BinaryOp(Op):
     lexpr: Expr
     rexpr: Expr
 
@@ -275,6 +275,19 @@ class InfixOp(Op):
     def subnodes(self) -> Iterable[Node]:
         return (self.lexpr, self.rexpr)
 
+
+@dataclass(kw_only=True, frozen=True)
+class InfixOp(BinaryOp):
+    def __init__(
+        self,
+        *,
+        lexpr: ExprCompatible,
+        rexpr: ExprCompatible,
+        op: _edgeql.Token | str,
+        type_: SchemaPath,
+    ) -> None:
+        super().__init__(lexpr=lexpr, rexpr=rexpr, op=op, type_=type_)
+
     def __edgeql_expr__(self, *, ctx: ScopeContext | None) -> str:
         left = edgeql(self.lexpr, ctx=ctx)
         if _need_left_parens(self.precedence, self.lexpr):
@@ -283,6 +296,30 @@ class InfixOp(Op):
         if _need_right_parens(self.precedence, self.rexpr):
             right = f"({right})"
         return f"{left} {self.op} {right}"
+
+
+@dataclass(kw_only=True, frozen=True)
+class IndexOp(BinaryOp):
+    def __init__(
+        self,
+        *,
+        lexpr: ExprCompatible,
+        rexpr: ExprCompatible,
+        op: _edgeql.Token | str,
+        type_: SchemaPath,
+    ) -> None:
+        super().__init__(
+            lexpr=lexpr, rexpr=rexpr, op=_edgeql.Token.LBRACKET, type_=type_
+        )
+
+    def __edgeql_expr__(self, *, ctx: ScopeContext | None) -> str:
+        left = edgeql(self.lexpr, ctx=ctx)
+        if _need_left_parens(self.precedence, self.lexpr):
+            left = f"({left})"
+        right = edgeql(self.rexpr, ctx=ctx)
+        if _need_right_parens(self.precedence, self.rexpr):
+            right = f"({right})"
+        return f"{left}[{right}]"
 
 
 @dataclass(kw_only=True, frozen=True)

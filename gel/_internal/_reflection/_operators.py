@@ -30,37 +30,36 @@ if TYPE_CHECKING:
 
 @dataclasses.dataclass(frozen=True, kw_only=True)
 class Operator(Callable):
-    id: uuid.UUID
+    id: str
     name: str
     description: str
     suggested_ident: str
-    py_magic: str | None = None
+    py_magic: tuple[str, ...] | None
     operator_kind: _enums.OperatorKind
     return_type: _types.TypeRef
     return_typemod: _enums.TypeModifier
     params: list[CallableParam]
 
 
-OperatorMap = TypeAliasType(
-    "OperatorMap", MutableMapping[uuid.UUID, list[Operator]]
-)
+OperatorMap = TypeAliasType("OperatorMap", MutableMapping[str, list[Operator]])
 
 
-INFIX_OPERATOR_MAP = {
+INFIX_OPERATOR_MAP: dict[str, str | tuple[str, str]] = {
     "std::=": "__eq__",
     "std::!=": "__ne__",
     "std::<": "__lt__",
     "std::<=": "__le__",
     "std::>": "__gt__",
     "std::>=": "__ge__",
-    "std::+": "__add__",
-    "std::++": "__add__",
-    "std::-": "__sub__",
-    "std::*": "__mul__",
-    "std::/": "__truediv__",
-    "std:://": "__floordiv__",
-    "std::%": "__mod__",
-    "std::^": "__pow__",
+    "std::+": ("__add__", "__radd__"),
+    "std::++": ("__add__", "__radd__"),
+    "std::-": ("__sub__", "__rsub__"),
+    "std::*": ("__mul__", "__rmul__"),
+    "std::/": ("__truediv__", "__rtruediv__"),
+    "std:://": ("__floordiv__", "__rfloordiv__"),
+    "std::%": ("__mod__", "__rmod__"),
+    "std::^": ("__pow__", "__rpow__"),
+    "std::[]": "__getitem__",
 }
 
 PREFIX_OPERATOR_MAP = {
@@ -108,29 +107,31 @@ def fetch_operators(
     other_ops: list[Operator] = []
 
     for op in ops:
+        opv = _dataclass_extras.coerce_to_dataclass(
+            Operator, op, cast_map={str: (uuid.UUID,)}
+        )
         if (
             op.operator_kind == _enums.OperatorKind.Infix
             and op.name in INFIX_OPERATOR_MAP
         ):
-            opv = _dataclass_extras.coerce_to_dataclass(Operator, op)
-            opv = dataclasses.replace(
-                opv, py_magic=INFIX_OPERATOR_MAP[op.name]
-            )
-            binary_ops[op.params[0].type.id].append(opv)
+            py_magic: str | tuple[str, ...] = INFIX_OPERATOR_MAP[op.name]
+            if isinstance(py_magic, str):
+                py_magic = (py_magic,)
+            opv = dataclasses.replace(opv, py_magic=py_magic)
+            binary_ops[opv.params[0].type.id].append(opv)
         elif (
             op.operator_kind == _enums.OperatorKind.Prefix
             and op.name in PREFIX_OPERATOR_MAP
         ):
-            opv = _dataclass_extras.coerce_to_dataclass(Operator, op)
             opv = dataclasses.replace(
-                opv, py_magic=PREFIX_OPERATOR_MAP[op.name]
+                opv, py_magic=(PREFIX_OPERATOR_MAP[op.name],)
             )
-            unary_ops[op.params[0].type.id].append(opv)
+            unary_ops[opv.params[0].type.id].append(opv)
         else:
-            other_ops.append(op)
+            other_ops.append(opv)
 
     return OperatorMatrix(
-        binary_ops=binary_ops,
-        unary_ops=unary_ops,
+        binary_ops=dict(binary_ops),
+        unary_ops=dict(unary_ops),
         other_ops=other_ops,
     )
