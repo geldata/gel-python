@@ -17,7 +17,7 @@ from gel._internal import _typing_eval
 from gel._internal import _typing_inspect
 from gel._internal import _utils
 
-from ._base import GelType
+from ._base import GelType, is_gel_type
 
 
 if TYPE_CHECKING:
@@ -85,7 +85,7 @@ class ModelFieldDescriptor(_qb.AbstractFieldDescriptor):
             t = typing.get_args(t)[0]
 
         if t is not None:
-            if not isinstance(t, type) or not issubclass(t, GelType):
+            if not is_gel_type(t):
                 raise AssertionError(
                     f"{self._fqname} type argument is not a GelType: {t}"
                 )

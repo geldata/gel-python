@@ -5,7 +5,16 @@
 """Primitive (non-object) types used to implement class-based query builders"""
 
 from __future__ import annotations
-from typing import TYPE_CHECKING, Any, Generic, Protocol, TypeVar, overload
+from typing import (
+    TYPE_CHECKING,
+    Annotated,
+    Any,
+    ClassVar,
+    Generic,
+    Protocol,
+    TypeVar,
+    overload,
+)
 from typing_extensions import Self, TypeVarTuple, Unpack
 
 import builtins
@@ -105,6 +114,12 @@ class AnyEnum(BaseScalar, StrEnum, metaclass=AnyEnumMeta):
     pass
 
 
+class HomogeneousCollection(
+    _typing_parametric.ParametricType, GelPrimitiveType, Generic[T]
+):
+    __element_type__: ClassVar[type[T]]  # type: ignore [misc]
+
+
 if TYPE_CHECKING:
 
     class _ArrayMeta(GelTypeMeta, typing._ProtocolMeta):
@@ -113,7 +128,7 @@ else:
     _ArrayMeta = type(list)
 
 
-class Array(list[T], GelPrimitiveType, metaclass=_ArrayMeta):
+class Array(HomogeneousCollection[T], list[T], metaclass=_ArrayMeta):  # type: ignore [misc]
     if TYPE_CHECKING:
 
         def __set__(self, obj: Any, value: Array[T] | Sequence[T]) -> None: ...
@@ -130,7 +145,17 @@ else:
 _Ts = TypeVarTuple("_Ts")
 
 
-class Tuple(tuple[Unpack[_Ts]], GelPrimitiveType, metaclass=_TupleMeta):
+class HeterogeneousCollection(
+    _typing_parametric.ParametricType, GelPrimitiveType, Generic[Unpack[_Ts]]
+):
+    __element_types__: ClassVar[Annotated[tuple[type[Any], ...], Unpack[_Ts]]]
+
+
+class Tuple(  # type: ignore[misc]
+    HeterogeneousCollection[Unpack[_Ts]],
+    tuple[Unpack[_Ts]],
+    metaclass=_TupleMeta,
+):
     __slots__ = ()
 
     if TYPE_CHECKING:
@@ -150,7 +175,11 @@ else:
     _RangeMeta = type
 
 
-class Range(_range.Range[T], GelPrimitiveType, metaclass=_RangeMeta):
+class Range(
+    HomogeneousCollection[T],
+    _range.Range[T],
+    metaclass=_RangeMeta,
+):
     if TYPE_CHECKING:
 
         def __set__(
@@ -167,8 +196,7 @@ else:
 
 
 class MultiRange(
-    GelPrimitiveType,
-    Generic[T],
+    HomogeneousCollection[T],
     metaclass=_MultiRangeMeta,
 ):
     if TYPE_CHECKING:

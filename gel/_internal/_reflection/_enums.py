@@ -3,6 +3,8 @@
 # SPDX-FileCopyrightText: Copyright Gel Data Inc. and the contributors.
 
 
+from __future__ import annotations
+
 import enum
 from typing import final
 
@@ -35,6 +37,18 @@ class Cardinality(StrEnum):
             Cardinality.Many,
             Cardinality.Empty,
         }
+
+    def as_optional(self) -> Cardinality:
+        return _as_optional_map[self]
+
+
+_as_optional_map: dict[Cardinality, Cardinality] = {
+    Cardinality.AtMostOne: Cardinality.AtMostOne,
+    Cardinality.One: Cardinality.AtMostOne,
+    Cardinality.Many: Cardinality.Many,
+    Cardinality.AtLeastOne: Cardinality.Many,
+    Cardinality.Empty: Cardinality.Empty,
+}
 
 
 @final

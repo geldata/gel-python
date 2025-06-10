@@ -3,6 +3,7 @@
 # SPDX-FileCopyrightText: Copyright Gel Data Inc. and the contributors.
 
 from __future__ import annotations
+import contextlib
 from typing import (
     TYPE_CHECKING,
     Literal,
@@ -488,6 +489,21 @@ CORE_OBJECTS = {
     "std::Object",
     "std::FreeObject",
 }
+
+
+def _get_object_type_body(
+    objtype: reflection.ObjectType,
+    filters: Iterable[Callable[[reflection.Pointer], bool]] = (),
+) -> list[reflection.Pointer]:
+    filters = [
+        lambda ptr: ptr.name not in {"id", "__type__"},
+        *filters,
+    ]
+    if objtype.name.startswith("schema::"):
+        filters.append(
+            lambda ptr: not ptr.name.startswith("is_") or not ptr.is_computed
+        )
+    return [ptr for ptr in objtype.pointers if all(f(ptr) for f in filters)]
 
 
 class BaseGeneratedModule:
@@ -1957,8 +1973,8 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         type_name = objtype.schemapath
         name = type_name.name
 
-        def _mangle_typeof(name: str) -> str:
-            return f"__{name}_typeof__"
+        def _mangle_typeof_base(name: str) -> str:
+            return f"__{name}_typeof_base__"
 
         base_types = [
             self.get_type(
@@ -1967,12 +1983,12 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             )
             for base in objtype.bases
         ]
-        typeof_class = _mangle_typeof(name)
+        typeof_base_class = _mangle_typeof_base(name)
         if base_types:
-            typeof_bases = _map_name(_mangle_typeof, base_types)
+            typeof_base_bases = _map_name(_mangle_typeof_base, base_types)
         else:
             gmm = self.import_name(BASE_IMPL, "GelTypeMetadata")
-            typeof_bases = [gmm]
+            typeof_base_bases = [gmm]
 
         pointers = objtype.pointers
         sp = self.import_name(BASE_IMPL, "SchemaPath")
@@ -1988,11 +2004,11 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         )
         assert objecttype_import is not None
         uuid = self.import_name("uuid", "UUID")
-        with self._class_def(typeof_class, typeof_bases):
+        with self._class_def(typeof_base_class, typeof_base_bases):
             with self._class_def(
                 "__gel_reflection__",
                 _map_name(
-                    lambda s: f"{_mangle_typeof(s)}.__gel_reflection__",
+                    lambda s: f"{_mangle_typeof_base(s)}.__gel_reflection__",
                     base_types,
                 ),
             ):
@@ -2046,7 +2062,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                             [
                                 "my_ptrs",
                                 *_map_name(
-                                    lambda s: f"{_mangle_typeof(s)}.{pp}",
+                                    lambda s: f"{_mangle_typeof_base(s)}.{pp}",
                                     base_types,
                                 ),
                             ],
@@ -2078,6 +2094,18 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                     self.write(")")
             self.write()
 
+        def _mangle_typeof(name: str) -> str:
+            return f"__{name}_typeof__"
+
+        typeof_class = _mangle_typeof(name)
+        if base_types:
+            typeof_bases = _map_name(_mangle_typeof, base_types)
+        else:
+            typeof_bases = []
+
+        typeof_bases.append(typeof_base_class)
+
+        with self._class_def(typeof_class, typeof_bases):
             with self._class_def(
                 "__typeof__",
                 _map_name(
@@ -2093,6 +2121,46 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                     )
                     for ptr in pointers:
                         ptr_t = self.get_ptr_type(objtype, ptr)
+                        defn = f"{type_alias}('{ptr.name}', '{ptr_t}')"
+                        self.write(f"{ptr.name} = {defn}")
+
+        self.write()
+        self.write()
+
+        def _mangle_typeof_partial(name: str) -> str:
+            return f"__{name}_typeof_partial__"
+
+        typeof_partial_class = _mangle_typeof_partial(name)
+        if base_types:
+            typeof_partial_bases = _map_name(
+                _mangle_typeof_partial, base_types
+            )
+        else:
+            typeof_partial_bases = []
+
+        typeof_partial_bases.append(typeof_base_class)
+
+        with self._class_def(typeof_partial_class, typeof_partial_bases):
+            with self._class_def(
+                "__typeof__",
+                _map_name(
+                    lambda s: f"{_mangle_typeof_partial(s)}.__typeof__",
+                    base_types,
+                ),
+            ):
+                if not pointers:
+                    self.write("pass")
+                else:
+                    type_alias = self.import_name(
+                        "typing_extensions", "TypeAliasType"
+                    )
+                    for ptr in pointers:
+                        ptr_t = self.get_ptr_type(
+                            objtype,
+                            ptr,
+                            cardinality=ptr.card.as_optional(),
+                            variants=frozenset({None, "Partial"}),
+                        )
                         defn = f"{type_alias}('{ptr.name}', '{ptr_t}')"
                         self.write(f"{ptr.name} = {defn}")
 
@@ -2137,28 +2205,95 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                 "__variants__",
                 _map_name(lambda s: f"{s}.__variants__", base_types),
             ):
-                base_bases = [typeof_class]
-                if base_types:
-                    base_bases.extend(
-                        _map_name(
-                            lambda s: f"{s}.__variants__.Base",
-                            base_types,
-                        )
-                    )
-                else:
-                    gel_model = self.import_name(BASE_IMPL, "GelModel")
-                    base_bases.append(gel_model)
+                variant_base_types = []
+                for bt in base_types:
+                    if bt in {"Base", "Required", "PartalBase", "Partial"}:
+                        variant_base_types.append(f"___{bt}___")
+                    else:
+                        variant_base_types.append(bt)
 
-                with self._class_def(
-                    "Base",
-                    base_bases,
+                with self._object_type_variant(
+                    objtype,
+                    variant="Base",
+                    base_types=variant_base_types,
+                    static_bases=[typeof_class],
                     class_kwargs=class_kwargs,
+                    inherit_from_base_variant=False,
                 ):
                     self._write_base_object_type_body(objtype, typeof_class)
 
+                with self._object_type_variant(
+                    objtype,
+                    variant="Required",
+                    base_types=variant_base_types,
+                    static_bases=[],
+                    class_kwargs={},
+                    inherit_from_base_variant=True,
+                ):
+                    ptrs = _get_object_type_body(
+                        objtype,
+                        filters=[lambda ptr: not ptr.card.is_optional()],
+                    )
+                    if ptrs:
+                        localns = frozenset(ptr.name for ptr in ptrs)
+                        for ptr in ptrs:
+                            ptr_type = self.get_ptr_type(
+                                objtype,
+                                ptr,
+                                aspect=ModuleAspect.MAIN,
+                                localns=localns,
+                            )
+                            self.write(f"{ptr.name}: {ptr_type}")
+                        self.write()
+                    else:
+                        self.write("pass")
+                        self.write()
+
+                with self._object_type_variant(
+                    objtype,
+                    variant="PartialBase",
+                    base_types=variant_base_types,
+                    static_bases=[typeof_partial_class],
+                    class_kwargs={},
+                    inherit_from_base_variant=True,
+                    line_comment="type: ignore [misc, unused-ignore]",
+                ):
+                    self.write("pass")
+                    self.write()
+
+                with self._object_type_variant(
+                    objtype,
+                    variant="Partial",
+                    base_types=variant_base_types,
+                    static_bases=["PartialBase"],
+                    class_kwargs={},
+                    inherit_from_base_variant=False,
+                    line_comment="type: ignore [misc, unused-ignore]",
+                ):
+                    ptrs = _get_object_type_body(objtype)
+                    if ptrs:
+                        localns = frozenset(ptr.name for ptr in ptrs)
+                        for ptr in ptrs:
+                            ptr_type = self.get_ptr_type(
+                                objtype,
+                                ptr,
+                                aspect=ModuleAspect.MAIN,
+                                localns=localns,
+                                cardinality=ptr.card.as_optional(),
+                                variants=frozenset({None, "Partial"}),
+                            )
+                            self.write(f"{ptr.name}: {ptr_type}")
+                        self.write()
+                    else:
+                        self.write("pass")
+                        self.write()
+
                 self.write()
                 typevar = self.import_name("typing", "TypeVar")
-                self.write(f'Any = {typevar}("Any", bound="{name} | Base")')
+                self.write(
+                    f'Any = {typevar}("Any", '
+                    f'bound="{name} | Base | Required | Partial")'
+                )
 
             proplinks = self._get_links_with_props(objtype)
             if base_types:
@@ -2173,9 +2308,30 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                 else:
                     self.write("pass")
 
+            if base_types:
+                links_partial_bases = _map_name(
+                    lambda s: f"{s}.__links_partial__", base_types
+                )
+            else:
+                lns = self.import_name(BASE_IMPL, "LinkClassNamespace")
+                links_partial_bases = [lns]
+
+            with self._class_def("__links_partial__", links_partial_bases):
+                if proplinks:
+                    self.write_object_type_link_variants(
+                        objtype,
+                        variant="Partial",
+                    )
+                else:
+                    self.write("pass")
+
         self.write()
         with self.not_type_checking():
             self.write(f"{name}.__variants__.Base = {name}")
+
+        if name in {"Base", "Required", "PartalBase", "Partial"}:
+            # alias classes that conflict with variant types
+            self.write(f"___{name}___ = {name}")
 
         self.write()
 
@@ -2209,6 +2365,41 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             f"{classes['GelPointerReflection']}({{list}})",
             [f"{k}={v}" for k, v in kwargs.items()],
         )
+
+    @contextlib.contextmanager
+    def _object_type_variant(
+        self,
+        objtype: reflection.ObjectType,
+        *,
+        variant: str,
+        base_types: list[str],
+        static_bases: list[str],
+        class_kwargs: dict[str, str],
+        inherit_from_base_variant: bool,
+        line_comment: str | None = None,
+    ) -> Iterator[None]:
+        variant_bases = list(static_bases)
+        if inherit_from_base_variant:
+            variant_bases.append("Base")
+
+        if base_types:
+            variant_bases.extend(
+                _map_name(
+                    lambda s: f"{s}.__variants__.{variant}",
+                    base_types,
+                )
+            )
+        elif not inherit_from_base_variant:
+            gel_model = self.import_name(BASE_IMPL, "GelModel")
+            variant_bases.append(gel_model)
+
+        with self._class_def(
+            variant,
+            variant_bases,
+            class_kwargs=class_kwargs,
+            line_comment=line_comment,
+        ):
+            yield
 
     def _write_base_object_type_body(
         self,
@@ -2496,6 +2687,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         objtype: reflection.ObjectType,
         *,
         target_aspect: ModuleAspect = ModuleAspect.MAIN,
+        variant: str | None = None,
     ) -> None:
         pointers = self._get_links_with_props(objtype)
         if not pointers:
@@ -2513,6 +2705,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                     ptr_origins=all_ptr_origins[pointer.name],
                     target_aspect=target_aspect,
                     is_forward_decl=True,
+                    variant=variant,
                 )
 
         with self.not_type_checking():
@@ -2532,6 +2725,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                         ptr_origins=all_ptr_origins[pointer.name],
                         target_aspect=target_aspect,
                         is_forward_decl=False,
+                        variant=variant,
                     )
                     self.write(f"{classname}.__name__ = {ptrname!r}")
                     qualname = f"{obj_class}.{ptrname}"
@@ -2546,6 +2740,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         ptr_origins: list[reflection.ObjectType],
         target_aspect: ModuleAspect | None = None,
         is_forward_decl: bool = False,
+        variant: str | None = None,
     ) -> str:
         type_name = reflection.parse_name(objtype.name)
         name = type_name.name
@@ -2569,6 +2764,8 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             import_time=import_time,
             aspect=target_aspect,
         )
+        if variant is not None:
+            target = f"{target}.__variants__.{variant}"
 
         ptr_origin_types = [
             self.get_type(
@@ -2580,12 +2777,20 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         ]
 
         classname = pname if is_forward_decl else f"{name}__{pname}"
+        if variant is not None:
+            container = f"__links_{variant.lower()}__"
+            line_comment = "type: ignore [misc]"
+        else:
+            container = "__links__"
+            line_comment = None
+
         with self._class_def(
             classname,
             (
-                [f"{s}.__links__.{pname}" for s in ptr_origin_types]
+                [f"{s}.{container}.{pname}" for s in ptr_origin_types]
                 + [target, f"{proxymodel_t}[{target}]"]
             ),
+            line_comment=line_comment,
         ):
             self.write(
                 f'"""link {objtype.name}.{pname}: {target_type.name}"""'
@@ -2594,7 +2799,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             if ptr_origin_types:
                 lprops_bases = _map_name(
                     functools.partial(
-                        lambda s, pn: f"{s}.__links__.{pn}.__lprops__",
+                        lambda s, pn: f"{s}.{container}.{pn}.__lprops__",
                         pn=pname,
                     ),
                     ptr_origin_types,
@@ -2691,18 +2896,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                 base_types.append(self.get_type(base_type))
 
         with self._class_def(name, base_types):
-            pointers = [
-                ptr
-                for ptr in objtype.pointers
-                if ptr.name not in {"id", "__type__"}
-            ]
-            if objtype.name.startswith("schema::"):
-                pointers = [
-                    ptr
-                    for ptr in objtype.pointers
-                    if not ptr.name.startswith("is_") or not ptr.is_computed
-                ]
-
+            pointers = _get_object_type_body(objtype)
             if pointers:
                 localns = frozenset(ptr.name for ptr in pointers)
                 for ptr in pointers:
@@ -3013,10 +3207,12 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         aspect: ModuleAspect | None = None,
         cardinality: reflection.Cardinality | None = None,
         localns: frozenset[str] | None = None,
+        variants: frozenset[str | None] | None = None,
     ) -> str:
         if aspect is None:
             aspect = ModuleAspect.VARIANTS
 
+        objtype_name = objtype.schemapath
         target_type = self._types[prop.target_id]
         bare_ptr_type = ptr_type = self.get_type(
             target_type,
@@ -3055,12 +3251,28 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             and prop.pointers
             and not prefer_broad_target_type
         ):
-            objtype_name = reflection.parse_name(objtype.name)
             if self.current_aspect is ModuleAspect.VARIANTS:
                 target_name = reflection.parse_name(target_type.name)
                 if target_name.parent != objtype_name.parent:
                     aspect = ModuleAspect.LATE
             ptr_type = f"{objtype_name.name}.__links__.{prop.name}"
+            has_lprops = True
+        else:
+            has_lprops = False
+
+        if reflection.is_link(prop) and variants:
+            union = set()
+            for variant in variants:
+                if variant is None:
+                    union.add(ptr_type)
+                elif has_lprops:
+                    union.add(
+                        f"{objtype_name.name}.__links_{variant.lower()}__"
+                        f".{prop.name}"
+                    )
+                else:
+                    union.add(f"{ptr_type}.__variants__.{variant}")
+            ptr_type = " | ".join(sorted(union))
 
         if cardinality is None:
             cardinality = reflection.Cardinality(prop.card)
