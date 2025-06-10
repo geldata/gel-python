@@ -40,7 +40,11 @@ class _NoopResponse(fastapi.Response):
 
 class GelAuth(client_mod.Extension):
     auth_path_prefix = utils.Config("/auth")
+    client_token_global = utils.Config("ext::auth::client_token")
     auth_cookie_name = utils.Config("gel_auth_token")
+    auth_cookie_description = utils.Config(
+        "The cookie as the authentication token"
+    )
     verifier_cookie_name = utils.Config("gel_verifier")
     tags: utils.Config[list[str | enum.Enum]] = utils.Config(["Gel Auth"])
     secure_cookie = utils.Config(True)  # noqa: FBT003
@@ -58,8 +62,8 @@ class GelAuth(client_mod.Extension):
     )
 
     _pkce_verifier: Optional[security.APIKeyCookie] = None
-    _maybe_auth_token: Optional[security.APIKeyCookie] = None
-    _auth_token: Optional[security.APIKeyCookie] = None
+    _maybe_auth_token: params.Depends
+    _auth_token: params.Depends
     _insts: dict[str, Installable]
 
     def _post_init(self) -> None:
@@ -118,38 +122,43 @@ class GelAuth(client_mod.Extension):
     def client(self) -> gel.AsyncIOClient:
         return self._lifespan.client
 
-    def _make_auth_token_dependency(
-        self, *, auto_error: bool, cache_name: str
-    ) -> params.Depends:
-        auth_token_cookie = getattr(self, cache_name, None)
-        if auth_token_cookie is None:
-            auth_token_cookie = security.APIKeyCookie(
-                name=self.auth_cookie_name.value,
-                description="The cookie as the authentication token",
-                auto_error=auto_error,
-            )
-            setattr(self, cache_name, auth_token_cookie)
-
-        def get_auth_token(
-            auth_token: Optional[str] = fastapi.Depends(auth_token_cookie),
-        ) -> Optional[str]:
-            return auth_token
-
-        return self._lifespan.with_global("ext::auth::client_token")(
-            get_auth_token
-        )
-
     @property
     def maybe_auth_token(self) -> params.Depends:
-        return self._make_auth_token_dependency(
-            auto_error=False, cache_name="_maybe_auth_token"
-        )
+        if not hasattr(self, "_maybe_auth_token"):
+            auth_token_cookie = security.APIKeyCookie(
+                name=self.auth_cookie_name.value,
+                description=self.auth_cookie_description.value,
+                auto_error=False,
+            )
+
+            def get_auth_token(
+                auth_token: Optional[str] = fastapi.Depends(auth_token_cookie),
+            ) -> Optional[str]:
+                return auth_token
+
+            self._maybe_auth_token = self._lifespan.with_global(
+                self.client_token_global.value
+            )(get_auth_token)
+        return self._maybe_auth_token
 
     @property
     def auth_token(self) -> params.Depends:
-        return self._make_auth_token_dependency(
-            auto_error=True, cache_name="_auth_token"
-        )
+        if not hasattr(self, "_auth_token"):
+            auth_token_cookie = security.APIKeyCookie(
+                name=self.auth_cookie_name.value,
+                description=self.auth_cookie_description.value,
+                auto_error=True,
+            )
+
+            def get_auth_token(
+                auth_token: str = fastapi.Depends(auth_token_cookie),
+            ) -> str:
+                return auth_token
+
+            self._auth_token = self._lifespan.with_global(
+                self.client_token_global.value
+            )(get_auth_token)
+        return self._auth_token
 
     async def handle_new_identity(
         self,
@@ -162,7 +171,9 @@ class GelAuth(client_mod.Extension):
             if token_data is None:
                 response = await self.on_new_identity.call(request, result)
             else:
-                dec = self._lifespan.with_global("ext::auth::client_token")
+                dec = self._lifespan.with_global(
+                    self.client_token_global.value
+                )
                 dep = dec(lambda: token_data.auth_token).dependency
                 call = cast("Callable[[fastapi.Request], Iterator[None]]", dep)
                 ctx = contextlib.contextmanager(call)

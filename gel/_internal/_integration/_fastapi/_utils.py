@@ -18,7 +18,9 @@ from typing_extensions import Self
 import asyncio
 import contextlib
 import functools
+import os
 import re
+import traceback
 import warnings
 
 import fastapi
@@ -39,6 +41,7 @@ class ConfigSubject(Protocol):
 S = TypeVar("S", bound=ConfigSubject)
 T = TypeVar("T")
 T_contra = TypeVar("T_contra", contravariant=True)
+DEBUG_DEPTH = int(os.environ.get("GEL_PYTHON_DEBUG_ACCESS_STACK", "0"))
 
 
 class Handler(Protocol[T_contra]):
@@ -355,6 +358,7 @@ class ConfigInstance(Generic[T, S]):
     _default: Callable[[], T]
     _subject: S
     _value: T
+    _froze_by: Optional[str] = None
 
     def __init__(self, config: Config[T], subject: S) -> None:
         self._default = lambda: config.default
@@ -363,11 +367,27 @@ class ConfigInstance(Generic[T, S]):
     def __call__(self, value: T) -> S:
         if self._subject.installed:
             raise ValueError("cannot set config value after installation")
+        if self._froze_by is not None:
+            raise ValueError(
+                f"cannot set config value after reading it: \n{self._froze_by}"
+            )
         self._value = value
         return self._subject
 
     @property
     def value(self) -> T:
+        if self._froze_by is None:
+            if DEBUG_DEPTH > 0:
+                self._froze_by = "".join(
+                    traceback.format_list(
+                        traceback.extract_stack(limit=DEBUG_DEPTH + 1)[:-1]
+                    )
+                )
+            else:
+                self._froze_by = (
+                    "  Set GEL_PYTHON_DEBUG_ACCESS_STACK=3 "
+                    "to see the stack trace"
+                )
         try:
             return self._value
         except AttributeError:

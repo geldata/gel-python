@@ -10,6 +10,7 @@ from typing import (
     Optional,
     ParamSpec,
     TYPE_CHECKING,
+    TypeVar,
 )
 
 from starlette import concurrency
@@ -33,6 +34,7 @@ if TYPE_CHECKING:
 
 GEL_STATE_NAMES_STATE = "_gel_state_names"
 P = ParamSpec("P")
+T = TypeVar("T")
 
 
 class Extension:
@@ -222,8 +224,8 @@ class GelLifespan:
 
     def with_global(
         self, name: str
-    ) -> Callable[[Callable[P, Optional[str]]], params.Depends]:
-        def decorator(func: Callable[P, Optional[str]]) -> params.Depends:
+    ) -> Callable[[Callable[P, T]], params.Depends]:
+        def decorator(func: Callable[P, T]) -> params.Depends:
             def wrapper(
                 request: fastapi.Request, *args: P.args, **kwargs: P.kwargs
             ) -> Iterator[None]:
