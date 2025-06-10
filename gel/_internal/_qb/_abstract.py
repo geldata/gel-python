@@ -96,6 +96,21 @@ class TypedExpr(Expr):
         return self.type_
 
 
+@dataclass(kw_only=True, frozen=True)
+class QueryText(TypedExpr):
+    text: str
+
+    @property
+    def precedence(self) -> _edgeql.Precedence:
+        return _edgeql.PRECEDENCE[_edgeql.Operation.RAW]
+
+    def subnodes(self) -> Iterable[Node | None]:
+        return ()
+
+    def __edgeql_expr__(self, *, ctx: ScopeContext | None) -> str:
+        return self.text
+
+
 class AtomicExpr(TypedExpr):
     pass
 

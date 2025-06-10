@@ -14,6 +14,8 @@ from typing_extensions import Self
 import itertools
 import textwrap
 import typing
+import weakref
+
 from dataclasses import dataclass, field
 
 from gel._internal import _edgeql
@@ -34,11 +36,17 @@ from ._abstract import (
     Symbol,
     TypedExpr,
 )
-from ._protocols import ExprCompatible, edgeql, edgeql_qb_expr
+from ._protocols import (
+    ExprCompatible,
+    edgeql,
+    edgeql_qb_expr,
+)
 
 if TYPE_CHECKING:
     import decimal
     from collections.abc import Callable, Iterable
+
+    from ._reflection import GelTypeMetadata
 
 
 class ExprPlaceholder(Expr):
@@ -254,6 +262,31 @@ class PrefixOp(Op):
         if _need_right_parens(self.precedence, self.expr):
             left = f"({left})"
         return f"{self.op} {left}"
+
+
+@dataclass(kw_only=True, frozen=True)
+class CastOp(PrefixOp):
+    def __init__(
+        self,
+        *,
+        expr: ExprCompatible,
+        type_: SchemaPath,
+    ) -> None:
+        op = _edgeql.Token.RANGBRACKET
+        super().__init__(expr=expr, op=op, type_=type_)
+
+    @property
+    def precedence(self) -> _edgeql.Precedence:
+        return _edgeql.PRECEDENCE[_edgeql.Operation.RAW]
+
+    def subnodes(self) -> Iterable[Node]:
+        return (self.expr,)
+
+    def __edgeql_expr__(self, *, ctx: ScopeContext | None) -> str:
+        expr = edgeql(self.expr, ctx=ctx)
+        if _need_right_parens(self.precedence, self.expr):
+            expr = f"({expr})"
+        return f"<{self.type.as_quoted_schema_name()}>{expr}"
 
 
 @dataclass(kw_only=True, frozen=True)
@@ -566,6 +599,7 @@ class SelectStmt(IteratorStmt):
         expr: Expr,
         *,
         new_stmt_if: Callable[[SelectStmt], bool] | None = None,
+        splat_cb: Callable[[], Shape] | None = None,
     ) -> SelectStmt:
         if not isinstance(expr, SelectStmt) or (
             new_stmt_if is not None and new_stmt_if(expr)
@@ -574,10 +608,11 @@ class SelectStmt(IteratorStmt):
             if isinstance(expr, ShapeOp):
                 kwargs["body_scope"] = expr.scope
             elif isinstance(expr, SchemaSet):
-                expr = ShapeOp(
-                    iter_expr=expr,
-                    shape=Shape.splat(source=expr.type),
-                )
+                if splat_cb is not None:
+                    shape = splat_cb()
+                else:
+                    shape = Shape.splat(source=expr.type)
+                expr = ShapeOp(iter_expr=expr, shape=shape)
                 kwargs["body_scope"] = expr.scope
             expr = SelectStmt(iter_expr=expr, **kwargs)  # type: ignore [arg-type]
 
@@ -703,6 +738,7 @@ class ShapeElement(Node):
     def splat(
         cls,
         source: _reflection.SchemaPath,
+        *,
         kind: Splat = Splat.STAR,
     ) -> Self:
         return cls(name=kind, origin=source)
@@ -719,9 +755,11 @@ class Shape(Node):
     def splat(
         cls,
         source: _reflection.SchemaPath,
+        *,
         kind: Splat = Splat.STAR,
     ) -> Self:
-        return cls(elements=[ShapeElement.splat(source=source, kind=kind)])
+        elements = [ShapeElement.splat(source=source, kind=kind)]
+        return cls(elements=elements)
 
 
 def _render_shape(
@@ -813,8 +851,26 @@ def _need_right_parens(
     return _edgeql.need_right_parens(prod_prec, right_prec)
 
 
-def toplevel_edgeql(x: ExprCompatible) -> str:
+_type_splat_cache: weakref.WeakKeyDictionary[type[GelTypeMetadata], Shape] = (
+    weakref.WeakKeyDictionary()
+)
+
+
+def get_object_type_splat(cls: type[GelTypeMetadata]) -> Shape:
+    shape = _type_splat_cache.get(cls)
+    if shape is None:
+        reflection = cls.__gel_reflection__
+        shape = Shape.splat(source=reflection.name)
+        _type_splat_cache[cls] = shape
+    return shape
+
+
+def toplevel_edgeql(
+    x: ExprCompatible,
+    *,
+    splat_cb: Callable[[], Shape] | None = None,
+) -> str:
     expr = edgeql_qb_expr(x)
     if not isinstance(expr, Stmt):
-        expr = SelectStmt.wrap(expr)
+        expr = SelectStmt.wrap(expr, splat_cb=splat_cb)
     return edgeql(expr, ctx=None)

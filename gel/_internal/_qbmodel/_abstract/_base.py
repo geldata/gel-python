@@ -3,27 +3,21 @@
 # SPDX-FileCopyrightText: Copyright Gel Data Inc. and the contributors.
 
 from __future__ import annotations
-from typing import TYPE_CHECKING, ClassVar, TypeVar
+from typing import TYPE_CHECKING, Any, ClassVar, TypeVar
 
+import dataclasses
 
+from gel._internal import _edgeql
 from gel._internal import _qb
 from gel._internal._hybridmethod import hybridmethod
 
 if TYPE_CHECKING:
-    import uuid
     from collections.abc import Iterator
-    from gel._internal import _reflection
 
 
 T = TypeVar("T")
 T_co = TypeVar("T_co", covariant=True)
 GelType_T = TypeVar("GelType_T", bound="GelType")
-
-
-class GelTypeMetadata:
-    class __gel_reflection__:  # noqa: N801
-        id: ClassVar[uuid.UUID]
-        name: ClassVar[_reflection.SchemaPath]
 
 
 if TYPE_CHECKING:
@@ -33,7 +27,7 @@ if TYPE_CHECKING:
 
     class GelType(
         _qb.AbstractDescriptor,
-        GelTypeMetadata,
+        _qb.GelTypeMetadata,
         metaclass=GelTypeMeta,
     ):
         __gel_type_class__: ClassVar[type]
@@ -49,7 +43,7 @@ if TYPE_CHECKING:
 else:
     GelTypeMeta = type
 
-    class GelType(_qb.AbstractDescriptor, GelTypeMetadata):
+    class GelType(_qb.AbstractDescriptor, _qb.GelTypeMetadata):
         @hybridmethod
         def __edgeql_qb_expr__(self) -> _qb.Expr:
             if isinstance(self, type):
@@ -73,11 +67,23 @@ else:
 if TYPE_CHECKING:
 
     class GelObjectTypeMeta(GelTypeMeta):
+        __gel_pointer_infos__: ClassVar[dict[str, PointerInfo]]
+
         # Splat qb protocol
         def __iter__(cls) -> Iterator[_qb.ShapeElement]:  # noqa: N805
             ...
 else:
     GelObjectTypeMeta = type
+
+
+@dataclasses.dataclass(kw_only=True, frozen=True)
+class PointerInfo:
+    computed: bool = False
+    readonly: bool = False
+    has_props: bool = False
+    cardinality: _edgeql.Cardinality = _edgeql.Cardinality.One
+    annotation: type[Any] | None = None
+    kind: _edgeql.PointerKind | None = None
 
 
 class GelObjectType(GelType, metaclass=GelObjectTypeMeta):

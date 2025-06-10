@@ -10,7 +10,7 @@ from ._base import (
     GelType,
     GelType_T,
     GelTypeMeta,
-    GelTypeMetadata,
+    PointerInfo,
 )
 
 from ._descriptors import (
@@ -21,7 +21,6 @@ from ._descriptors import (
     OptionalPointerDescriptor,
     OptionalPropertyDescriptor,
     PointerDescriptor,
-    PointerInfo,
     PropertyDescriptor,
     field_descriptor,
 )
@@ -62,7 +61,6 @@ __all__ = (
     "GelPrimitiveType",
     "GelType",
     "GelTypeMeta",
-    "GelTypeMetadata",
     "GelType_T",
     "LinkDescriptor",
     "ModelFieldDescriptor",
