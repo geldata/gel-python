@@ -9,6 +9,7 @@ from __future__ import annotations
 from typing import (
     TYPE_CHECKING,
     Any,
+    TypedDict,
     get_args,
 )
 
@@ -16,20 +17,27 @@ from typing import (
 import dataclasses
 import functools
 
+from gel._internal import _edgeql
 from gel._internal import _typing_inspect
 from gel._internal import _utils
 
 from ._abstract import AbstractFieldDescriptor
-from ._expressions import InfixOp, Path, Variable, toplevel_edgeql
-from ._protocols import TypeClassProto, edgeql_qb_expr, is_exprmethod
+from ._expressions import BinaryOp, Path, Variable, toplevel_edgeql
+from ._protocols import (
+    TypeClassProto,
+    assert_edgeql_qb_expr,
+    edgeql_qb_expr,
+    is_exprmethod,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
 
+    from gel._internal._reflection import SchemaPath
     from ._abstract import Expr
 
 
-OP_OVERLOADS = frozenset(
+_OP_OVERLOADS = frozenset(
     {
         "__add__",
         "__and__",
@@ -37,6 +45,7 @@ OP_OVERLOADS = frozenset(
         "__eq__",
         "__floordiv__",
         "__ge__",
+        "__getitem__",
         "__gt__",
         "__le__",
         "__lshift__",
@@ -55,6 +64,32 @@ OP_OVERLOADS = frozenset(
 )
 """Operators that are overloaded on types"""
 
+_SWAPPED_OP_OVERLOADS = frozenset(
+    {
+        "__radd__",
+        "__rand__",
+        "__rfloordiv__",
+        "__rlshift__",
+        "__rmatmul__",
+        "__rmod__",
+        "__rmul__",
+        "__ror__",
+        "__rpow__",
+        "__rrshift__",
+        "__rsub__",
+        "__rtruediv__",
+        "__rxor__",
+    }
+)
+"""Operators that are overloaded on types (swapped versions)"""
+
+
+class _BinaryOpKwargs(TypedDict, total=False):
+    lexpr: Expr
+    rexpr: Expr
+    op: _edgeql.Token
+    type_: SchemaPath
+
 
 SPECIAL_EXPR_METHODS = frozenset(
     {
@@ -70,10 +105,18 @@ class BaseAliasMeta(type):
         bases: tuple[type[Any], ...],
         namespace: dict[str, Any],
     ) -> BaseAliasMeta:
-        for op in OP_OVERLOADS:
+        for op in _OP_OVERLOADS:
             namespace.setdefault(
                 op,
                 lambda self, other, op=op: self.__infix_op__(op, other),
+            )
+
+        for op in _SWAPPED_OP_OVERLOADS:
+            namespace.setdefault(
+                op,
+                lambda self, other, op=op: self.__infix_op__(
+                    op, other, swapped=True
+                ),
             )
 
         return super().__new__(mcls, name, bases, namespace)
@@ -141,7 +184,13 @@ class BaseAlias(metaclass=BaseAliasMeta):
     def __edgeql_qb_expr__(self) -> Expr:
         return self.__gel_metadata__
 
-    def __infix_op__(self, op: str, operand: Any) -> Any:
+    def __infix_op__(
+        self,
+        op: str,
+        operand: BaseAlias | type[TypeClassProto],
+        *,
+        swapped: bool = False,
+    ) -> Any:
         if op == "__eq__" and operand is self:
             return True
 
@@ -162,19 +211,23 @@ class BaseAlias(metaclass=BaseAliasMeta):
         expr = op_impl(this_operand, other_operand)
         assert isinstance(expr, ExprAlias)
         metadata = expr.__gel_metadata__
-        assert isinstance(metadata, InfixOp)
+        assert isinstance(metadata, BinaryOp)
         self_expr = edgeql_qb_expr(self)
-        if hasattr(operand, "__edgeql_qb_expr__"):
-            expr.__gel_metadata__ = dataclasses.replace(
-                metadata,
-                lexpr=self_expr,
-                rexpr=edgeql_qb_expr(operand),
-            )
+
+        if isinstance(operand, BaseAlias):
+            other_expr = assert_edgeql_qb_expr(operand)
         else:
-            expr.__gel_metadata__ = dataclasses.replace(
-                metadata,
-                lexpr=self_expr,
-            )
+            other_expr = metadata.lexpr if swapped else metadata.rexpr
+
+        replacements: _BinaryOpKwargs = {}
+        if swapped:
+            replacements["rexpr"] = self_expr
+            replacements["lexpr"] = other_expr
+        else:
+            replacements["lexpr"] = self_expr
+            replacements["rexpr"] = other_expr
+
+        expr.__gel_metadata__ = dataclasses.replace(metadata, **replacements)
 
         return expr
 

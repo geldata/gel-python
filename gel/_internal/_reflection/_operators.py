@@ -34,7 +34,7 @@ class Operator(Callable):
     name: str
     description: str
     suggested_ident: str
-    py_magic: str | None = None
+    py_magic: tuple[str, ...] | None
     operator_kind: _enums.OperatorKind
     return_type: _types.TypeRef
     return_typemod: _enums.TypeModifier
@@ -44,21 +44,22 @@ class Operator(Callable):
 OperatorMap = TypeAliasType("OperatorMap", MutableMapping[str, list[Operator]])
 
 
-INFIX_OPERATOR_MAP = {
+INFIX_OPERATOR_MAP: dict[str, str | tuple[str, str]] = {
     "std::=": "__eq__",
     "std::!=": "__ne__",
     "std::<": "__lt__",
     "std::<=": "__le__",
     "std::>": "__gt__",
     "std::>=": "__ge__",
-    "std::+": "__add__",
-    "std::++": "__add__",
-    "std::-": "__sub__",
-    "std::*": "__mul__",
-    "std::/": "__truediv__",
-    "std:://": "__floordiv__",
-    "std::%": "__mod__",
-    "std::^": "__pow__",
+    "std::+": ("__add__", "__radd__"),
+    "std::++": ("__add__", "__radd__"),
+    "std::-": ("__sub__", "__rsub__"),
+    "std::*": ("__mul__", "__rmul__"),
+    "std::/": ("__truediv__", "__rtruediv__"),
+    "std:://": ("__floordiv__", "__rfloordiv__"),
+    "std::%": ("__mod__", "__rmod__"),
+    "std::^": ("__pow__", "__rpow__"),
+    "std::[]": "__getitem__",
 }
 
 PREFIX_OPERATOR_MAP = {
@@ -113,16 +114,17 @@ def fetch_operators(
             op.operator_kind == _enums.OperatorKind.Infix
             and op.name in INFIX_OPERATOR_MAP
         ):
-            opv = dataclasses.replace(
-                opv, py_magic=INFIX_OPERATOR_MAP[op.name]
-            )
+            py_magic: str | tuple[str, ...] = INFIX_OPERATOR_MAP[op.name]
+            if isinstance(py_magic, str):
+                py_magic = (py_magic,)
+            opv = dataclasses.replace(opv, py_magic=py_magic)
             binary_ops[opv.params[0].type.id].append(opv)
         elif (
             op.operator_kind == _enums.OperatorKind.Prefix
             and op.name in PREFIX_OPERATOR_MAP
         ):
             opv = dataclasses.replace(
-                opv, py_magic=PREFIX_OPERATOR_MAP[op.name]
+                opv, py_magic=(PREFIX_OPERATOR_MAP[op.name],)
             )
             unary_ops[opv.params[0].type.id].append(opv)
         else:

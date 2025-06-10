@@ -20,7 +20,9 @@ from typing import Any
 
 import dataclasses
 import os
+import sys
 import typing
+import unittest
 
 if typing.TYPE_CHECKING:
     from typing import reveal_type
@@ -201,16 +203,24 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertIsInstance(d.author, default.User)
         self.assertEqual(d.author.name, "Alice")
 
+    @unittest.skipIf(
+        sys.version_info < (3, 11),
+        "dispatch_overload currently broken under Python 3.10",
+    )
     @tb.typecheck
     def test_modelgen_data_unpack_1b(self):
-        from models import default
+        from models import default, std
 
         q = (
             default.Post.select(
                 body=True,
                 author=lambda p: p.author.select(name=True),
             )
-            .filter(lambda p: p.body == "Hello")
+            .filter(
+                lambda p: p.body == "Hello",
+                lambda p: 1 * std.len(p.body) == 5,
+                lambda p: p.body[0] == "H",
+            )
             .limit(1)
         )
         d = self.client.get(q)
