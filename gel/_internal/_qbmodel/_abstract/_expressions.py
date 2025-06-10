@@ -5,7 +5,7 @@
 """Base object types used to implement class-based query builders"""
 
 from __future__ import annotations
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 from typing_extensions import TypeAliasType
 
 import dataclasses
@@ -90,14 +90,12 @@ def _const_to_expr(
 
 
 def select(
-    cls: type[GelType],
+    cls: type[GelObjectType],
     /,
-    *elements: _qb.PathAlias,
+    *elements: _qb.ShapeElement | Literal["*"],
     __operand__: _qb.ExprAlias | None = None,
     **kwargs: bool | _Value,
 ) -> _qb.ShapeOp:
-    shape: dict[str, _qb.Expr] = {}
-
     this_type = cls.__gel_reflection__.name
     scope = _qb.Scope()
 
@@ -105,8 +103,9 @@ def select(
         operand = _qb.edgeql_qb_expr(__operand__)
         if (
             isinstance(operand, _qb.ShapeOp)
-            and not operand.shape.elements
-            and operand.shape.star_splat
+            and len(operand.shape.elements) == 1
+            and operand.shape.elements[0].name is _qb.Splat.STAR
+            and operand.shape.elements[0].origin == this_type
         ):
             operand = operand.iter_expr
     else:
@@ -116,37 +115,59 @@ def select(
     prefix = _qb.PathPrefix(type_=subject.type, scope=scope)
     prefix_alias = _qb.PathAlias(cls, prefix)
 
+    shape_elements: list[_qb.ShapeElement] = []
     for elem in elements:
-        path = _qb.edgeql_qb_expr(elem)
-        if not isinstance(path, _qb.Path):
-            raise TypeError(f"{elem} is not a valid path expression")
-
-        if path.source.type == this_type:
-            path = dataclasses.replace(path, source=prefix)
-
-        shape[path.name] = path
+        if elem == "*":
+            shape_elements.extend(iter(cls))
+        else:
+            shape_elements.append(elem)
 
     for ptrname, kwarg in kwargs.items():
         if isinstance(kwarg, bool):
             ptr_expr: _qb.Expr
             ptr, ptr_expr = _get_prefixed_ptr(cls, ptrname, scope=scope)
             if kwarg:
-                if issubclass(ptr.__gel_origin__, GelObjectType):
+                target = ptr.__gel_origin__
+                if issubclass(target, GelObjectType):
+                    target_type = target.__gel_reflection__.name
                     ptr_expr = _qb.ShapeOp(
                         iter_expr=ptr_expr,
-                        shape=_qb.Shape(star_splat=True),
+                        shape=_qb.Shape.splat(source=target_type),
                     )
-                shape[ptrname] = ptr_expr
+                    shape_el = _qb.ShapeElement(
+                        name=ptrname,
+                        expr=ptr_expr,
+                        origin=this_type,
+                    )
+                else:
+                    shape_el = _qb.ShapeElement(
+                        name=ptrname,
+                        origin=this_type,
+                    )
+
+                shape_elements.append(shape_el)
             else:
-                shape.pop(ptrname, None)
+                shape_elements = list(
+                    filter(lambda el: el.name != ptrname, shape_elements)
+                )
         elif isinstance(kwarg, PyConstType):
-            shape[ptrname] = _const_to_expr(cls, ptrname, kwarg)
+            shape_el = _qb.ShapeElement(
+                name=ptrname,
+                expr=_const_to_expr(cls, ptrname, kwarg),
+                origin=this_type,
+            )
+            shape_elements.append(shape_el)
         else:
-            shape[ptrname] = _qb.edgeql_qb_expr(kwarg, var=prefix_alias)
+            shape_el = _qb.ShapeElement(
+                name=ptrname,
+                expr=_qb.edgeql_qb_expr(kwarg, var=prefix_alias),
+                origin=this_type,
+            )
+            shape_elements.append(shape_el)
 
     return _qb.ShapeOp(
         iter_expr=operand,
-        shape=_qb.Shape(elements=shape),
+        shape=_qb.Shape(elements=shape_elements),
         scope=scope,
         body_scope=scope,
     )
@@ -158,8 +179,6 @@ def update(
     __operand__: _qb.ExprAlias | None = None,
     **kwargs: _Value,
 ) -> _qb.UpdateStmt:
-    shape: dict[str, _qb.Expr] = {}
-
     this_type = cls.__gel_reflection__.name
     scope = _qb.Scope()
     operand = _qb.edgeql_qb_expr(cls if __operand__ is None else __operand__)
@@ -167,11 +186,16 @@ def update(
     prefix = _qb.PathPrefix(type_=this_type, scope=scope)
     prefix_alias = _qb.PathAlias(cls, prefix)
 
+    shape: list[_qb.ShapeElement] = []
     for ptrname, kwarg in kwargs.items():
+        ptr_expr: _qb.Expr
         if isinstance(kwarg, PyConstType):
-            shape[ptrname] = _const_to_expr(cls, ptrname, kwarg)
+            ptr_expr = _const_to_expr(cls, ptrname, kwarg)
         else:
-            shape[ptrname] = _qb.edgeql_qb_expr(kwarg, var=prefix_alias)
+            ptr_expr = _qb.edgeql_qb_expr(kwarg, var=prefix_alias)
+        shape.append(
+            _qb.ShapeElement(name=ptrname, expr=ptr_expr, origin=this_type)
+        )
 
     return _qb.UpdateStmt(
         iter_expr=operand,

@@ -1027,6 +1027,10 @@ def must_fail(f):
     return unittest.expectedFailure(f)
 
 
+def xfail(f):
+    return unittest.expectedFailure(f)
+
+
 def to_be_fixed(f):
     return unittest.expectedFailure(f)
 

@@ -11,6 +11,7 @@ from gel._internal._hybridmethod import hybridmethod
 
 if TYPE_CHECKING:
     import uuid
+    from collections.abc import Iterator
     from gel._internal import _reflection
 
 
@@ -69,5 +70,14 @@ else:
                 return type(self), _qb.toplevel_edgeql(self)
 
 
-class GelObjectType(GelType):
+if TYPE_CHECKING:
+    class GelObjectTypeMeta(GelTypeMeta):
+        # Splat qb protocol
+        def __iter__(cls) -> Iterator[_qb.ShapeElement]:  # noqa: N805
+            ...
+else:
+    GelObjectTypeMeta = type
+
+
+class GelObjectType(GelType, metaclass=GelObjectTypeMeta):
     pass

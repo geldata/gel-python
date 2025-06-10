@@ -7,6 +7,8 @@ from typing import NamedTuple
 
 import pathlib
 
+from gel._internal import _edgeql
+
 
 class QualName(NamedTuple):
     module: str
@@ -33,6 +35,9 @@ class SchemaPath(pathlib.PurePosixPath):
 
     def as_schema_name(self) -> str:
         return "::".join(self.parts)
+
+    def as_quoted_schema_name(self) -> str:
+        return "::".join(_edgeql.quote_ident(p) for p in self.parts)
 
 
 def parse_name(name: str) -> SchemaPath:

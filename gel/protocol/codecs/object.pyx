@@ -228,38 +228,14 @@ cdef class ObjectCodec(BaseNamedRecordCodec):
         if return_type is None:
             return self._decode_plain(buf, elem_count)
 
-        if names[0] != '__tid__':
-            raise RuntimeError(
-                f'the first field of object is expected to be __tid__, got {names[0]!r}')
-        frb_read(buf, 4)  # reserved
-        elem_len = hton.unpack_int32(frb_read(buf, 4))
-        if elem_len == -1:
-            raise RuntimeError('__tid__ is unexepectedly empty')
-
         current_ret_type = return_type
-        if tid_map is not None and len(tid_map) > 1:
-            elem_codec = <BaseCodec>fields_codecs[0]
-            tid = elem_codec.decode(
-                fields_types[0],
-                frb_slice_from(&elem_buf, buf, elem_len)
-            )
-
-            try:
-                current_ret_type = tid_map[tid]
-            except KeyError:
-                pass
-        else:
-            # Don't bother with actually reading __tid__ if this isn't
-            # a polymorphic query scenario
-            frb_read(buf, elem_len)
-
         result_dict = {}
         if return_type_proxy is not None:
             lprops_dict = {}
         else:
             lprops_dict = None
 
-        for i in range(1, elem_count):
+        for i in range(elem_count):
             frb_read(buf, 4)  # reserved
             elem_len = hton.unpack_int32(frb_read(buf, 4))
             if elem_len == -1:
@@ -276,7 +252,15 @@ cdef class ObjectCodec(BaseNamedRecordCodec):
                         f'object element decoding: {frb_get_len(&elem_buf)}')
 
             name = names[i]
-            if flags[i] & datatypes._EDGE_POINTER_IS_LINKPROP:
+            if name == "__tid__":
+                if elem is None:
+                    raise RuntimeError('__tid__ is unexepectedly empty')
+                if tid_map is not None and len(tid_map) > 1:
+                    try:
+                        current_ret_type = tid_map[elem]
+                    except KeyError:
+                        pass
+            elif flags[i] & datatypes._EDGE_POINTER_IS_LINKPROP:
                 assert name[0] == '@' # XXX fix this
                 lprops_dict[name[1:]] = elem
             else:
