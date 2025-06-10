@@ -59,6 +59,7 @@ INFIX_OPERATOR_MAP: dict[str, str | tuple[str, str]] = {
     "std:://": ("__floordiv__", "__rfloordiv__"),
     "std::%": ("__mod__", "__rmod__"),
     "std::^": ("__pow__", "__rpow__"),
+    "std::[]": "__getitem__",
 }
 
 PREFIX_OPERATOR_MAP = {
