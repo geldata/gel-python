@@ -30,7 +30,7 @@ if TYPE_CHECKING:
 class Installable:
     installed: bool = False
 
-    def install(self, router: fastapi.APIRouter) -> None:
+    async def install(self, router: fastapi.APIRouter) -> None:
         self.installed = True
 
 
@@ -192,10 +192,10 @@ class GelAuth(client_mod.Extension):
             for provider in config.providers:
                 inst = self._insts.get(provider.name)
                 if inst is not None:
-                    inst.install(router)
+                    await inst.install(router)
 
             if config.ui is not None:
-                self.builtin_ui.install(router)
+                await self.builtin_ui.install(router)
 
         app.include_router(router)
         await super().on_startup(app)

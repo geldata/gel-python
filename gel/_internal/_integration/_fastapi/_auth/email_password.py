@@ -52,6 +52,7 @@ class EmailPassword(Installable):
     reset_password_page_name = utils.Config("reset_password_page")
 
     _auth: GelAuth
+    _core: core.AsyncEmailPassword
 
     # Sign-up
     sign_up_path = utils.Config("/register")
@@ -284,8 +285,7 @@ class EmailPassword(Installable):
             sign_up_body: Annotated[SignUpBody, fastapi.Form()],
             request: fastapi.Request,
         ) -> fastapi.Response:
-            client = await core.make_async(self._auth.client)
-            result = await client.sign_up(
+            result = await self._core.sign_up(
                 sign_up_body.email,
                 sign_up_body.password,
                 verify_url=str(
@@ -363,8 +363,7 @@ class EmailPassword(Installable):
             sign_in_body: Annotated[SignInBody, fastapi.Form()],
             request: fastapi.Request,
         ) -> fastapi.Response:
-            client = await core.make_async(self._auth.client)
-            result = await client.sign_in(
+            result = await self._core.sign_in(
                 sign_in_body.email, sign_in_body.password
             )
             match result:
@@ -443,8 +442,7 @@ class EmailPassword(Installable):
                 self._auth.pkce_verifier
             ),
         ) -> fastapi.Response:
-            client = await core.make_async(self._auth.client)
-            result = await client.verify_email(
+            result = await self._core.verify_email(
                 verify_body.verification_token, verifier
             )
             match result:
@@ -516,8 +514,7 @@ class EmailPassword(Installable):
             ],
             request: fastapi.Request,
         ) -> fastapi.Response:
-            client = await core.make_async(self._auth.client)
-            result = await client.send_password_reset_email(
+            result = await self._core.send_password_reset_email(
                 send_password_reset_body.email,
                 reset_url=str(
                     request.url_for(self.reset_password_page_name.value)
@@ -597,8 +594,7 @@ class EmailPassword(Installable):
                 self._auth.pkce_verifier
             ),
         ) -> fastapi.Response:
-            client = await core.make_async(self._auth.client)
-            result = await client.reset_password(
+            result = await self._core.reset_password(
                 reset_token=reset_password_body.reset_token,
                 verifier=verifier,
                 password=reset_password_body.password,
@@ -619,10 +615,11 @@ class EmailPassword(Installable):
                 case _:
                     raise AssertionError("Invalid reset password response")
 
-    def install(self, router: fastapi.APIRouter) -> None:
+    async def install(self, router: fastapi.APIRouter) -> None:
+        self._core = await core.make_async(self._auth.client)
         self.install_sign_up(router)
         self.install_sign_in(router)
         self.install_email_verification(router)
         self.install_send_password_reset(router)
         self.install_reset_password(router)
-        super().install(router)
+        await super().install(router)

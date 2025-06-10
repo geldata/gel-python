@@ -16,6 +16,7 @@ from .. import _utils as utils
 
 class BuiltinUI(Installable):
     _auth: GelAuth
+    _core: core.AsyncBuiltinUI
 
     sign_in_path = utils.Config("/sign-in")
     sign_in_name = utils.Config("gel.auth.builtin_ui.sign_in")
@@ -41,8 +42,7 @@ class BuiltinUI(Installable):
             status_code=http.HTTPStatus.SEE_OTHER,
         )
         async def sign_in(response: fastapi.Response) -> str:
-            ui = await core.make_async(self._auth.client)
-            result = ui.start_sign_in()
+            result = self._core.start_sign_in()
             self._auth.set_verifier_cookie(result.verifier, response)
             return str(result.redirect_url)
 
@@ -55,12 +55,12 @@ class BuiltinUI(Installable):
             status_code=http.HTTPStatus.SEE_OTHER,
         )
         async def sign_up(response: fastapi.Response) -> str:
-            ui = await core.make_async(self._auth.client)
-            result = ui.start_sign_up()
+            result = self._core.start_sign_up()
             self._auth.set_verifier_cookie(result.verifier, response)
             return str(result.redirect_url)
 
-    def install(self, router: fastapi.APIRouter) -> None:
+    async def install(self, router: fastapi.APIRouter) -> None:
+        self._core = await core.make_async(self._auth.client)
         self.install_sign_in_page(router)
         self.install_sign_up_page(router)
-        super().install(router)
+        await super().install(router)
