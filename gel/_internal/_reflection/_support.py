@@ -39,6 +39,9 @@ class SchemaPath(pathlib.PurePosixPath):
     def as_quoted_schema_name(self) -> str:
         return "::".join(_edgeql.quote_ident(p) for p in self.parts)
 
+    def as_code(self, clsname: str = "SchemaPath") -> str:
+        return f"{clsname}({', '.join(repr(p) for p in self.parts)})"
+
 
 def parse_name(name: str) -> SchemaPath:
     return SchemaPath.from_schema_name(name)

@@ -362,6 +362,48 @@ def get_py_type_scalar_match_rank(
         return None
 
 
+_scalar_type_to_zero_value: dict[str, str] = {
+    "std::str": '""',
+    "std::float32": "0",
+    "std::float64": "0",
+    "std::int16": "0",
+    "std::int32": "0",
+    "std::int64": "0",
+    "std::bigint": "0",
+    "std::bool": "false",
+    "std::uuid": '"00000000-0000-0000-0000-000000000000"',
+    "std::bytes": "b''",
+    "std::decimal": "0",
+    "std::datetime": '"0001-01-01T00:00:00Z"',
+    "std::duration": '"0"',
+    "std::json": "0",
+    "std::cal::local_date": '"0001-01-01"',
+    "std::cal::local_time": '"00:00"',
+    "std::cal::local_datetime": '"0001-01-01T00:00"',
+    "std::cal::relative_duration": '"0"',
+    "std::cal::date_duration": '"0"',
+    "cfg::memory": "0",
+    "ext::pgvector::vector": "[0]",
+}
+
+
+def maybe_get_zero_value_for_scalar(
+    typename: str,
+) -> str | None:
+    return _scalar_type_to_zero_value.get(typename)
+
+
+def maybe_get_zero_value_for_scalar_hierarchy(
+    typenames: Iterable[str],
+) -> str | None:
+    for typename in typenames:
+        zero_value = maybe_get_zero_value_for_scalar(typename)
+        if zero_value is not None:
+            return zero_value
+
+    return None
+
+
 _py_type_to_literal: dict[type[PyConstType], type[_qb.Literal]] = {
     builtins.bool: _qb.BoolLiteral,
     builtins.int: _qb.IntLiteral,

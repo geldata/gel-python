@@ -8,6 +8,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any, ClassVar, Literal
 from typing_extensions import Self
 
+import functools
 import weakref
 
 from gel._internal import _qb
@@ -19,6 +20,7 @@ from ._expressions import (
     add_limit,
     add_offset,
     delete,
+    get_object_type_splat,
     order_by,
     select,
     update,
@@ -227,7 +229,10 @@ class GelModel(
         @hybridmethod
         def __edgeql__(self) -> tuple[type, str]:
             if isinstance(self, type):
-                return self, _qb.toplevel_edgeql(self)
+                return self, _qb.toplevel_edgeql(
+                    self,
+                    splat_cb=functools.partial(get_object_type_splat, self),
+                )
             else:
                 raise NotImplementedError(
                     f"{type(self)} instances are not queryable"

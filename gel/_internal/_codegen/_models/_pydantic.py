@@ -35,6 +35,7 @@ from gel import _version as _gel_py_ver
 from gel._internal import _cache
 from gel._internal import _dataclass_extras
 from gel._internal import _dirsync
+from gel._internal import _edgeql
 from gel._internal import _reflection as reflection
 from gel._internal._qbmodel import _abstract as _qbmodel
 from gel._internal._reflection._enums import SchemaPart
@@ -951,11 +952,17 @@ class BaseGeneratedModule:
         values: list[str],
         *,
         first_line_comment: str | None = None,
+        extra_indent: int = 0,
+        separator: str = ", ",
+        carry_separator: bool = False,
     ) -> str:
         return self.py_file.format_list(
             tpl,
             values,
             first_line_comment=first_line_comment,
+            extra_indent=extra_indent,
+            separator=separator,
+            carry_separator=carry_separator,
         )
 
     def _format_class_line(
@@ -1341,6 +1348,70 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             tup = self.import_name("builtins", "tuple")
             tup_vars = self.format_list("[{list}]", elems)
             return f"{tup}{tup_vars}"
+
+        raise AssertionError(f"unhandled primitive type: {stype.kind}")
+
+    def _get_zero_value_for_scalar(
+        self,
+        stype: reflection.ScalarType,
+    ) -> str:
+        zero_value = _qbmodel.maybe_get_zero_value_for_scalar_hierarchy(
+            self._get_scalar_hierarchy(stype),
+        )
+        if zero_value is None:
+            raise AssertionError(
+                f"could not determine zero value for scalar type {stype.name}"
+            )
+        else:
+            return zero_value
+
+    def _get_zero_value_for_primitive_type(
+        self,
+        stype: reflection.PrimitiveType,
+    ) -> str:
+        if reflection.is_scalar_type(stype):
+            if stype.enum_values:
+                return _edgeql.quote_literal(stype.enum_values[0])
+            else:
+                return self._get_zero_value_for_scalar(stype)
+        elif reflection.is_array_type(stype):
+            return "[]"
+        elif reflection.is_range_type(stype):
+            el_type = self._types[stype.range_element_id]
+            el_type_s = el_type.schemapath.as_quoted_schema_name()
+            if reflection.is_primitive_type(el_type):
+                zv = self._get_zero_value_for_primitive_type(el_type)
+                el = f"<{el_type_s}>{zv}"
+                return f"range({el}, {el})"
+            else:
+                raise AssertionError(
+                    f"unexpected non-primitive range type: {stype.name}"
+                )
+        elif reflection.is_multi_range_type(stype):
+            el_type = self._types[stype.multirange_element_id]
+            el_type_s = el_type.schemapath.as_quoted_schema_name()
+            if reflection.is_primitive_type(el_type):
+                return f"multirange(<array<range<{el_type_s}>>>[])"
+            else:
+                raise AssertionError(
+                    f"unexpected non-primitive range type: {stype.name}"
+                )
+        elif reflection.is_named_tuple_type(stype) or reflection.is_tuple_type(
+            stype
+        ):
+            elems = []
+            for elem in stype.tuple_elements:
+                el_type = self._types[elem.type_id]
+                el_type_s = el_type.schemapath.as_quoted_schema_name()
+                if reflection.is_primitive_type(el_type):
+                    zv = self._get_zero_value_for_primitive_type(el_type)
+                else:
+                    raise AssertionError(
+                        f"unexpected non-primitive tuple "
+                        f"element type: {el_type.name}"
+                    )
+                elems.append(zv)
+            return f"tuple({', '.join(elems)})"
 
         raise AssertionError(f"unhandled primitive type: {stype.kind}")
 
@@ -1991,8 +2062,69 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                 ),
             ):
                 self.write(f"id = {uuid}(int={objtype.uuid.int})")
-                schema_path = ", ".join(repr(p) for p in type_name.parts)
-                self.write(f"name = {sp}({schema_path})")
+                self.write(f"name = {type_name.as_code(sp)}")
+
+                dict_ = self.import_name(
+                    "builtins", "dict", import_time=ImportTime.typecheck
+                )
+                str_ = self.import_name(
+                    "builtins", "str", import_time=ImportTime.typecheck
+                )
+                gel_ptr_ref = self.import_name(
+                    BASE_IMPL,
+                    "GelPointerReflection",
+                    import_time=ImportTime.runtime
+                    if pointers
+                    else ImportTime.typecheck,
+                )
+                ptr_ref_t = f"{dict_}[{str_}, {gel_ptr_ref}]"
+                with self._classmethod_def(
+                    "pointers",
+                    [],
+                    ptr_ref_t,
+                    decorators=(f'{lazyclassproperty}["{ptr_ref_t}"]',),
+                ):
+                    if pointers:
+                        self.write(f"my_ptrs: {ptr_ref_t} = {{")
+                        classes = {
+                            "SchemaPath": sp,
+                            "GelPointerReflection": gel_ptr_ref,
+                            "Cardinality": self.import_name(
+                                BASE_IMPL, "Cardinality"
+                            ),
+                            "PointerKind": self.import_name(
+                                BASE_IMPL, "PointerKind"
+                            ),
+                        }
+                        with self.indented():
+                            for ptr in pointers:
+                                r = self._reflect_pointer(ptr, classes)
+                                self.write(f"{ptr.name!r}: {r},")
+                        self.write("}")
+                    else:
+                        self.write(f"my_ptrs: {ptr_ref_t} = {{}}")
+
+                    if base_types:
+                        pp = "__gel_reflection__.pointers"
+                        ret = self.format_list(
+                            "return ({list})",
+                            [
+                                "my_ptrs",
+                                *_map_name(
+                                    lambda s: f"{_mangle_typeof(s)}.{pp}",
+                                    base_types,
+                                ),
+                            ],
+                            separator=" | ",
+                            carry_separator=True,
+                        )
+                    else:
+                        ret = "return my_ptrs"
+
+                    self.write(ret)
+
+                self.write()
+
                 with self._classmethod_def(
                     "object",
                     [],
@@ -2111,6 +2243,45 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             self.write(f"{name}.__variants__.Base = {name}")
 
         self.write()
+
+    def _reflect_pointer(
+        self,
+        ptr: reflection.Pointer,
+        classes: dict[str, str],
+    ) -> str:
+        target_type = self._types[ptr.target_id]
+        if (
+            reflection.is_primitive_type(target_type)
+            and not ptr.card.is_optional()
+        ):
+            zero_value = self._get_zero_value_for_primitive_type(target_type)
+        else:
+            zero_value = "{}"
+        kwargs: dict[str, str] = {
+            "type_": target_type.schemapath.as_code(classes["SchemaPath"]),
+            "kind": f"{classes['PointerKind']}({str(ptr.kind)!r})",
+            "cardinality": f"{classes['Cardinality']}({str(ptr.card)!r})",
+            "computed": str(ptr.is_computed),
+            "readonly": str(ptr.is_readonly),
+            "zero_value": repr(zero_value),
+        }
+
+        if ptr.pointers is not None:
+            kwargs["properties"] = self.format_list(
+                "({list})",
+                [
+                    self._reflect_pointer(prop, classes)
+                    for prop in ptr.pointers
+                ],
+                extra_indent=1,
+            )
+        else:
+            kwargs["properties"] = "None"
+
+        return self.format_list(
+            f"{classes['GelPointerReflection']}({{list}})",
+            [f"{k}={v}" for k, v in kwargs.items()],
+        )
 
     def _write_base_object_type_body(
         self,

@@ -7,10 +7,12 @@
 from __future__ import annotations
 
 from ._base import (
+    GelPointerReflection,
     GelType,
     GelType_T,
     GelTypeMeta,
     GelTypeMetadata,
+    PointerInfo,
 )
 
 from ._descriptors import (
@@ -21,9 +23,12 @@ from ._descriptors import (
     OptionalPointerDescriptor,
     OptionalPropertyDescriptor,
     PointerDescriptor,
-    PointerInfo,
     PropertyDescriptor,
     field_descriptor,
+)
+
+from ._expressions import (
+    get_object_type_splat,
 )
 
 from ._objects import (
@@ -47,6 +52,7 @@ from ._primitive import (
     get_py_type_for_scalar_hierarchy,
     get_py_type_scalar_match_rank,
     maybe_get_protocol_for_py_type,
+    maybe_get_zero_value_for_scalar_hierarchy,
 )
 
 
@@ -59,6 +65,7 @@ __all__ = (
     "DateTimeLike",
     "GelModel",
     "GelModelMeta",
+    "GelPointerReflection",
     "GelPrimitiveType",
     "GelType",
     "GelTypeMeta",
@@ -78,8 +85,10 @@ __all__ = (
     "Range",
     "Tuple",
     "field_descriptor",
+    "get_object_type_splat",
     "get_py_type_for_scalar",
     "get_py_type_for_scalar_hierarchy",
     "get_py_type_scalar_match_rank",
     "maybe_get_protocol_for_py_type",
+    "maybe_get_zero_value_for_scalar_hierarchy",
 )

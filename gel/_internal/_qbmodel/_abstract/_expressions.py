@@ -9,7 +9,10 @@ from typing import TYPE_CHECKING, Any, Literal
 from typing_extensions import TypeAliasType
 
 import dataclasses
+import functools
+import weakref
 
+from gel._internal import _edgeql
 from gel._internal import _qb
 from gel._internal._utils import Unspecified
 
@@ -58,9 +61,14 @@ def _select_stmt_context(
     *,
     new_stmt_if: Callable[[_qb.SelectStmt], bool] | None = None,
 ) -> tuple[_qb.SelectStmt, _qb.PathAlias]:
+    if issubclass(cls, GelObjectType):
+        splat_cb = functools.partial(get_object_type_splat, cls)
+    else:
+        splat_cb = None
     stmt = _qb.SelectStmt.wrap(
         _qb.edgeql_qb_expr(cls if operand is None else operand),
         new_stmt_if=new_stmt_if,
+        splat_cb=splat_cb,
     )
     return stmt, _qb.PathAlias(cls, stmt.path_prefix)
 
@@ -87,6 +95,26 @@ def _const_to_expr(
     ptype: type[PyTypeScalar[PyConstType]] | None = getattr(cls, pname, None)
     vtype = type(val) if ptype is None else ptype.type
     return get_literal_for_value(vtype, val)
+
+
+_type_splat_cache: weakref.WeakKeyDictionary[
+    type[GelObjectType], _qb.Shape
+] = weakref.WeakKeyDictionary()
+
+
+def get_object_type_splat(
+    cls: type[GelObjectType],
+) -> _qb.Shape:
+    shape = _type_splat_cache.get(cls)
+    if shape is None:
+        reflection = cls.__gel_reflection__
+        computeds = {}
+        for n, p in reflection.pointers.items():
+            if p.computed and p.kind is _edgeql.PointerKind.Property:
+                computeds[n] = (p.type_, p.zero_value)
+        shape = _qb.Shape.splat(source=reflection.name, exclude=computeds)
+        _type_splat_cache[cls] = shape
+    return shape
 
 
 def select(
@@ -129,10 +157,9 @@ def select(
             if kwarg:
                 target = ptr.__gel_origin__
                 if issubclass(target, GelObjectType):
-                    target_type = target.__gel_reflection__.name
                     ptr_expr = _qb.ShapeOp(
                         iter_expr=ptr_expr,
-                        shape=_qb.Shape.splat(source=target_type),
+                        shape=get_object_type_splat(target),
                     )
                     shape_el = _qb.ShapeElement(
                         name=ptrname,

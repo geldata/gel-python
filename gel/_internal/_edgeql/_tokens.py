@@ -262,6 +262,7 @@ class Operation(enum.Enum):
     PARENEXPR = enum.auto()
     PATH = enum.auto()
     CALL = enum.auto()
+    RAW = enum.auto()
 
 
 class Precedence(NamedTuple):
@@ -344,6 +345,7 @@ PRECEDENCE: dict[Token | tuple[Token, int] | Operation, Precedence] = {
     Token.OPTIONAL: Precedence(28, Assoc.RIGHT),
     Token.MULTI: Precedence(28, Assoc.RIGHT),
     Token.SINGLE: Precedence(28, Assoc.RIGHT),
+    Operation.RAW: Precedence(100, Assoc.NONASSOC),
 }
 
 

@@ -336,8 +336,8 @@ class GeneratedModule:
     def exports(self) -> set[str]:
         return self._exports
 
-    def current_indentation(self) -> str:
-        return self.INDENT * self._indent_level
+    def current_indentation(self, extra: int = 0) -> str:
+        return self.INDENT * (self._indent_level + extra)
 
     @contextlib.contextmanager
     def indented(self) -> Iterator[None]:
@@ -555,14 +555,28 @@ class GeneratedModule:
         values: list[str],
         *,
         first_line_comment: str | None = None,
+        extra_indent: int = 0,
+        separator: str = ", ",
+        carry_separator: bool = False,
+        trailing_separator: bool | None = None,
     ) -> str:
-        list_string = ", ".join(values)
+        list_string = separator.join(values)
         output_string = tpl.format(list=list_string)
-        line_length = len(output_string) + len(self.current_indentation())
+        line_length = len(output_string) + len(
+            self.current_indentation(extra_indent)
+        )
+        if trailing_separator is None:
+            trailing_separator = not carry_separator
         if line_length > MAX_LINE_LENGTH:
-            list_string = ",\n    ".join(values)
-            if list_string:
-                list_string += ","
+            if carry_separator:
+                strip_sep = separator.lstrip()
+                line_sep = f"\n{self.INDENT}{strip_sep}"
+            else:
+                strip_sep = separator.rstrip()
+                line_sep = f"{strip_sep}\n{self.INDENT}"
+            list_string = line_sep.join(values)
+            if list_string and trailing_separator:
+                list_string += strip_sep
             if first_line_comment:
                 list_string = f"  # {first_line_comment}\n    {list_string}\n"
             else:

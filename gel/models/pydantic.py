@@ -10,6 +10,7 @@ from pydantic import (
     computed_field,
 )
 
+from gel._internal._edgeql import Cardinality, PointerKind
 from gel._internal._lazyprop import LazyClassProperty
 from gel._internal._reflection import SchemaPath
 from gel._internal._typing_dispatch import dispatch_overload
@@ -33,6 +34,7 @@ from gel._internal._qbmodel._abstract import (
     AnyTuple,
     BaseScalar,
     DateTimeLike,
+    GelPointerReflection,
     GelType,
     GelType_T,
     GelTypeMeta,
@@ -80,6 +82,7 @@ __all__ = (
     "AnyTuple",
     "Array",
     "BaseScalar",
+    "Cardinality",
     "ComputedLinkWithProps",
     "ComputedMultiLink",
     "ComputedMultiLinkWithProps",
@@ -94,6 +97,7 @@ __all__ = (
     "GelLinkModel",
     "GelModel",
     "GelModelMeta",
+    "GelPointerReflection",
     "GelType",
     "GelTypeMeta",
     "GelTypeMetadata",
@@ -116,6 +120,7 @@ __all__ = (
     "OptionalLinkWithProps",
     "OptionalProperty",
     "PathAlias",
+    "PointerKind",
     "PrefixOp",
     "PrivateAttr",
     "Property",

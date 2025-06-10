@@ -7,13 +7,11 @@
 from __future__ import annotations
 from typing import TYPE_CHECKING, Any, Generic, TypeVar, overload
 
-import dataclasses
 import typing
 
 # XXX: get rid of this
 from pydantic._internal import _namespace_utils  # noqa: PLC2701
 
-from gel._internal import _edgeql
 from gel._internal import _qb
 from gel._internal import _typing_eval
 from gel._internal import _typing_inspect
@@ -183,16 +181,6 @@ class OptionalPointerDescriptor(PointerDescriptor[T_co, BT_co]):
         ) -> type[T_co] | T_co | None: ...
 
         def __set__(self, obj: Any, value: BT_co | None) -> None: ...
-
-
-@dataclasses.dataclass(kw_only=True, frozen=True)
-class PointerInfo:
-    computed: bool = False
-    readonly: bool = False
-    has_props: bool = False
-    cardinality: _edgeql.Cardinality = _edgeql.Cardinality.One
-    annotation: type[Any] | None = None
-    kind: _edgeql.PointerKind | None = None
 
 
 class AnyPropertyDescriptor(PointerDescriptor[T_co, BT_co]):
