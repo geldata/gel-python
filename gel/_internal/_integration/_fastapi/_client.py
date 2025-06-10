@@ -7,11 +7,9 @@ from typing import (
     Any,
     Annotated,
     cast,
-    Concatenate,
     Optional,
     ParamSpec,
     TYPE_CHECKING,
-    TypeVar,
 )
 
 from starlette import concurrency
@@ -35,7 +33,6 @@ if TYPE_CHECKING:
 
 GEL_STATE_NAMES_STATE = "_gel_state_names"
 P = ParamSpec("P")
-Lifespan_T = TypeVar("Lifespan_T", bound="GelLifespan")
 
 
 class Extension:
@@ -63,8 +60,11 @@ class GelLifespan:
     shutdown_timeout: utils.Config[Optional[float]] = utils.Config(None)
 
     _app: fastapi.FastAPI
+    _client_creator: Callable[..., gel.AsyncIOClient]
     _client: gel.AsyncIOClient
+    _bio_client_creator: Callable[..., gel.Client]
     _bio_client: gel.Client
+    _client_accessed: bool = False
 
     _auth: Optional[GelAuth] = None
     _auto_auth: bool = True
@@ -72,14 +72,19 @@ class GelLifespan:
     def __init__(
         self,
         app: fastapi.FastAPI,
-        client: gel.AsyncIOClient,
-        bio_client: gel.Client,
+        *,
+        client_creator: Callable[..., gel.AsyncIOClient],
+        bio_client_creator: Callable[..., gel.Client],
     ) -> None:
         self._app = app
-        self._client = client
-        self._bio_client = bio_client
-
         self._auth = None
+
+        self._client_creator = client_creator
+        self._client = client_creator()
+        self._bio_client_creator = bio_client_creator
+        self._bio_client = bio_client_creator()
+
+        self._install_lifespan()
 
     async def __aenter__(self) -> dict[str, Any]:
         await self._client.ensure_connected()
@@ -138,14 +143,82 @@ class GelLifespan:
 
     @property
     def client(self) -> gel.AsyncIOClient:
+        self._client_accessed = True
         return self._client
 
     @property
     def blocking_io_client(self) -> gel.Client:
+        self._client_accessed = True
         return self._bio_client
 
-    def install(self) -> None:
+    def _install_lifespan(self) -> None:
         self._app.include_router(fastapi.APIRouter(lifespan=self))
+
+    def with_client_options(
+        self,
+        *,
+        dsn: Optional[str] = None,
+        max_concurrency: Optional[int] = None,
+        host: Optional[str] = None,
+        port: Optional[int] = None,
+        credentials: Optional[str] = None,
+        credentials_file: Optional[str] = None,
+        user: Optional[str] = None,
+        password: Optional[str] = None,
+        secret_key: Optional[str] = None,
+        database: Optional[str] = None,
+        branch: Optional[str] = None,
+        tls_ca: Optional[str] = None,
+        tls_ca_file: Optional[str] = None,
+        tls_security: Optional[str] = None,
+        wait_until_available: int = 30,
+        timeout: int = 10,
+    ) -> Self:
+        if self.installed:
+            raise ValueError("Cannot change client options after installation")
+        if self._client_accessed:
+            raise ValueError(
+                "Cannot change client options "
+                "after the client has been accessed"
+            )
+
+        self._client = self._client_creator(
+            dsn=dsn,
+            max_concurrency=max_concurrency,
+            host=host,
+            port=port,
+            credentials=credentials,
+            credentials_file=credentials_file,
+            user=user,
+            password=password,
+            secret_key=secret_key,
+            database=database,
+            branch=branch,
+            tls_ca=tls_ca,
+            tls_ca_file=tls_ca_file,
+            tls_security=tls_security,
+            wait_until_available=wait_until_available,
+            timeout=timeout,
+        )
+        self._bio_client = self._bio_client_creator(
+            dsn=dsn,
+            max_concurrency=max_concurrency,
+            host=host,
+            port=port,
+            credentials=credentials,
+            credentials_file=credentials_file,
+            user=user,
+            password=password,
+            secret_key=secret_key,
+            database=database,
+            branch=branch,
+            tls_ca=tls_ca,
+            tls_ca_file=tls_ca_file,
+            tls_security=tls_security,
+            wait_until_available=wait_until_available,
+            timeout=timeout,
+        )
+        return self
 
     def with_global(
         self, name: str
@@ -213,28 +286,18 @@ class GelLifespan:
         return self
 
 
-def _make_gelify(
-    client_creator: Callable[P, gel.AsyncIOClient],
-    bio_client_creator: Callable[P, gel.Client],
-    lifespan_class: Callable[
-        [fastapi.FastAPI, gel.AsyncIOClient, gel.Client], Lifespan_T
-    ],
-) -> Callable[Concatenate[fastapi.FastAPI, P], Lifespan_T]:
-    def gelify(
-        app: fastapi.FastAPI,
-        /,
-        *args: P.args,
-        **kwargs: P.kwargs,
-    ) -> Lifespan_T:
-        lifespan = lifespan_class(
-            app,
-            client_creator(*args, **kwargs),
-            bio_client_creator(*args, **kwargs),
-        )
-        lifespan.install()
-        return lifespan
-
-    return gelify
+def gelify(app: fastapi.FastAPI, **kwargs: Any) -> GelLifespan:
+    rv = GelLifespan(
+        app,
+        client_creator=gel.create_async_client,
+        bio_client_creator=gel.create_client,
+    )
+    for key, value in kwargs.items():
+        if hasattr(rv, key):
+            getattr(rv, key)(value)
+        else:
+            raise ValueError(f"Unknown configuration option: {key}")
+    return rv
 
 
 def _get_client(request: fastapi.Request) -> gel.AsyncIOClient:
@@ -247,6 +310,5 @@ def _get_bio_client(request: fastapi.Request) -> gel.Client:
     return cast("gel.Client", getattr(request.state, state_name))
 
 
-gelify = _make_gelify(gel.create_async_client, gel.create_client, GelLifespan)
 Client = Annotated[gel.AsyncIOClient, fastapi.Depends(_get_client)]
 BlockingIOClient = Annotated[gel.Client, fastapi.Depends(_get_bio_client)]
