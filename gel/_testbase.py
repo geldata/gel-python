@@ -717,7 +717,7 @@ class ModelTestCase(SyncQueryTestCase):
         from gel._internal._codegen._models import PydanticModelsGenerator
 
         cls.gen = PydanticModelsGenerator(
-            argparse.Namespace(no_cache=True),
+            argparse.Namespace(no_cache=True, output="models"),
             project_dir=pathlib.Path(cls.tmp_model_dir.name),
             client=cls.client,
             interactive=False,

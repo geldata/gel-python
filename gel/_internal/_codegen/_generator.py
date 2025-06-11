@@ -36,6 +36,7 @@ class AbstractCodeGenerator:
         client: gel.Client | None = None,
         interactive: bool = True,
     ):
+        self._args = args
         self._default_module = "default"
         self._async = False
         self._no_cache = args.no_cache

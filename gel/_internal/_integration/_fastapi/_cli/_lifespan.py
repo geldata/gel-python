@@ -102,10 +102,11 @@ class SubprocessLogger:
 
 
 @contextlib.contextmanager
-def _gel_toml() -> Iterator[str]:
-    content = textwrap.dedent("""\
+def _gel_toml(app_path: pathlib.Path) -> Iterator[str]:
+    output = app_path / "models"
+    content = textwrap.dedent(f"""\
         [hooks-extend]
-        schema.update.after="gel-generate models"
+        schema.update.after="gel-generate-py models --output={output}"
         """)
 
     with tempfile.NamedTemporaryFile("w+t", encoding="utf8") as f:
@@ -118,7 +119,7 @@ def fastapi_cli_lifespan(
     cli: rich_toolkit.RichToolkit,
     app_path: pathlib.Path,
 ) -> Iterator[None]:
-    with _gel_toml() as gel_toml:
+    with _gel_toml(app_path) as gel_toml:
         cmd = ["gel", "watch", "--migrate", "--extend-gel-toml", gel_toml]
         with SubprocessLogger(cmd, cwd=app_path, cli=cli):
             yield

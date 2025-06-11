@@ -98,6 +98,14 @@ def run_queries_generator(args: argparse.Namespace) -> None:
     queries.Generator(args).run()  # type: ignore [no-untyped-call]
 
 
+def _augment_models_parser(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--output",
+        help="Generated models output directory",
+        default="models",
+    )
+
+
 def run_models_generator(args: argparse.Namespace) -> None:
     _models.PydanticModelsGenerator(args).run()
 
@@ -123,6 +131,7 @@ def generate() -> None:
         "models",
         description="Generate models for current Gel schema",
     )
+    _augment_models_parser(models_parser)
     models_parser.set_defaults(func=run_models_generator)
 
     args = parser.parse_args()
