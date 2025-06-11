@@ -105,7 +105,7 @@ class ParametricType:
             raise TypeError(f"{cls} must be declared as Generic")
 
         mod = sys.modules[cls.__module__]
-        annos = get_type_hints(cls, mod.__dict__)
+        annos = get_type_hints(cls, mod.__dict__, include_extras=True)
         param_map = {}
 
         for attr, t in annos.items():
@@ -117,18 +117,29 @@ class ParametricType:
             assert len(args) == 1
 
             arg = args[0]
-            if typing.get_origin(arg) is not type:
-                continue
+            if _typing_inspect.is_annotated(arg):
+                arg_meta = arg.__metadata__
+                if not arg_meta:
+                    continue
+                arg_meta_0 = arg_meta[0]
+                if not _typing_inspect.is_type_var_tuple_unpack(arg_meta_0):
+                    continue
+                arg_args = typing.get_args(arg_meta_0)
+            else:
+                if typing.get_origin(arg) is not type:
+                    continue
 
-            arg_args = typing.get_args(arg)
+                arg_args = typing.get_args(arg)
+
             # Likewise, rely on Type checking its stuff in the constructor
             assert len(arg_args) == 1
+            arg_args_0 = arg_args[0]
 
-            if type(arg_args[0]) is not TypeVar:
+            if not _typing_inspect.is_type_var_or_tuple(arg_args_0):
                 continue
 
-            if arg_args[0] in params:
-                param_map[arg_args[0]] = attr
+            if arg_args_0 in params:
+                param_map[arg_args_0] = attr
 
         for param in params:
             if param not in param_map:
@@ -187,11 +198,13 @@ class ParametricType:
             for i, arg in enumerate(args):
                 if i in base_non_type_params:
                     continue
-                if type(arg) is not TypeVar:
+                if not _typing_inspect.is_type_var_or_tuple_unpack(arg):
                     raise TypeError(
-                        f"{b.__name__} expects all arguments to be TypeVars"
+                        f"{b.__name__}: {arg} "
+                        f"is not a TypeVar or *TypeVarTuple"
                     )
-
+                if _typing_inspect.is_type_var_tuple_unpack(arg):
+                    arg = typing.get_args(arg)[0]  # noqa: PLW2901
                 base_typevar = base_params[i]
                 attr = base_map.get(base_typevar)
                 if attr is not None:
@@ -229,7 +242,8 @@ class ParametricType:
 
     def __class_getitem__(
         cls,
-        params: type[Any] | tuple[type[Any], ...],
+        params: Any,
+        /,
     ) -> type[ParametricType]:
         """Return a dynamic subclass parametrized with `params`.
 
@@ -264,6 +278,7 @@ class ParametricType:
         }
         forward_refs: dict[str, tuple[int, str]] = {}
         tuple_to_attr: dict[int, str] = {}
+        type_var_tuple_idx: int | None = None
 
         if cls._type_param_map:
             gen_params = getattr(cls, "__parameters__", ())
@@ -271,10 +286,14 @@ class ParametricType:
                 attr = cls._type_param_map.get(gen_param)
                 if attr:
                     tuple_to_attr[i] = attr
+                    if _typing_inspect.is_type_var_tuple(gen_param):
+                        type_var_tuple_idx = i
 
             expected = len(gen_params)
             actual = len(params)
-            if expected != actual:
+            if expected != actual and not any(
+                _typing_inspect.is_type_var_or_tuple(p) for p in gen_params
+            ):
                 raise TypeError(
                     f"type {cls.__name__!r} expects {expected} type"
                     f" parameter{'s' if expected != 1 else ''},"
@@ -282,18 +301,22 @@ class ParametricType:
                 )
 
             for i, attr in tuple_to_attr.items():
-                type_dict[attr] = all_params[i]
+                if i == type_var_tuple_idx:
+                    type_dict[attr] = all_params[i:]
+                    break
+                else:
+                    type_dict[attr] = all_params[i]
 
         if not all(
             _typing_inspect.is_valid_type_arg(param) for param in type_params
         ):
             if all(
-                type(param) is TypeVar  # type: ignore[comparison-overlap]
+                _typing_inspect.is_type_var_or_tuple_unpack(param)
                 for param in type_params
             ):
                 # All parameters are type variables: return the regular generic
                 # alias to allow proper subclassing.
-                generic = super(ParametricType, cls)  # noqa: UP008
+                generic = super(ParametricType, cls)
                 return generic.__class_getitem__(all_params)  # type: ignore [attr-defined, no-any-return]
             else:
                 forward_refs = {}
