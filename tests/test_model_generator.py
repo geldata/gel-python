@@ -233,7 +233,6 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(d.body, "Hello")
         self.assertIsInstance(d.author, default.User)
 
-        assert d.author is not None
         self.assertEqual(d.author.name, "Alice")
 
     @tb.to_be_fixed
@@ -1009,7 +1008,6 @@ class TestModelGenerator(tb.ModelTestCase):
             author=True,
         ).filter(file="cat.jpg")
         img = self.client.get(img_query)
-        assert img.author is not None
         self.assertEqual(img.author.name, "Elsa")
         self.assertEqual(img.author.__linkprops__.caption, "made of snow")
         self.assertEqual(img.author.__linkprops__.year, 2025)
@@ -1019,7 +1017,6 @@ class TestModelGenerator(tb.ModelTestCase):
 
         # Re-fetch and verify
         img = self.client.get(img_query)
-        assert img.author is not None
         self.assertEqual(img.author.name, "Zoe")
         self.assertEqual(img.author.__linkprops__.caption, "kitty!")
         self.assertEqual(img.author.__linkprops__.year, None)
@@ -1029,7 +1026,6 @@ class TestModelGenerator(tb.ModelTestCase):
 
         # Re-fetch and verify
         img = self.client.get(img_query)
-        assert img.author is not None
         self.assertEqual(img.author.name, "Alice")
         self.assertEqual(img.author.__linkprops__.caption, None)
         self.assertEqual(img.author.__linkprops__.year, None)
@@ -1039,7 +1035,6 @@ class TestModelGenerator(tb.ModelTestCase):
 
         # Re-fetch and verify
         img = self.client.get(img_query)
-        assert img.author is not None
         self.assertEqual(img.author.name, "Zoe")
         self.assertEqual(img.author.__linkprops__.caption, "cute")
         self.assertEqual(img.author.__linkprops__.year, 2024)
@@ -1181,7 +1176,6 @@ class TestModelGenerator(tb.ModelTestCase):
                 author=True,
             ).filter(file="puppy.jpg")
         )
-        assert img.author is not None
         self.assertEqual(img.author.name, "Alice")
         self.assertEqual(img.author.__linkprops__.caption, "woof!")
         self.assertEqual(img.author.__linkprops__.year, 2000)
