@@ -8,6 +8,7 @@ from typing_extensions import Self
 
 import contextlib
 import datetime
+import logging
 
 import fastapi
 import jwt
@@ -26,6 +27,9 @@ if TYPE_CHECKING:
     from gel import auth as core
     from .email_password import EmailPassword
     from .builtin_ui import BuiltinUI
+
+
+_logger = logging.getLogger("gel.fastapi.auth")
 
 
 class Installable:
@@ -239,6 +243,22 @@ class GelAuth(client_mod.Extension):
         )
         insts: list[Optional[Installable]] = []
         if self.auto_detection.value:
+            ext = await self._lifespan.client.query_single(
+                """
+                select assert_single(
+                    (select schema::Extension filter .name = "auth")
+                )
+                """
+            )
+
+            if not ext:
+                _logger.warning(
+                    "auth extension not installed, add `use extension auth;` "
+                    "to your Gel schema to enable FastAPI auth integration"
+                )
+                await super().on_startup(app)
+                return
+
             config = await self._lifespan.client.query_single(
                 """
                 select assert_single(
