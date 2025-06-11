@@ -11,6 +11,7 @@ from typing_extensions import TypeAliasType
 import dataclasses
 import functools
 
+from gel._internal import _edgeql
 from gel._internal import _qb
 from gel._internal._utils import Unspecified
 
@@ -163,9 +164,35 @@ def select(
             )
             shape_elements.append(shape_el)
         else:
+            el_expr = _qb.edgeql_qb_expr(kwarg, var=prefix_alias)
+            if isinstance(el_expr, _qb.ShapeOp):
+                ptrinfo = cls.__gel_reflection__.pointers[ptrname]
+                subshape = list(el_expr.shape.elements)
+                subshape_names = {el.name: el for el in subshape}
+                if (
+                    ptrinfo.kind is _edgeql.PointerKind.Link
+                    and ptrinfo.properties
+                ):
+                    for propname in ptrinfo.properties:
+                        lprop = f"@{propname}"
+                        if lprop not in subshape_names:
+                            subshape.append(
+                                _qb.ShapeElement(
+                                    name=lprop,
+                                    origin=el_expr.type,
+                                )
+                            )
+                    el_expr = dataclasses.replace(
+                        el_expr,
+                        shape=dataclasses.replace(
+                            el_expr.shape,
+                            elements=subshape,
+                        ),
+                    )
+
             shape_el = _qb.ShapeElement(
                 name=ptrname,
-                expr=_qb.edgeql_qb_expr(kwarg, var=prefix_alias),
+                expr=el_expr,
                 origin=this_type,
             )
             shape_elements.append(shape_el)

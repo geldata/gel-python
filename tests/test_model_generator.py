@@ -660,7 +660,7 @@ class TestModelGenerator(tb.ModelTestCase):
         res = self.client.get(
             default.Raid.select(
                 name=True,
-                members=True,
+                members=lambda r: r.members.select(name=True, nickname=True),
             ).filter(name="Solo")
         )
         self.assertEqual(res.name, "Solo")

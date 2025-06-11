@@ -20,7 +20,7 @@ class GelPointerReflection:
     cardinality: _edgeql.Cardinality
     computed: bool
     readonly: bool
-    properties: tuple[GelPointerReflection, ...] | None
+    properties: dict[str, GelPointerReflection] | None
 
 
 class GelTypeMetadata:
