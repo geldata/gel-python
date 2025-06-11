@@ -105,7 +105,7 @@ class PydanticModelsGenerator(AbstractCodeGenerator):
             logger.exception("could not connect to Gel instance")
             self.abort(61)
 
-        models_root = self._project_dir / "models"
+        models_root = self._project_dir / self._args.output
         tmp_models_root = tempfile.TemporaryDirectory(
             prefix=".~tmp.models.",
             dir=self._project_dir,
