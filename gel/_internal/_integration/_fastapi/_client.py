@@ -24,6 +24,7 @@ import fastapi
 import gel
 from fastapi import params
 
+from . import _cli
 from . import _utils as utils
 
 if TYPE_CHECKING:
@@ -293,6 +294,7 @@ def gelify(app: fastapi.FastAPI, **kwargs: Any) -> GelLifespan:
             getattr(rv, key)(value)
         else:
             raise ValueError(f"Unknown configuration option: {key}")
+    _cli.maybe_patch_fastapi_cli()
     return rv
 
 
