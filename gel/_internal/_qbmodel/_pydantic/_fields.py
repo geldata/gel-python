@@ -417,9 +417,7 @@ class _Link(
         def __get__(self, obj: None, objtype: type[Any]) -> type[_MT_co]: ...
 
         @overload
-        def __get__(
-            self, obj: object, objtype: Any = None
-        ) -> _MT_co: ...
+        def __get__(self, obj: object, objtype: Any = None) -> _MT_co: ...
 
         def __get__(
             self,
