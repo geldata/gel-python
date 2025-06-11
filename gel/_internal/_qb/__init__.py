@@ -20,6 +20,7 @@ from ._expressions import (
     BinaryOp,
     BoolLiteral,
     BytesLiteral,
+    CastOp,
     DecimalLiteral,
     DeleteStmt,
     Direction,
@@ -52,6 +53,7 @@ from ._expressions import (
     StringLiteral,
     UpdateStmt,
     Variable,
+    get_object_type_splat,
     toplevel_edgeql,
 )
 
@@ -75,6 +77,11 @@ from ._protocols import (
     is_expr_compatible,
 )
 
+from ._reflection import (
+    GelPointerReflection,
+    GelTypeMetadata,
+)
+
 
 __all__ = (
     "AbstractDescriptor",
@@ -86,6 +93,7 @@ __all__ = (
     "BinaryOp",
     "BoolLiteral",
     "BytesLiteral",
+    "CastOp",
     "DecimalLiteral",
     "DeleteStmt",
     "Direction",
@@ -99,6 +107,8 @@ __all__ = (
     "FloatLiteral",
     "ForStmt",
     "FuncCall",
+    "GelPointerReflection",
+    "GelTypeMetadata",
     "IndexOp",
     "InfixOp",
     "IntLiteral",
@@ -132,6 +142,7 @@ __all__ = (
     "edgeql",
     "edgeql_qb_expr",
     "exprmethod",
+    "get_object_type_splat",
     "is_expr_compatible",
     "toplevel_edgeql",
 )

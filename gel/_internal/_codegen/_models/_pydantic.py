@@ -951,11 +951,17 @@ class BaseGeneratedModule:
         values: list[str],
         *,
         first_line_comment: str | None = None,
+        extra_indent: int = 0,
+        separator: str = ", ",
+        carry_separator: bool = False,
     ) -> str:
         return self.py_file.format_list(
             tpl,
             values,
             first_line_comment=first_line_comment,
+            extra_indent=extra_indent,
+            separator=separator,
+            carry_separator=carry_separator,
         )
 
     def _format_class_line(
@@ -1991,8 +1997,69 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                 ),
             ):
                 self.write(f"id = {uuid}(int={objtype.uuid.int})")
-                schema_path = ", ".join(repr(p) for p in type_name.parts)
-                self.write(f"name = {sp}({schema_path})")
+                self.write(f"name = {type_name.as_code(sp)}")
+
+                dict_ = self.import_name(
+                    "builtins", "dict", import_time=ImportTime.typecheck
+                )
+                str_ = self.import_name(
+                    "builtins", "str", import_time=ImportTime.typecheck
+                )
+                gel_ptr_ref = self.import_name(
+                    BASE_IMPL,
+                    "GelPointerReflection",
+                    import_time=ImportTime.runtime
+                    if pointers
+                    else ImportTime.typecheck,
+                )
+                ptr_ref_t = f"{dict_}[{str_}, {gel_ptr_ref}]"
+                with self._classmethod_def(
+                    "pointers",
+                    [],
+                    ptr_ref_t,
+                    decorators=(f'{lazyclassproperty}["{ptr_ref_t}"]',),
+                ):
+                    if pointers:
+                        self.write(f"my_ptrs: {ptr_ref_t} = {{")
+                        classes = {
+                            "SchemaPath": sp,
+                            "GelPointerReflection": gel_ptr_ref,
+                            "Cardinality": self.import_name(
+                                BASE_IMPL, "Cardinality"
+                            ),
+                            "PointerKind": self.import_name(
+                                BASE_IMPL, "PointerKind"
+                            ),
+                        }
+                        with self.indented():
+                            for ptr in pointers:
+                                r = self._reflect_pointer(ptr, classes)
+                                self.write(f"{ptr.name!r}: {r},")
+                        self.write("}")
+                    else:
+                        self.write(f"my_ptrs: {ptr_ref_t} = {{}}")
+
+                    if base_types:
+                        pp = "__gel_reflection__.pointers"
+                        ret = self.format_list(
+                            "return ({list})",
+                            [
+                                "my_ptrs",
+                                *_map_name(
+                                    lambda s: f"{_mangle_typeof(s)}.{pp}",
+                                    base_types,
+                                ),
+                            ],
+                            separator=" | ",
+                            carry_separator=True,
+                        )
+                    else:
+                        ret = "return my_ptrs"
+
+                    self.write(ret)
+
+                self.write()
+
                 with self._classmethod_def(
                     "object",
                     [],
@@ -2111,6 +2178,37 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             self.write(f"{name}.__variants__.Base = {name}")
 
         self.write()
+
+    def _reflect_pointer(
+        self,
+        ptr: reflection.Pointer,
+        classes: dict[str, str],
+    ) -> str:
+        target_type = self._types[ptr.target_id]
+        kwargs: dict[str, str] = {
+            "type_": target_type.schemapath.as_code(classes["SchemaPath"]),
+            "kind": f"{classes['PointerKind']}({str(ptr.kind)!r})",
+            "cardinality": f"{classes['Cardinality']}({str(ptr.card)!r})",
+            "computed": str(ptr.is_computed),
+            "readonly": str(ptr.is_readonly),
+        }
+
+        if ptr.pointers is not None:
+            kwargs["properties"] = self.format_list(
+                "({list})",
+                [
+                    self._reflect_pointer(prop, classes)
+                    for prop in ptr.pointers
+                ],
+                extra_indent=1,
+            )
+        else:
+            kwargs["properties"] = "None"
+
+        return self.format_list(
+            f"{classes['GelPointerReflection']}({{list}})",
+            [f"{k}={v}" for k, v in kwargs.items()],
+        )
 
     def _write_base_object_type_body(
         self,

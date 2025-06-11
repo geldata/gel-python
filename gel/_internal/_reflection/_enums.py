@@ -4,17 +4,18 @@
 
 
 import enum
+from typing import final
+
+from gel._internal._polyfills._strenum import StrEnum
 
 
-class StrEnum(str, enum.Enum):
-    pass
-
-
+@final
 class SchemaPart(enum.Enum):
     STD = enum.auto()
     USER = enum.auto()
 
 
+@final
 class Cardinality(StrEnum):
     AtMostOne = "AtMostOne"
     One = "One"
@@ -36,6 +37,7 @@ class Cardinality(StrEnum):
         }
 
 
+@final
 class TypeKind(StrEnum):
     Array = "Array"
     Enum = "Enum"
@@ -48,17 +50,20 @@ class TypeKind(StrEnum):
     Pseudo = "Pseudo"
 
 
+@final
 class TypeModifier(StrEnum):
     SetOf = "SetOfType"
     Optional = "OptionalType"
     Singleton = "SingletonType"
 
 
+@final
 class PointerKind(StrEnum):
     Link = "Link"
     Property = "Property"
 
 
+@final
 class OperatorKind(StrEnum):
     Infix = "Infix"
     Postfix = "Postfix"
@@ -66,6 +71,7 @@ class OperatorKind(StrEnum):
     Ternary = "Ternary"
 
 
+@final
 class CallableParamKind(StrEnum):
     Variadic = "VariadicParam"
     NamedOnly = "NamedOnlyParam"

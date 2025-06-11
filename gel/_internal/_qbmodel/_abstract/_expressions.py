@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any, Literal
 from typing_extensions import TypeAliasType
 
 import dataclasses
+import functools
 
 from gel._internal import _qb
 from gel._internal._utils import Unspecified
@@ -58,9 +59,14 @@ def _select_stmt_context(
     *,
     new_stmt_if: Callable[[_qb.SelectStmt], bool] | None = None,
 ) -> tuple[_qb.SelectStmt, _qb.PathAlias]:
+    if issubclass(cls, GelObjectType):
+        splat_cb = functools.partial(_qb.get_object_type_splat, cls)
+    else:
+        splat_cb = None
     stmt = _qb.SelectStmt.wrap(
         _qb.edgeql_qb_expr(cls if operand is None else operand),
         new_stmt_if=new_stmt_if,
+        splat_cb=splat_cb,
     )
     return stmt, _qb.PathAlias(cls, stmt.path_prefix)
 
@@ -129,10 +135,9 @@ def select(
             if kwarg:
                 target = ptr.__gel_origin__
                 if issubclass(target, GelObjectType):
-                    target_type = target.__gel_reflection__.name
                     ptr_expr = _qb.ShapeOp(
                         iter_expr=ptr_expr,
-                        shape=_qb.Shape.splat(source=target_type),
+                        shape=_qb.get_object_type_splat(target),
                     )
                     shape_el = _qb.ShapeElement(
                         name=ptrname,

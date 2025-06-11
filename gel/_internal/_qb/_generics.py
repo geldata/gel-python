@@ -22,13 +22,20 @@ from gel._internal import _typing_inspect
 from gel._internal import _utils
 
 from ._abstract import AbstractFieldDescriptor
-from ._expressions import BinaryOp, Path, Variable, toplevel_edgeql
+from ._expressions import (
+    BinaryOp,
+    Path,
+    Variable,
+    get_object_type_splat,
+    toplevel_edgeql,
+)
 from ._protocols import (
     TypeClassProto,
     assert_edgeql_qb_expr,
     edgeql_qb_expr,
     is_exprmethod,
 )
+from ._reflection import GelTypeMetadata
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -232,7 +239,12 @@ class BaseAlias(metaclass=BaseAliasMeta):
         return expr
 
     def __edgeql__(self) -> tuple[type, str]:
-        return self.__gel_origin__, toplevel_edgeql(self)
+        type_ = self.__gel_origin__
+        if issubclass(type_, GelTypeMetadata):
+            splat_cb = functools.partial(get_object_type_splat, type_)
+        else:
+            splat_cb = None
+        return type_, toplevel_edgeql(self, splat_cb=splat_cb)
 
 
 class PathAlias(BaseAlias):

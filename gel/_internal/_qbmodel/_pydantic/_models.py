@@ -37,10 +37,8 @@ from pydantic._internal import _model_construction  # noqa: PLC2701
 
 from gel._internal import _edgeql
 from gel._internal import _qb
-from gel._internal import _lazyprop
 from gel._internal import _typing_inspect
 from gel._internal import _unsetid
-from gel._internal import _utils
 
 from gel._internal._qbmodel import _abstract
 
@@ -136,28 +134,8 @@ class GelModelMeta(_model_construction.ModelMetaclass, _abstract.GelModelMeta):
     # Splat qb protocol
     def __iter__(cls) -> Iterator[_qb.ShapeElement]:  # noqa: N805
         cls = cast("type[GelModel]", cls)
-        source = cls.__gel_reflection__.name
-        return iter((_qb.ShapeElement.splat(source),))
-
-    @_lazyprop.LazyProperty[tuple[_qb.PathAlias, ...]]
-    def __gel_eager_pointers__(cls) -> tuple[_qb.PathAlias, ...]:  # noqa: N805
-        cls = cast("type[GelModel]", cls)
-        ptrs = []
-        for fname in cls.__pydantic_fields__:
-            desc = _utils.maybe_get_descriptor(
-                cls,
-                fname,
-                of_type=_abstract.ModelFieldDescriptor,
-            )
-            if desc is None:
-                continue
-            fgeneric = desc.get_resolved_type_generic()
-            if fgeneric is None or issubclass(
-                typing.get_origin(fgeneric), _abstract.AnyPropertyDescriptor
-            ):
-                ptrs.append(getattr(cls, fname))
-
-        return tuple(ptrs)
+        shape = _qb.get_object_type_splat(cls)
+        return iter(shape.elements)
 
     def __gel_pointers__(cls) -> GelPointers:  # noqa: N805
         cls = cast("type[GelModel]", cls)
@@ -303,8 +281,6 @@ class GelBaseModel(pydantic.BaseModel, metaclass=GelModelMeta):
     # making state management for "special" properties like
     # these hard.
     __slots__ = ("__gel_changed_fields__",)
-
-    __gel_pointer_infos__: ClassVar[dict[str, _abstract.PointerInfo]]
 
     if TYPE_CHECKING:
         __gel_changed_fields__: set[str] | None
