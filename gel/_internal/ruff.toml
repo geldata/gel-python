@@ -46,6 +46,7 @@ extend-ignore = [
     "PLR0913", # too-many-arguments
     "PLR0914", # too-many-local-variables
     "PLR0915", # too-many-statements
+    "PLR0916", # too-many-boolean-expressions
     "PLR1702", # too-many-nested-blocks
     "PLR2004", # magic-value-comparison
     "PLR6301", # no-self-use

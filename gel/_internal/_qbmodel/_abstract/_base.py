@@ -12,6 +12,7 @@ from typing import (
     TypeVar,
     final,
 )
+from typing_extensions import TypeVarTuple
 
 import dataclasses
 
@@ -26,6 +27,7 @@ if TYPE_CHECKING:
 T = TypeVar("T")
 T_co = TypeVar("T_co", covariant=True)
 GelType_T = TypeVar("GelType_T", bound="GelType")
+GelType_Tup = TypeVarTuple("GelType_Tup")
 
 
 if TYPE_CHECKING:
