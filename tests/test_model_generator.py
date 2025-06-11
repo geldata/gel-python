@@ -343,7 +343,6 @@ class TestModelGenerator(tb.ModelTestCase):
         with self.assertRaisesRegex(AttributeError, r".body. is not set"):
             d.body
 
-    @tb.xfail  # decoder currently unable to cope with polymorphic results
     @tb.typecheck
     def test_modelgen_data_unpack_polymorphic(self):
         from models import default

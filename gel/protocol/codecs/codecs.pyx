@@ -216,6 +216,7 @@ cdef class CodecsRegistry:
             names = cpython.PyTuple_New(els)
             flags = cpython.PyTuple_New(els)
             cards = cpython.PyTuple_New(els)
+            source_types = cpython.PyTuple_New(els)
             for i in range(els):
                 flag = hton.unpack_uint32(frb_read(spec, 4))  # flags
                 cardinality = <uint8_t>frb_read(spec, 1)[0]
@@ -244,9 +245,15 @@ cdef class CodecsRegistry:
                     source_type_pos = <uint16_t>hton.unpack_int16(
                         frb_read(spec, 2))
                     source_type = codecs_list[source_type_pos]
+                    cpython.Py_INCREF(source_type)
+                    cpython.PyTuple_SetItem(source_types, i, source_type)
+                else:
+                    cpython.Py_INCREF(None)
+                    cpython.PyTuple_SetItem(source_types, i, None)
 
             res = ObjectCodec.new(
-                tid, names, flags, cards, codecs, t == CTYPE_INPUT_SHAPE
+                tid, names, flags, cards, codecs, source_types,
+                t == CTYPE_INPUT_SHAPE,
             )
 
         elif t == CTYPE_INPUT_SHAPE:
@@ -280,7 +287,8 @@ cdef class CodecsRegistry:
                 cpython.PyTuple_SetItem(cards, i, cardinality)
 
             res = ObjectCodec.new(
-                tid, names, flags, cards, codecs, t == CTYPE_INPUT_SHAPE
+                tid, names, flags, cards, codecs, None,
+                t == CTYPE_INPUT_SHAPE,
             )
 
         elif t == CTYPE_BASE_SCALAR:
@@ -494,14 +502,28 @@ cdef class CodecsRegistry:
             res.type_name = type_name
 
         elif t == CTYPE_OBJECT and protocol_version >= (2, 0):
-            # Ignore
-            frb_read(spec, desc_len)
-            res = NULL_CODEC
+            str_len = hton.unpack_uint32(frb_read(spec, 4))
+            name = cpythonx.PyUnicode_FromStringAndSize(
+                frb_read(spec, str_len), str_len)
+            schema_defined = <bint>frb_read(spec, 1)[0]
+            res = ObjectTypeNullCodec.new(tid, name, schema_defined)
 
         elif t == CTYPE_COMPOUND and protocol_version >= (2, 0):
-            # Ignore
-            frb_read(spec, desc_len)
-            res = NULL_CODEC
+            str_len = hton.unpack_uint32(frb_read(spec, 4))
+            name = cpythonx.PyUnicode_FromStringAndSize(
+                frb_read(spec, str_len), str_len)
+            schema_defined = <bint>frb_read(spec, 1)[0]
+            op = <uint8_t>frb_read(spec, 1)[0]
+            els = <uint16_t>hton.unpack_int16(frb_read(spec, 2))
+            components = cpython.PyTuple_New(els)
+            for i in range(els):
+                cmp_pos = <uint16_t>hton.unpack_int16(
+                    frb_read(spec, 2))
+                cmp = codecs_list[cmp_pos]
+                cpython.Py_INCREF(cmp)
+                cpython.PyTuple_SetItem(components, i, cmp)
+            res = CompoundTypeNullCodec.new(
+                tid, name, schema_defined, op, components)
 
         else:
             raise NotImplementedError(
