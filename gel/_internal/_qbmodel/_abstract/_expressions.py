@@ -187,7 +187,7 @@ def select(
                         shape=dataclasses.replace(
                             el_expr.shape,
                             elements=subshape,
-                        )
+                        ),
                     )
 
             shape_el = _qb.ShapeElement(
