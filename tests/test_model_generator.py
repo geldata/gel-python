@@ -343,7 +343,6 @@ class TestModelGenerator(tb.ModelTestCase):
         with self.assertRaisesRegex(AttributeError, r".body. is not set"):
             d.body
 
-    @tb.xfail  # decoder currently unable to cope with polymorphic results
     @tb.typecheck
     def test_modelgen_data_unpack_polymorphic(self):
         from models import default
@@ -619,9 +618,7 @@ class TestModelGenerator(tb.ModelTestCase):
         res = self.client.get(
             default.Party.select(
                 "*",
-                members=lambda p: p.members.select(
-                    "*"
-                ).order_by(name=True),
+                members=lambda p: p.members.select("*").order_by(name=True),
             ).filter(name="The A-Team")
         )
         self.assertEqual(res.name, "The A-Team")
@@ -992,40 +989,39 @@ class TestModelGenerator(tb.ModelTestCase):
         self.client.save(post)
 
         # Fetch and verify
-        res = self.client.query('''
+        res = self.client.query("""
             select Post {body, author: {name}}
             filter .body = 'Hello'
-        ''')
+        """)
         assert len(res) == 1
-        self.assertEqual(res[0].author.name, 'Zoe')
+        self.assertEqual(res[0].author.name, "Zoe")
 
     @tb.typecheck
     def test_modelgen_save_12(self):
         from models import default
+
         # Update object adding an existing object to an exiting single
         # required link (with link props)
-        a = self.client.get(default.User.filter(name='Alice'))
-        z = self.client.get(default.User.filter(name='Zoe'))
+        a = self.client.get(default.User.filter(name="Alice"))
+        z = self.client.get(default.User.filter(name="Zoe"))
         img_query = default.Image.select(
             file=True,
             author=True,
-        ).filter(file='cat.jpg')
+        ).filter(file="cat.jpg")
         img = self.client.get(img_query)
         assert img.author is not None
-        self.assertEqual(img.author.name, 'Elsa')
-        self.assertEqual(img.author.__linkprops__.caption, 'made of snow')
+        self.assertEqual(img.author.name, "Elsa")
+        self.assertEqual(img.author.__linkprops__.caption, "made of snow")
         self.assertEqual(img.author.__linkprops__.year, 2025)
 
-        img.author = default.Image.author.link(
-            z, caption='kitty!'
-        )
+        img.author = default.Image.author.link(z, caption="kitty!")
         self.client.save(img)
 
         # Re-fetch and verify
         img = self.client.get(img_query)
         assert img.author is not None
-        self.assertEqual(img.author.name, 'Zoe')
-        self.assertEqual(img.author.__linkprops__.caption, 'kitty!')
+        self.assertEqual(img.author.name, "Zoe")
+        self.assertEqual(img.author.__linkprops__.caption, "kitty!")
         self.assertEqual(img.author.__linkprops__.year, None)
 
         img.author = a
@@ -1034,20 +1030,18 @@ class TestModelGenerator(tb.ModelTestCase):
         # Re-fetch and verify
         img = self.client.get(img_query)
         assert img.author is not None
-        self.assertEqual(img.author.name, 'Alice')
+        self.assertEqual(img.author.name, "Alice")
         self.assertEqual(img.author.__linkprops__.caption, None)
         self.assertEqual(img.author.__linkprops__.year, None)
 
-        img.author = default.Image.author.link(
-            z, caption='cute', year=2024
-        )
+        img.author = default.Image.author.link(z, caption="cute", year=2024)
         self.client.save(img)
 
         # Re-fetch and verify
         img = self.client.get(img_query)
         assert img.author is not None
-        self.assertEqual(img.author.name, 'Zoe')
-        self.assertEqual(img.author.__linkprops__.caption, 'cute')
+        self.assertEqual(img.author.name, "Zoe")
+        self.assertEqual(img.author.__linkprops__.caption, "cute")
         self.assertEqual(img.author.__linkprops__.year, 2024)
 
     @tb.typecheck
@@ -1056,23 +1050,24 @@ class TestModelGenerator(tb.ModelTestCase):
         # Update object adding an existing object to an exiting single
         # optional link (no link props)
 
-        loot = self.client.get(default.Loot.select(
+        loot = self.client.get(
+            default.Loot.select(
                 name=True,
                 owner=True,
-            ).filter(name='Cool Hat')
+            ).filter(name="Cool Hat")
         )
-        z = self.client.get(default.User.filter(name='Zoe'))
+        z = self.client.get(default.User.filter(name="Zoe"))
         assert loot.owner is not None
-        self.assertEqual(loot.owner.name, 'Billie')
+        self.assertEqual(loot.owner.name, "Billie")
         loot.owner = z
         self.client.save(loot)
 
         # Fetch and verify
-        res = self.client.get('''
+        res = self.client.get("""
             select Loot {name, owner: {name}}
             filter .name = 'Cool Hat'
-        ''')
-        self.assertEqual(res.owner.name, 'Zoe')
+        """)
+        self.assertEqual(res.owner.name, "Zoe")
 
     @tb.typecheck
     def test_modelgen_save_14(self):
@@ -1080,31 +1075,34 @@ class TestModelGenerator(tb.ModelTestCase):
         # Update object adding an existing object to an exiting single
         # optional link (with link props)
 
-        loot = self.client.get(default.StackableLoot.select(
+        loot = self.client.get(
+            default.StackableLoot.select(
                 name=True,
                 owner=True,
-            ).filter(name='Gold Coin')
+            ).filter(name="Gold Coin")
         )
-        a = self.client.get(default.User.filter(name='Alice'))
-        z = self.client.get(default.User.filter(name='Zoe'))
+        a = self.client.get(default.User.filter(name="Alice"))
+        z = self.client.get(default.User.filter(name="Zoe"))
         assert loot.owner is not None
-        self.assertEqual(loot.owner.name, 'Billie')
+        self.assertEqual(loot.owner.name, "Billie")
         self.assertEqual(loot.owner.__linkprops__.count, 34)
         self.assertEqual(loot.owner.__linkprops__.bonus, True)
 
         loot.owner = default.StackableLoot.owner.link(
-            z, count=12,
+            z,
+            count=12,
         )
         self.client.save(loot)
 
         # Re-fetch and verify
-        loot = self.client.get(default.StackableLoot.select(
+        loot = self.client.get(
+            default.StackableLoot.select(
                 name=True,
                 owner=True,
-            ).filter(name='Gold Coin')
+            ).filter(name="Gold Coin")
         )
         assert loot.owner is not None
-        self.assertEqual(loot.owner.name, 'Zoe')
+        self.assertEqual(loot.owner.name, "Zoe")
         self.assertEqual(loot.owner.__linkprops__.count, 12)
         self.assertEqual(loot.owner.__linkprops__.bonus, None)
 
@@ -1112,29 +1110,29 @@ class TestModelGenerator(tb.ModelTestCase):
         self.client.save(loot)
 
         # Re-fetch and verify
-        loot = self.client.get(default.StackableLoot.select(
+        loot = self.client.get(
+            default.StackableLoot.select(
                 name=True,
                 owner=True,
-            ).filter(name='Gold Coin')
+            ).filter(name="Gold Coin")
         )
         assert loot.owner is not None
-        self.assertEqual(loot.owner.name, 'Alice')
+        self.assertEqual(loot.owner.name, "Alice")
         self.assertEqual(loot.owner.__linkprops__.count, None)
         self.assertEqual(loot.owner.__linkprops__.bonus, None)
 
-        loot.owner = default.StackableLoot.owner.link(
-            z, count=56, bonus=False
-        )
+        loot.owner = default.StackableLoot.owner.link(z, count=56, bonus=False)
         self.client.save(loot)
 
         # Re-fetch and verify
-        loot = self.client.get(default.StackableLoot.select(
+        loot = self.client.get(
+            default.StackableLoot.select(
                 name=True,
                 owner=True,
-            ).filter(name='Gold Coin')
+            ).filter(name="Gold Coin")
         )
         assert loot.owner is not None
-        self.assertEqual(loot.owner.name, 'Zoe')
+        self.assertEqual(loot.owner.name, "Zoe")
         self.assertEqual(loot.owner.__linkprops__.count, 56)
         self.assertEqual(loot.owner.__linkprops__.bonus, False)
 
@@ -1144,45 +1142,48 @@ class TestModelGenerator(tb.ModelTestCase):
         # insert an object with a required single: no link props, one object
         # added to the link
 
-        z = self.client.get(default.User.filter(name='Zoe'))
+        z = self.client.get(default.User.filter(name="Zoe"))
         post = default.Post(
-            body='test post 15',
+            body="test post 15",
             author=z,
         )
         self.client.save(post)
 
         # Fetch and verify
-        res = self.client.get('''
+        res = self.client.get("""
             select Post {body, author: {name}}
             filter .body = 'test post 15'
             limit 1
-        ''')
-        self.assertEqual(res.body, 'test post 15')
-        self.assertEqual(res.author.name, 'Zoe')
+        """)
+        self.assertEqual(res.body, "test post 15")
+        self.assertEqual(res.author.name, "Zoe")
 
     @tb.typecheck
     def test_modelgen_save_16(self):
         from models import default
         # insert an object with a required single: with link props
 
-        a = self.client.get(default.User.filter(name='Alice'))
+        a = self.client.get(default.User.filter(name="Alice"))
         img = default.Image(
-            file='puppy.jpg',
+            file="puppy.jpg",
             author=default.Image.author.link(
-                a, caption='woof!', year=2000,
-            )
+                a,
+                caption="woof!",
+                year=2000,
+            ),
         )
         self.client.save(img)
 
         # Re-fetch and verify
-        img = self.client.get(default.Image.select(
+        img = self.client.get(
+            default.Image.select(
                 file=True,
                 author=True,
-            ).filter(file='puppy.jpg')
+            ).filter(file="puppy.jpg")
         )
         assert img.author is not None
-        self.assertEqual(img.author.name, 'Alice')
-        self.assertEqual(img.author.__linkprops__.caption, 'woof!')
+        self.assertEqual(img.author.name, "Alice")
+        self.assertEqual(img.author.__linkprops__.caption, "woof!")
         self.assertEqual(img.author.__linkprops__.year, 2000)
 
     @tb.typecheck
@@ -1191,43 +1192,46 @@ class TestModelGenerator(tb.ModelTestCase):
         # insert an object with an optional single: no link props, one object
         # added to the link
 
-        z = self.client.get(default.User.filter(name='Zoe'))
+        z = self.client.get(default.User.filter(name="Zoe"))
         loot = default.Loot(
-            name='Pony',
+            name="Pony",
             owner=z,
         )
         self.client.save(loot)
 
         # Fetch and verify
-        res = self.client.get('''
+        res = self.client.get("""
             select Loot {name, owner: {name}}
             filter .name = 'Pony'
-        ''')
-        self.assertEqual(res.name, 'Pony')
-        self.assertEqual(res.owner.name, 'Zoe')
+        """)
+        self.assertEqual(res.name, "Pony")
+        self.assertEqual(res.owner.name, "Zoe")
 
     @tb.typecheck
     def test_modelgen_save_18(self):
         from models import default
         # insert an object with an optional single: with link props
 
-        a = self.client.get(default.User.filter(name='Alice'))
+        a = self.client.get(default.User.filter(name="Alice"))
         loot = default.StackableLoot(
-            name='Button',
+            name="Button",
             owner=default.StackableLoot.owner.link(
-                a, count=5, bonus=False,
+                a,
+                count=5,
+                bonus=False,
             ),
         )
         self.client.save(loot)
 
         # Re-fetch and verify
-        loot = self.client.get(default.StackableLoot.select(
+        loot = self.client.get(
+            default.StackableLoot.select(
                 name=True,
                 owner=True,
-            ).filter(name='Button')
+            ).filter(name="Button")
         )
         assert loot.owner is not None
-        self.assertEqual(loot.owner.name, 'Alice')
+        self.assertEqual(loot.owner.name, "Alice")
         self.assertEqual(loot.owner.__linkprops__.count, 5)
         self.assertEqual(loot.owner.__linkprops__.bonus, False)
 
@@ -1240,17 +1244,17 @@ class TestModelGenerator(tb.ModelTestCase):
         from models import default
         # insert an object with an optional link to self set to self
 
-        p = default.LinearPath(label='singleton')
+        p = default.LinearPath(label="singleton")
         p.next = p
         self.client.save(p)
 
         # Fetch and verify
-        res = self.client.query('''
+        res = self.client.query("""
             select LinearPath {id, label, next: {id, label}}
             order by .label
-        ''')
+        """)
         self.assertEqual(len(res), 1)
-        self.assertEqual(res[0].label, 'singleton')
+        self.assertEqual(res[0].label, "singleton")
         self.assertEqual(res[0].id, res[0].next.id)
 
     @tb.typecheck
@@ -1258,19 +1262,19 @@ class TestModelGenerator(tb.ModelTestCase):
         from models import default
         # make a self loop in 2 steps
 
-        p = default.LinearPath(label='singleton')
+        p = default.LinearPath(label="singleton")
         self.client.save(p)
         # close the loop
-        p.next = self.client.get(default.LinearPath.filter(label='singleton'))
+        p.next = self.client.get(default.LinearPath.filter(label="singleton"))
         self.client.save(p)
 
         # Fetch and verify
-        res = self.client.query('''
+        res = self.client.query("""
             select LinearPath {id, label, next: {id, label}}
             order by .label
-        ''')
+        """)
         self.assertEqual(len(res), 1)
-        self.assertEqual(res[0].label, 'singleton')
+        self.assertEqual(res[0].label, "singleton")
         self.assertEqual(res[0].id, res[0].next.id)
 
     @tb.typecheck
@@ -1279,13 +1283,10 @@ class TestModelGenerator(tb.ModelTestCase):
         # insert an object with an optional link to self set to self
 
         p = default.LinearPath(
-            label='start',
+            label="start",
             next=default.LinearPath(
-                label='step 1',
-                next=default.LinearPath(
-                    label='step 2'
-                )
-            )
+                label="step 1", next=default.LinearPath(label="step 2")
+            ),
         )
         assert p.next is not None
         assert p.next.next is not None
@@ -1293,17 +1294,17 @@ class TestModelGenerator(tb.ModelTestCase):
         self.client.save(p)
 
         # Fetch and verify
-        res = self.client.query('''
+        res = self.client.query("""
             select LinearPath {id, label, next: {id, label}}
             order by .label
-        ''')
+        """)
         self.assertEqual(len(res), 3)
-        self.assertEqual(res[0].label, 'start')
-        self.assertEqual(res[0].next.label, 'step 1')
-        self.assertEqual(res[1].label, 'step 1')
-        self.assertEqual(res[1].next.label, 'step 2')
-        self.assertEqual(res[2].label, 'step 2')
-        self.assertEqual(res[2].next.label, 'start')
+        self.assertEqual(res[0].label, "start")
+        self.assertEqual(res[0].next.label, "step 1")
+        self.assertEqual(res[1].label, "step 1")
+        self.assertEqual(res[1].next.label, "step 2")
+        self.assertEqual(res[2].label, "step 2")
+        self.assertEqual(res[2].next.label, "start")
 
     @tb.typecheck
     def test_modelgen_linkprops_1(self):

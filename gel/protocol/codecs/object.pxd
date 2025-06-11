@@ -24,12 +24,14 @@ cdef class ObjectCodec(BaseNamedRecordCodec):
         object cached_dataclass_fields
         tuple names
         tuple flags
+        tuple source_types
 
         dict cached_tid_map
         tuple cached_return_type_subcodecs
         tuple cached_return_type_dlists
         object cached_return_type_proxy
         object cached_return_type
+        object cached_field_origins
         object cached_orig_return_type
         Py_ssize_t cached_tid_index
 
@@ -41,4 +43,28 @@ cdef class ObjectCodec(BaseNamedRecordCodec):
 
     @staticmethod
     cdef BaseCodec new(bytes tid, tuple names, tuple flags,
-                       tuple cards, tuple codecs, bint is_sparse)
+                       tuple cards, tuple codecs, tuple source_types,
+                       bint is_sparse)
+
+
+@cython.final
+cdef class ObjectTypeNullCodec(BaseCodec):
+    cdef:
+        str name
+        bint schema_defined
+
+    @staticmethod
+    cdef BaseCodec new(bytes tid, str name, bint schema_defined)
+
+
+@cython.final
+cdef class CompoundTypeNullCodec(BaseCodec):
+    cdef:
+        str name
+        bint schema_defined
+        int op
+        tuple components
+
+    @staticmethod
+    cdef BaseCodec new(bytes tid, str name, bint schema_defined,
+                       int op, tuple components)

@@ -193,7 +193,8 @@ cdef class ObjectCodec(BaseNamedRecordCodec):
             object result, lprops
             Py_ssize_t elem_count
             Py_ssize_t i
-            Py_ssize_t cached_tid_index
+            Py_ssize_t tid_index
+            Py_ssize_t start_reading_from = 0
             int32_t elem_len
             BaseCodec elem_codec
             FRBuffer elem_buf
@@ -209,6 +210,7 @@ cdef class ObjectCodec(BaseNamedRecordCodec):
             dict lprops_dict
             dict result_dict
             bint is_polymorphic
+            char *started_at
 
         if self.is_sparse:
             raise NotImplementedError
@@ -221,6 +223,7 @@ cdef class ObjectCodec(BaseNamedRecordCodec):
         return_type = self.cached_return_type
         return_type_proxy = self.cached_return_type_proxy
         dlists = self.cached_return_type_dlists
+        origins = self.cached_field_origins
 
         elem_count = <Py_ssize_t><uint32_t>hton.unpack_int32(frb_read(buf, 4))
 
@@ -239,14 +242,47 @@ cdef class ObjectCodec(BaseNamedRecordCodec):
         else:
             lprops_dict = None
 
-        for i in range(elem_count):
+        tid = None
+        if is_polymorphic:
+            # We need to read __tid__ and adapt the decoding types to it.
+            # Unfortunately, __tid__ isn't always a first field, so for
+            # certain queries we have to workaround and fish for it before
+            # we start reading any other data.
+            if tid_index == 0:
+                frb_read(buf, 4)  # reserved
+                elem_len = hton.unpack_int32(frb_read(buf, 4))
+                if elem_len != 16:
+                    raise RuntimeError('__tid__ has wrong length')
+                tid = frb_read(buf, 16)[:16]
+                start_reading_from = 1
+            else:
+                started_at = buf.buf
+                for i in range(elem_count):
+                    frb_read(buf, 4)  # reserved
+                    elem_len = hton.unpack_int32(frb_read(buf, 4))
+                    if i == tid_index:
+                        if elem_len != 16:
+                            raise RuntimeError('__tid__ has wrong length')
+                        tid = frb_read(buf, 16)[:16]
+                        buf.buf = started_at  # reset the buffer
+                    else:
+                        if elem_len != -1:
+                            frb_read(buf, elem_len)
+
+            if tid is None:
+                raise RuntimeError('__tid__ is unexepectedly empty')
+            try:
+                current_ret_type = tid_map[tid]
+            except KeyError:
+                pass
+
+        for i in range(start_reading_from, elem_count):
             frb_read(buf, 4)  # reserved
             elem_len = hton.unpack_int32(frb_read(buf, 4))
 
-            if i == tid_index and not is_polymorphic:
+            if i == tid_index:
                 if elem_len != -1:
-                    # Don't bother with actually reading __tid__ if this isn't
-                    # a polymorphic query scenario
+                    # Discard the value; we've parsed it earlier.
                     frb_read(buf, elem_len)
                 continue
             else:
@@ -262,14 +298,6 @@ cdef class ObjectCodec(BaseNamedRecordCodec):
                         raise RuntimeError(
                             f'unexpected trailing data in buffer after '
                             f'object element decoding: {frb_get_len(&elem_buf)}')
-
-                if i == tid_index:
-                    if elem is None:
-                        raise RuntimeError('__tid__ is unexepectedly empty')
-                    try:
-                        current_ret_type = tid_map[elem]
-                    except KeyError:
-                        pass
 
             name = names[i]
             if flags[i] & datatypes._EDGE_POINTER_IS_LINKPROP:
@@ -337,24 +365,61 @@ cdef class ObjectCodec(BaseNamedRecordCodec):
             self.cached_return_type = return_type
             self.cached_return_type_proxy = None
 
+        tid_map = {}
+        try:
+            refl = return_type.__gel_reflection__
+        except AttributeError:
+            pass
+        else:
+            # Store base type's tid in the mapping *also* to exclude
+            # subclasses of base type, e.g. if we have this:
+            #
+            #    class CustomContent(default.Content):
+            #        pass
+            #
+            # then default.Content.__subclasses__() will contain
+            # CustomContent, which we don't want to be there.
+
+            tid_map[refl.id.bytes] = return_type
+
+            for ch in return_type.__subclasses__():
+                try:
+                    refl = ch.__gel_reflection__
+                except AttributeError:
+                    pass
+                else:
+                    if refl.id.bytes not in tid_map:
+                        tid_map[refl.id.bytes] = ch
+
         subs = []
         dlists = []
+        origins = []
         for i, name in enumerate(names):
             if flags[i] & datatypes._EDGE_POINTER_IS_LINKPROP:
-                # sub = getattr(lprops_type, name[1:])
-                # subs.append(sub.__gel_origin__)
                 subs.append(None)
                 dlists.append(None)
+                origins.append(return_type)
             elif name in {"__tname__", "__tid__"}:
                 subs.append(None)
                 dlists.append(None)
                 self.cached_tid_index = i
+                origins.append(return_type)
             else:
-                sub = getattr(return_type, name)
+                origin = return_type
+                if isinstance(self.source_types[i], ObjectTypeNullCodec):
+                    tid = self.source_types[i].get_tid()
+                    try:
+                        origin = tid_map[tid]
+                    except KeyError:
+                        pass
+
+                origins.append(origin)
+
+                sub = getattr(origin, name)
                 subs.append(sub.__gel_origin__)
 
                 dlist_factory = None
-                desc = inspect.getattr_static(return_type, name, None)
+                desc = inspect.getattr_static(origin, name, None)
                 if desc is not None and hasattr(desc, '__gel_resolved_type__'):
                     target = desc.get_resolved_type_generic()
                     if target is not None:
@@ -383,31 +448,7 @@ cdef class ObjectCodec(BaseNamedRecordCodec):
         self.cached_return_type_subcodecs = tuple(subs)
         self.cached_return_type_dlists = tuple(dlists)
 
-        tid_map = {}
-        try:
-            refl = return_type.__gel_reflection__
-        except AttributeError:
-            pass
-        else:
-            # Store base type's tid in the mapping *also* to exclude
-            # subclasses of base type, e.g. if we have this:
-            #
-            #    class CustomContent(default.Content):
-            #        pass
-            #
-            # then default.Content.__subclasses__() will contain
-            # CustomContent, which we don't want to be there.
-
-            tid_map[refl.id] = return_type
-
-            for ch in return_type.__subclasses__():
-                try:
-                    refl = ch.__gel_reflection__
-                except AttributeError:
-                    pass
-                else:
-                    if refl.id not in tid_map:
-                        tid_map[refl.id] = ch
+        self.cached_field_origins = tuple(origins)
 
         self.cached_tid_map = tid_map
         self.cached_orig_return_type = return_type
@@ -430,7 +471,7 @@ cdef class ObjectCodec(BaseNamedRecordCodec):
 
     @staticmethod
     cdef BaseCodec new(bytes tid, tuple names, tuple flags, tuple cards,
-                       tuple codecs, bint is_sparse):
+                       tuple codecs, tuple source_types, bint is_sparse):
         cdef:
             ObjectCodec codec
 
@@ -448,6 +489,7 @@ cdef class ObjectCodec(BaseNamedRecordCodec):
         codec.cached_orig_return_type = None
         codec.cached_tid_map = None
         codec.cached_return_type_dlists = None
+        codec.cached_field_origins = None
 
         codec.flags = flags
         codec.is_sparse = is_sparse
@@ -455,6 +497,7 @@ cdef class ObjectCodec(BaseNamedRecordCodec):
         codec.descriptor.set_dataclass_fields_func(codec.get_dataclass_fields)
         codec.fields_codecs = codecs
         codec.names = names
+        codec.source_types = source_types
         return codec
 
     def make_type(self, describe_context):
@@ -492,3 +535,42 @@ cdef class ObjectCodec(BaseNamedRecordCodec):
             name=None,
             elements=elements,
         )
+
+
+@cython.final
+cdef class ObjectTypeNullCodec(BaseCodec):
+
+    @staticmethod
+    cdef BaseCodec new(bytes tid, str name, bint schema_defined):
+        cdef:
+            ObjectTypeNullCodec codec
+
+        codec = ObjectTypeNullCodec.__new__(ObjectTypeNullCodec)
+        codec.tid = tid
+        codec.name = name
+        codec.schema_defined = schema_defined
+        return codec
+
+    def get_tid(self):
+        return self.tid
+
+    def __repr__(self):
+        return f'<ObjectType tid={self.tid} name={self.name}>'
+
+@cython.final
+cdef class CompoundTypeNullCodec(BaseCodec):
+
+    @staticmethod
+    cdef BaseCodec new(bytes tid, str name, bint schema_defined,
+                       int op, tuple components):
+        cdef:
+            CompoundTypeNullCodec codec
+
+        codec = CompoundTypeNullCodec.__new__(CompoundTypeNullCodec)
+
+        codec.tid = tid
+        codec.name = name
+        codec.schema_defined = schema_defined
+        codec.op = op
+        codec.components = components
+        return codec
