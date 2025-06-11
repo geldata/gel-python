@@ -2195,9 +2195,9 @@ class GeneratedSchemaModule(BaseGeneratedModule):
 
         if ptr.pointers is not None:
             kwargs["properties"] = self.format_list(
-                "({list})",
+                "{{{list}}}",
                 [
-                    self._reflect_pointer(prop, classes)
+                    f"{prop.name!r}: {self._reflect_pointer(prop, classes)}"
                     for prop in ptr.pointers
                 ],
                 extra_indent=1,
