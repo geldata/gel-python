@@ -44,7 +44,7 @@ def dirsync(
     remove_files: set[Path] = set()
     remove_dirs: set[Path] = set()
 
-    keep_paths = {str(Path(p)) for p in keep}
+    keep_paths = {Path(p) for p in keep}
 
     # schedule base directory creation
     if not dst_path.exists():
@@ -78,18 +78,19 @@ def dirsync(
                 copy_files.append((src_file, dst_file))
 
     # scan destination for removals
-    for root, dirs, files in os.walk(dst_path, topdown=False):
-        rel = Path(root).relative_to(dst_path)
+    for dirpath_str, dirs, files in os.walk(dst_path, topdown=False):
+        dirpath = Path(dirpath_str)
+        rel = dirpath.relative_to(dst_path)
         src_root = src_path / rel
 
         for f in files:
-            dst_file = Path(root) / f
-            if not (src_root / f).exists() and f not in keep_paths:
+            dst_file = dirpath / f
+            if not (src_root / f).exists() and (rel / f) not in keep_paths:
                 remove_files.add(dst_file)
 
         for d in dirs:
-            dst_dir = Path(root) / d
-            if not (src_root / d).exists() and d not in keep_paths:
+            dst_dir = dirpath / d
+            if not (src_root / d).exists() and (rel / d) not in keep_paths:
                 remove_dirs.add(dst_dir)
 
     # execute creations
