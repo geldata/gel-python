@@ -3,7 +3,7 @@
 # SPDX-FileCopyrightText: Copyright Gel Data Inc. and the contributors.
 
 from __future__ import annotations
-from typing import TYPE_CHECKING, Any, ClassVar, TypeVar
+from typing import TYPE_CHECKING, Any, ClassVar, TypeGuard, TypeVar
 
 import dataclasses
 
@@ -62,6 +62,10 @@ else:
                 raise NotImplementedError(f"{type(self).__name__}.__edgeql__")
             else:
                 return type(self), _qb.toplevel_edgeql(self)
+
+
+def is_gel_type(t: Any) -> TypeGuard[type[GelType]]:
+    return isinstance(t, type) and issubclass(t, GelType)
 
 
 if TYPE_CHECKING:
