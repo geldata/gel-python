@@ -10,6 +10,7 @@ from typing import (
     TypeGuard,
 )
 
+import abc
 import dataclasses
 import functools
 import re
@@ -32,7 +33,7 @@ class TypeRef:
 
 
 @struct
-class Type:
+class Type(abc.ABC):
     id: str
     kind: enums.TypeKind
     name: str
@@ -50,6 +51,10 @@ class Type:
         return hash(self.id)
 
     @functools.cached_property
+    def edgeql(self) -> str:
+        return self.schemapath.as_quoted_schema_name()
+
+    @functools.cached_property
     def schemapath(self) -> _support.SchemaPath:
         return _support.parse_name(self.name)
 
@@ -64,6 +69,10 @@ class InheritingType(Type):
     final: bool
     bases: tuple[TypeRef, ...]
     ancestors: tuple[TypeRef, ...]
+
+    @functools.cached_property
+    def edgeql(self) -> str:
+        return self.schemapath.as_quoted_schema_name()
 
 
 @struct
@@ -93,6 +102,10 @@ class CollectionType(Type):
     @functools.cached_property
     def schemapath(self) -> _support.SchemaPath:
         return _support.SchemaPath(re.sub(r"\|+", "::", self.name))
+
+    @functools.cached_property
+    def edgeql(self) -> str:
+        return str(self.schemapath)
 
 
 @struct
@@ -199,6 +212,7 @@ def is_primitive_type(t: AnyType) -> TypeGuard[PrimitiveType]:
 
 @dataclasses.dataclass(frozen=True)
 class Pointer:
+    id: str
     card: enums.Cardinality
     kind: enums.PointerKind
     name: str
@@ -208,6 +222,10 @@ class Pointer:
     is_readonly: bool
     has_default: bool
     pointers: tuple[Pointer, ...] | None = None
+
+    @functools.cached_property
+    def uuid(self) -> uuid.UUID:
+        return uuid.UUID(self.id)
 
 
 def is_link(p: Pointer) -> bool:

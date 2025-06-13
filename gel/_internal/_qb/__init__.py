@@ -78,8 +78,11 @@ from ._protocols import (
 )
 
 from ._reflection import (
+    GelLinkMetadata,
     GelPointerReflection,
+    GelSourceMetadata,
     GelTypeMetadata,
+    GelObjectTypeMetadata,
 )
 
 
@@ -107,7 +110,10 @@ __all__ = (
     "FloatLiteral",
     "ForStmt",
     "FuncCall",
+    "GelLinkMetadata",
+    "GelObjectTypeMetadata",
     "GelPointerReflection",
+    "GelSourceMetadata",
     "GelTypeMetadata",
     "IndexOp",
     "InfixOp",

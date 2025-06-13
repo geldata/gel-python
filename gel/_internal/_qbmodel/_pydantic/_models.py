@@ -18,10 +18,8 @@ from typing import (
 
 from typing_extensions import (
     Self,
-    TypeAliasType,
 )
 
-import dataclasses
 import inspect
 import typing
 import uuid
@@ -35,7 +33,6 @@ from pydantic_core import core_schema
 
 from pydantic._internal import _model_construction  # noqa: PLC2701
 
-from gel._internal import _edgeql
 from gel._internal import _qb
 from gel._internal import _typing_inspect
 from gel._internal import _unsetid
@@ -43,47 +40,12 @@ from gel._internal import _unsetid
 from gel._internal._qbmodel import _abstract
 
 if TYPE_CHECKING:
-    from typing import Type  # noqa: UP035
-    from collections.abc import Iterator, Iterable, Set as AbstractSet
+    from collections.abc import Iterator, Iterable, Mapping, Set as AbstractSet
     from gel._internal._qbmodel._abstract import GelType
 
 
-@dataclasses.dataclass(kw_only=True, frozen=True)
-class Pointer:
-    cardinality: _edgeql.Cardinality
-    computed: bool
-    has_props: bool
-    kind: _edgeql.PointerKind
-    name: str
-    readonly: bool
-    type: type[GelType]
-
-    @classmethod
-    def from_ptr_info(
-        cls,
-        name: str,
-        # We're using `Type[GelType]` below because `type` is bound
-        # to `type[GelType]` a few lines above.
-        type: Type[GelType],  # noqa: UP006, A002
-        kind: _edgeql.PointerKind,
-        ptrinfo: _abstract.PointerInfo,
-    ) -> Self:
-        return cls(
-            cardinality=ptrinfo.cardinality,
-            computed=ptrinfo.computed,
-            has_props=ptrinfo.has_props,
-            kind=kind,
-            name=name,
-            readonly=ptrinfo.readonly,
-            type=type,
-        )
-
-
-GelPointers = TypeAliasType("GelPointers", dict[str, Pointer])
-
-
 _model_pointers_cache: weakref.WeakKeyDictionary[
-    type[GelModel], dict[str, Pointer]
+    type[GelModel], dict[str, type[GelType]]
 ] = weakref.WeakKeyDictionary()
 
 
@@ -134,10 +96,10 @@ class GelModelMeta(_model_construction.ModelMetaclass, _abstract.GelModelMeta):
 
     def __setattr__(cls, name: str, value: Any, /) -> None:  # noqa: N805
         if name == "__pydantic_fields__":
-            fields, ptr_infos = _process_pydantic_fields(cls, value)  # type: ignore [arg-type]
+            cls = cast("type[GelModel]", cls)
+            fields = _process_pydantic_fields(cls, value)
             super().__setattr__("__pydantic_fields__", fields)
-            super().__setattr__("__gel_pointer_infos__", ptr_infos)
-            _model_pointers_cache.pop(cls, None)  # type: ignore [call-overload]
+            _model_pointers_cache.pop(cls, None)
         else:
             super().__setattr__(name, value)
 
@@ -147,7 +109,7 @@ class GelModelMeta(_model_construction.ModelMetaclass, _abstract.GelModelMeta):
         shape = _qb.get_object_type_splat(cls)
         return iter(shape.elements)
 
-    def __gel_pointers__(cls) -> GelPointers:  # noqa: N805
+    def __gel_pointers__(cls) -> Mapping[str, type[GelType]]:  # noqa: N805
         cls = cast("type[GelModel]", cls)
         result = _model_pointers_cache.get(cls)
         if result is None:
@@ -157,18 +119,18 @@ class GelModelMeta(_model_construction.ModelMetaclass, _abstract.GelModelMeta):
         return result
 
 
-def _resolve_pointers(cls: type[GelBaseModel]) -> dict[str, Pointer]:
+def _resolve_pointers(cls: type[GelSourceModel]) -> dict[str, type[GelType]]:
     if not cls.__pydantic_complete__ and cls.model_rebuild() is False:
         raise TypeError(f"{cls} has unresolved fields")
 
     pointers = {}
-    for ptr_name, ptr_info in cls.__gel_pointer_infos__.items():
+    for ptr_name in cls.__pydantic_fields__:
         descriptor = inspect.getattr_static(cls, ptr_name)
         if not isinstance(descriptor, _abstract.ModelFieldDescriptor):
             raise AssertionError(
                 f"'{cls}.{ptr_name}' is not a ModelFieldDescriptor"
             )
-        orig_t = t = descriptor.get_resolved_type()
+        t = descriptor.get_resolved_type()
         if t is None:
             raise TypeError(
                 f"the type of '{cls}.{ptr_name}' has not been resolved"
@@ -190,17 +152,7 @@ def _resolve_pointers(cls: type[GelBaseModel]) -> dict[str, Pointer]:
                         f"the type of '{cls}.{ptr_name}' has not been resolved"
                     )
 
-        kind = (
-            _edgeql.PointerKind.Link
-            if isinstance(orig_t, GelModelMeta)
-            else _edgeql.PointerKind.Property
-        )
-        pointers[ptr_name] = Pointer.from_ptr_info(
-            ptr_name,
-            t,
-            kind,
-            ptr_info,
-        )
+        pointers[ptr_name] = t
 
     return pointers
 
@@ -208,12 +160,7 @@ def _resolve_pointers(cls: type[GelBaseModel]) -> dict[str, Pointer]:
 def _process_pydantic_fields(
     cls: type[GelModel],
     fields: dict[str, pydantic.fields.FieldInfo],
-) -> tuple[
-    dict[str, pydantic.fields.FieldInfo],
-    dict[str, _abstract.PointerInfo],
-]:
-    ptr_infos_dict: dict[str, _abstract.PointerInfo] = {}
-
+) -> dict[str, pydantic.fields.FieldInfo]:
     for fn, field in fields.items():
         fdef = field.default
         overrides: dict[str, Any] = {}
@@ -240,28 +187,8 @@ def _process_pydantic_fields(
             ]
             if field_infos:
                 overrides["annotation"] = field.annotation
-
-            ptr_infos = [
-                a
-                for a in anno.metadata
-                if isinstance(a, _abstract.PointerInfo)
-            ]
         else:
             field_infos = []
-            ptr_infos = []
-
-        num_ptr_infos = len(ptr_infos)
-        if num_ptr_infos == 0:
-            ptr_info = _abstract.PointerInfo()
-        elif num_ptr_infos == 1:
-            ptr_info = ptr_infos[0]
-        else:
-            ptr_info_kwargs: dict[str, Any] = {}
-            for entry in ptr_infos:
-                ptr_info_kwargs |= dataclasses.asdict(entry)
-            ptr_info = _abstract.PointerInfo(**ptr_info_kwargs)
-
-        ptr_infos_dict[fn] = ptr_info
 
         if overrides:
             if field_infos:
@@ -278,7 +205,7 @@ def _process_pydantic_fields(
 
             fields[fn] = merged
 
-    return fields, ptr_infos_dict
+    return fields
 
 
 _unset: object = object()
@@ -286,7 +213,11 @@ _empty_str_set: frozenset[str] = frozenset()
 _setattr = object.__setattr__
 
 
-class GelBaseModel(pydantic.BaseModel, metaclass=GelModelMeta):
+class GelSourceModel(
+    pydantic.BaseModel,
+    _abstract.GelSourceModel,
+    metaclass=GelModelMeta,
+):
     # We use slots because PyDantic overrides `__dict__`
     # making state management for "special" properties like
     # these hard.
@@ -365,7 +296,7 @@ class GelBaseModel(pydantic.BaseModel, metaclass=GelModelMeta):
 
 
 class GelModel(
-    GelBaseModel,
+    GelSourceModel,
     _abstract.GelModel,
 ):
     model_config = pydantic.ConfigDict(
@@ -467,7 +398,7 @@ class LinkPropsDescriptor(Generic[_T_co]):
             return obj.__linkprops__  # type: ignore [no-any-return]
 
 
-class GelLinkModel(GelBaseModel):
+class GelLinkModel(GelSourceModel):
     model_config = pydantic.ConfigDict(
         validate_assignment=True,
         defer_build=True,

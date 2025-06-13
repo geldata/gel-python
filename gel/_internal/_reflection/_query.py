@@ -195,6 +195,7 @@ SELECT Type {
     [IS ObjectType].union_of,
     [IS ObjectType].intersection_of,
     [IS ObjectType].pointers: {
+        id,
         card := ("One" IF .required ELSE "AtMostOne")
                 IF <str>.cardinality = "One"
                 ELSE ("AtLeastOne" IF .required ELSE "Many"),
@@ -210,6 +211,7 @@ SELECT Type {
             OR ("std::sequence" IN .target[IS ScalarType].ancestors.name)
         ),
         [IS Link].pointers: {
+            id,
             card := ("One" IF .required ELSE "AtMostOne")
                     IF <str>.cardinality = "One"
                     ELSE ("AtLeastOne" IF .required ELSE "Many"),

@@ -90,5 +90,9 @@ class PointerInfo:
     kind: _edgeql.PointerKind | None = None
 
 
-class GelObjectType(GelType, metaclass=GelObjectTypeMeta):
+class GelObjectType(
+    GelType,
+    _qb.GelObjectTypeMetadata,
+    metaclass=GelObjectTypeMeta,
+):
     pass

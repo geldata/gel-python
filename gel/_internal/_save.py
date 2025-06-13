@@ -3,18 +3,24 @@ from __future__ import annotations
 import collections
 import dataclasses
 
-from typing import TYPE_CHECKING, Any, NamedTuple, TypeVar, Generic, cast
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    NamedTuple,
+    TypeGuard,
+    TypeVar,
+    Generic,
+    cast,
+)
+from typing_extensions import TypeAliasType, dataclass_transform
 
 from gel._internal._qbmodel._abstract import GelPrimitiveType
 from gel._internal._qbmodel._pydantic._models import (
-    GelBaseModel,
     GelModel,
+    GelSourceModel,
     ProxyModel,
-    GelPointers,
-    Pointer,
 )
 from gel._internal._dlist import (
-    AbstractDowncastingList,
     TrackedList,
     DowncastingTrackedList,
     DistinctList,
@@ -24,18 +30,14 @@ from gel._internal._edgeql import PointerKind, quote_ident
 
 if TYPE_CHECKING:
     import uuid
-
     from collections.abc import (
         Iterable,
         Iterator,
         Callable,
+        Sequence,
     )
-    from typing import TypeGuard
 
-    from gel._internal._qbmodel._abstract import GelType
-
-
-from typing_extensions import TypeAliasType
+    from gel._internal._qb import GelPointerReflection
 
 
 T = TypeVar("T")
@@ -49,17 +51,30 @@ LinkPropertiesValues = TypeAliasType(
 )
 
 
-@dataclasses.dataclass(frozen=True)
+_dataclass = dataclasses.dataclass(frozen=True, kw_only=True)
+
+
+@dataclass_transform(
+    frozen_default=True,
+    kw_only_default=True,
+)
+def _struct(t: type[T]) -> type[T]:
+    return _dataclass(t)
+
+
+@_struct
 class BaseFieldChange:
     name: str
-    info: Pointer
+    """Pointer name"""
+    info: GelPointerReflection
+    """Static pointer schema reflection"""
 
 
-@dataclasses.dataclass(frozen=True)
+@_struct
 class SingleLinkChange(BaseFieldChange):
     target: GelModel | None
 
-    props_info: GelPointers | None = None
+    props_info: dict[str, GelPointerReflection] | None = None
     props: LinkPropertiesValues | None = None
 
     def __post_init__(self) -> None:
@@ -67,26 +82,20 @@ class SingleLinkChange(BaseFieldChange):
         assert not self.info.cardinality.is_multi()
 
 
-@dataclasses.dataclass(frozen=True)
+@_struct
 class MultiLinkAdd(BaseFieldChange):
-    name: str
-    info: Pointer
-
     added: Iterable[GelModel]
 
     added_props: Iterable[LinkPropertiesValues] | None = None
-    props_info: GelPointers | None = None
+    props_info: dict[str, GelPointerReflection] | None = None
 
     def __post_init__(self) -> None:
         assert not any(isinstance(o, ProxyModel) for o in self.added)
         assert self.info.cardinality.is_multi()
 
 
-@dataclasses.dataclass(frozen=True)
+@_struct
 class MultiLinkRemove(BaseFieldChange):
-    name: str
-    info: Pointer
-
     removed: Iterable[GelModel]
 
     def __post_init__(self) -> None:
@@ -94,33 +103,24 @@ class MultiLinkRemove(BaseFieldChange):
         assert self.info.cardinality.is_multi()
 
 
-@dataclasses.dataclass(frozen=True)
+@_struct
 class PropertyChange(BaseFieldChange):
-    name: str
-    info: Pointer
-
     value: object | None
 
     def __post_init__(self) -> None:
         assert not self.info.cardinality.is_multi()
 
 
-@dataclasses.dataclass(frozen=True)
+@_struct
 class MultiPropAdd(BaseFieldChange):
-    name: str
-    info: Pointer
-
     added: Iterable[object]
 
     def __post_init__(self) -> None:
         assert self.info.cardinality.is_multi()
 
 
-@dataclasses.dataclass(frozen=True)
+@_struct
 class MultiPropRemove(BaseFieldChange):
-    name: str
-    info: Pointer
-
     removed: Iterable[object]
 
     def __post_init__(self) -> None:
@@ -262,11 +262,12 @@ def unwrap(val: GelModel) -> tuple[ProxyModel[GelModel] | None, GelModel]:
         return None, val
 
 
-def get_pointers(tp: type[GelBaseModel]) -> Iterable[Pointer]:
+def get_pointers(tp: type[GelSourceModel]) -> list[GelPointerReflection]:
     # We sort pointers to produce similar queies regardless of Python
     # hashing -- this is to maximize the probability of a generated
     # uodate/insert query to hit the Gel's compiled cache.
-    return sorted(tp.__gel_pointers__().values(), key=lambda p: p.name)
+    pointers = tp.__gel_reflection__.pointers
+    return [pointers[name] for name in sorted(pointers)]
 
 
 def iter_graph(objs: Iterable[GelModel]) -> Iterable[GelModel]:
@@ -343,10 +344,6 @@ def get_linked_new_objects(obj: GelModel) -> Iterable[GelModel]:
             if unwrapped.id is UNSET_UUID and unwrapped not in visited:
                 visited.track(unwrapped)
                 yield unwrapped
-
-
-def type_to_ql(tp: type[GelType]) -> str:
-    return quote_ident(tp.__gel_reflection__.name.as_schema_name())
 
 
 def obj_to_name_ql(obj: GelModel) -> str:
@@ -454,13 +451,14 @@ def make_plan(objs: Iterable[GelModel]) -> SavePlan:
                     assert not prop.cardinality.is_multi()
 
                     link_prop_variant = False
-                    if prop.has_props:
+                    if prop.properties:
                         assert isinstance(val, ProxyModel)
                         link_prop_variant = bool(
                             val.__linkprops__.__gel_get_changed_fields__()
                         )
 
                     if link_prop_variant:
+                        assert isinstance(val, ProxyModel)
                         # Link with link properties
                         ptrs = get_pointers(val.__lprops__)
 
@@ -502,7 +500,9 @@ def make_plan(objs: Iterable[GelModel]) -> SavePlan:
                         requireds,
                         sched,
                         MultiPropAdd(
-                            name=prop.name, info=prop, added=mp_added
+                            name=prop.name,
+                            info=prop,
+                            added=mp_added,
                         ),
                     )
 
@@ -511,7 +511,9 @@ def make_plan(objs: Iterable[GelModel]) -> SavePlan:
                         requireds,
                         sched,
                         MultiPropRemove(
-                            name=prop.name, info=prop, removed=mp_removed
+                            name=prop.name,
+                            info=prop,
+                            removed=mp_removed,
                         ),
                     )
 
@@ -539,7 +541,6 @@ def make_plan(objs: Iterable[GelModel]) -> SavePlan:
             assert is_link_list(linked), (
                 f"`linked` is not dlist, it is {type(linked)}"
             )
-            assert issubclass(prop.type, DistinctList)
 
             removed = linked.__gel_get_removed__()
             if removed:
@@ -567,7 +568,7 @@ def make_plan(objs: Iterable[GelModel]) -> SavePlan:
             #   (yet) to update a specific link prop -- we'll have to submit
             #   all of them.
             added = linked.__gel_get_added__()
-            if prop.has_props:
+            if prop.properties:
                 added_index = IDTracker[ProxyModel[GelModel], None]()
                 added_index.track_many(
                     cast("list[ProxyModel[GelModel]]", added)
@@ -583,10 +584,12 @@ def make_plan(objs: Iterable[GelModel]) -> SavePlan:
             if not added:
                 continue
 
+            added_proxies: Sequence[ProxyModel[GelModel]] = added  # type: ignore [assignment]
+
             # Simple case -- no link props!
-            if not prop.has_props or all(
+            if not prop.properties or all(
                 not link.__linkprops__.__gel_get_changed_fields__()
-                for link in cast("list[ProxyModel[GelModel]]", added)
+                for link in added_proxies
             ):
                 mch = MultiLinkAdd(
                     name=prop.name,
@@ -603,9 +606,9 @@ def make_plan(objs: Iterable[GelModel]) -> SavePlan:
             # (as we use UpcastingDistinctList for links with props.)
             # Our goal is to segregate different combinations of
             # set link properties into separate groups.
-            link_tp = prop.type
-            assert issubclass(link_tp.type, ProxyModel)
-            props_info = get_pointers(link_tp.type.__lprops__)
+            link_tp = type(added_proxies[0])
+            assert issubclass(link_tp, ProxyModel)
+            props_info = get_pointers(link_tp.__lprops__)
 
             mch = MultiLinkAdd(
                 name=prop.name,
@@ -833,18 +836,17 @@ class SaveExecutor:
         for ch in change.fields.values():
             if isinstance(ch, PropertyChange):
                 arg = add_arg(
-                    type_to_ql(ch.info.type),
+                    ch.info.typexpr,
                     ch.value,
                     optional=ch.info.cardinality.is_optional(),
                 )
                 shape_parts.append(f"{quote_ident(ch.name)} := {arg}")
 
             elif isinstance(ch, MultiPropAdd):
-                assert issubclass(ch.info.type, AbstractDowncastingList)
                 # Since we're passing a set of values packed into an array
                 # we need to wrap elements in tuples to allow multi props
                 # or arrays etc.
-                arg_t = f"array<tuple<{type_to_ql(ch.info.type.type)}>>"
+                arg_t = f"array<tuple<{ch.info.typexpr}>>"
 
                 assign_op = ":=" if for_insert else "+="
 
@@ -854,8 +856,7 @@ class SaveExecutor:
                 )
 
             elif isinstance(ch, MultiPropRemove):
-                assert issubclass(ch.info.type, AbstractDowncastingList)
-                arg_t = f"array<tuple<{type_to_ql(ch.info.type.type)}>>"
+                arg_t = f"array<tuple<{ch.info.typexpr}>>"
 
                 assert not for_insert
 
@@ -881,7 +882,7 @@ class SaveExecutor:
 
                     for pname, pval in ch.props.items():
                         parg = add_arg(
-                            type_to_ql(ch.props_info[pname].type),
+                            ch.props_info[pname].typexpr,
                             pval,
                             optional=ch.props_info[
                                 pname
@@ -915,11 +916,9 @@ class SaveExecutor:
                     [self._get_id(o) for o in ch.removed],
                 )
 
-                assert issubclass(ch.info.type, DistinctList)
-
                 shape_parts.append(
                     f"{quote_ident(ch.name)} -= "
-                    f"<{type_to_ql(ch.info.type.type)}>array_unpack({arg})"
+                    f"<{ch.info.typexpr}>array_unpack({arg})"
                 )
 
             elif isinstance(ch, MultiLinkAdd):
@@ -953,8 +952,7 @@ class SaveExecutor:
                             # The nested tuple indirection is needed to support
                             # link props that have types of arrays.
                             tuple_subt = [
-                                f"array<tuple<"
-                                f"{type_to_ql(ch.props_info[k].type)}>>"
+                                f"array<tuple<{ch.props_info[k].typexpr}>>"
                                 for k in prop_order
                             ]
 
@@ -983,15 +981,13 @@ class SaveExecutor:
                         for i, p in enumerate(prop_order)
                     )
 
-                    assert issubclass(ch.info.type, DistinctList)
-
                     assign_op = ":=" if for_insert else "+="
 
                     shape_parts.append(
                         f"{quote_ident(ch.name)} {assign_op} "
                         f"assert_distinct(("
                         f"for tup in array_unpack({arg}) union ("
-                        f"select (<{type_to_ql(ch.info.type.type)}>tup.0) {{ "
+                        f"select (<{ch.info.typexpr}>tup.0) {{ "
                         f"{lp_assign}"
                         f"}})))"
                     )
@@ -1002,14 +998,12 @@ class SaveExecutor:
                         [self._get_id(o) for o in ch.added],
                     )
 
-                    assert issubclass(ch.info.type, DistinctList)
-
                     assign_op = ":=" if for_insert else "+="
 
                     shape_parts.append(
                         f"{quote_ident(ch.name)} {assign_op} "
                         f"assert_distinct("
-                        f"<{type_to_ql(ch.info.type.type)}>array_unpack({arg})"
+                        f"<{ch.info.typexpr}>array_unpack({arg})"
                         f")"
                     )
             else:

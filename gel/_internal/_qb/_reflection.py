@@ -15,7 +15,9 @@ if TYPE_CHECKING:
 
 @dataclasses.dataclass(frozen=True, kw_only=True)
 class GelPointerReflection:
-    type_: _reflection.SchemaPath
+    name: str
+    type: _reflection.SchemaPath
+    typexpr: str
     kind: _edgeql.PointerKind
     cardinality: _edgeql.Cardinality
     computed: bool
@@ -23,8 +25,28 @@ class GelPointerReflection:
     properties: dict[str, GelPointerReflection] | None
 
 
-class GelTypeMetadata:
+class GelSchemaMetadata:
     class __gel_reflection__:  # noqa: N801
         id: ClassVar[uuid.UUID]
         name: ClassVar[_reflection.SchemaPath]
+
+
+class GelSourceMetadata(GelSchemaMetadata):
+    class __gel_reflection__(GelSchemaMetadata.__gel_reflection__):  # noqa: N801
         pointers: ClassVar[dict[str, GelPointerReflection]]
+
+
+class GelTypeMetadata(GelSchemaMetadata):
+    pass
+
+
+class GelObjectTypeMetadata(GelSourceMetadata, GelTypeMetadata):
+    class __gel_reflection__(  # noqa: N801
+        GelSourceMetadata.__gel_reflection__,
+        GelTypeMetadata.__gel_reflection__,
+    ):
+        pass
+
+
+class GelLinkMetadata(GelSourceMetadata):
+    pass

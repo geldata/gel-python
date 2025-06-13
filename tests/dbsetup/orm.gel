@@ -36,17 +36,6 @@ type Post {
     required link author: User;
 }
 
-type AssortedScalars {
-    required name: str;
-    vals: array<str>;
-
-    date: cal::local_date;
-    time: cal::local_time;
-    ts: datetime;
-    lts: cal::local_datetime;
-    bstr: bytes;
-}
-
 module sub {
     type TypeInSub {
         post: default::Post;
@@ -129,6 +118,27 @@ type StepPath {
 }
 
 type KitchenSink {
-    name: str;
-    multi mstr: str;
+    required p_str: str;
+    required multi p_multi_str: str;
+    p_opt_str: str;
+    multi p_opt_multi_str: str;
+
+    required array: array<str>;
+    required multi p_multi_arr: array<str>;
+    p_opt_arr: array<str>;
+    multi p_opt_multi_arr: array<str>;
+
+    required p_arrtup: array<tuple<str>>;
+    required multi p_multi_arrtup: array<tuple<str>>;
+    p_opt_arrtup: array<tuple<str>>;
+    multi p_opt_multi_arrtup: array<tuple<str>>;
+
+    required p_tuparr: tuple<array<str>>;
+    required multi p_multi_tuparr: tuple<array<str>>;
+    p_opt_tuparr: tuple<array<str>>;
+    multi p_opt_multi_tuparr: tuple<array<str>>;
+
+    date: cal::local_date;
+    ts: datetime;
+    lts: cal::local_datetime;
 }

@@ -16,6 +16,7 @@
 # limitations under the License.
 #
 
+from __future__ import annotations
 from typing import Any
 
 import dataclasses
@@ -30,6 +31,7 @@ if typing.TYPE_CHECKING:
 from gel import _testbase as tb
 
 from gel._internal import _typing_inspect
+from gel._internal._reflection import SchemaPath
 from gel._internal._qbmodel._pydantic._models import GelModel
 from gel._internal._dlist import DistinctList
 from gel._internal._edgeql import Cardinality, PointerKind
@@ -49,12 +51,12 @@ class Q:
 
 class MockPointer(typing.NamedTuple):
     name: str
+    type: SchemaPath
     cardinality: Cardinality
     computed: bool
-    has_props: bool
     kind: PointerKind
     readonly: bool
-    type: type
+    properties: dict[str, MockPointer] | None
 
 
 # In Python 3.10 isinstance(tuple[int], type) is True, but
@@ -73,7 +75,7 @@ class TestModelGenerator(tb.ModelTestCase):
     def assert_pointers_match(
         self, obj: type[GelModel], expected: list[MockPointer]
     ):
-        ptrs = list(obj.__gel_pointers__().values())
+        ptrs = list(obj.__gel_reflection__.pointers.values())
         ptrs.sort(key=lambda x: x.name)
 
         expected.sort(key=lambda x: x.name)
@@ -95,11 +97,6 @@ class TestModelGenerator(tb.ModelTestCase):
                 f"{obj.__name__}.{p.name} computed mismatch",
             )
             self.assertEqual(
-                e.has_props,
-                p.has_props,
-                f"{obj.__name__}.{p.name} has_props mismatch",
-            )
-            self.assertEqual(
                 e.kind,
                 p.kind,
                 f"{obj.__name__}.{p.name} kind mismatch",
@@ -108,6 +105,11 @@ class TestModelGenerator(tb.ModelTestCase):
                 e.readonly,
                 p.readonly,
                 f"{obj.__name__}.{p.name} readonly mismatch",
+            )
+            self.assertEqual(
+                bool(e.properties),
+                bool(p.properties),
+                f"{obj.__name__}.{p.name} has_props mismatch",
             )
 
             if _isclass(p.type) and _isclass(e.type):
@@ -1301,6 +1303,41 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(res[2].next.label, "start")
 
     @tb.typecheck
+    def test_modelgen_save_collections_1(self):
+        from models import default
+        # insert an object with an optional single: with link props
+
+        ks = default.KitchenSink(
+            p_str="coll_test_1",
+            p_multi_str=["1", "222"],
+            array=["foo", "bar"],
+            p_multi_arr=[["foo"], ["bar"]],
+            p_arrtup=[("foo",)],
+            p_multi_arrtup=[[("foo",)], [("foo",)]],
+            p_tuparr=(["foo"],),
+            p_multi_tuparr=[(["foo"],), (["foo"],)],
+        )
+        self.client.save(ks)
+
+        # Re-fetch and verify
+        ks = self.client.get(default.KitchenSink.filter(p_str="coll_test_1"))
+        self.assertEqual(sorted(ks.p_multi_str), ["1", "222"])
+        self.assertEqual(ks.array, ["foo", "bar"])
+        self.assertEqual(sorted(ks.p_multi_arr), [["bar"], ["foo"]])
+        self.assertEqual(ks.p_arrtup, [("foo",)])
+        self.assertEqual(sorted(ks.p_multi_arrtup), [[("foo",)], [("foo",)]])
+        self.assertEqual(ks.p_tuparr, (["foo"],))
+        self.assertEqual(sorted(ks.p_multi_tuparr), [(["foo"],), (["foo"],)])
+
+        ks.p_multi_str.append("zzz")
+        ks.p_multi_str.append("zzz")
+        ks.p_multi_str.remove("1")
+        self.client.save(ks)
+
+        ks3 = self.client.get(default.KitchenSink.filter(p_str="coll_test_1"))
+        self.assertEqual(sorted(ks3.p_multi_str), ["222", "zzz", "zzz"])
+
+    @tb.typecheck
     def test_modelgen_linkprops_1(self):
         from models import default
 
@@ -1398,25 +1435,8 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(p1.nickname, "HACKED")
         self.assertEqual(p1.__linkprops__.is_tall_enough, False)
 
-    def test_modelgen_multiprops_1(self):
-        from models import default
-
-        ks = default.KitchenSink(mstr=["1", "222"], name="aaa")
-        self.client.save(ks)
-
-        ks2 = self.client.get(default.KitchenSink.filter(name="aaa"))
-        self.assertEqual(sorted(ks2.mstr), ["1", "222"])
-
-        ks2.mstr.append("zzz")
-        ks2.mstr.append("zzz")
-        ks2.mstr.remove("1")
-        self.client.save(ks2)
-
-        ks3 = self.client.get(default.KitchenSink.filter(name="aaa"))
-        self.assertEqual(sorted(ks3.mstr), ["222", "zzz", "zzz"])
-
     def test_modelgen_reflection_1(self):
-        from models import default, std
+        from models import default
 
         from gel._internal._edgeql import Cardinality, PointerKind
 
@@ -1424,58 +1444,67 @@ class TestModelGenerator(tb.ModelTestCase):
             default.User,
             [
                 MockPointer(
+                    name="__type__",
+                    cardinality=Cardinality.One,
+                    computed=False,
+                    properties=None,
+                    kind=PointerKind.Link,
+                    readonly=True,
+                    type=SchemaPath("schema", "ObjectType"),
+                ),
+                MockPointer(
                     name="groups",
                     cardinality=Cardinality.Many,
                     computed=True,
-                    has_props=False,
+                    properties=None,
                     kind=PointerKind.Link,
-                    readonly=True,
-                    type=tuple[default.UserGroup, ...],
+                    readonly=False,
+                    type=SchemaPath("default", "UserGroup"),
                 ),
                 MockPointer(
                     name="id",
                     cardinality=Cardinality.One,
-                    computed=True,
-                    has_props=False,
+                    computed=False,
+                    properties=None,
                     kind=PointerKind.Property,
                     readonly=True,
-                    type=std.uuid,
+                    type=SchemaPath("std", "uuid"),
                 ),
                 MockPointer(
                     name="name",
                     cardinality=Cardinality.One,
                     computed=False,
-                    has_props=False,
+                    properties=None,
                     kind=PointerKind.Property,
                     readonly=False,
-                    type=std.str,
+                    type=SchemaPath("std", "str"),
                 ),
                 MockPointer(
                     name="name_len",
                     cardinality=Cardinality.One,
                     computed=True,
-                    has_props=False,
+                    properties=None,
                     kind=PointerKind.Property,
-                    readonly=True,
-                    type=std.int64,
+                    readonly=False,
+                    type=SchemaPath("std", "int64"),
                 ),
                 MockPointer(
                     name="nickname",
                     cardinality=Cardinality.AtMostOne,
                     computed=False,
-                    has_props=False,
+                    properties=None,
                     kind=PointerKind.Property,
                     readonly=False,
-                    type=std.str,
+                    type=SchemaPath("std", "str"),
                 ),
                 MockPointer(
                     name="nickname_len",
                     cardinality=Cardinality.AtMostOne,
                     computed=True,
-                    has_props=False,
+                    properties=None,
                     kind=PointerKind.Property,
-                    readonly=True,
-                    type=std.int64,
+                    readonly=False,
+                    type=SchemaPath("std", "int64"),
                 ),
             ],
         )
@@ -1484,39 +1513,56 @@ class TestModelGenerator(tb.ModelTestCase):
             default.GameSession,
             [
                 MockPointer(
+                    name="__type__",
+                    cardinality=Cardinality.One,
+                    computed=False,
+                    properties=None,
+                    kind=PointerKind.Link,
+                    readonly=True,
+                    type=SchemaPath("schema", "ObjectType"),
+                ),
+                MockPointer(
                     name="num",
                     cardinality=Cardinality.One,
                     computed=False,
-                    has_props=False,
+                    properties=None,
                     kind=PointerKind.Property,
                     readonly=False,
-                    type=std.int64,
+                    type=SchemaPath("std", "int64"),
                 ),
                 MockPointer(
                     name="id",
                     cardinality=Cardinality.One,
-                    computed=True,
-                    has_props=False,
+                    computed=False,
+                    properties=None,
                     kind=PointerKind.Property,
                     readonly=True,
-                    type=std.uuid,
+                    type=SchemaPath("std", "uuid"),
                 ),
                 MockPointer(
                     name="players",
                     cardinality=Cardinality.Many,
                     computed=False,
-                    has_props=True,
+                    properties={
+                        "is_tall_enough": MockPointer(
+                            name="is_tall_enough",
+                            cardinality=Cardinality.AtMostOne,
+                            computed=False,
+                            properties=None,
+                            kind=PointerKind.Property,
+                            readonly=False,
+                            type=SchemaPath("std", "bool"),
+                        )
+                    },
                     kind=PointerKind.Link,
                     readonly=False,
-                    type=_UpcastingDistinctList[
-                        default.GameSession.__links__.players, default.User
-                    ],
+                    type=SchemaPath("default", "User"),
                 ),
             ],
         )
 
-        ntup_t = default.sub.TypeInSub.__gel_pointers__()["ntup"].type
+        ntup_t = default.sub.TypeInSub.__gel_reflection__.pointers["ntup"].type
         self.assertEqual(
-            ntup_t.__gel_reflection__.name.as_schema_name(),
+            ntup_t.as_schema_name(),
             "tuple<a:std::str, b:tuple<c:std::int64, d:std::str>>",
         )

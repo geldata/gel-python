@@ -26,8 +26,10 @@ from ._descriptors import (
 )
 
 from ._objects import (
+    GelLinkModel,
     GelModel,
     GelModelMeta,
+    GelSourceModel,
 )
 
 from ._primitive import (
@@ -56,9 +58,11 @@ __all__ = (
     "Array",
     "BaseScalar",
     "DateTimeLike",
+    "GelLinkModel",
     "GelModel",
     "GelModelMeta",
     "GelPrimitiveType",
+    "GelSourceModel",
     "GelType",
     "GelTypeMeta",
     "GelType_T",

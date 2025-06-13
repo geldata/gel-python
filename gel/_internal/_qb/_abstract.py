@@ -471,5 +471,5 @@ class AbstractDescriptor:
 
 
 class AbstractFieldDescriptor(AbstractDescriptor):
-    def get(self, owner: Any) -> Any:
+    def get(self, owner: Any, expr: Any | None = None) -> Any:
         raise NotImplementedError(f"{type(self)}.get")

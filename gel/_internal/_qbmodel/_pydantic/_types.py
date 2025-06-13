@@ -20,7 +20,6 @@ from typing_extensions import (
 import builtins
 import datetime
 import decimal
-import typing
 import uuid
 
 import pydantic
@@ -29,7 +28,6 @@ from pydantic_core import core_schema
 
 
 from gel.datatypes.datatypes import CustomType
-from gel._internal import _typing_inspect
 from gel._internal._qbmodel import _abstract
 
 
@@ -49,17 +47,12 @@ class Array(_abstract.Array[_T]):
         source_type: Any,
         handler: pydantic.GetCoreSchemaHandler,
     ) -> pydantic_core.CoreSchema:
-        if _typing_inspect.is_generic_alias(source_type):
-            args = typing.get_args(source_type)
-            item_type = args[0]
-            return core_schema.list_schema(
-                items_schema=handler.generate_schema(item_type),
-                serialization=core_schema.plain_serializer_function_ser_schema(
-                    list,
-                ),
-            )
-        else:
-            return handler.generate_schema(source_type)
+        return core_schema.list_schema(
+            items_schema=handler.generate_schema(cls.__element_type__),
+            serialization=core_schema.plain_serializer_function_ser_schema(
+                list,
+            ),
+        )
 
 
 _Ts = TypeVarTuple("_Ts")
@@ -74,24 +67,21 @@ class Tuple(_abstract.Tuple[Unpack[_Ts]]):
         source_type: Any,
         handler: pydantic.GetCoreSchemaHandler,
     ) -> pydantic_core.CoreSchema:
-        if _typing_inspect.is_generic_alias(source_type):
-            args = typing.get_args(source_type)
-            return core_schema.tuple_schema(
-                items_schema=[handler.generate_schema(arg) for arg in args],
-                serialization=core_schema.plain_serializer_function_ser_schema(
-                    tuple,
-                ),
-            )
-        else:
-            return handler.generate_schema(source_type)
+        return core_schema.tuple_schema(
+            items_schema=[
+                handler.generate_schema(arg) for arg in cls.__element_types__
+            ],
+            serialization=core_schema.plain_serializer_function_ser_schema(
+                tuple,
+            ),
+        )
 
 
 def _get_range_core_schema(
-    source_type: Any,
+    source_type: type[Range[_T] | MultiRange[_T]],
     handler: pydantic.GetCoreSchemaHandler,
 ) -> core_schema.ModelFieldsSchema:
-    args = typing.get_args(source_type)
-    item_schema = handler.generate_schema(args[0])
+    item_schema = handler.generate_schema(source_type.__element_type__)  # type: ignore [misc]
     opt_item_schema = core_schema.nullable_schema(item_schema)
     item_field_schema = core_schema.model_field(opt_item_schema)
     bool_schema = core_schema.bool_schema()
@@ -114,10 +104,7 @@ class Range(_abstract.Range[_T]):
         source_type: Any,
         handler: pydantic.GetCoreSchemaHandler,
     ) -> pydantic_core.CoreSchema:
-        if _typing_inspect.is_generic_alias(source_type):
-            return _get_range_core_schema(source_type, handler)
-        else:
-            return handler.generate_schema(source_type)
+        return _get_range_core_schema(cls, handler)
 
 
 class MultiRange(_abstract.MultiRange[_T]):
@@ -127,11 +114,8 @@ class MultiRange(_abstract.MultiRange[_T]):
         source_type: Any,
         handler: pydantic.GetCoreSchemaHandler,
     ) -> pydantic_core.CoreSchema:
-        if _typing_inspect.is_generic_alias(source_type):
-            range_schema = _get_range_core_schema(source_type, handler)
-            return core_schema.list_schema(range_schema)
-        else:
-            return handler.generate_schema(source_type)
+        range_schema = _get_range_core_schema(cls, handler)
+        return core_schema.list_schema(range_schema)
 
 
 _PT_co = TypeVar("_PT_co", bound=_abstract.PyConstType, covariant=True)

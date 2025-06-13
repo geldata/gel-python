@@ -53,6 +53,7 @@ if TYPE_CHECKING:
         Iterable,
         Iterator,
         Mapping,
+        Sequence,
     )
 
 
@@ -701,8 +702,177 @@ class BaseGeneratedModule:
             ),
         ):
             self.write(f"id = {uuid}(int={stype.uuid.int})")
-            schema_path = ", ".join(repr(p) for p in stype.schemapath.parts)
-            self.write(f"name = {schemapath}({schema_path})")
+            self.write(f"name = {stype.schemapath.as_code(schemapath)}")
+
+    def write_object_type_reflection(
+        self,
+        objtype: reflection.ObjectType,
+        base_types: list[str],
+    ) -> None:
+        sp = self.import_name(BASE_IMPL, "SchemaPath")
+        lazyclassproperty = self.import_name(BASE_IMPL, "LazyClassProperty")
+        objecttype_t = self.get_type(
+            self._schema_object_type,
+            aspect=ModuleAspect.MAIN,
+            import_time=ImportTime.typecheck,
+        )
+        objecttype_import = self._resolve_rel_import(
+            reflection.parse_name(self._schema_object_type.name),
+            aspect=ModuleAspect.MAIN,
+        )
+        assert objecttype_import is not None
+        uuid_ = self.import_name("uuid", "UUID")
+
+        if base_types:
+            class_bases = base_types
+        else:
+            class_bases = [
+                self.import_name(BASE_IMPL, "GelObjectTypeMetadata")
+            ]
+
+        with self._class_def(
+            "__gel_reflection__",
+            _map_name(lambda s: f"{s}.__gel_reflection__", class_bases),
+        ):
+            self.write(f"id = {uuid_}(int={objtype.uuid.int})")
+            self.write(f"name = {objtype.schemapath.as_code(sp)}")
+            self._write_pointers_reflection(objtype.pointers, base_types)
+
+            with self._classmethod_def(
+                "object",
+                [],
+                objecttype_t,
+                decorators=(f'{lazyclassproperty}["{objecttype_t}"]',),
+            ):
+                objecttype, import_code = self.py_file.render_name_import(
+                    objecttype_import.module,
+                    objecttype_import.name,
+                    suggested_module_alias=objecttype_import.module_alias,
+                )
+                self.write(import_code)
+                self.write(f"return {objecttype}(")
+                with self.indented():
+                    self.write(f"id={uuid_}(int={objtype.uuid.int}),")
+                    self.write(f"name={objtype.name!r},")
+                    self.write(f"builtin={objtype.builtin!r},")
+                    self.write(f"internal={objtype.internal!r},")
+                    self.write(f"abstract={objtype.abstract!r},")
+                    self.write(f"final={objtype.final!r},")
+                    self.write(f"compound_type={objtype.compound_type!r},")
+                self.write(")")
+        self.write()
+
+    def write_link_reflection(
+        self,
+        link: reflection.Pointer,
+        bases: list[str],
+    ) -> None:
+        sp = self.import_name(BASE_IMPL, "SchemaPath")
+        uuid_ = self.import_name("uuid", "UUID")
+
+        class_bases = bases or [self.import_name(BASE_IMPL, "GelLinkModel")]
+        with self._class_def(
+            "__gel_reflection__",
+            _map_name(lambda s: f"{s}.__gel_reflection__", class_bases),
+        ):
+            self.write(f"id = {uuid_}(int={link.uuid.int})")
+            self.write(f"name = {sp}({link.name!r})")
+            self._write_pointers_reflection(link.pointers, bases)
+
+        self.write()
+
+    def _write_pointers_reflection(
+        self,
+        pointers: Sequence[reflection.Pointer] | None,
+        bases: list[str],
+    ) -> None:
+        dict_ = self.import_name(
+            "builtins", "dict", import_time=ImportTime.typecheck
+        )
+        str_ = self.import_name(
+            "builtins", "str", import_time=ImportTime.typecheck
+        )
+        gel_ptr_ref = self.import_name(
+            BASE_IMPL,
+            "GelPointerReflection",
+            import_time=ImportTime.runtime
+            if pointers
+            else ImportTime.typecheck,
+        )
+        lazyclassproperty = self.import_name(BASE_IMPL, "LazyClassProperty")
+        ptr_ref_t = f"{dict_}[{str_}, {gel_ptr_ref}]"
+        with self._classmethod_def(
+            "pointers",
+            [],
+            ptr_ref_t,
+            decorators=(f'{lazyclassproperty}["{ptr_ref_t}"]',),
+        ):
+            if pointers:
+                self.write(f"my_ptrs: {ptr_ref_t} = {{")
+                classes = {
+                    "SchemaPath": self.import_name(BASE_IMPL, "SchemaPath"),
+                    "GelPointerReflection": gel_ptr_ref,
+                    "Cardinality": self.import_name(BASE_IMPL, "Cardinality"),
+                    "PointerKind": self.import_name(BASE_IMPL, "PointerKind"),
+                }
+                with self.indented():
+                    for ptr in pointers:
+                        r = self._reflect_pointer(ptr, classes)
+                        self.write(f"{ptr.name!r}: {r},")
+                self.write("}")
+            else:
+                self.write(f"my_ptrs: {ptr_ref_t} = {{}}")
+
+            if bases:
+                pp = "__gel_reflection__.pointers"
+                ret = self.format_list(
+                    "return ({list})",
+                    [
+                        "my_ptrs",
+                        *_map_name(lambda s: f"{s}.{pp}", bases),
+                    ],
+                    separator=" | ",
+                    carry_separator=True,
+                )
+            else:
+                ret = "return my_ptrs"
+
+            self.write(ret)
+
+        self.write()
+
+    def _reflect_pointer(
+        self,
+        ptr: reflection.Pointer,
+        classes: dict[str, str],
+    ) -> str:
+        target_type = self._types[ptr.target_id]
+        kwargs: dict[str, str] = {
+            "name": repr(ptr.name),
+            "type": target_type.schemapath.as_code(classes["SchemaPath"]),
+            "typexpr": repr(target_type.edgeql),
+            "kind": f"{classes['PointerKind']}({str(ptr.kind)!r})",
+            "cardinality": f"{classes['Cardinality']}({str(ptr.card)!r})",
+            "computed": str(ptr.is_computed),
+            "readonly": str(ptr.is_readonly),
+        }
+
+        if ptr.pointers is not None:
+            kwargs["properties"] = self.format_list(
+                "{{{list}}}",
+                [
+                    f"{prop.name!r}: {self._reflect_pointer(prop, classes)}"
+                    for prop in ptr.pointers
+                ],
+                extra_indent=1,
+            )
+        else:
+            kwargs["properties"] = "None"
+
+        return self.format_list(
+            f"{classes['GelPointerReflection']}({{list}})",
+            [f"{k}={v}" for k, v in kwargs.items()],
+        )
 
     def import_name(
         self,
@@ -1951,20 +2121,6 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                     import_time=ImportTime.late_runtime,
                 )
 
-    def _write_object_type_reflection(
-        self,
-        objtype: reflection.ObjectType,
-        refl_t: str,
-    ) -> None:
-        uuid_t = self.import_name("uuid", "UUID")
-        self.write(f"id={uuid_t}(int={objtype.uuid.int}),")
-        self.write(f"name={objtype.name!r},")
-        self.write(f"builtin={objtype.builtin!r},")
-        self.write(f"internal={objtype.internal!r},")
-        self.write(f"abstract={objtype.abstract!r},")
-        self.write(f"final={objtype.final!r},")
-        self.write(f"compound_type={objtype.compound_type!r},")
-
     def write_object_type_variants(
         self,
         objtype: reflection.ObjectType,
@@ -1991,18 +2147,13 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         typeof_base_class = _mangle_typeof_base(name)
         if base_types:
             typeof_base_bases = _map_name(_mangle_typeof_base, base_types)
+            reflection_bases = typeof_base_bases
         else:
-            gmm = self.import_name(BASE_IMPL, "GelTypeMetadata")
+            gmm = self.import_name(BASE_IMPL, "GelObjectTypeMetadata")
             typeof_base_bases = [gmm]
+            reflection_bases = []
 
         pointers = objtype.pointers
-        sp = self.import_name(BASE_IMPL, "SchemaPath")
-        lazyclassproperty = self.import_name(BASE_IMPL, "LazyClassProperty")
-        objecttype_t = self.get_type(
-            self._schema_object_type,
-            aspect=ModuleAspect.MAIN,
-            import_time=ImportTime.typecheck,
-        )
         objecttype_import = self._resolve_rel_import(
             reflection.parse_name(self._schema_object_type.name),
             aspect=ModuleAspect.MAIN,
@@ -2010,94 +2161,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         assert objecttype_import is not None
         uuid = self.import_name("uuid", "UUID")
         with self._class_def(typeof_base_class, typeof_base_bases):
-            with self._class_def(
-                "__gel_reflection__",
-                _map_name(
-                    lambda s: f"{_mangle_typeof_base(s)}.__gel_reflection__",
-                    base_types,
-                ),
-            ):
-                self.write(f"id = {uuid}(int={objtype.uuid.int})")
-                self.write(f"name = {type_name.as_code(sp)}")
-
-                dict_ = self.import_name(
-                    "builtins", "dict", import_time=ImportTime.typecheck
-                )
-                str_ = self.import_name(
-                    "builtins", "str", import_time=ImportTime.typecheck
-                )
-                gel_ptr_ref = self.import_name(
-                    BASE_IMPL,
-                    "GelPointerReflection",
-                    import_time=ImportTime.runtime
-                    if pointers
-                    else ImportTime.typecheck,
-                )
-                ptr_ref_t = f"{dict_}[{str_}, {gel_ptr_ref}]"
-                with self._classmethod_def(
-                    "pointers",
-                    [],
-                    ptr_ref_t,
-                    decorators=(f'{lazyclassproperty}["{ptr_ref_t}"]',),
-                ):
-                    if pointers:
-                        self.write(f"my_ptrs: {ptr_ref_t} = {{")
-                        classes = {
-                            "SchemaPath": sp,
-                            "GelPointerReflection": gel_ptr_ref,
-                            "Cardinality": self.import_name(
-                                BASE_IMPL, "Cardinality"
-                            ),
-                            "PointerKind": self.import_name(
-                                BASE_IMPL, "PointerKind"
-                            ),
-                        }
-                        with self.indented():
-                            for ptr in pointers:
-                                r = self._reflect_pointer(ptr, classes)
-                                self.write(f"{ptr.name!r}: {r},")
-                        self.write("}")
-                    else:
-                        self.write(f"my_ptrs: {ptr_ref_t} = {{}}")
-
-                    if base_types:
-                        pp = "__gel_reflection__.pointers"
-                        ret = self.format_list(
-                            "return ({list})",
-                            [
-                                "my_ptrs",
-                                *_map_name(
-                                    lambda s: f"{_mangle_typeof_base(s)}.{pp}",
-                                    base_types,
-                                ),
-                            ],
-                            separator=" | ",
-                            carry_separator=True,
-                        )
-                    else:
-                        ret = "return my_ptrs"
-
-                    self.write(ret)
-
-                self.write()
-
-                with self._classmethod_def(
-                    "object",
-                    [],
-                    objecttype_t,
-                    decorators=(f'{lazyclassproperty}["{objecttype_t}"]',),
-                ):
-                    objecttype, import_code = self.py_file.render_name_import(
-                        objecttype_import.module,
-                        objecttype_import.name,
-                        suggested_module_alias=objecttype_import.module_alias,
-                    )
-                    self.write(import_code)
-                    self.write(f"return {objecttype}(")
-                    with self.indented():
-                        self._write_object_type_reflection(objtype, objecttype)
-                    self.write(")")
-            self.write()
+            self.write_object_type_reflection(objtype, reflection_bases)
 
         def _mangle_typeof(name: str) -> str:
             return f"__{name}_typeof__"
@@ -2339,37 +2403,6 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             self.write(f"___{name}___ = {name}")
 
         self.write()
-
-    def _reflect_pointer(
-        self,
-        ptr: reflection.Pointer,
-        classes: dict[str, str],
-    ) -> str:
-        target_type = self._types[ptr.target_id]
-        kwargs: dict[str, str] = {
-            "type_": target_type.schemapath.as_code(classes["SchemaPath"]),
-            "kind": f"{classes['PointerKind']}({str(ptr.kind)!r})",
-            "cardinality": f"{classes['Cardinality']}({str(ptr.card)!r})",
-            "computed": str(ptr.is_computed),
-            "readonly": str(ptr.is_readonly),
-        }
-
-        if ptr.pointers is not None:
-            kwargs["properties"] = self.format_list(
-                "{{{list}}}",
-                [
-                    f"{prop.name!r}: {self._reflect_pointer(prop, classes)}"
-                    for prop in ptr.pointers
-                ],
-                extra_indent=1,
-            )
-        else:
-            kwargs["properties"] = "None"
-
-        return self.format_list(
-            f"{classes['GelPointerReflection']}({{list}})",
-            [f"{k}={v}" for k, v in kwargs.items()],
-        )
 
     @contextlib.contextmanager
     def _object_type_variant(
@@ -2809,11 +2842,15 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                     ),
                     ptr_origin_types,
                 )
+                reflection_bases = lprops_bases
             else:
                 b = self.import_name(BASE_IMPL, "GelLinkModel")
                 lprops_bases = [b]
+                reflection_bases = []
 
             with self._class_def("__lprops__", lprops_bases):
+                self.write_link_reflection(pointer, reflection_bases)
+
                 assert ptr.pointers
                 lprops = []
                 for lprop in ptr.pointers:
