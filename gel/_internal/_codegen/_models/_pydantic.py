@@ -153,6 +153,10 @@ class PydanticModelsGenerator(AbstractCodeGenerator):
 
             self._write_state(db_state, outdir)
 
+            for fn in list(std_manifest):
+                # Also keep the directories
+                std_manifest.update(fn.parents)
+
             _dirsync.dirsync(outdir, models_root, keep=std_manifest)
 
         self.print_msg(f"{C.GREEN}{C.BOLD}Done.{C.ENDC}")
@@ -265,9 +269,10 @@ class SchemaGenerator:
 
         files = set()
         for mod, has_submodules in std_modules.items():
+            modpath = get_modpath(mod, ModuleAspect.MAIN)
+            as_pkg = mod_is_package(modpath, part) or has_submodules
             for aspect in ModuleAspect.__members__.values():
                 modpath = get_modpath(mod, aspect)
-                as_pkg = mod_is_package(modpath, part) or has_submodules
                 files.add(mod_filename(modpath, as_pkg=as_pkg))
 
         common_modpath = get_common_types_modpath(self._schema_part)
