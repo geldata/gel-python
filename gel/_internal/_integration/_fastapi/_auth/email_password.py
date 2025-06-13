@@ -282,7 +282,7 @@ class EmailPassword(Installable):
             summary=self.sign_up_summary.value,
         )
         async def sign_up(
-            sign_up_body: Annotated[SignUpBody, fastapi.Form()],
+            sign_up_body: Annotated[SignUpBody, fastapi.Body()],
             request: fastapi.Request,
         ) -> fastapi.Response:
             result = await self._core.sign_up(
@@ -360,7 +360,7 @@ class EmailPassword(Installable):
             summary=self.sign_in_summary.value,
         )
         async def sign_in(
-            sign_in_body: Annotated[SignInBody, fastapi.Form()],
+            sign_in_body: Annotated[SignInBody, fastapi.Body()],
             request: fastapi.Request,
         ) -> fastapi.Response:
             result = await self._core.sign_in(
@@ -510,7 +510,7 @@ class EmailPassword(Installable):
         )
         async def send_password_reset(
             send_password_reset_body: Annotated[
-                SendPasswordResetBody, fastapi.Form()
+                SendPasswordResetBody, fastapi.Body()
             ],
             request: fastapi.Request,
         ) -> fastapi.Response:
@@ -589,7 +589,7 @@ class EmailPassword(Installable):
         )
         async def reset_password(
             request: fastapi.Request,
-            reset_password_body: Annotated[ResetPasswordBody, fastapi.Form()],
+            reset_password_body: Annotated[ResetPasswordBody, fastapi.Body()],
             verifier: Optional[str] = fastapi.Depends(
                 self._auth.pkce_verifier
             ),
