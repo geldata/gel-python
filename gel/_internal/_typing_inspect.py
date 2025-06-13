@@ -42,6 +42,12 @@ def is_valid_type_arg(t: Any) -> bool:
     )
 
 
+# In Python 3.10 isinstance(tuple[int], type) is True, but
+# issubclass will fail if you pass such type to it.
+def is_valid_isinstance_arg(t: Any) -> typing.TypeGuard[type[Any]]:
+    return isinstance(t, type) and not is_generic_alias(t)
+
+
 def is_type_alias(t: Any) -> TypeGuard[TypeAliasType]:
     return isinstance(t, TypeAliasType) and not is_generic_alias(t)
 

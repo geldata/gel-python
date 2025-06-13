@@ -50,16 +50,6 @@ insert Post {
     body := '*magic stuff*',
 };
 
-insert AssortedScalars {
-    name:= 'hello world',
-    vals := ['brown', 'fox'],
-    bstr := b'word\x00\x0b',
-    time := <cal::local_time>'20:13:45.678',
-    date:= <cal::local_date>'2025-01-26',
-    ts:=<datetime>'2025-01-26T20:13:45+00:00',
-    lts:=<cal::local_datetime>'2025-01-26T20:13:45',
-};
-
 insert Image {
     file := 'cat.jpg',
     author := assert_single((
@@ -86,4 +76,22 @@ insert StackableLoot {
             @bonus := True,
         } filter .name = 'Billie'
     )),
+};
+
+insert KitchenSink {
+    p_str := 'hello world',
+    p_multi_str := {'brown', 'fox'},
+
+    array := ["foo"],
+    p_multi_arr := {["foo"], ["bar"]},
+
+    p_arrtup := [("foo",)],
+    p_multi_arrtup := {[("foo",)], [("bar",)]},
+
+    p_tuparr := (["foo"],),
+    p_multi_tuparr := {(["foo"],), (["bar"],)},
+
+    date := <cal::local_date>'2025-01-26',
+    ts := <datetime>'2025-01-26T20:13:45+00:00',
+    lts := <cal::local_datetime>'2025-01-26T20:13:45',
 };

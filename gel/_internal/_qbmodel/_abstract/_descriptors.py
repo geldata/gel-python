@@ -113,21 +113,23 @@ class ModelFieldDescriptor(_qb.AbstractFieldDescriptor):
 
     def get(
         self,
-        owner: type[Any] | _qb.PathAlias,
+        owner: type[_qb.GelSourceMetadata],
+        expr: _qb.BaseAlias | None = None,
     ) -> Any:
         t = self.get_resolved_type()
         if t is None:
             return self
         else:
             source: _qb.Expr
-            if isinstance(owner, _qb.BaseAlias):
-                source = owner.__gel_metadata__
-            elif hasattr(owner, "__edgeql_qb_expr__"):
+            if expr is not None:
+                source = expr.__gel_metadata__
+            elif _qb.is_expr_compatible(owner):
                 source = _qb.edgeql_qb_expr(owner)
             else:
                 return t
+            ptr = owner.__gel_reflection__.pointers[self.__gel_name__]
             metadata = _qb.Path(
-                type_=t.__gel_reflection__.name,
+                type_=ptr.type,
                 source=source,
                 name=self.__gel_name__,
                 is_lprop=False,

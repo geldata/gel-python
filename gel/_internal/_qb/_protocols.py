@@ -14,7 +14,7 @@ from typing import (
     TypeGuard,
     TypeVar,
 )
-from typing_extensions import TypeAliasType
+from typing_extensions import TypeAliasType, TypeIs
 from collections.abc import Callable
 
 from gel._internal import _utils
@@ -60,7 +60,7 @@ ExprCompatible = TypeAliasType(
 )
 
 
-def is_expr_compatible(v: Any) -> TypeGuard[ExprCompatible]:
+def is_expr_compatible(v: Any) -> TypeIs[ExprCompatible]:
     return callable(getattr(v, "__edgeql_qb_expr__", None))
 
 

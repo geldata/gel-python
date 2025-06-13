@@ -66,7 +66,12 @@ class GelModelMeta(GelObjectTypeMeta):
         cls.__gel_class_registry__[tid] = cls
 
 
+class GelSourceModel(_qb.GelSourceMetadata):
+    pass
+
+
 class GelModel(
+    GelSourceModel,
     GelObjectType,
     metaclass=GelModelMeta,
 ):
@@ -243,3 +248,7 @@ class GelModel(
     def __edgeql_qb_expr__(cls) -> _qb.Expr:  # pyright: ignore [reportIncompatibleMethodOverride]
         this_type = cls.__gel_reflection__.name
         return _qb.SchemaSet(type_=this_type)
+
+
+class GelLinkModel(GelSourceModel):
+    pass

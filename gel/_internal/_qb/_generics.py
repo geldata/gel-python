@@ -173,7 +173,7 @@ class BaseAlias(metaclass=BaseAliasMeta):
                 origin, attr, of_type=AbstractFieldDescriptor
             )
             if descriptor is not None:
-                return descriptor.get(self)
+                return descriptor.get(origin, self)
             else:
                 attrval = getattr(origin, attr)
                 if is_exprmethod(attrval):
