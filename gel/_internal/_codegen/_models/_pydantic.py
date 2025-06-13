@@ -884,6 +884,9 @@ class BaseGeneratedModule:
         directly: bool = True,
         localns: frozenset[str] | None = None,
     ) -> str:
+        if module is _qbmodel.MODEL_SUBSTRATE_MODULE:
+            module = BASE_IMPL
+
         return self.py_file.import_name(
             module,
             name,
@@ -1426,6 +1429,27 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         consider_abstract: bool = True,
         import_time: ImportTime = ImportTime.runtime,
     ) -> list[str] | None:
+        base_type = _qbmodel.get_py_base_for_scalar(
+            stype.name,
+            require_subclassable=require_subclassable,
+            consider_abstract=consider_abstract,
+        )
+        if not base_type:
+            return None
+        else:
+            return sorted(
+                self.import_name(*t, import_time=import_time)
+                for t in base_type
+            )
+
+    def _get_pytype_for_this_scalar(
+        self,
+        stype: reflection.ScalarType,
+        *,
+        require_subclassable: bool = False,
+        consider_abstract: bool = True,
+        import_time: ImportTime = ImportTime.runtime,
+    ) -> list[str] | None:
         base_type = _qbmodel.get_py_type_for_scalar(
             stype.name,
             require_subclassable=require_subclassable,
@@ -1448,7 +1472,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             *(self._types[a.id].name for a in reversed(stype.ancestors)),
         ]
 
-    def _get_pybase_for_scalar(
+    def _get_pytype_for_scalar(
         self,
         stype: reflection.ScalarType,
         *,
@@ -1470,7 +1494,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                 for t in base_type
             )
 
-    def _get_pybase_for_primitive_type(
+    def _get_pytype_for_primitive_type(
         self,
         stype: reflection.PrimitiveType,
         *,
@@ -1482,7 +1506,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                 return self.import_name("builtins", "str")
             else:
                 return " | ".join(
-                    self._get_pybase_for_scalar(
+                    self._get_pytype_for_scalar(
                         stype,
                         import_time=import_time,
                         localns=localns,
@@ -1491,7 +1515,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         elif reflection.is_array_type(stype):
             el_type = self._types[stype.array_element_id]
             if reflection.is_primitive_type(el_type):
-                el = self._get_pybase_for_primitive_type(
+                el = self._get_pytype_for_primitive_type(
                     el_type,
                     import_time=import_time,
                     localns=localns,
@@ -1503,7 +1527,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         elif reflection.is_range_type(stype):
             el_type = self._types[stype.range_element_id]
             if reflection.is_primitive_type(el_type):
-                el = self._get_pybase_for_primitive_type(
+                el = self._get_pytype_for_primitive_type(
                     el_type, import_time=import_time, localns=localns
                 )
             else:
@@ -1513,7 +1537,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         elif reflection.is_multi_range_type(stype):
             el_type = self._types[stype.multirange_element_id]
             if reflection.is_primitive_type(el_type):
-                el = self._get_pybase_for_primitive_type(
+                el = self._get_pytype_for_primitive_type(
                     el_type, import_time=import_time, localns=localns
                 )
             else:
@@ -1527,7 +1551,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             for elem in stype.tuple_elements:
                 el_type = self._types[elem.type_id]
                 if reflection.is_primitive_type(el_type):
-                    el = self._get_pybase_for_primitive_type(
+                    el = self._get_pytype_for_primitive_type(
                         el_type, import_time=import_time, localns=localns
                     )
                 else:
@@ -1599,7 +1623,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             consider_abstract=False,
         )
         if pybase is not None:
-            real_pybase = self._get_pybase_for_this_scalar(
+            real_pybase = self._get_pytype_for_this_scalar(
                 stype,
                 consider_abstract=False,
             )
@@ -1709,7 +1733,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         result = f"{type_}[{result}]"
 
         if include_pybase and reflection.is_primitive_type(tp):
-            pybase = self._get_pybase_for_primitive_type(
+            pybase = self._get_pytype_for_primitive_type(
                 tp,
                 import_time=ImportTime.typecheck,
             )
@@ -2567,7 +2591,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                 union = []
                 select_union = [builtin_bool, expr_closure, expr_proto]
                 if reflection.is_non_enum_scalar_type(target_t):
-                    broad_ptr_t = self._get_pybase_for_scalar(target_t)
+                    broad_ptr_t = self._get_pytype_for_scalar(target_t)
                     union.extend(broad_ptr_t)
                     order_args.append(
                         f"{ptr.name}: {order_kwarg_t} = {unspec}"
@@ -2669,7 +2693,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                     import_time=ImportTime.typecheck,
                 )
 
-                builtins_int = self._get_pybase_for_primitive_type(int64_t)
+                builtins_int = self._get_pytype_for_primitive_type(int64_t)
 
                 splice_args = [f"value: {type_}[{std_int}] | {builtins_int}"]
                 with self._classmethod_def("limit", splice_args, "type[Self]"):
@@ -2859,7 +2883,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                     ttype = self._types[lprop.target_id]
                     assert reflection.is_scalar_type(ttype)
                     ptr_type = self.get_type(ttype, import_time=import_time)
-                    pytype = " | ".join(self._get_pybase_for_scalar(ttype))
+                    pytype = " | ".join(self._get_pytype_for_scalar(ttype))
                     py_anno = self._py_anno_for_ptr(
                         lprop,
                         ptr_type,
@@ -3264,7 +3288,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         )
 
         if reflection.is_primitive_type(target_type):
-            bare_ptr_type = self._get_pybase_for_primitive_type(
+            bare_ptr_type = self._get_pytype_for_primitive_type(
                 target_type,
                 import_time=ImportTime.late_runtime,
                 localns=localns,
@@ -3277,7 +3301,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             for type_id in assn_casts:
                 assn_type = self._types[type_id]
                 if reflection.is_primitive_type(assn_type):
-                    assn_pytype = self._get_pybase_for_primitive_type(
+                    assn_pytype = self._get_pytype_for_primitive_type(
                         assn_type,
                         import_time=ImportTime.late_runtime,
                         localns=localns,

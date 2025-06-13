@@ -19,6 +19,7 @@ type UserGroup extending Named {
 
 type GameSession {
     required num: int64;
+    public: bool;
     # one-to-many
     multi link players: User {
         constraint exclusive;

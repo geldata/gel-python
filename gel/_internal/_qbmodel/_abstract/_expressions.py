@@ -21,6 +21,7 @@ from ._primitive import (
     GelPrimitiveType,
     PyConstType,
     PyTypeScalar,
+    get_literal_for_scalar,
     get_literal_for_value,
 )
 
@@ -90,10 +91,12 @@ def _const_to_expr(
     cls: type[GelType],
     pname: str,
     val: Any,
-) -> _qb.Literal:
+) -> _qb.Literal | _qb.CastOp:
     ptype: type[PyTypeScalar[PyConstType]] | None = getattr(cls, pname, None)
-    vtype = type(val) if ptype is None else ptype.type
-    return get_literal_for_value(vtype, val)
+    if ptype is None:
+        return get_literal_for_value(val)
+    else:
+        return get_literal_for_scalar(ptype, val)
 
 
 def select(
