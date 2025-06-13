@@ -10,12 +10,14 @@ from typing import (
     Annotated,
     Any,
     ClassVar,
+    Final,
     Generic,
     Protocol,
     TypeVar,
+    SupportsIndex,
     overload,
 )
-from typing_extensions import Self, TypeVarTuple, Unpack
+from typing_extensions import Self, TypeVarTuple, TypeAliasType, Unpack
 
 import builtins
 import datetime
@@ -349,6 +351,40 @@ def _get_py_type_for_abstract_scalar(typename: str) -> set[tuple[str, str]]:
     return union
 
 
+MODEL_SUBSTRATE_MODULE: Final = "__gel_substrate__"
+"""Sentinel module value to be replaced by a concrete imported model
+substrate in generated models, e.g `gel.models.pydantic`."""
+
+
+_scalar_type_impl_overrides: dict[str, tuple[str, str]] = {
+    "std::uuid": (MODEL_SUBSTRATE_MODULE, "UUIDImpl"),
+    "std::datetime": (MODEL_SUBSTRATE_MODULE, "DateTimeImpl"),
+    "std::duration": (MODEL_SUBSTRATE_MODULE, "TimeDeltaImpl"),
+    "std::cal::local_date": (MODEL_SUBSTRATE_MODULE, "DateImpl"),
+    "std::cal::local_time": (MODEL_SUBSTRATE_MODULE, "TimeImpl"),
+    "std::cal::local_datetime": (MODEL_SUBSTRATE_MODULE, "DateTimeImpl"),
+}
+"""Overrides of scalar bases for types that lack `cls(inst_of_cls)` invariant
+required for scalar downcasting."""
+
+
+def get_py_base_for_scalar(
+    typename: str,
+    *,
+    require_subclassable: bool = False,
+    consider_abstract: bool = True,
+) -> tuple[tuple[str, str], ...]:
+    override = _scalar_type_impl_overrides.get(typename)
+    if override is not None:
+        return (override,)
+    else:
+        return get_py_type_for_scalar(
+            typename,
+            require_subclassable=require_subclassable,
+            consider_abstract=consider_abstract,
+        )
+
+
 _py_type_to_scalar_type: dict[tuple[str, str], list[str]] = {
     ("gel", "DateDuration"): ["std::cal::date_duration"],
     ("gel", "RelativeDuration"): ["std::cal::relative_duration"],
@@ -403,26 +439,206 @@ _py_type_to_literal: dict[type[PyConstType], type[_qb.Literal]] = {
 _PT_co = TypeVar("_PT_co", bound=PyConstType, covariant=True)
 
 
-def get_literal_for_value(t: type[PyConstType], v: PyConstType) -> _qb.Literal:
+def get_literal_for_value(
+    v: Any,
+) -> _qb.Literal:
+    for t, ltype in _py_type_to_literal.items():
+        if isinstance(v, t):
+            return ltype(val=v)  # type: ignore [call-arg]
+
+    raise NotImplementedError(f"cannot convert Python value to Literal: {v!r}")
+
+
+def get_literal_for_scalar(
+    t: type[PyTypeScalar[_PT_co]],
+    v: Any,
+) -> _qb.Literal | _qb.CastOp:
     if not isinstance(v, t):
-        raise ValueError(
-            f"get_literal_for_value: {v!r} is not an instance of {t}"
-        )
-    ltype = _py_type_to_literal.get(t)
-    if ltype is None:
-        raise NotImplementedError(f"unsupported Python raw value type: {t}")
-    else:
-        if t is builtins.bool:
-            v = builtins.bool(v)
+        v = t(v)
+    ltype = _py_type_to_literal.get(t.type)  # type: ignore [arg-type]
+    if ltype is not None:
         return ltype(val=v)  # type: ignore [call-arg]
+    else:
+        return _qb.CastOp(
+            expr=_qb.StringLiteral(val=str(v)),
+            type_=t.__gel_reflection__.name,
+        )
 
 
-class PyTypeScalar(_typing_parametric.SingleParametricType[_PT_co]):
+class PyTypeScalar(
+    _typing_parametric.SingleParametricType[_PT_co],
+    BaseScalar,
+):
     if TYPE_CHECKING:
 
-        def __init__(self, val: Any) -> None: ...
         def __set__(self, obj: Any, value: _PT_co) -> None: ...  # type: ignore [misc]
 
-    def __edgeql_literal__(self) -> _qb.Literal:
-        pytype = type(self).type
-        return get_literal_for_value(pytype, self)  # type: ignore [arg-type]
+    def __edgeql_literal__(self) -> _qb.Literal | _qb.CastOp:
+        return get_literal_for_scalar(type(self), self)
+
+
+UUIDFieldsTuple = TypeAliasType(
+    "UUIDFieldsTuple", tuple[int, int, int, int, int, int]
+)
+
+
+class UUIDImpl(uuid.UUID):
+    def __init__(  # noqa: PLR0917
+        self,
+        hex: uuid.UUID | str | None = None,  # noqa: A002
+        bytes: builtins.bytes | None = None,  # noqa: A002
+        bytes_le: builtins.bytes | None = None,
+        fields: UUIDFieldsTuple | None = None,
+        int: builtins.int | None = None,  # noqa: A002
+        version: builtins.int | None = None,
+        *,
+        is_safe: uuid.SafeUUID = uuid.SafeUUID.unknown,
+    ) -> None:
+        if hex is not None and isinstance(hex, uuid.UUID):
+            super().__init__(
+                int=hex.int,
+                is_safe=hex.is_safe,
+            )
+        else:
+            super().__init__(
+                hex,
+                bytes,
+                bytes_le,
+                fields,
+                int,
+                version,
+                is_safe=is_safe,
+            )
+
+
+class DateImpl(datetime.date):
+    def __new__(
+        cls,
+        year: datetime.date | SupportsIndex,
+        month: SupportsIndex,
+        day: SupportsIndex,
+    ) -> Self:
+        if isinstance(year, datetime.date):
+            dt = year
+            return cls(dt.year, dt.month, dt.day)
+        else:
+            return super().__new__(cls, year, month, day)
+
+
+class TimeImpl(datetime.time):
+    if TYPE_CHECKING:
+
+        def __new__(
+            cls,
+            hour: SupportsIndex = ...,
+            minute: SupportsIndex = ...,
+            second: SupportsIndex = ...,
+            microsecond: SupportsIndex = ...,
+            tzinfo: datetime.tzinfo | None = ...,
+            *,
+            fold: int = ...,
+        ) -> Self: ...
+    else:
+
+        def __new__(
+            cls,
+            hour,
+            *args,
+            **kwargs,
+        ):
+            if isinstance(hour, datetime.time):
+                t = hour
+                return cls(
+                    hour=t.hour,
+                    minute=t.minute,
+                    second=t.second,
+                    microsecond=t.microsecond,
+                    tzinfo=t.tzinfo,
+                    fold=t.fold,
+                )
+            else:
+                return super().__new__(
+                    cls,
+                    hour,
+                    *args,
+                    **kwargs,
+                )
+
+
+class DateTimeImpl(datetime.datetime):
+    if TYPE_CHECKING:
+
+        def __new__(  # noqa: PLR0917
+            cls,
+            year: SupportsIndex,
+            month: SupportsIndex,
+            day: SupportsIndex,
+            hour: SupportsIndex = ...,
+            minute: SupportsIndex = ...,
+            second: SupportsIndex = ...,
+            microsecond: SupportsIndex = ...,
+            tzinfo: datetime.tzinfo | None = ...,
+            *,
+            fold: int = ...,
+        ) -> Self: ...
+    else:
+
+        def __new__(
+            cls,
+            year,
+            *args,
+            **kwargs,
+        ):
+            if isinstance(year, datetime.datetime):
+                dt = year
+                return cls(
+                    year=dt.year,
+                    month=dt.month,
+                    day=dt.day,
+                    hour=dt.hour,
+                    minute=dt.minute,
+                    second=dt.second,
+                    microsecond=dt.microsecond,
+                    tzinfo=dt.tzinfo,
+                    fold=dt.fold,
+                )
+            else:
+                return super().__new__(
+                    cls,
+                    year,
+                    *args,
+                    **kwargs,
+                )
+
+
+class TimeDeltaImpl(datetime.timedelta):
+    if TYPE_CHECKING:
+
+        def __new__(  # noqa: PLR0917
+            cls,
+            days: float = ...,
+            seconds: float = ...,
+            microseconds: float = ...,
+            milliseconds: float = ...,
+            minutes: float = ...,
+            hours: float = ...,
+            weeks: float = ...,
+        ) -> Self: ...
+    else:
+
+        def __new__(
+            cls,
+            days,
+            *args,
+            **kwargs,
+        ):
+            if isinstance(days, datetime.timedelta):
+                td = days
+                return cls(td.days, td.seconds, td.microseconds)
+            else:
+                return super().__new__(
+                    cls,
+                    days,
+                    *args,
+                    **kwargs,
+                )

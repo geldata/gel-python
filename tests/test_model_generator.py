@@ -553,6 +553,7 @@ class TestModelGenerator(tb.ModelTestCase):
 
     @tb.typecheck
     def test_modelgen_save_02(self):
+        import uuid
         from models import default
         # insert an object with a required multi: no link props, one object
         # added to the link
@@ -569,11 +570,12 @@ class TestModelGenerator(tb.ModelTestCase):
         self.client.save(party)
 
         # Fetch and verify
+        raw_id = uuid.UUID(str(party.id))
         res = self.client.get(
             default.Party.select(
                 name=True,
                 members=True,
-            ).filter(name="Solo")
+            ).filter(id=raw_id)
         )
         self.assertEqual(res.name, "Solo")
         self.assertEqual(len(res.members), 1)
@@ -1341,6 +1343,7 @@ class TestModelGenerator(tb.ModelTestCase):
         gs = default.GameSession(
             num=1001,
             players=[default.GameSession.players.link(u, is_tall_enough=True)],
+            public=True,
         )
         self.client.save(gs)
 
@@ -1349,7 +1352,7 @@ class TestModelGenerator(tb.ModelTestCase):
             default.GameSession.select(
                 num=True,
                 players=True,
-            ).filter(num=1001)
+            ).filter(num=1001, public=True)
         )
         self.assertEqual(res.num, 1001)
         self.assertEqual(len(res.players), 1)
@@ -1552,6 +1555,15 @@ class TestModelGenerator(tb.ModelTestCase):
                     kind=PointerKind.Link,
                     readonly=False,
                     type=SchemaPath("default", "User"),
+                ),
+                MockPointer(
+                    name="public",
+                    cardinality=Cardinality.AtMostOne,
+                    computed=False,
+                    properties=None,
+                    kind=PointerKind.Property,
+                    readonly=False,
+                    type=SchemaPath("std", "bool"),
                 ),
             ],
         )

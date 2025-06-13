@@ -23,6 +23,7 @@ insert UserGroup {
 insert GameSession {
     num := 123,
     players := (select User filter .name in {'Alice', 'Billie'}),
+    public := true,
 };
 insert GameSession {
     num := 456,
