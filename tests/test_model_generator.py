@@ -17,7 +17,6 @@
 #
 
 from __future__ import annotations
-from typing import Any
 
 import dataclasses
 import os
@@ -57,12 +56,6 @@ class MockPointer(typing.NamedTuple):
     kind: PointerKind
     readonly: bool
     properties: dict[str, MockPointer] | None
-
-
-# In Python 3.10 isinstance(tuple[int], type) is True, but
-# issubclass will fail if you pass such type to it.
-def _isclass(t: Any) -> typing.TypeGuard[type[Any]]:
-    return isinstance(t, type) and not _typing_inspect.is_generic_alias(t)
 
 
 class TestModelGenerator(tb.ModelTestCase):
@@ -112,7 +105,9 @@ class TestModelGenerator(tb.ModelTestCase):
                 f"{obj.__name__}.{p.name} has_props mismatch",
             )
 
-            if _isclass(p.type) and _isclass(e.type):
+            if _typing_inspect.is_valid_isinstance_arg(
+                p.type
+            ) and _typing_inspect.is_valid_isinstance_arg(e.type):
                 if issubclass(e.type, DistinctList):
                     if not issubclass(p.type, DistinctList):
                         self.fail(

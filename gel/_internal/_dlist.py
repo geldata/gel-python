@@ -28,6 +28,7 @@ from collections.abc import (
 
 import functools
 
+from gel._internal import _typing_inspect
 from gel._internal import _typing_parametric as parametric
 
 
@@ -259,7 +260,9 @@ class AbstractDowncastingList(Generic[_T_co, _BT]):
         bt = cls.supertype
         if isinstance(value, cls.type):
             return value  # type: ignore [no-any-return]
-        elif not isinstance(bt, type) or isinstance(value, bt):
+        elif not _typing_inspect.is_valid_isinstance_arg(bt) or isinstance(
+            value, bt
+        ):
             return t(value)  # type: ignore [no-any-return]
 
         raise ValueError(
