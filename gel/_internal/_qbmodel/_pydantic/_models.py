@@ -108,6 +108,16 @@ class GelModelMeta(_model_construction.ModelMetaclass, _abstract.GelModelMeta):
                 super().__new__(mcls, name, bases, namespace, **kwargs),
             )
 
+        # Workaround for https://github.com/pydantic/pydantic/issues/11975
+        for base in reversed(cls.__mro__[1:]):
+            decinfos = base.__dict__.get("__pydantic_decorators__")
+            if decinfos is None:
+                try:
+                    decinfos = type(cls.__pydantic_decorators__)()
+                    base.__pydantic_decorators__ = decinfos  # type: ignore [attr-defined]
+                except TypeError:
+                    pass
+
         for fname, field in cls.__pydantic_fields__.items():
             if fname in cls.__annotations__:
                 if field.annotation is None:
