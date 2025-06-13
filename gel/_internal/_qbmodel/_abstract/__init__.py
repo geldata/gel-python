@@ -7,6 +7,8 @@
 from __future__ import annotations
 
 from ._base import (
+    DEFAULT_VALUE,
+    DefaultValue,
     GelType,
     GelType_T,
     GelTypeMeta,
@@ -59,6 +61,7 @@ from ._primitive import (
 
 
 __all__ = (
+    "DEFAULT_VALUE",
     "MODEL_SUBSTRATE_MODULE",
     "AnyEnum",
     "AnyPropertyDescriptor",
@@ -68,6 +71,7 @@ __all__ = (
     "DateImpl",
     "DateTimeImpl",
     "DateTimeLike",
+    "DefaultValue",
     "GelLinkModel",
     "GelModel",
     "GelModelMeta",

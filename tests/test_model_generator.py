@@ -1374,11 +1374,12 @@ class TestModelGenerator(tb.ModelTestCase):
         # Now fetch it again snd update
         gs = self.client.get(
             default.GameSession.select(
-                num=True,
+                "*",
                 players=True,
             ).filter(num=1002)
         )
         self.assertEqual(gs.num, 1002)
+        self.assertEqual(gs.public, False)
         self.assertEqual(len(gs.players), 1)
         self.assertEqual(gs.players[0].__linkprops__.is_tall_enough, None)
         gs.players[0].__linkprops__.is_tall_enough = False
@@ -1558,7 +1559,7 @@ class TestModelGenerator(tb.ModelTestCase):
                 ),
                 MockPointer(
                     name="public",
-                    cardinality=Cardinality.AtMostOne,
+                    cardinality=Cardinality.One,
                     computed=False,
                     properties=None,
                     kind=PointerKind.Property,

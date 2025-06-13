@@ -855,6 +855,7 @@ class BaseGeneratedModule:
             "cardinality": f"{classes['Cardinality']}({str(ptr.card)!r})",
             "computed": str(ptr.is_computed),
             "readonly": str(ptr.is_readonly),
+            "has_default": str(ptr.has_default),
         }
 
         if ptr.pointers is not None:
@@ -2519,17 +2520,18 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             if (ptr.name != "id" and not ptr.is_computed)
             or objtype.name.startswith("schema::")
         ]
-        args = []
+        init_args = []
         if init_pointers:
-            args.extend(["/", "*"])
+            init_args.extend(["/", "*"])
         for ptr, org_objtype in init_pointers:
             ptr_t = self.get_ptr_type(
                 org_objtype,
                 ptr,
                 style="arg",
                 prefer_broad_target_type=True,
+                consider_default=True,
             )
-            args.append(f"{ptr.name}: {ptr_t}")
+            init_args.append(f"{ptr.name}: {ptr_t}")
 
         std_bool = self.get_type(
             self._types_by_name["std::bool"],
@@ -2613,7 +2615,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             update_args = ["/", "*", *update_args]
 
         with self.type_checking():
-            with self._method_def("__init__", args):
+            with self._method_def("__init__", init_args):
                 self.write(
                     f'"""Create a new {objtype.name} instance '
                     "from keyword arguments."
@@ -3270,6 +3272,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         *,
         style: Literal["annotation", "typeddict", "arg"] = "annotation",
         prefer_broad_target_type: bool = False,
+        consider_default: bool = False,
         aspect: ModuleAspect | None = None,
         cardinality: reflection.Cardinality | None = None,
         localns: frozenset[str] | None = None,
@@ -3366,11 +3369,23 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             case "arg":
                 if cardinality.is_multi():
                     iterable = self.import_name("collections.abc", "Iterable")
-                    result = f"{iterable}[{ptr_type}] = []"
+                    type_ = f"{iterable}[{ptr_type}]"
+                    default = "[]"
                 elif cardinality.is_optional():
-                    result = f"{ptr_type} | None = None"
+                    type_ = f"{ptr_type} | None"
+                    default = "None"
                 else:
-                    result = ptr_type
+                    type_ = ptr_type
+                    default = None
+
+                if consider_default and prop.has_default:
+                    defv_t = self.import_name(BASE_IMPL, "DefaultValue")
+                    type_ = f"{type_} | {defv_t}"
+                    default = self.import_name(BASE_IMPL, "DEFAULT_VALUE")
+
+                result = type_
+                if default is not None:
+                    result = f"{type_} = {default}"
             case _:
                 raise AssertionError(
                     f"unexpected type rendering style: {style!r}"

@@ -21,7 +21,7 @@ from gel._internal import _edgeql
 from gel._internal import _typing_inspect
 from gel._internal import _utils
 
-from ._abstract import AbstractFieldDescriptor
+from ._abstract import AbstractDescriptor, AbstractFieldDescriptor
 from ._expressions import (
     BinaryOp,
     Path,
@@ -274,3 +274,10 @@ class VarAlias(BaseAlias):
 
 def AnnotatedVar(origin: type[Any], metadata: Variable) -> VarAlias:  # noqa: N802
     return VarAlias(origin, metadata)
+
+
+def is_pointer_descriptor(v: Any) -> bool:
+    return isinstance(v, (AbstractDescriptor, PathAlias)) or (
+        _typing_inspect.is_annotated(v)
+        and isinstance(v.__origin__, AbstractDescriptor)
+    )

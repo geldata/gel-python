@@ -164,13 +164,11 @@ def _process_pydantic_fields(
     for fn, field in fields.items():
         fdef = field.default
         overrides: dict[str, Any] = {}
+        ptr = cls.__gel_reflection__.pointers.get(fn)
 
-        if isinstance(fdef, (_qb.AbstractDescriptor, _qb.PathAlias)) or (
-            _typing_inspect.is_annotated(fdef)
-            and isinstance(fdef.__origin__, _qb.AbstractDescriptor)
-        ):
-            field.default = pydantic_core.PydanticUndefined
-            field._attributes_set.pop("default", None)
+        if ptr is not None and ptr.has_default and fn != "id":
+            overrides["default"] = _abstract.DEFAULT_VALUE
+        elif _qb.is_pointer_descriptor(fdef):
             overrides["default"] = ...
 
         anno = _typing_inspect.inspect_annotation(
@@ -191,6 +189,10 @@ def _process_pydantic_fields(
             field_infos = []
 
         if overrides:
+            field_attrs = dict(field._attributes_set)
+            for override in overrides:
+                field_attrs.pop(override, None)
+
             if field_infos:
                 merged = pydantic.fields.FieldInfo.merge_field_infos(
                     field,
@@ -199,7 +201,7 @@ def _process_pydantic_fields(
                 )
             else:
                 merged = pydantic.fields.FieldInfo(
-                    **field._attributes_set,  # type: ignore [arg-type]
+                    **field_attrs,  # type: ignore [arg-type]
                     **overrides,
                 )
 
