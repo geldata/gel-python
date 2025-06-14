@@ -3,7 +3,15 @@
 # SPDX-FileCopyrightText: Copyright Gel Data Inc. and the contributors.
 
 from __future__ import annotations
-from typing import TYPE_CHECKING, Any, ClassVar, TypeGuard, TypeVar
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    ClassVar,
+    Final,
+    TypeGuard,
+    TypeVar,
+    final,
+)
 
 import dataclasses
 
@@ -96,3 +104,14 @@ class GelObjectType(
     metaclass=GelObjectTypeMeta,
 ):
     pass
+
+
+@final
+class DefaultValue:
+    def __repr__(self) -> str:
+        return "<DEFAULT_VALUE>"
+
+
+DEFAULT_VALUE: Final = DefaultValue()
+"""Sentinel value indicating that the object should use the default value
+from the schema for a pointer on which this is set."""

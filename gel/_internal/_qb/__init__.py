@@ -66,6 +66,7 @@ from ._generics import (
     PathAlias,
     SortAlias,
     VarAlias,
+    is_pointer_descriptor,
 )
 
 from ._protocols import (
@@ -150,5 +151,6 @@ __all__ = (
     "exprmethod",
     "get_object_type_splat",
     "is_expr_compatible",
+    "is_pointer_descriptor",
     "toplevel_edgeql",
 )

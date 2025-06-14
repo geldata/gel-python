@@ -34,12 +34,14 @@ from gel._internal._qb import (
 )
 
 from gel._internal._qbmodel._abstract import (
+    DEFAULT_VALUE,
     AnyEnum,
     AnyTuple,
     BaseScalar,
     DateImpl,
     DateTimeImpl,
     DateTimeLike,
+    DefaultValue,
     GelType,
     GelType_T,
     GelTypeMeta,
@@ -84,6 +86,7 @@ from gel._internal._qbmodel._pydantic import (
 
 
 __all__ = (
+    "DEFAULT_VALUE",
     "AnnotatedExpr",
     "AnyEnum",
     "AnyTuple",
@@ -98,6 +101,7 @@ __all__ = (
     "DateImpl",
     "DateTimeImpl",
     "DateTimeLike",
+    "DefaultValue",
     "Direction",
     "EmptyDirection",
     "ExprClosure",

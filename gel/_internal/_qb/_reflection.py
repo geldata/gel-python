@@ -22,6 +22,7 @@ class GelPointerReflection:
     cardinality: _edgeql.Cardinality
     computed: bool
     readonly: bool
+    has_default: bool
     properties: dict[str, GelPointerReflection] | None
 
 
