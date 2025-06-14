@@ -12,7 +12,7 @@ import functools
 import weakref
 
 from gel._internal import _qb
-from gel._internal._hybridmethod import hybridmethod
+from gel._internal._xmethod import classonlymethod, hybridmethod
 
 from ._base import GelObjectType, GelObjectTypeMeta
 from ._expressions import (
@@ -117,8 +117,10 @@ class GelModel(
             *,
             message: str | None = None,
         ) -> type[Self]: ...
+
     else:
 
+        @classonlymethod
         @_qb.exprmethod
         @classmethod
         def select(
@@ -133,6 +135,7 @@ class GelModel(
                 select(cls, *elements, __operand__=__operand__, **kwargs),
             )
 
+        @classonlymethod
         @_qb.exprmethod
         @classmethod
         def update(
@@ -146,6 +149,7 @@ class GelModel(
                 update(cls, __operand__=__operand__, **kwargs),
             )
 
+        @classonlymethod
         @_qb.exprmethod
         @classmethod
         def delete(
@@ -158,6 +162,7 @@ class GelModel(
                 delete(cls, __operand__=__operand__),
             )
 
+        @classonlymethod
         @_qb.exprmethod
         @classmethod
         def filter(
@@ -172,6 +177,7 @@ class GelModel(
                 add_filter(cls, *exprs, __operand__=__operand__, **properties),
             )
 
+        @classonlymethod
         @_qb.exprmethod
         @classmethod
         def order_by(
@@ -190,6 +196,7 @@ class GelModel(
                 order_by(cls, *elements, __operand__=__operand__, **kwargs),
             )
 
+        @classonlymethod
         @_qb.exprmethod
         @classmethod
         def limit(
@@ -203,6 +210,7 @@ class GelModel(
                 add_limit(cls, value, __operand__=__operand__),
             )
 
+        @classonlymethod
         @_qb.exprmethod
         @classmethod
         def offset(
@@ -216,6 +224,7 @@ class GelModel(
                 add_offset(cls, value, __operand__=__operand__),
             )
 
+        @classonlymethod
         @_qb.exprmethod
         @classmethod
         def __gel_assert_single__(

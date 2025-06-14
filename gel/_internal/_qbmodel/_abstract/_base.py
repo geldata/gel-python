@@ -17,7 +17,7 @@ import dataclasses
 
 from gel._internal import _edgeql
 from gel._internal import _qb
-from gel._internal._hybridmethod import hybridmethod
+from gel._internal._xmethod import hybridmethod
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
