@@ -118,6 +118,22 @@ class GelModelMeta(_model_construction.ModelMetaclass, _abstract.GelModelMeta):
 
         return result
 
+    # We don't need the complicated isinstance checking inherited
+    # by Pydantic's ModelMetaclass from abc.Meta -- it's incredibly
+    # slow. For GelModels we can just use the built-in
+    # type.__instancecheck__ and type.__subclasscheck__. It's not
+    # clear why an ABC-level "compatibility" would even be useful
+    # for GelModels given how specialized they are.
+    #
+    # Context: without this, IMDBench's data loading takes 2x longer.
+    #
+    # Alternatively, we could just overload these for ProxyModel --
+    # that's where most impact is. So if *you*, the reader of this code,
+    # have a use case for supporting the broader isinstance/issubclass
+    # semantics please onen an issue and let us know.
+    __instancecheck__ = type.__instancecheck__  # type: ignore [assignment]
+    __subclasscheck__ = type.__subclasscheck__  # type: ignore [assignment]
+
 
 def _resolve_pointers(cls: type[GelSourceModel]) -> dict[str, type[GelType]]:
     if not cls.__pydantic_complete__ and cls.model_rebuild() is False:
