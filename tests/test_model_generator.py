@@ -389,7 +389,15 @@ class TestModelGenerator(tb.ModelTestCase):
         q = models.default.Post.limit(1).__gel_assert_single__()
         d = self.client.query(q)[0]
 
-        for method in ("select", "filter", "order_by", "limit", "offset"):
+        for method in (
+            "delete",
+            "update",
+            "select",
+            "filter",
+            "order_by",
+            "limit",
+            "offset",
+        ):
             with self.assertRaisesRegex(
                 AttributeError,
                 "class-only method",
