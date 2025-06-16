@@ -5,7 +5,6 @@
 from typing import (
     TYPE_CHECKING,
     Any,
-    Concatenate,
     Generic,
     TypeVar,
     ParamSpec,
@@ -17,7 +16,6 @@ from typing_extensions import Never
 import functools
 import types
 
-_T = TypeVar("_T")
 _P = ParamSpec("_P")
 _R_co = TypeVar("_R_co", covariant=True)
 
@@ -58,9 +56,7 @@ class hybridmethod(Generic[_P, _R_co]):  # noqa: N801
 class classonlymethod(Generic[_P, _R_co]):  # noqa: N801
     """Transform a method into a class-only method."""
 
-    def __init__(
-        self, cm: Callable[_P, _R_co], /
-    ) -> None:
+    def __init__(self, cm: Callable[_P, _R_co], /) -> None:
         self._cm = cm
 
     @overload

@@ -39,7 +39,6 @@ from gel._internal import _dirsync
 from gel._internal import _reflection as reflection
 from gel._internal._qbmodel import _abstract as _qbmodel
 from gel._internal._reflection._enums import SchemaPart
-from gel._internal._xmethod import classonlymethod
 
 from .._generator import C, AbstractCodeGenerator
 from .._module import ImportTime, CodeSection, GeneratedModule
@@ -2536,7 +2535,6 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         py_const = self.import_name(BASE_IMPL, "PyConstType")
         expr_closure = f"{callable_}[[{type_self}], {expr_proto}]"
         pathalias = self.import_name(BASE_IMPL, "PathAlias")
-        classonlymethod = self.import_name(BASE_IMPL, "classonlymethod")
         filter_args = [
             "/",
             f"*exprs: {callable_}[[{type_self}], {type_}[{std_bool}]]",
