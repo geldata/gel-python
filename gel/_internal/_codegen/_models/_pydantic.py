@@ -124,6 +124,7 @@ class PydanticModelsGenerator(AbstractCodeGenerator):
             )
 
             outdir = pathlib.Path(tmp_models_root.name)
+            need_dirsync = False
 
             if (
                 file_state is None
@@ -134,6 +135,7 @@ class PydanticModelsGenerator(AbstractCodeGenerator):
                 self._save_std_schema_cache(
                     std_schema, db_state.server_version
                 )
+                need_dirsync = True
             else:
                 std_schema = self._load_std_schema_cache(
                     db_state.server_version,
@@ -142,6 +144,7 @@ class PydanticModelsGenerator(AbstractCodeGenerator):
 
             if (
                 file_state is None
+                or file_state.server_version != db_state.server_version
                 or file_state.top_migration != db_state.top_migration
                 or self._no_cache
             ):
@@ -151,14 +154,16 @@ class PydanticModelsGenerator(AbstractCodeGenerator):
                     std_schema=std_schema,
                 )
                 usr_gen.run(outdir)
+                need_dirsync = True
 
             self._write_state(db_state, outdir)
 
-            for fn in list(std_manifest):
-                # Also keep the directories
-                std_manifest.update(fn.parents)
+            if need_dirsync:
+                for fn in list(std_manifest):
+                    # Also keep the directories
+                    std_manifest.update(fn.parents)
 
-            _dirsync.dirsync(outdir, models_root, keep=std_manifest)
+                _dirsync.dirsync(outdir, models_root, keep=std_manifest)
 
         self.print_msg(f"{C.GREEN}{C.BOLD}Done.{C.ENDC}")
 
