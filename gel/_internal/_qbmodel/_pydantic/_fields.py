@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from typing import (
     TYPE_CHECKING,
+    cast,
     Annotated,
     Any,
     Generic,
@@ -542,9 +543,41 @@ OptionalComputedLinkWithProps = TypeAliasType(
 
 
 class _UpcastingDistinctList(
-    _dlist.DistinctList[_MT_co], Generic[_MT_co, _BMT_co]
+    _dlist.DistinctList[_PT_co], Generic[_PT_co, _BMT_co]
 ):
-    def _check_value(self, value: Any) -> _MT_co:
+    _wrapped_index: dict[int, _PT_co] | None = None
+
+    def _init_tracking(self) -> None:
+        super()._init_tracking()
+
+        if self._wrapped_index is None:
+            self._wrapped_index = {}
+            for item in self._items:
+                assert isinstance(item, ProxyModel)
+                self._wrapped_index[id(item._p__obj__)] = cast("_PT_co", item)
+
+    def _track_item(self, item: _PT_co) -> None:  # type: ignore [misc]
+        assert isinstance(item, ProxyModel)
+        super()._track_item(cast("_PT_co", item))
+        assert self._wrapped_index is not None
+        self._wrapped_index[id(item._p__obj__)] = cast("_PT_co", item)
+
+    def _untrack_item(self, item: _PT_co) -> None:  # type: ignore [misc]
+        assert isinstance(item, ProxyModel)
+        super()._untrack_item(cast("_PT_co", item))
+        assert self._wrapped_index is not None
+        self._wrapped_index.pop(id(item._p__obj__), None)
+
+    def _is_tracked(self, item: _PT_co | _BMT_co) -> bool:
+        self._init_tracking()
+        assert self._wrapped_index is not None
+
+        if isinstance(item, ProxyModel):
+            return id(item._p__obj__) in self._wrapped_index
+        else:
+            return id(item) in self._wrapped_index
+
+    def _check_value(self, value: Any) -> _PT_co:
         cls = type(self)
 
         t = cls.type
@@ -576,55 +609,41 @@ class _UpcastingDistinctList(
 
         return value  # type: ignore [no-any-return]
 
-    def _find_proxied_obj(self, item: _MT_co | _BMT_co) -> _MT_co | None:
+    def _find_proxied_obj(self, item: _PT_co | _BMT_co) -> _PT_co | None:
+        self._init_tracking()
+        assert self._wrapped_index is not None
+
         if isinstance(item, ProxyModel):
             item = item._p__obj__
 
-        for sub in self._unhashables.values():
-            assert isinstance(sub, ProxyModel)
-            if sub._p__obj__ is item:
-                return sub  # type: ignore [return-value]
+        return self._wrapped_index.get(id(item), None)
 
-        for sub in self._set:
-            assert isinstance(sub, ProxyModel)
-            if sub._p__obj__ is item:
-                return sub  # type: ignore [return-value]
-
-        return None
-
-    def __contains__(self, item: Any) -> bool:
-        if id(item) in self._unhashables:
-            return True
-
-        try:
-            return item in self._set
-        except TypeError:
-            pass
-
-        return self._find_proxied_obj(item) is not None
+    def clear(self) -> None:
+        super().clear()
+        self._wrapped_index = None
 
     if TYPE_CHECKING:
 
-        def append(self, value: _MT_co | _BMT_co) -> None: ...
+        def append(self, value: _PT_co | _BMT_co) -> None: ...
         def insert(
-            self, index: SupportsIndex, value: _MT_co | _BMT_co
+            self, index: SupportsIndex, value: _PT_co | _BMT_co
         ) -> None: ...
         def __setitem__(
             self,
             index: SupportsIndex | slice,
-            value: _MT_co | _BMT_co | Iterable[_MT_co | _BMT_co],
+            value: _PT_co | _BMT_co | Iterable[_PT_co | _BMT_co],
         ) -> None: ...
-        def extend(self, values: Iterable[_MT_co | _BMT_co]) -> None: ...
-        def remove(self, value: _MT_co | _BMT_co) -> None: ...
+        def extend(self, values: Iterable[_PT_co | _BMT_co]) -> None: ...
+        def remove(self, value: _PT_co | _BMT_co) -> None: ...
         def index(
             self,
-            value: _MT_co | _BMT_co,
+            value: _PT_co | _BMT_co,
             start: SupportsIndex = 0,
             stop: SupportsIndex | None = None,
         ) -> int: ...
-        def count(self, value: _MT_co | _BMT_co) -> int: ...
-        def __add__(self, other: Iterable[_MT_co | _BMT_co]) -> Self: ...
-        def __iadd__(self, other: Iterable[_MT_co | _BMT_co]) -> Self: ...
+        def count(self, value: _PT_co | _BMT_co) -> int: ...
+        def __add__(self, other: Iterable[_PT_co | _BMT_co]) -> Self: ...
+        def __iadd__(self, other: Iterable[_PT_co | _BMT_co]) -> Self: ...
 
 
 class _ComputedMultiLink(
@@ -685,27 +704,27 @@ class _MultiLink(
 
 
 class _MultiLinkWithProps(
-    _MultiPointer[_MT_co, _BMT_co],
-    _abstract.LinkDescriptor[_MT_co, _BMT_co],
+    _MultiPointer[_PT_co, _BMT_co],
+    _abstract.LinkDescriptor[_PT_co, _BMT_co],
 ):
     if TYPE_CHECKING:
 
         @overload
-        def __get__(self, obj: None, objtype: type[Any]) -> type[_MT_co]: ...
+        def __get__(self, obj: None, objtype: type[Any]) -> type[_PT_co]: ...
 
         @overload
         def __get__(
             self, obj: object, objtype: Any = None
-        ) -> _UpcastingDistinctList[_MT_co, _BMT_co]: ...
+        ) -> _UpcastingDistinctList[_PT_co, _BMT_co]: ...
 
         def __get__(
             self,
             obj: Any,
             objtype: Any = None,
-        ) -> type[_MT_co] | _UpcastingDistinctList[_MT_co, _BMT_co] | None: ...
+        ) -> type[_PT_co] | _UpcastingDistinctList[_PT_co, _BMT_co] | None: ...
 
         def __set__(
-            self, obj: Any, value: Sequence[_MT_co | _BMT_co]
+            self, obj: Any, value: Sequence[_PT_co | _BMT_co]
         ) -> None: ...
 
     @classmethod
@@ -720,8 +739,8 @@ class _MultiLinkWithProps(
         cls,
         value: Any,
         generic_args: tuple[type[Any], type[Any]],
-    ) -> _UpcastingDistinctList[_MT_co, _BMT_co]:
-        lt: type[_UpcastingDistinctList[_MT_co, _BMT_co]] = (
+    ) -> _UpcastingDistinctList[_PT_co, _BMT_co]:
+        lt: type[_UpcastingDistinctList[_PT_co, _BMT_co]] = (
             _UpcastingDistinctList[
                 generic_args[0],  # type: ignore [valid-type]
                 generic_args[1],  # type: ignore [valid-type]
