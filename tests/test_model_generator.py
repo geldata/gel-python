@@ -1305,7 +1305,7 @@ class TestModelGenerator(tb.ModelTestCase):
         # insert an object with an optional single: with link props
 
         ks = default.KitchenSink(
-            p_str="coll_test_1",
+            str="coll_test_1",
             p_multi_str=["1", "222"],
             array=["foo", "bar"],
             p_multi_arr=[["foo"], ["bar"]],
@@ -1317,7 +1317,7 @@ class TestModelGenerator(tb.ModelTestCase):
         self.client.save(ks)
 
         # Re-fetch and verify
-        ks = self.client.get(default.KitchenSink.filter(p_str="coll_test_1"))
+        ks = self.client.get(default.KitchenSink.filter(str="coll_test_1"))
         self.assertEqual(sorted(ks.p_multi_str), ["1", "222"])
         self.assertEqual(ks.array, ["foo", "bar"])
         self.assertEqual(sorted(ks.p_multi_arr), [["bar"], ["foo"]])
@@ -1331,7 +1331,7 @@ class TestModelGenerator(tb.ModelTestCase):
         ks.p_multi_str.remove("1")
         self.client.save(ks)
 
-        ks3 = self.client.get(default.KitchenSink.filter(p_str="coll_test_1"))
+        ks3 = self.client.get(default.KitchenSink.filter(str="coll_test_1"))
         self.assertEqual(sorted(ks3.p_multi_str), ["222", "zzz", "zzz"])
 
     @tb.typecheck

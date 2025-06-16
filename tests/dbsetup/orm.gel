@@ -121,7 +121,7 @@ type StepPath {
 }
 
 type KitchenSink {
-    required p_str: str;
+    required str: str;
     required multi p_multi_str: str;
     p_opt_str: str;
     multi p_opt_multi_str: str;

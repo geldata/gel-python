@@ -80,7 +80,7 @@ insert StackableLoot {
 };
 
 insert KitchenSink {
-    p_str := 'hello world',
+    str := 'hello world',
     p_multi_str := {'brown', 'fox'},
 
     array := ["foo"],
