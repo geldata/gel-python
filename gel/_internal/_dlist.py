@@ -74,8 +74,7 @@ class AbstractTrackedList(
         else:
             self._initial_items = []
             self._items = []
-            for item in iterable:
-                self.append(item)
+            self.extend(iterable)
 
     def _ensure_snapshot(self) -> None:
         if self._initial_items is None:
@@ -323,104 +322,146 @@ class AbstractDistinctList(AbstractTrackedList[_HT_co]):
     """
 
     # Set of (hashable) items to maintain distinctness.
-    _set_impl: set[_HT_co] | None
+    _set: set[_HT_co] | None
 
     # Assuming unhashable items compare by object identity,
     # the dict below is used as an extension for distinctness
     # checks.
-    _unhashables_impl: dict[int, _HT_co] | None
+    _unhashables: dict[int, _HT_co] | None
 
     def __init__(
         self, iterable: Iterable[_HT_co] = (), *, __wrap_list__: bool = False
     ) -> None:
-        self._set_impl = None
-        self._unhashables_impl = None
+        self._set = None
+        self._unhashables = None
         super().__init__(iterable, __wrap_list__=__wrap_list__)
 
-    @property
-    def _set(self) -> set[_HT_co]:
-        if self._set_impl is None:
-            self._set_impl = set(self._items)
-            assert len(self._set_impl) == len(self._items)
-        return self._set_impl
+    def _ensure_snapshot(self) -> None:
+        # "_ensure_snapshot" is called right before any mutation:
+        # this is the perfect place to initialize `self._set` and
+        # `self._unhashables`.
+        self._init_tracking()
+        super()._ensure_snapshot()
 
-    @property
-    def _unhashables(self) -> dict[int, _HT_co]:
-        if self._unhashables_impl is None:
-            self._unhashables_impl = {}
-        return self._unhashables_impl
+    def _init_tracking(self) -> None:
+        if self._set is None:
+            # Why is `set(self._items)` OK? `self._items` can be
+            # in one of two states:
+            #
+            #  - have 0 elements -- new collection
+            #  - have non-zero elements -- existing collection
+            #    loaded from database (we trust its contents)
+            #    *before any mutations*.
+            #
+            # So it's either no elements or all elements are hashable
+            # (have IDs).
+            self._set = set(self._items)
+
+            assert self._unhashables is None
+            self._unhashables = {}
+        else:
+            assert self._unhashables is not None
+
+    def _track_item(self, item: _HT_co) -> None:  # type: ignore [misc]
+        assert self._set is not None
+        try:
+            self._set.add(item)
+        except TypeError:
+            pass
+
+        assert self._unhashables is not None
+        self._unhashables[id(item)] = item
+
+    def _untrack_item(self, item: _HT_co) -> None:  # type: ignore [misc]
+        assert self._set is not None
+        try:
+            self._set.discard(item)
+        except TypeError:
+            pass
+
+        assert self._unhashables is not None
+        self._unhashables.pop(id(item), None)
+
+    def _is_tracked(self, item: _HT_co) -> bool:  # type: ignore [misc]
+        self._init_tracking()
+        assert self._set is not None
+
+        try:
+            return item in self._set
+        except TypeError:
+            # unhashable
+            pass
+
+        assert self._unhashables is not None
+        return id(item) in self._unhashables
 
     def __setitem__(
         self,
         index: SupportsIndex | slice,
         value: _HT_co | Iterable[_HT_co],
     ) -> None:
+        self._ensure_snapshot()
+
         if isinstance(index, slice):
-            self._ensure_snapshot()
             start, stop, step = index.indices(len(self._items))
             if step != 1:
                 raise ValueError(
                     "Slice assignment with step != 1 not supported",
                 )
-            prefix = self._items[:start]
-            suffix = self._items[stop:]
+
             new_values = self._check_values(value)  # type: ignore [arg-type]
-            self.clear()
-            for item in (*prefix, *new_values, *suffix):
-                self._append_no_check(item)
+
+            for item in self._items[start:stop]:
+                self._untrack_item(item)
+
+            new_filtered_values = [
+                v for v in new_values if not self._is_tracked(v)
+            ]
+
+            self._items = [
+                *self._items[:start],
+                *new_filtered_values,
+                *self._items[stop:],
+            ]
+
+            for item in new_values:
+                self._track_item(item)
+
         else:
             new_value = self._check_value(value)
+
             old = self._items[index]
-            if new_value is old or new_value == old:
-                return
-            self._ensure_snapshot()
+            self._untrack_item(old)
             del self._items[index]
-            vid = id(new_value)
-            if self._unhashables.pop(vid, None) is None:
-                self._set.remove(old)
 
-            if new_value not in self:
-                try:
-                    self._set.add(new_value)
-                except TypeError:
-                    self._unhashables[vid] = new_value
+            if self._is_tracked(new_value):
+                return
 
-                self._items.insert(index, new_value)
+            self._items.insert(index, new_value)
+            self._track_item(new_value)
 
     def __delitem__(self, index: SupportsIndex | slice) -> None:
         self._ensure_snapshot()
+
         if isinstance(index, slice):
-            to_remove = type(self)(self._items[index])
+            to_remove = self._items[index]
+            del self._items[index]
             for item in to_remove:
-                vid = id(item)
-                if self._unhashables.pop(vid, None) is None:
-                    # safe to assume hashable if not in _unhashables
-                    self._set.discard(item)
-            self._items = [it for it in self._items if it not in to_remove]
+                self._untrack_item(item)
         else:
-            item = self._items.pop(index)
-            vid = id(item)
-            if vid in self._unhashables:
-                del self._unhashables[vid]
-            else:
-                self._set.remove(item)
+            item = self._items[index]
+            del self._items[index]
+            self._untrack_item(item)
 
     def __contains__(self, item: object) -> bool:
-        if id(item) in self._unhashables:
-            return True
-
-        try:
-            return item in self._set
-        except TypeError:
-            return False
+        return self._is_tracked(item)  # type: ignore [arg-type]
 
     def insert(self, index: SupportsIndex, value: _HT_co) -> None:  # type: ignore [misc]
         """Insert item at index if not already present."""
-        if value in self:
-            return
-
         value = self._check_value(value)
-        self._ensure_snapshot()
+
+        if self._is_tracked(value):
+            return
 
         # clamp index
         index = int(index)
@@ -428,16 +469,8 @@ class AbstractDistinctList(AbstractTrackedList[_HT_co]):
             index = max(0, len(self._items) + index + 1)
         index = min(index, len(self._items))
 
-        try:
-            if value not in self._set:
-                self._items.insert(index, value)
-                self._set.add(value)
-        except TypeError:
-            # fallback for unhashables
-            vid = id(value)
-            if vid not in self._unhashables:
-                self._items.insert(index, value)
-                self._unhashables[vid] = value
+        self._items.insert(index, value)
+        self._track_item(value)
 
     def extend(self, values: Iterable[_HT_co]) -> None:
         if values is self:
@@ -451,43 +484,34 @@ class AbstractDistinctList(AbstractTrackedList[_HT_co]):
         self._append_no_check(value)
 
     def _append_no_check(self, value: _HT_co) -> None:  # type: ignore[misc]
-        if value in self:
+        if self._is_tracked(value):
             return
-        else:
-            try:
-                self._set.add(value)
-            except TypeError:
-                self._unhashables[id(value)] = value
-
-            self._items.append(value)
+        self._track_item(value)
+        self._items.append(value)
 
     def remove(self, value: _HT_co) -> None:  # type: ignore [misc]
         """Remove item; raise ValueError if missing."""
-        self._ensure_snapshot()
-        if self._unhashables.pop(id(value), None) is None:
-            try:
-                self._set.remove(value)
-            except (KeyError, TypeError):
-                raise ValueError(
-                    "DisinctList.remove(x): x not in list",
-                ) from None
+        if not self._is_tracked(value):
+            pass
 
+        self._ensure_snapshot()
+        value = self._check_value(value)
+        self._untrack_item(value)
         self._items.remove(value)
 
     def pop(self, index: SupportsIndex = -1) -> _HT_co:
         """Remove and return item at index (default last)."""
         self._ensure_snapshot()
         item = self._items.pop(index)
-        if self._unhashables.pop(id(item), None) is None:
-            self._set.remove(item)
+        self._untrack_item(item)
         return item
 
     def clear(self) -> None:
         """Remove all items but keep element-type enforcement."""
         self._ensure_snapshot()
         self._items.clear()
-        self._set.clear()
-        self._unhashables.clear()
+        self._set = None
+        self._unhashables = None
 
     def index(
         self,
@@ -496,6 +520,7 @@ class AbstractDistinctList(AbstractTrackedList[_HT_co]):
         stop: SupportsIndex | None = None,
     ) -> int:
         """Return first index of value."""
+        value = self._check_value(value)
         return self._items.index(
             value,
             start,
@@ -504,37 +529,11 @@ class AbstractDistinctList(AbstractTrackedList[_HT_co]):
 
     def count(self, value: _HT_co) -> int:  # type: ignore [misc]
         """Return 1 if item is present, else 0."""
-        if id(value) in self._unhashables:
+        value = self._check_value(value)
+        if self._is_tracked(value):
             return 1
         else:
-            try:
-                return 1 if value in self._set else 0
-            except TypeError:
-                return 0
-
-    def promote_unhashables(self, *items: _HT_co) -> None:  # type: ignore [misc]
-        """Try hashing each unhashable: if it now hashes, move into `_set`, or
-        if it duplicates an existing, drop it from the list."""
-        if not items:
-            pairs = list(self._unhashables.items())
-        else:
-            pairs = [(id(item), item) for item in items]
-
-        for vid, item in pairs:
-            try:
-                hash(item)
-            except TypeError:
-                continue  # still unhashable
-
-            # now hashable: if duplicate, remove outright; otherwise add to set
-            if item in self._set:
-                # drop from items list to keep distinctness
-                self._items.remove(item)
-            else:
-                self._set.add(item)
-
-            # in either case, no longer "unhashable"
-            del self._unhashables[vid]
+            return 0
 
 
 class DistinctList(

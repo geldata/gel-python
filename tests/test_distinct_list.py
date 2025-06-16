@@ -188,28 +188,6 @@ class TestDistinctList(unittest.TestCase):
         lst = AnyList()
         self.assertIsInstance(lst, MutableSequence)
 
-    # promote_unhashables method
-    def test_dlist_promote_unhashables(self):
-        u = ToggleHash()
-        u2 = ToggleHash()
-        u3 = ToggleHash()
-        u4 = ToggleHash()
-        lst = AnyList([u, u2, u3, u4])
-        self.assertIn(id(u), lst._unhashables)
-        u.make_hashable()
-        lst.promote_unhashables(u)
-        self.assertNotIn(id(u), lst._unhashables)
-        self.assertIn(u, lst._set)
-        u2.make_hashable()
-        lst.promote_unhashables()
-        self.assertNotIn(id(u2), lst._unhashables)
-        self.assertIn(u2, lst._set)
-        self.assertIn(id(u3), lst._unhashables)
-        u3.make_hashable()
-        u4.make_hashable(id(u3))
-        lst.promote_unhashables()
-        self.assertEqual(list(lst), [u, u2, u3])
-
     # Type enforcement errors
     def test_dlist_type_enforcement(self):
         il = IntList()
