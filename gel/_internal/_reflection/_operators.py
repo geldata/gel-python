@@ -1,19 +1,23 @@
 # SPDX-PackageName: gel-python
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright Gel Data Inc. and the contributors.
-
+#
+# ruff: noqa: TC001
 
 from __future__ import annotations
 from typing import TYPE_CHECKING
-from collections.abc import (
-    MutableMapping,
-)
 from typing_extensions import (
     TypeAliasType,
     Self,
 )
+from collections.abc import (
+    Mapping,
+    MutableMapping,
+)
 
 import dataclasses
+import functools
+import itertools
 import uuid
 from collections import ChainMap, defaultdict
 
@@ -21,28 +25,54 @@ from gel._internal import _dataclass_extras
 
 from . import _enums
 from . import _query
-from . import _types
-from ._callables import Callable, CallableParam
+
+from ._base import sobject
+from ._callables import Callable
+from ._enums import OperatorKind
 
 if TYPE_CHECKING:
     from gel import abstract
 
 
-@dataclasses.dataclass(frozen=True, kw_only=True)
+@sobject
 class Operator(Callable):
-    id: str
-    name: str
-    description: str
-    suggested_ident: str
+    suggested_ident: str | None
     py_magic: tuple[str, ...] | None
-    operator_kind: _enums.OperatorKind
-    return_type: _types.TypeRef
-    return_typemod: _enums.TypeModifier
-    params: list[CallableParam]
+    operator_kind: OperatorKind
+
+    @functools.cached_property
+    def ident(self) -> str:
+        if self.py_magic is not None:
+            return self.py_magic[0]
+        elif self.suggested_ident is not None:
+            return self.suggested_ident
+        else:
+            raise AssertionError(
+                f"operator {self.name} has no defined py_magic "
+                f"or suggested_ident"
+            )
+
+    @functools.cached_property
+    def swapped_infix_ident(self) -> str | None:
+        if self.py_magic is not None and len(self.py_magic) > 1:
+            return self.py_magic[1]
+        else:
+            return None
 
 
 OperatorMap = TypeAliasType("OperatorMap", MutableMapping[str, list[Operator]])
 
+OPERATOR_IDENT_FIXUP: dict[str, str] = {
+    "std::=": "eq",
+    "std::!=": "ne",
+    "std::<": "lt",
+    "std::<=": "le",
+    "std::>": "gt",
+    "std::>=": "ge",
+    "std::?=": "coal_eq",
+    "std::?!=": "coal_neq",
+}
+"""Patch missing std::identifier for some operators."""
 
 INFIX_OPERATOR_MAP: dict[str, str | tuple[str, str]] = {
     "std::=": "__eq__",
@@ -95,6 +125,13 @@ class OperatorMatrix:
             other_ops=self.other_ops + other.other_ops,
         )
 
+    @functools.cached_property
+    def binary_ops_by_name(self) -> Mapping[str, frozenset[Operator]]:
+        m: defaultdict[str, set[Operator]] = defaultdict(set)
+        for op in itertools.chain.from_iterable(self.binary_ops.values()):
+            m[op.name].add(op)
+        return {k: frozenset(v) for k, v in m.items()}
+
 
 def fetch_operators(
     db: abstract.ReadOnlyExecutor,
@@ -111,6 +148,10 @@ def fetch_operators(
         opv = _dataclass_extras.coerce_to_dataclass(
             Operator, op, cast_map={str: (uuid.UUID,)}
         )
+        if opv.suggested_ident is None and (
+            ident_fixup := OPERATOR_IDENT_FIXUP.get(opv.name)
+        ):
+            opv = dataclasses.replace(opv, suggested_ident=ident_fixup)
         py_magic: str | tuple[str, ...] | None
         if op.operator_kind == _enums.OperatorKind.Infix:
             py_magic = INFIX_OPERATOR_MAP.get(op.name)

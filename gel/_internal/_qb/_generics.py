@@ -19,6 +19,7 @@ import functools
 import types
 
 from gel._internal import _edgeql
+from gel._internal import _namespace
 from gel._internal import _typing_inspect
 from gel._internal import _utils
 
@@ -184,12 +185,12 @@ class BaseAlias(metaclass=BaseAliasMeta):
                     return method
 
         if (
-            not _utils.is_dunder(attr)
+            not _namespace.is_dunder(attr)
             or attr in self.__gel_proxied_dunders__
             or attr in SPECIAL_EXPR_METHODS
         ):
             origin = self.__gel_origin__
-            descriptor = _utils.maybe_get_descriptor(
+            descriptor = _namespace.maybe_get_descriptor(
                 origin, attr, of_type=AbstractFieldDescriptor
             )
             if descriptor is not None:

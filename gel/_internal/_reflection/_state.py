@@ -7,8 +7,8 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, NamedTuple
 
 
-from ._struct import struct
 from . import _query
+from ._base import struct
 
 if TYPE_CHECKING:
     from gel import abstract

@@ -3,7 +3,7 @@
 # SPDX-FileCopyrightText: Copyright Gel Data Inc. and the contributors.
 
 from __future__ import annotations
-from typing import TYPE_CHECKING, ClassVar
+from typing import TYPE_CHECKING, ClassVar, Protocol
 
 import dataclasses
 
@@ -24,6 +24,11 @@ class GelPointerReflection:
     readonly: bool
     has_default: bool
     properties: dict[str, GelPointerReflection] | None
+
+
+class GelReflectionProto(Protocol):
+    id: ClassVar[uuid.UUID]
+    name: ClassVar[_reflection.SchemaPath]
 
 
 class GelSchemaMetadata:

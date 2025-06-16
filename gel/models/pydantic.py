@@ -19,6 +19,7 @@ from gel._internal._xmethod import classonlymethod
 
 from gel._internal._qb import (
     AnnotatedExpr,
+    BaseAlias,
     EmptyDirection,
     Direction,
     GelLinkMetadata,
@@ -51,6 +52,7 @@ from gel._internal._qbmodel._abstract import (
     TimeImpl,
     PyConstType,
     UUIDImpl,
+    empty_set_if_none,
 )
 
 from gel._internal._qbmodel._pydantic import (
@@ -94,6 +96,7 @@ __all__ = (
     "AnyNamedTuple",
     "AnyTuple",
     "Array",
+    "BaseAlias",
     "BaseScalar",
     "Cardinality",
     "ComputedLinkWithProps",
@@ -158,4 +161,5 @@ __all__ = (
     "classonlymethod",
     "computed_field",
     "dispatch_overload",
+    "empty_set_if_none",
 )

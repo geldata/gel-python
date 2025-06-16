@@ -8,10 +8,10 @@ from __future__ import annotations
 
 from typing import (
     TYPE_CHECKING,
+    TypeVar,
 )
 from typing_extensions import Self
 
-import itertools
 import textwrap
 import typing
 import weakref
@@ -47,6 +47,9 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Iterable
 
     from ._reflection import GelTypeMetadata
+
+
+_T = TypeVar("_T")
 
 
 class ExprPlaceholder(Expr):
@@ -160,7 +163,7 @@ class StringLiteral(Literal):
 
 @dataclass(kw_only=True, frozen=True)
 class SetLiteral(AtomicExpr):
-    items: list[Expr]
+    items: tuple[Expr, ...]
 
     def subnodes(self) -> Iterable[Node]:
         return self.items
@@ -289,6 +292,16 @@ class CastOp(PrefixOp):
         return f"<{self.type.as_quoted_schema_name()}>{expr}"
 
 
+def empty_set(type_: _reflection.SchemaPath) -> CastOp:
+    return CastOp(expr=SetLiteral(items=(), type_=type_), type_=type_)
+
+
+def empty_set_if_none(
+    val: _T | None, type_: _reflection.SchemaPath
+) -> _T | CastOp:
+    return empty_set(type_) if val is None else val
+
+
 @dataclass(kw_only=True, frozen=True)
 class BinaryOp(Op):
     lexpr: Expr
@@ -359,26 +372,37 @@ class IndexOp(BinaryOp):
 @dataclass(kw_only=True, frozen=True)
 class FuncCall(TypedExpr):
     fname: str
-    args: list[Expr]
-    kwargs: dict[str, Expr]
+    args: list[Expr] | None = None
+    kwargs: dict[str, Expr] | None = None
 
     def __init__(
         self,
         *,
         fname: str,
-        args: list[ExprCompatible],
-        kwargs: dict[str, ExprCompatible],
+        args: list[ExprCompatible] | None = None,
+        kwargs: dict[str, ExprCompatible] | None = None,
         type_: SchemaPath,
     ) -> None:
         object.__setattr__(self, "fname", fname)
-        object.__setattr__(self, "args", [edgeql_qb_expr(a) for a in args])
-        object.__setattr__(
-            self, "kwargs", {k: edgeql_qb_expr(v) for k, v in kwargs.items()}
-        )
+        if args is not None:
+            object.__setattr__(self, "args", [edgeql_qb_expr(a) for a in args])
+        else:
+            object.__setattr__(self, "args", None)
+        if kwargs is not None:
+            object.__setattr__(
+                self,
+                "kwargs",
+                {k: edgeql_qb_expr(v) for k, v in kwargs.items()},
+            )
+        else:
+            object.__setattr__(self, "kwargs", None)
         super().__init__(type_=type_)
 
     def subnodes(self) -> Iterable[Node]:
-        return itertools.chain(self.args, self.kwargs.values())
+        if self.args is not None:
+            yield from self.args
+        if self.kwargs is not None:
+            yield from self.kwargs.values()
 
     @property
     def precedence(self) -> _edgeql.Precedence:
@@ -387,16 +411,18 @@ class FuncCall(TypedExpr):
     def __edgeql_expr__(self, *, ctx: ScopeContext | None) -> str:
         args = []
         comma_prec = _edgeql.PRECEDENCE[_edgeql.Token.COMMA]
-        for arg in self.args:
-            arg_text = edgeql(arg, ctx=ctx)
-            if _need_left_parens(comma_prec, arg):
-                arg_text = f"({arg_text})"
-            args.append(arg_text)
-        for n, arg in self.kwargs.items():
-            arg_text = edgeql(arg, ctx=ctx)
-            if _need_left_parens(comma_prec, arg):
-                arg_text = f"({arg_text})"
-            args.append(f"{n} := {arg_text}")
+        if self.args is not None:
+            for arg in self.args:
+                arg_text = edgeql(arg, ctx=ctx)
+                if _need_left_parens(comma_prec, arg):
+                    arg_text = f"({arg_text})"
+                args.append(arg_text)
+        if self.kwargs is not None:
+            for n, arg in self.kwargs.items():
+                arg_text = edgeql(arg, ctx=ctx)
+                if _need_left_parens(comma_prec, arg):
+                    arg_text = f"({arg_text})"
+                args.append(f"{n} := {arg_text}")
 
         return f"{self.fname}({', '.join(args)})"
 

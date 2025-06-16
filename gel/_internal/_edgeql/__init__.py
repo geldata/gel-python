@@ -12,6 +12,11 @@ from ._quoting import (
 from ._schema import (
     Cardinality,
     PointerKind,
+    get_array_type_id_and_name,
+    get_multirange_type_id_and_name,
+    get_range_type_id_and_name,
+    get_tuple_type_id_and_name,
+    unmangle_unqual_name,
 )
 
 from ._tokens import (
@@ -33,9 +38,14 @@ __all__ = (
     "PointerKind",
     "Precedence",
     "Token",
+    "get_array_type_id_and_name",
+    "get_multirange_type_id_and_name",
+    "get_range_type_id_and_name",
+    "get_tuple_type_id_and_name",
     "need_left_parens",
     "need_right_parens",
     "needs_quoting",
     "quote_ident",
     "quote_literal",
+    "unmangle_unqual_name",
 )

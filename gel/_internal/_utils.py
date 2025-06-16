@@ -4,10 +4,7 @@
 
 """Miscellaneous utilities."""
 
-from typing import Any, TypeVar, final, overload
-
-import sys
-import types
+from typing import Any, final
 
 
 @final
@@ -26,59 +23,3 @@ def type_repr(t: Any) -> str:
             return f"{t.__module__}.{t.__qualname__}"
     else:
         return repr(t)
-
-
-def is_dunder(attr: str) -> bool:
-    return attr.startswith("__") and attr.endswith("__")
-
-
-def module_of(obj: object) -> types.ModuleType | None:
-    if isinstance(obj, types.ModuleType):
-        return obj
-    else:
-        module_name = getattr(obj, "__module__", None)
-        if module_name:
-            return sys.modules.get(module_name)
-        else:
-            return None
-
-
-def module_ns_of(obj: object) -> dict[str, Any]:
-    """Return the namespace of the module where *obj* is defined."""
-    module = module_of(obj)
-    return module.__dict__ if module is not None else {}
-
-
-_T = TypeVar("_T")
-
-
-@overload
-def maybe_get_descriptor(
-    cls: type,
-    name: str,
-    of_type: type[_T],
-) -> _T | None: ...
-
-
-@overload
-def maybe_get_descriptor(
-    cls: type,
-    name: str,
-    of_type: None = None,
-) -> Any | None: ...
-
-
-def maybe_get_descriptor(
-    cls: type,
-    name: str,
-    of_type: type | None = None,
-) -> Any | None:
-    if of_type is None:
-        of_type = types.MethodDescriptorType
-
-    for ancestor in cls.__mro__:
-        desc = ancestor.__dict__.get(name, Unspecified)
-        if desc is not Unspecified and isinstance(desc, of_type):
-            return desc
-
-    return None

@@ -6,25 +6,30 @@
 from __future__ import annotations
 from typing import (
     TYPE_CHECKING,
+    Any,
     Literal,
     TypeGuard,
 )
+from typing_extensions import TypeAliasType
 
 import abc
-import dataclasses
 import functools
-import re
 import uuid
+from collections import defaultdict
 
 from gel._internal import _dataclass_extras
+from gel._internal import _edgeql
 
-from . import _enums as enums
 from . import _query
-from . import _support
-from ._struct import struct
+from ._base import struct, sobject, SchemaObject, SchemaPath
+from ._enums import Cardinality, PointerKind, SchemaPart, TypeKind
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
     from gel import abstract
+
+
+Indirection = TypeAliasType("Indirection", tuple[str | tuple[str, int], ...])
 
 
 @struct
@@ -32,35 +37,88 @@ class TypeRef:
     id: str
 
 
-@struct
-class Type(abc.ABC):
-    id: str
-    kind: enums.TypeKind
-    name: str
-    description: str | None
+@sobject
+class Type(SchemaObject, abc.ABC):
+    kind: TypeKind
     builtin: bool
     internal: bool
-
-    def __eq__(self, other: object) -> bool:
-        if not isinstance(other, Type):
-            return NotImplemented
-        else:
-            return self.id == other.id
-
-    def __hash__(self) -> int:
-        return hash(self.id)
 
     @functools.cached_property
     def edgeql(self) -> str:
         return self.schemapath.as_quoted_schema_name()
 
     @functools.cached_property
-    def schemapath(self) -> _support.SchemaPath:
-        return _support.parse_name(self.name)
+    def generic(self) -> bool:
+        sp = self.schemapath
+        return (
+            len(sp.parts) > 1
+            and sp.parents[0].name == "std"
+            and sp.name.startswith("any")
+        )
 
-    @functools.cached_property
-    def uuid(self) -> uuid.UUID:
-        return uuid.UUID(self.id)
+    def assignable_from(
+        self,
+        other: Type,
+        *,
+        schema: Mapping[str, Type],
+        generics: Mapping[Indirection, Type] | None = None,
+        generic_bindings: dict[Type, Type] | None = None,
+        _path: Indirection = (),
+    ) -> bool:
+        if generics is None:
+            generics = {}
+        if generic_bindings is None:
+            generic_bindings = {}
+
+        generic = generics.get(_path)
+
+        if generic is not None:
+            this = generic_bindings.get(self, self)
+            other = generic_bindings.get(other, other)
+        else:
+            this = self
+
+        if this == other:
+            return True
+        else:
+            assignable = this._assignable_from(
+                other,
+                schema=schema,
+                generics=generics,
+                generic_bindings=generic_bindings,
+                path=_path,
+            )
+            if assignable and generic is not None:
+                previous = generic_bindings.get(generic)
+                if previous is None:
+                    generic_bindings[generic] = other
+                else:
+                    # Generic is bound to incompatible types.
+                    assignable = False
+
+            return assignable
+
+    def _assignable_from(
+        self,
+        other: Type,
+        *,
+        schema: Mapping[str, Type],
+        generics: Mapping[Indirection, Type],
+        generic_bindings: dict[Type, Type],
+        path: Indirection,
+    ) -> bool:
+        raise NotImplementedError("_assignable_from()")
+
+    def contained_generics(
+        self,
+        schema: Mapping[str, Type],
+        *,
+        path: Indirection = (),
+    ) -> dict[Type, set[Indirection]]:
+        if self.generic:
+            return {self: {path}}
+        else:
+            return {}
 
 
 @struct
@@ -74,15 +132,48 @@ class InheritingType(Type):
     def edgeql(self) -> str:
         return self.schemapath.as_quoted_schema_name()
 
+    def _assignable_from(
+        self,
+        other: Type,
+        *,
+        schema: Mapping[str, Type],
+        generics: Mapping[Indirection, Type],
+        generic_bindings: dict[Type, Type],
+        path: Indirection = (),
+    ) -> bool:
+        return self == other or (
+            isinstance(other, InheritingType)
+            and any(a.id == self.id for a in other.ancestors)
+        )
+
 
 @struct
 class PseudoType(Type):
-    kind: Literal[enums.TypeKind.Pseudo]
+    kind: Literal[TypeKind.Pseudo]
+
+    @functools.cached_property
+    def generic(self) -> bool:
+        return True
+
+    def _assignable_from(
+        self,
+        other: Type,
+        *,
+        schema: Mapping[str, Type],
+        generics: Mapping[Indirection, Type],
+        generic_bindings: dict[Type, Type],
+        path: Indirection = (),
+    ) -> bool:
+        return (
+            self.name == "anytype"
+            or (self.name == "anytuple" and isinstance(other, _TupleType))
+            or (self.name == "anyobject" and isinstance(other, ObjectType))
+        )
 
 
 @struct
 class ScalarType(InheritingType):
-    kind: Literal[enums.TypeKind.Scalar]
+    kind: Literal[TypeKind.Scalar]
     is_seq: bool
     enum_values: tuple[str, ...] | None = None
     material_id: str | None = None
@@ -91,7 +182,7 @@ class ScalarType(InheritingType):
 
 @struct
 class ObjectType(InheritingType):
-    kind: Literal[enums.TypeKind.Object]
+    kind: Literal[TypeKind.Object]
     union_of: tuple[TypeRef, ...]
     intersection_of: tuple[TypeRef, ...]
     compound_type: bool
@@ -100,30 +191,101 @@ class ObjectType(InheritingType):
 
 class CollectionType(Type):
     @functools.cached_property
-    def schemapath(self) -> _support.SchemaPath:
-        return _support.SchemaPath(re.sub(r"\|+", "::", self.name))
-
-    @functools.cached_property
     def edgeql(self) -> str:
         return str(self.schemapath)
 
+    @functools.cached_property
+    def schemapath(self) -> SchemaPath:
+        return SchemaPath(self.name)
+
+
+class HomogeneousCollectionType(CollectionType):
+    @functools.cached_property
+    def element_type_id(self) -> str:
+        raise NotImplementedError("element_type_id")
+
+    def contained_generics(
+        self,
+        schema: Mapping[str, Type],
+        *,
+        path: Indirection = (),
+    ) -> dict[Type, set[Indirection]]:
+        element_type = schema[self.element_type_id]
+        return element_type.contained_generics(
+            schema,
+            path=(*path, "__element_type__"),
+        )
+
+    def _assignable_from(
+        self,
+        other: Type,
+        *,
+        schema: Mapping[str, Type],
+        generics: Mapping[Indirection, Type],
+        generic_bindings: dict[Type, Type],
+        path: Indirection = (),
+    ) -> bool:
+        return isinstance(other, type(self)) and schema[
+            self.element_type_id
+        ].assignable_from(
+            schema[other.element_type_id],
+            schema=schema,
+            generics=generics,
+            generic_bindings=generic_bindings,
+            _path=(*path, "__element_type__"),
+        )
+
+
+class HeterogeneousCollectionType(CollectionType):
+    @functools.cached_property
+    def element_type_ids(self) -> list[str]:
+        raise NotImplementedError("element_type_ids")
+
+    def contained_generics(
+        self,
+        schema: Mapping[str, Type],
+        *,
+        path: Indirection = (),
+    ) -> dict[Type, set[Indirection]]:
+        el_types: defaultdict[Type, set[Indirection]] = defaultdict(set)
+        for i, el_tid in enumerate(self.element_type_ids):
+            el_type = schema[el_tid]
+            for t, t_paths in el_type.contained_generics(
+                schema, path=(*path, ("__element_types__", i))
+            ).items():
+                el_types[t].update(t_paths)
+
+        return el_types
+
 
 @struct
-class ArrayType(CollectionType):
-    kind: Literal[enums.TypeKind.Array]
+class ArrayType(HomogeneousCollectionType):
+    kind: Literal[TypeKind.Array]
     array_element_id: str
 
+    @functools.cached_property
+    def element_type_id(self) -> str:
+        return self.array_element_id
+
 
 @struct
-class RangeType(CollectionType):
-    kind: Literal[enums.TypeKind.Range]
+class RangeType(HomogeneousCollectionType):
+    kind: Literal[TypeKind.Range]
     range_element_id: str
 
+    @functools.cached_property
+    def element_type_id(self) -> str:
+        return self.range_element_id
+
 
 @struct
-class MultiRangeType(CollectionType):
-    kind: Literal[enums.TypeKind.MultiRange]
+class MultiRangeType(HomogeneousCollectionType):
+    kind: Literal[TypeKind.MultiRange]
     multirange_element_id: str
+
+    @functools.cached_property
+    def element_type_id(self) -> str:
+        return self.multirange_element_id
 
 
 @struct
@@ -133,15 +295,48 @@ class TupleElement:
 
 
 @struct
-class TupleType(CollectionType):
-    kind: Literal[enums.TypeKind.Tuple]
+class _TupleType(HeterogeneousCollectionType):
     tuple_elements: tuple[TupleElement, ...]
+
+    @functools.cached_property
+    def element_type_ids(self) -> list[str]:
+        return [el.type_id for el in self.tuple_elements]
+
+    def _assignable_from(
+        self,
+        other: Type,
+        *,
+        schema: Mapping[str, Type],
+        generics: Mapping[Indirection, Type],
+        generic_bindings: dict[Type, Type],
+        path: Indirection = (),
+    ) -> bool:
+        return (
+            isinstance(other, _TupleType)
+            and len(self.tuple_elements) == len(other.tuple_elements)
+            and all(
+                schema[self_el.type_id].assignable_from(
+                    schema[other_el.type_id],
+                    schema=schema,
+                    generics=generics,
+                    generic_bindings=generic_bindings,
+                    _path=(*path, ("__element_types__", i)),
+                )
+                for i, (self_el, other_el) in enumerate(
+                    zip(self.tuple_elements, other.tuple_elements, strict=True)
+                )
+            )
+        )
 
 
 @struct
-class NamedTupleType(CollectionType):
-    kind: Literal[enums.TypeKind.NamedTuple]
-    tuple_elements: tuple[TupleElement, ...]
+class TupleType(_TupleType):
+    kind: Literal[TypeKind.Tuple]
+
+
+@struct
+class NamedTupleType(_TupleType):
+    kind: Literal[TypeKind.NamedTuple]
 
 
 PrimitiveType = (
@@ -153,69 +348,65 @@ PrimitiveType = (
     | MultiRangeType
 )
 
-AnyType = PseudoType | PrimitiveType | ObjectType
-
-Types = dict[str, AnyType]
+Types = dict[str, Type]
 
 
-_kind_to_class: dict[enums.TypeKind, type[Type]] = {
-    enums.TypeKind.Array: ArrayType,
-    enums.TypeKind.MultiRange: MultiRangeType,
-    enums.TypeKind.NamedTuple: NamedTupleType,
-    enums.TypeKind.Object: ObjectType,
-    enums.TypeKind.Pseudo: PseudoType,
-    enums.TypeKind.Range: RangeType,
-    enums.TypeKind.Scalar: ScalarType,
-    enums.TypeKind.Tuple: TupleType,
+_kind_to_class: dict[TypeKind, type[Type]] = {
+    TypeKind.Array: ArrayType,
+    TypeKind.MultiRange: MultiRangeType,
+    TypeKind.NamedTuple: NamedTupleType,
+    TypeKind.Object: ObjectType,
+    TypeKind.Pseudo: PseudoType,
+    TypeKind.Range: RangeType,
+    TypeKind.Scalar: ScalarType,
+    TypeKind.Tuple: TupleType,
 }
 
 
-def is_pseudo_type(t: AnyType) -> TypeGuard[PseudoType]:
-    return t.kind == enums.TypeKind.Pseudo
+def is_pseudo_type(t: Type) -> TypeGuard[PseudoType]:
+    return isinstance(t, PseudoType)
 
 
-def is_object_type(t: AnyType) -> TypeGuard[ObjectType]:
-    return t.kind == enums.TypeKind.Object
+def is_object_type(t: Type) -> TypeGuard[ObjectType]:
+    return isinstance(t, ObjectType)
 
 
-def is_scalar_type(t: AnyType) -> TypeGuard[ScalarType]:
-    return t.kind == enums.TypeKind.Scalar
+def is_scalar_type(t: Type) -> TypeGuard[ScalarType]:
+    return isinstance(t, ScalarType)
 
 
-def is_non_enum_scalar_type(t: AnyType) -> TypeGuard[ScalarType]:
-    return t.kind == enums.TypeKind.Scalar and not t.enum_values
+def is_non_enum_scalar_type(t: Type) -> TypeGuard[ScalarType]:
+    return isinstance(t, ScalarType) and not t.enum_values
 
 
-def is_array_type(t: AnyType) -> TypeGuard[ArrayType]:
-    return t.kind == enums.TypeKind.Array
+def is_array_type(t: Type) -> TypeGuard[ArrayType]:
+    return isinstance(t, ArrayType)
 
 
-def is_range_type(t: AnyType) -> TypeGuard[RangeType]:
-    return t.kind == enums.TypeKind.Range
+def is_range_type(t: Type) -> TypeGuard[RangeType]:
+    return isinstance(t, RangeType)
 
 
-def is_multi_range_type(t: AnyType) -> TypeGuard[MultiRangeType]:
-    return t.kind == enums.TypeKind.MultiRange
+def is_multi_range_type(t: Type) -> TypeGuard[MultiRangeType]:
+    return isinstance(t, MultiRangeType)
 
 
-def is_tuple_type(t: AnyType) -> TypeGuard[TupleType]:
-    return t.kind == enums.TypeKind.Tuple
+def is_tuple_type(t: Type) -> TypeGuard[TupleType]:
+    return isinstance(t, TupleType)
 
 
-def is_named_tuple_type(t: AnyType) -> TypeGuard[NamedTupleType]:
-    return t.kind == enums.TypeKind.NamedTuple
+def is_named_tuple_type(t: Type) -> TypeGuard[NamedTupleType]:
+    return isinstance(t, NamedTupleType)
 
 
-def is_primitive_type(t: AnyType) -> TypeGuard[PrimitiveType]:
-    return t.kind not in {enums.TypeKind.Object, enums.TypeKind.Pseudo}
+def is_primitive_type(t: Type) -> TypeGuard[PrimitiveType]:
+    return not isinstance(t, (ObjectType, PseudoType))
 
 
-@dataclasses.dataclass(frozen=True)
-class Pointer:
-    id: str
-    card: enums.Cardinality
-    kind: enums.PointerKind
-    name: str
+@sobject
+class Pointer(SchemaObject):
+    card: Cardinality
+    kind: PointerKind
     target_id: str
     is_exclusive: bool
     is_computed: bool
@@ -223,30 +414,33 @@ class Pointer:
     has_default: bool
     pointers: tuple[Pointer, ...] | None = None
 
-    @functools.cached_property
-    def uuid(self) -> uuid.UUID:
-        return uuid.UUID(self.id)
-
 
 def is_link(p: Pointer) -> bool:
-    return p.kind == enums.PointerKind.Link
+    return p.kind == PointerKind.Link
 
 
 def is_property(p: Pointer) -> bool:
-    return p.kind == enums.PointerKind.Property
+    return p.kind == PointerKind.Property
 
 
 def fetch_types(
     db: abstract.ReadOnlyExecutor,
-    schema_part: enums.SchemaPart,
+    schema_part: SchemaPart,
 ) -> Types:
-    builtin = schema_part is enums.SchemaPart.STD
-    types: list[AnyType] = db.query(_query.TYPES, builtin=builtin)
+    builtin = schema_part is SchemaPart.STD
+    types: list[Type] = db.query(_query.TYPES, builtin=builtin)
     result = {}
     for t in types:
+        cls = _kind_to_class[t.kind]
+        replace: dict[str, Any] = {}
+        if issubclass(cls, CollectionType):
+            replace["name"] = _edgeql.unmangle_unqual_name(t.name)
         vt = _dataclass_extras.coerce_to_dataclass(
-            _kind_to_class[t.kind], t, cast_map={str: (uuid.UUID,)}
+            cls,
+            t,
+            cast_map={str: (uuid.UUID,)},
+            replace=replace,
         )
         result[vt.id] = vt
 
-    return result  # type: ignore [return-value]
+    return result

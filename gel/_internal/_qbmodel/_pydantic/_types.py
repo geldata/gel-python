@@ -22,7 +22,6 @@ import datetime
 import decimal
 import uuid
 
-import pydantic
 import pydantic_core
 from pydantic_core import core_schema
 
@@ -34,10 +33,10 @@ from gel._internal._qbmodel import _abstract
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    import pydantic.fields
+    import pydantic
 
 
-_T = TypeVar("_T")
+_T = TypeVar("_T", bound=_abstract.GelType)
 
 
 class Array(_abstract.Array[_T]):

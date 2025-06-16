@@ -6,11 +6,14 @@ from __future__ import annotations
 import contextlib
 from typing import (
     TYPE_CHECKING,
+    Any,
     Literal,
     NamedTuple,
+    Protocol,
     TypedDict,
     TypeVar,
 )
+from typing_extensions import TypeAliasType
 
 import base64
 import collections
@@ -20,15 +23,15 @@ import functools
 import itertools
 import json
 import graphlib
-import keyword
 import logging
 import operator
 import pathlib
 import tempfile
 import textwrap
+import uuid
 
 from collections import defaultdict
-from collections.abc import MutableMapping  # noqa: TC003  # pydantic needs it
+from collections.abc import Mapping, MutableMapping  # noqa: TC003  # pydantic needs it
 from contextlib import contextmanager
 
 import gel
@@ -38,8 +41,9 @@ from gel._internal import _cache
 from gel._internal import _dataclass_extras
 from gel._internal import _dirsync
 from gel._internal import _reflection as reflection
+from gel._internal._namespace import ident, dunder
 from gel._internal._qbmodel import _abstract as _qbmodel
-from gel._internal._reflection._enums import SchemaPart
+from gel._internal._reflection._enums import SchemaPart, TypeModifier
 
 from .._generator import C, AbstractCodeGenerator
 from .._module import ImportTime, CodeSection, GeneratedModule
@@ -57,6 +61,8 @@ if TYPE_CHECKING:
         Sequence,
     )
 
+    from gel._internal._reflection._types import Indirection
+
 
 COMMENT = """\
 #
@@ -69,22 +75,6 @@ COMMENT = """\
 logger = logging.getLogger(__name__)
 
 
-@functools.cache
-def ident(s: str) -> str:
-    if keyword.iskeyword(s):
-        return f"{s}_"
-    elif s.isidentifier():
-        return s
-    else:
-        result = "".join(
-            c if c.isidentifier() or c.isdigit() else "_" for c in s
-        )
-        if result and result[0].isdigit():
-            result = f"_{result}"
-
-        return result
-
-
 class IntrospectedModule(TypedDict):
     imports: dict[str, str]
     object_types: dict[str, reflection.ObjectType]
@@ -94,7 +84,7 @@ class IntrospectedModule(TypedDict):
 
 @dataclasses.dataclass(kw_only=True, frozen=True)
 class Schema:
-    types: MutableMapping[str, reflection.AnyType]
+    types: MutableMapping[str, reflection.Type]
     casts: reflection.CastMatrix
     operators: reflection.OperatorMatrix
     functions: list[reflection.Function]
@@ -248,7 +238,7 @@ class SchemaGenerator:
         self._basemodule = "models"
         self._modules: dict[reflection.SchemaPath, IntrospectedModule] = {}
         self._std_modules: list[reflection.SchemaPath] = []
-        self._types: Mapping[str, reflection.AnyType] = {}
+        self._types: Mapping[str, reflection.Type] = {}
         self._casts: reflection.CastMatrix
         self._operators: reflection.OperatorMatrix
         self._functions: list[reflection.Function]
@@ -496,11 +486,21 @@ def _map_name(
 
 
 BASE_IMPL = "gel.models.pydantic"
-CORE_OBJECTS = {
-    "std::BaseObject",
-    "std::Object",
-    "std::FreeObject",
-}
+CORE_OBJECTS = frozenset(
+    {
+        "std::BaseObject",
+        "std::Object",
+        "std::FreeObject",
+    }
+)
+GENERIC_TYPES = frozenset(
+    {
+        reflection.SchemaPath("std", "array"),
+        reflection.SchemaPath("std", "tuple"),
+        reflection.SchemaPath("std", "range"),
+        reflection.SchemaPath("std", "multirange"),
+    }
+)
 
 
 def _filter_pointers(
@@ -558,7 +558,7 @@ class BaseGeneratedModule:
         self,
         modname: reflection.SchemaPath,
         *,
-        all_types: Mapping[str, reflection.AnyType],
+        all_types: Mapping[str, reflection.Type],
         all_casts: reflection.CastMatrix,
         all_operators: reflection.OperatorMatrix,
         modules: Collection[reflection.SchemaPath],
@@ -567,7 +567,7 @@ class BaseGeneratedModule:
         super().__init__()
         self._modpath = modname
         self._types = all_types
-        self._types_by_name: dict[str, reflection.AnyType] = {}
+        self._types_by_name: dict[str, reflection.Type] = {}
         self._casts = all_casts
         self._operators = all_operators
         schema_obj_type = None
@@ -726,7 +726,7 @@ class BaseGeneratedModule:
 
     def write_type_reflection(
         self,
-        stype: reflection.AnyType,
+        stype: reflection.Type,
     ) -> None:
         uuid = self.import_name("uuid", "UUID")
         schemapath = self.import_name(BASE_IMPL, "SchemaPath")
@@ -918,6 +918,14 @@ class BaseGeneratedModule:
             [f"{k}={v}" for k, v in kwargs.items()],
         )
 
+    def declare_typevar(
+        self,
+        name: str,
+        *,
+        bound: str | None,
+    ) -> str:
+        return self.py_file.declare_typevar(name, bound=bound)
+
     def import_name(
         self,
         module: str,
@@ -949,6 +957,21 @@ class BaseGeneratedModule:
 
     def current_indentation(self) -> str:
         return self.py_file.current_indentation()
+
+    @contextmanager
+    def if_(self, cond: str) -> Iterator[None]:
+        with self.py_file.if_(cond):
+            yield
+
+    @contextmanager
+    def elif_(self, cond: str) -> Iterator[None]:
+        with self.py_file.elif_(cond):
+            yield
+
+    @contextmanager
+    def else_(self) -> Iterator[None]:
+        with self.py_file.else_():
+            yield
 
     @contextmanager
     def indented(self) -> Iterator[None]:
@@ -1044,14 +1067,20 @@ class BaseGeneratedModule:
 
     def get_type(
         self,
-        stype: reflection.AnyType,
+        stype: reflection.Type,
         *,
         import_time: ImportTime | None = None,
         aspect: ModuleAspect = ModuleAspect.MAIN,
         import_directly: bool | None = None,
-        allow_typevars: bool = True,
+        typevars: Mapping[reflection.Type, str] | None = None,
         localns: frozenset[str] | None = None,
     ) -> str:
+        if (
+            typevars is not None
+            and (typevar := typevars.get(stype)) is not None
+        ):
+            return typevar
+
         if import_time is None:
             import_time = (
                 ImportTime.typecheck
@@ -1067,6 +1096,7 @@ class BaseGeneratedModule:
                 import_directly=import_directly,
                 aspect=aspect,
                 localns=localns,
+                typevars=typevars,
             )
             return f"{arr}[{elem_type}]"
 
@@ -1079,6 +1109,7 @@ class BaseGeneratedModule:
                     import_directly=import_directly,
                     aspect=aspect,
                     localns=localns,
+                    typevars=typevars,
                 )
                 for elem in stype.tuple_elements
             ]
@@ -1092,6 +1123,7 @@ class BaseGeneratedModule:
                 import_directly=import_directly,
                 aspect=aspect,
                 localns=localns,
+                typevars=typevars,
             )
             return f"{rang}[{elem_type}]"
 
@@ -1103,17 +1135,23 @@ class BaseGeneratedModule:
                 import_directly=import_directly,
                 aspect=aspect,
                 localns=localns,
+                typevars=typevars,
             )
             return f"{rang}[{elem_type}]"
 
         elif reflection.is_pseudo_type(stype):
             if stype.name == "anyobject":
-                return self.import_name(BASE_IMPL, "GelModel")
+                return self.import_name(
+                    BASE_IMPL, "GelModel", import_time=import_time
+                )
             elif stype.name == "anytuple":
-                return self.import_name(BASE_IMPL, "AnyTuple")
+                return self.import_name(
+                    BASE_IMPL, "AnyTuple", import_time=import_time
+                )
             elif stype.name == "anytype":
-                basetype = "GelType_T" if allow_typevars else "GelType"
-                return self.import_name(BASE_IMPL, basetype)
+                return self.import_name(
+                    BASE_IMPL, "GelType", import_time=import_time
+                )
             else:
                 raise AssertionError(f"unsupported pseudo-type: {stype.name}")
 
@@ -1183,15 +1221,69 @@ class BaseGeneratedModule:
         self._type_import_cache[cache_key] = result
         return result
 
+    def get_type_type(
+        self,
+        stype: reflection.Type,
+        *,
+        import_time: ImportTime | None = None,
+        aspect: ModuleAspect = ModuleAspect.MAIN,
+        import_directly: bool | None = None,
+        typevars: Mapping[reflection.Type, str] | None = None,
+        localns: frozenset[str] | None = None,
+    ) -> str:
+        tp = self.get_type(
+            stype,
+            import_time=import_time,
+            aspect=aspect,
+            import_directly=import_directly,
+            typevars=typevars,
+            localns=localns,
+        )
+        if import_time is None:
+            import_time = (
+                ImportTime.typecheck
+                if self.in_type_checking
+                else ImportTime.runtime
+            )
+        type_ = self.import_name("builtins", "type", import_time=import_time)
+        return f"{type_}[{tp}]"
+
+    def get_type_generics(
+        self,
+        stype: reflection.Type,
+    ) -> set[reflection.Type]:
+        if stype.generic:
+            return {stype}
+        elif reflection.is_array_type(stype):
+            return self.get_type_generics(self._types[stype.array_element_id])
+        elif reflection.is_range_type(stype):
+            return self.get_type_generics(self._types[stype.range_element_id])
+        elif reflection.is_multi_range_type(stype):
+            return self.get_type_generics(
+                self._types[stype.multirange_element_id]
+            )
+        elif reflection.is_tuple_type(stype) or reflection.is_named_tuple_type(
+            stype
+        ):
+            return set(
+                itertools.chain.from_iterable(
+                    self.get_type_generics(self._types[el.type_id])
+                    for el in stype.tuple_elements
+                )
+            )
+        else:
+            return set()
+
     def format_list(
         self,
         tpl: str,
-        values: list[str],
+        values: Iterable[str],
         *,
         first_line_comment: str | None = None,
         extra_indent: int = 0,
         separator: str = ", ",
         carry_separator: bool = False,
+        trailing_separator: bool | None = None,
     ) -> str:
         return self.py_file.format_list(
             tpl,
@@ -1200,6 +1292,7 @@ class BaseGeneratedModule:
             extra_indent=extra_indent,
             separator=separator,
             carry_separator=carry_separator,
+            trailing_separator=trailing_separator,
         )
 
     def _format_class_line(
@@ -1255,12 +1348,22 @@ class BaseGeneratedModule:
         overload: bool = False,
         stub: bool = False,
         decorators: Iterable[str] = (),
+        type_ignore: Iterable[str] = (),
         line_comment: str | None = None,
         implicit_param: bool = True,
     ) -> Iterator[None]:
+        type_ignore = list(type_ignore)
         if overload:
             over = self.import_name("typing", "overload")
-            self.write(f"@{over}")
+            # Mypy sometimes complains about the `@overload` line,
+            # not the `def` line, so restate the type: ignore comment
+            # here (with unused-ignore).
+            decor_line = f"@{over}"
+            if type_ignore:
+                ignores = sorted({*type_ignore, "unused-ignore"})
+                type_ignore_comment = f"type: ignore [{', '.join(ignores)}]"
+                decor_line = f"{decor_line}  # {type_ignore_comment}"
+            self.write(decor_line)
         for decorator in decorators:
             self.write(f"@{decorator}")
         if kind == "classmethod":
@@ -1277,6 +1380,14 @@ class BaseGeneratedModule:
         tpl = f"def {func_name}({{list}}) -> {return_type}:"
         if stub:
             tpl += " ..."
+
+        if type_ignore:
+            type_ignore_comment = f"type: ignore [{', '.join(type_ignore)}]"
+            if line_comment:
+                line_comment = f"{type_ignore_comment}  # {line_comment}"
+            else:
+                line_comment = type_ignore_comment
+
         def_line = self.format_list(
             tpl,
             params,
@@ -1296,6 +1407,7 @@ class BaseGeneratedModule:
         kind: Literal["classmethod", "method", "property", "func"] = "func",
         overload: bool = False,
         decorators: Iterable[str] = (),
+        type_ignore: Iterable[str] = (),
         line_comment: str | None = None,
     ) -> Iterator[None]:
         with self._func_def(
@@ -1305,6 +1417,7 @@ class BaseGeneratedModule:
             kind="classmethod",
             overload=overload,
             decorators=decorators,
+            type_ignore=type_ignore,
             line_comment=line_comment,
         ):
             yield
@@ -1319,6 +1432,7 @@ class BaseGeneratedModule:
         kind: Literal["classmethod", "method", "property", "func"] = "func",
         overload: bool = False,
         decorators: Iterable[str] = (),
+        type_ignore: Iterable[str] = (),
         line_comment: str | None = None,
     ) -> Iterator[None]:
         with self._func_def(
@@ -1328,6 +1442,7 @@ class BaseGeneratedModule:
             kind="property",
             overload=overload,
             decorators=decorators,
+            type_ignore=type_ignore,
             line_comment=line_comment,
         ):
             yield
@@ -1342,6 +1457,7 @@ class BaseGeneratedModule:
         kind: Literal["classmethod", "method", "property", "func"] = "func",
         overload: bool = False,
         decorators: Iterable[str] = (),
+        type_ignore: Iterable[str] = (),
         line_comment: str | None = None,
         implicit_param: bool = True,
     ) -> Iterator[None]:
@@ -1352,6 +1468,7 @@ class BaseGeneratedModule:
             kind="method",
             overload=overload,
             decorators=decorators,
+            type_ignore=type_ignore,
             line_comment=line_comment,
             implicit_param=implicit_param,
         ):
@@ -1359,18 +1476,36 @@ class BaseGeneratedModule:
 
 
 InheritingType_T = TypeVar("InheritingType_T", bound=reflection.InheritingType)
+PyTypeName = TypeAliasType("PyTypeName", tuple[str, str])
+
+_Callable_T = TypeVar("_Callable_T", bound=reflection.Callable)
 
 
 class GeneratedSchemaModule(BaseGeneratedModule):
     def process(self, mod: IntrospectedModule) -> None:
+        self.prepare_namespace()
         self.write_scalar_types(mod["scalar_types"])
+        self.write_generic_types(mod)
         self.write_object_types(mod["object_types"])
-        self.write_functions(mod["functions"])
+        # Write functions, but omit generic type constructors
+        # (those would have already been written by write_generic_types())
+        self.write_functions(
+            [f for f in mod["functions"] if f.schemapath not in GENERIC_TYPES]
+        )
         self.write_non_magic_infix_operators(
             [
                 op
                 for op in itertools.chain.from_iterable(
                     self._operators.binary_ops.values()
+                )
+                if op.schemapath.parent == self.canonical_modpath
+            ]
+        )
+        self.write_non_magic_prefix_operators(
+            [
+                op
+                for op in itertools.chain.from_iterable(
+                    self._operators.unary_ops.values()
                 )
                 if op.schemapath.parent == self.canonical_modpath
             ]
@@ -1479,13 +1614,13 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         stype: reflection.ScalarType,
         *,
         require_subclassable: bool = False,
-        consider_abstract: bool = True,
+        consider_generic: bool = True,
         import_time: ImportTime = ImportTime.runtime,
     ) -> list[str] | None:
         base_type = _qbmodel.get_py_base_for_scalar(
             stype.name,
             require_subclassable=require_subclassable,
-            consider_abstract=consider_abstract,
+            consider_generic=consider_generic,
         )
         if not base_type:
             return None
@@ -1500,13 +1635,13 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         stype: reflection.ScalarType,
         *,
         require_subclassable: bool = False,
-        consider_abstract: bool = True,
+        consider_generic: bool = True,
         import_time: ImportTime = ImportTime.runtime,
     ) -> list[str] | None:
         base_type = _qbmodel.get_py_type_for_scalar(
             stype.name,
             require_subclassable=require_subclassable,
-            consider_abstract=consider_abstract,
+            consider_generic=consider_generic,
         )
         if not base_type:
             return None
@@ -1529,13 +1664,13 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         self,
         stype: reflection.ScalarType,
         *,
-        consider_abstract: bool = True,
+        consider_generic: bool = True,
         import_time: ImportTime = ImportTime.runtime,
         localns: frozenset[str] | None = None,
     ) -> list[str]:
         base_type = _qbmodel.get_py_type_for_scalar_hierarchy(
             self._get_scalar_hierarchy(stype),
-            consider_abstract=consider_abstract,
+            consider_generic=consider_generic,
         )
         if not base_type:
             raise AssertionError(
@@ -1641,6 +1776,76 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             )
             self.export(classname)
 
+    def prepare_namespace(self) -> None:
+        if self.canonical_modpath != reflection.SchemaPath("std"):
+            # Only std "defines" generic types at the moment.
+            return
+
+        with self.aspect(ModuleAspect.VARIANTS):
+            self.py_file.update_globals(gt.name for gt in GENERIC_TYPES)
+
+    def write_generic_types(
+        self,
+        mod: IntrospectedModule,
+    ) -> None:
+        if self.canonical_modpath != reflection.SchemaPath("std"):
+            # Only std "defines" generic types at the moment.
+            return
+
+        funcs = mod["functions"]
+        with self.aspect(ModuleAspect.VARIANTS):
+            anytype = self.get_type(
+                self._types_by_name["anytype"],
+                import_time=ImportTime.typecheck,
+            )
+            anypoint = self.get_type(
+                self._types_by_name["std::anypoint"],
+                import_time=ImportTime.typecheck,
+            )
+            typevartup = self.import_name("typing_extensions", "TypeVarTuple")
+            unpack = self.import_name("typing_extensions", "Unpack")
+            tup = self.import_name(BASE_IMPL, "Tuple")
+            arr = self.import_name(BASE_IMPL, "Array")
+            rang = self.import_name(BASE_IMPL, "Range")
+            mrang = self.import_name(BASE_IMPL, "MultiRange")
+
+            t_anytype = self.declare_typevar("_T_anytype", bound=anytype)
+            t_anypt = self.declare_typevar("_T_anypoint", bound=anypoint)
+            self.write(f'_Tt = {typevartup}("_Tt")')
+
+            generics = {
+                reflection.SchemaPath("std", "tuple"): f"{tup}[{unpack}[_Tt]]",
+                reflection.SchemaPath("std", "array"): f"{arr}[{t_anytype}]",
+                reflection.SchemaPath("std", "range"): f"{rang}[{t_anypt}]",
+                reflection.SchemaPath(
+                    "std", "multirange"
+                ): f"{mrang}[{t_anypt}]",
+            }
+            for gt, base in generics.items():
+                with self._class_def(gt.name, [base]):
+                    ctors = [f for f in funcs if f.schemapath == gt]
+                    if ctors:
+                        self.write_functions(
+                            ctors,
+                            style="constructor",
+                            type_ignore=["misc"],
+                        )
+                    else:
+                        self.write("pass")
+                self.write_section_break()
+
+        for gt in sorted(GENERIC_TYPES):
+            rel_import = self._resolve_rel_import(gt, ModuleAspect.VARIANTS)
+            assert rel_import is not None
+            name = self.import_name(
+                rel_import.module,
+                rel_import.name,
+                import_time=ImportTime.late_runtime,
+                suggested_module_alias=rel_import.module_alias,
+                directly=True,
+            )
+            self.export(name)
+
     def _write_enum_scalar_type(
         self,
         stype: reflection.ScalarType,
@@ -1673,12 +1878,12 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         pybase = self._get_pybase_for_this_scalar(
             stype,
             require_subclassable=True,
-            consider_abstract=False,
+            consider_generic=False,
         )
         if pybase is not None:
             real_pybase = self._get_pytype_for_this_scalar(
                 stype,
-                consider_abstract=False,
+                consider_generic=False,
             )
             assert real_pybase is not None
             assert len(real_pybase) == 1
@@ -1700,9 +1905,6 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             typecheck_parents = [self.import_name(BASE_IMPL, "BaseScalar")]
             runtime_parents = typecheck_parents
 
-        bin_ops = self._operators.binary_ops.get(stype.id, [])
-        un_ops = self._operators.unary_ops.get(stype.id, [])
-
         self.write()
         if scalar_bases:
             meta_bases = _map_name(
@@ -1715,13 +1917,10 @@ class GeneratedSchemaModule(BaseGeneratedModule):
 
         tmeta = f"__{tname}_meta__"
         with self._class_def(tmeta, meta_bases):
-            if not bin_ops and not un_ops:
+            un_ops = self._write_prefix_operator_methods(stype)
+            bin_ops = self._write_infix_operator_methods(stype)
+            if not un_ops and not bin_ops:
                 self.write("pass")
-            else:
-                self._write_prefix_operator_methods(
-                    [op for op in un_ops if op.py_magic is not None]
-                )
-                self._write_infix_operator_methods(bin_ops)
 
         with self.type_checking():
             with self._class_def(
@@ -1744,58 +1943,53 @@ class GeneratedSchemaModule(BaseGeneratedModule):
 
     def render_callable_return_type(
         self,
-        tp: reflection.AnyType,
+        tp: reflection.Type,
         typemod: reflection.TypeModifier,
         *,
-        default: str | None = None,
         import_time: ImportTime = ImportTime.typecheck,
-        allow_typevars: bool = True,
+        typevars: Mapping[reflection.Type, str] | None = None,
     ) -> str:
-        result = self.get_type(
+        result = self.get_type_type(
             tp,
             import_time=import_time,
-            allow_typevars=allow_typevars,
+            typevars=typevars,
         )
-        type_ = self.import_name("builtins", "type", import_time=import_time)
-        return f"{type_}[{result}]"
+        if typemod is reflection.TypeModifier.Optional:
+            result = f"{result} | None"
 
-    def render_callable_runtime_return_type(
-        self,
-        tp: reflection.AnyType,
-        typemod: reflection.TypeModifier,
-        *,
-        default: str | None = None,
-        import_time: ImportTime = ImportTime.late_runtime,
-    ) -> str:
-        return self.get_type(
-            tp,
-            import_time=import_time,
-            allow_typevars=False,
-        )
+        return result
 
     def render_callable_sig_type(
         self,
-        tp: reflection.AnyType,
+        tp: reflection.Type,
+        typemod: reflection.TypeModifier,
+        *,
+        default: str | None = None,
+        typevars: Mapping[reflection.Type, str] | None = None,
+        import_time: ImportTime = ImportTime.typecheck,
+    ) -> str:
+        result = self.get_type_type(
+            tp,
+            import_time=import_time,
+            typevars=typevars,
+        )
+
+        return self._render_callable_sig_type(
+            result,
+            typemod=typemod,
+            default=default,
+        )
+
+    def _render_callable_sig_type(
+        self,
+        typ: str,
         typemod: reflection.TypeModifier,
         default: str | None = None,
-        *,
-        include_pybase: bool = False,
     ) -> str:
-        result = self.get_type(tp, import_time=ImportTime.typecheck)
-        type_ = self.import_name(
-            "builtins", "type", import_time=ImportTime.typecheck
-        )
-        result = f"{type_}[{result}]"
-
-        if include_pybase and reflection.is_primitive_type(tp):
-            pybase = self._get_pytype_for_primitive_type(
-                tp,
-                import_time=ImportTime.typecheck,
-            )
-            result = f"{result} | {pybase}"
-
-        if typemod == reflection.TypeModifier.Optional:
+        result = typ
+        if typemod is reflection.TypeModifier.Optional:
             result = f"{result} | None"
+
         if default is not None:
             unspec_t = self.import_name(BASE_IMPL, "UnspecifiedType")
             unspec = self.import_name(BASE_IMPL, "Unspecified")
@@ -1803,249 +1997,698 @@ class GeneratedSchemaModule(BaseGeneratedModule):
 
         return result
 
+    def _write_prefix_op_method_node_ctor(
+        self,
+        op: reflection.Operator,
+    ) -> None:
+        """Generate the query node constructor for a prefix operator method.
+
+        Creates the code that builds a PrefixOp query node for unary operator
+        methods like __neg__. The operator is applied to 'self' as the
+        operand.
+
+        Args:
+            op: The operator reflection object containing metadata
+        """
+        op_name = op.schemapath.name
+        node_cls = self.import_name(BASE_IMPL, "PrefixOp")
+
+        args = [
+            "expr=self",  # The operand is always 'self' for method calls
+            f'op="{op_name}"',  # Gel operator name (e.g., "-", "+")
+            "type_=__rtype__.__gel_reflection__.name",  # Result type info
+        ]
+
+        self.write(self.format_list(f"{node_cls}({{list}}),", args))
+
     def _write_prefix_operator_methods(
         self,
-        ops: list[reflection.Operator],
-    ) -> None:
-        if not ops:
-            # Exit early, don't generate imports we won't use.
-            return
+        stype: reflection.Type,
+    ) -> bool:
+        """Generate Python magic methods for unary operators on a type.
 
-        aexpr = self.import_name(BASE_IMPL, "AnnotatedExpr")
-        pfxop = self.import_name(BASE_IMPL, "PrefixOp")
-        for op in ops:
-            if op.py_magic is None:
-                raise AssertionError(f"expected {op} to have py_magic set")
-            if op.operator_kind != reflection.OperatorKind.Prefix:
-                raise AssertionError(f"expected {op} to be a prefix operator")
-            ret_type = self._types[op.return_type.id]
-            rtype = self.render_callable_return_type(
-                ret_type, op.return_typemod
+        Creates unary operator methods (__neg__, __pos__, etc.) for all prefix
+        operators that can be applied to the given type. Only generates methods
+        for operators that have Python magic method equivalents.
+
+        Args:
+            stype: The type to generate unary operator methods for
+
+        Returns:
+            True if any operator methods were generated, False otherwise
+        """
+        # Find unary operators for this type that have Python magic methods
+        un_ops = [
+            op
+            for op in self._operators.unary_ops.get(stype.id, [])
+            if op.py_magic is not None
+        ]
+        if not un_ops:
+            return False
+        else:
+            self._write_callables(
+                un_ops,
+                style="method",
+                type_ignore=("override", "unused-ignore"),
+                node_ctor=self._write_prefix_op_method_node_ctor,
+                param_getter=lambda f: f.params[1:],  # Skip first param (self)
             )
-            rtype_rt = self.render_callable_runtime_return_type(
-                ret_type, op.return_typemod
+            return True
+
+    def _write_prefix_op_func_node_ctor(
+        self,
+        op: reflection.Operator,
+    ) -> None:
+        """Generate the query node constructor for a prefix operator function.
+
+        Creates the code that builds a PrefixOp query node for unary operator
+        functions. Unlike method versions, this takes the operand from function
+        arguments and applies special type casting for tuple parameters.
+
+        Args:
+            op: The operator reflection object containing metadata
+        """
+        op_name = op.schemapath.name
+        node_cls = self.import_name(BASE_IMPL, "PrefixOp")
+        expr_compat = self.import_name(BASE_IMPL, "ExprCompatible")
+        cast_ = self.import_name("typing", "cast")
+
+        other = "__args__[0]"
+        # Tuple parameters need ExprCompatible casting
+        # due to a possible mypy bug.
+        if reflection.is_tuple_type(self._types[op.params[0].type.id]):
+            other = f"{cast_}({expr_compat!r}, {other})"
+
+        args = [
+            f"expr={other}",
+            f'op="{op_name}"',  # Gel operator name (e.g., "-", "+")
+            "type_=__rtype__.__gel_reflection__.name",  # Result type info
+        ]
+
+        self.write(self.format_list(f"{node_cls}({{list}}),", args))
+
+    def write_non_magic_prefix_operators(
+        self,
+        ops: list[reflection.Operator],
+    ) -> bool:
+        """Generate standalone functions for unary operators without Python
+        magic methods.
+
+        Creates function-style operators for prefix operations that don't have
+        corresponding Python magic methods. Unlike magic method operators,
+        these are generated as standalone functions rather than methods on
+        types.
+
+        Args:
+            ops: List of operator reflection objects to process
+
+        Returns:
+            True if any operator functions were generated, False otherwise
+        """
+        # Filter to unary operators without Python magic method equivalents
+        un_ops = [op for op in ops if op.py_magic is None]
+        if not un_ops:
+            return False
+        else:
+            self._write_callables(
+                un_ops,
+                style="function",
+                type_ignore=("override", "unused-ignore"),
+                node_ctor=self._write_prefix_op_func_node_ctor,
             )
-            meth = op.py_magic[0]
-            with self._method_def(
-                meth,
-                ["cls"],
-                rtype,
-                implicit_param=False,
-            ):
-                name = reflection.parse_name(op.name)
-                args = [
-                    "expr=cls",
-                    f'op="{name.name}"',
-                    f"type_={self._render_obj_schema_path(ret_type)}",
-                ]
-                opexpr = self.format_list(f"{pfxop}({{list}})", args)
-                self.write(
-                    self.format_list(
-                        f"return {aexpr}({{list}})",
-                        [rtype_rt, opexpr],
-                        first_line_comment="type: ignore [return-value]",
-                    )
-                )
-            self.write()
+            return True
+
+    class InfixOpNodeConstructor(Protocol):
+        def __call__(
+            self,
+            op: reflection.Operator,
+            *,
+            swapped: bool = False,
+        ) -> None: ...
+
+    def _write_infix_op_func_node_ctor(
+        self,
+        op: reflection.Operator,
+        *,
+        swapped: bool = False,
+    ) -> None:
+        op_name = op.schemapath.name
+        node_cls = self.import_name(BASE_IMPL, "InfixOp")
+        expr_compat = self.import_name(BASE_IMPL, "ExprCompatible")
+        cast_ = self.import_name("typing", "cast")
+
+        if not swapped:
+            this_idx = 0
+            other_idx = 1
+        else:
+            this_idx = 1
+            other_idx = 0
+
+        this = f"__args__[{this_idx}]"
+        other = f"__args__[{other_idx}]"
+
+        if reflection.is_tuple_type(self._types[op.params[other_idx].type.id]):
+            other = f"{cast_}({expr_compat!r}, {other})"
+
+        args = [
+            f"lexpr={this}",
+            f'op="{op_name}"',
+            f"rexpr={other}",
+            "type_=__rtype__.__gel_reflection__.name",
+        ]
+
+        self.write(self.format_list(f"{node_cls}({{list}}),", args))
 
     def write_non_magic_infix_operators(
         self,
         ops: list[reflection.Operator],
+    ) -> bool:
+        """Generate standalone functions for operators without Python magic
+        methods.
+
+        Creates function-style operators for binary operations that don't have
+        corresponding Python magic methods. Unlike magic method operators,
+        these are generated as standalone functions rather than methods
+        on types.
+
+        Args:
+            ops: List of operator reflection objects to process
+
+        Returns:
+            True if any operator functions were generated, False otherwise
+        """
+        # Filter to operators without Python magic method equivalents
+        bin_ops = [op for op in ops if op.py_magic is None]
+        if not bin_ops:
+            return False
+        else:
+            # Create swapped versions for all non-magic operators since they
+            # don't have inherent left/right precedence like Python operators
+            swapped_ops = [
+                dataclasses.replace(op, id=str(uuid.uuid4())) for op in bin_ops
+            ]
+            self._write_infix_operators(
+                bin_ops,
+                swapped_ops,
+                style="function",
+                node_ctor=self._write_infix_op_func_node_ctor,
+            )
+            return True
+
+    def _write_infix_op_method_node_ctor(
+        self,
+        op: reflection.Operator,
+        *,
+        swapped: bool = False,
     ) -> None:
-        self._write_binary_operators(
-            [
-                (
-                    (
-                        op.suggested_ident or op.schemapath.name,
-                        op.suggested_ident or op.schemapath.name,
-                    ),
-                    op,
-                )
-                for op in ops
-                if op.py_magic is None
-            ],
-            style="function",
-        )
+        """Generate the query node constructor for an infix operator method.
+
+        Creates the code that builds the appropriate qb query node (InfixOp
+        or IndexOp) for a binary operator method like __add__, __getitem__,
+        etc.
+
+        Args:
+            op: The operator reflection object containing metadata
+            swapped: If True, generates right-hand operation (e.g., __radd__)
+                where 'other' becomes left operand and 'self' becomes right
+        """
+        op_name = op.schemapath.name
+        # Map special operators to their specific node classes
+        node_cls_map = {
+            "[]": "IndexOp",  # Array/container indexing gets special handling
+        }
+
+        node_cls_name = node_cls_map.get(op_name, "InfixOp")
+        node_cls = self.import_name(BASE_IMPL, node_cls_name)
+        expr_compat = self.import_name(BASE_IMPL, "ExprCompatible")
+        cast_ = self.import_name("typing", "cast")
+
+        other = "__args__[0]"  # The other operand from method arguments
+        # Tuple parameters need ExprCompatible casting due to type limits
+        if reflection.is_tuple_type(self._types[op.params[0].type.id]):
+            other = f"{cast_}({expr_compat!r}, {other})"
+
+        args = [
+            f'op="{op_name}"',  # Gel operator name (e.g., "+", "[]")
+            "type_=__rtype__.__gel_reflection__.name",  # Result type info
+        ]
+
+        if swapped:
+            args.extend([f"lexpr={other}", "rexpr=self"])
+        else:
+            args.extend(["lexpr=self", f"rexpr={other}"])
+
+        self.write(self.format_list(f"{node_cls}({{list}}),", args))
 
     def _write_infix_operator_methods(
         self,
-        ops: list[reflection.Operator],
-    ) -> None:
-        self._write_binary_operators(
-            [(op.py_magic, op) for op in ops if op.py_magic is not None],
-            style="method",
-        )
+        stype: reflection.Type,
+    ) -> bool:
+        """Generate Python magic methods for binary operators on a type.
 
-    def _write_binary_operators(
+        Creates both normal operator methods (__add__, __getitem__, etc.) and
+        their right-hand counterparts (__radd__, etc.) for all binary operators
+        that can be applied to the given type. Only generates methods for
+        operators that have Python magic method equivalents.
+
+        Args:
+            stype: The type to generate operator methods for
+
+        Returns:
+            True if any operator methods were generated, False otherwise
+        """
+        # Find binary operators for this type that have Python magic methods
+        bin_ops = [
+            op
+            for op in self._operators.binary_ops.get(stype.id, [])
+            if op.py_magic is not None
+        ]
+        if not bin_ops:
+            return False
+        else:
+            # Create swapped versions for operators where the right operand
+            # matches our type (enables right-hand methods like __radd__)
+            swapped_ops = [
+                dataclasses.replace(
+                    op,
+                    id=str(uuid.uuid4()),
+                    py_magic=(op.swapped_infix_ident,),  # __radd__ vs __add__
+                )
+                for op in bin_ops
+                if op.swapped_infix_ident is not None
+                and op.params[1].type.id == stype.id
+            ]
+
+            self._write_infix_operators(
+                bin_ops,
+                swapped_ops,
+                style="method",
+                node_ctor=self._write_infix_op_method_node_ctor,
+            )
+            return True
+
+    def _write_infix_operators(
         self,
-        ops: list[tuple[tuple[str, ...], reflection.Operator]],
+        bin_ops: list[reflection.Operator],
+        swapped_ops: list[reflection.Operator],
         *,
         style: Literal["method", "function"],
+        node_ctor: InfixOpNodeConstructor,
     ) -> None:
-        opmap: defaultdict[
-            tuple[tuple[str, ...], str],
-            defaultdict[
-                tuple[
-                    frozenset[reflection.AnyType],
-                    reflection.AnyType,
-                    reflection.TypeModifier,
-                ],
-                set[reflection.AnyType],
-            ],
-        ] = defaultdict(lambda: defaultdict(set))
+        """Generate code for binary operators and their swapped counterparts.
 
-        if not ops:
-            # Exit early, don't generate imports we won't use.
-            return
+        Generates both normal binary operators (like __add__) and their
+        right-hand counterparts (like __radd__) while avoiding overload
+        overlaps. Uses exclusion lists to prevent swapped operators from
+        accepting parameter types that are already handled by explicit normal
+        operators.
 
-        aexpr = self.import_name(BASE_IMPL, "AnnotatedExpr")
-        expr_compat = self.import_name(BASE_IMPL, "ExprCompatible")
-        type_ = self.import_name("builtins", "type")
-        any_ = self.import_name("typing", "Any")
-
-        op_map = {
-            "[]": "IndexOp",
-        }
-
-        op_classes_to_import: dict[str, str] = {}
-
-        explicit_rparams: defaultdict[str, set[str]] = defaultdict(set)
-        for _, op in ops:
-            explicit_rparams[op.schemapath.name].add(op.params[1].type.id)
-
-        for fnames, op in ops:
-            if op.operator_kind != reflection.OperatorKind.Infix:
-                raise AssertionError(f"expected {op} to be an infix operator")
-
-            opname = op.schemapath.name
-            op_classes_to_import[opname] = op_map.get(opname, "InfixOp")
-            ret_type = self._types[op.return_type.id]
-            left_type = self._types[op.params[0].type.id]
-            right_param = op.params[1]
-            right_type_id = right_param.type.id
-            right_type = self._types[right_type_id]
-            implicit_casts = self._casts.implicit_casts_to.get(right_type_id)
-            union = [right_type]
-            if implicit_casts:
-                union.extend(
-                    self._types[ic]
-                    for ic in set(implicit_casts) - explicit_rparams[opname]
-                )
-
-            op_key = fnames, opname
-
-            if style == "function" and (ex := opmap[op_key]):
-                ex_r_key, right_types = next(iter(ex.items()))
-                r_key = (
-                    ex_r_key[0] | frozenset((left_type,)),
-                    ret_type,
-                    op.return_typemod,
-                )
-                ex.clear()
-                ex[r_key] = right_types | set(union)
-            else:
-                r_key = frozenset((left_type,)), ret_type, op.return_typemod
-                opmap[op_key][r_key].update(union)
-
-        op_classes: dict[str, str] = {}
-        imported: dict[str, str] = {}
-        for opname, opclsname in op_classes_to_import.items():
-            opcls = imported.get(opname)
-            if opcls is None:
-                opcls = self.import_name(BASE_IMPL, opclsname)
-                imported[opname] = opcls
-            op_classes[opname] = opcls
-
-        py_cast_rankings: defaultdict[
-            tuple[tuple[str, ...], str],
-            dict[
-                tuple[str, str],
-                tuple[tuple[int, int], int, reflection.ScalarType],
-            ],
-        ] = defaultdict(dict)
-
-        for op_key, overloads in opmap.items():
-            explicit = explicit_rparams[op_key[1]]
-            py_cast_ranking = py_cast_rankings[op_key]
-
-            for i, params in enumerate(overloads.values()):
-                for stype in params:
-                    if reflection.is_scalar_type(stype):
-                        py_types = _qbmodel.get_py_type_for_scalar_hierarchy(
-                            self._get_scalar_hierarchy(stype),
-                            consider_abstract=True,
+        Args:
+            bin_ops: List of normal binary operators to generate
+            swapped_ops: List of swapped operators to generate
+            style: Whether to generate as methods or standalone functions
+            node_ctor: Factory function to create query nodes for operators
+        """
+        if swapped_ops:
+            # Build exclusion map to prevent type conflicts between normal and
+            # swapped operators. If A + B is explicitly defined, then
+            # B.__radd__ should not accept type A to avoid ambiguous dispatch.
+            explicit = frozenset(op.params[0].type.id for op in bin_ops)
+            excluded_param_types: dict[
+                reflection.Operator,
+                dict[reflection.CallableParamKey, frozenset[reflection.Type]],
+            ] = {
+                op: {
+                    0: frozenset(
+                        self._types[other_op.params[0].type.id]
+                        for other_op in self._operators.binary_ops_by_name.get(
+                            op.name, frozenset()
                         )
-                        cast_rank = int(stype.id not in explicit)
+                        if other_op.params[0].type.id not in explicit
+                    ),
+                }
+                for op in swapped_ops
+            }
+        else:
+            excluded_param_types = {}
 
-                        for py_type in py_types:
-                            scalar_rank = (
-                                _qbmodel.get_py_type_scalar_match_rank(
-                                    py_type, stype.name
-                                )
+        if style == "method":
+
+            def param_getter(
+                f: reflection.Operator,
+            ) -> Iterable[reflection.CallableParam]:
+                # Swapped ops take only first param (self is implicit left
+                # operand) Normal ops skip first param (self becomes explicit
+                # left operand)
+                return f.params[:1] if f in swapped_ops else f.params[1:]
+        else:
+            # For functions, use all parameters as-is
+            def param_getter(
+                f: reflection.Operator,
+            ) -> Iterable[reflection.CallableParam]:
+                return f.params
+
+        self._write_callables(
+            itertools.chain(bin_ops, swapped_ops),
+            style=style,
+            type_ignore=("override", "unused-ignore"),
+            param_getter=param_getter,
+            node_ctor=lambda op: node_ctor(op, swapped=op in swapped_ops),
+            excluded_param_types=excluded_param_types,
+        )
+
+    def _partition_nominal_overloads(
+        self,
+        callables: Iterable[_Callable_T],
+    ) -> dict[str, list[_Callable_T]]:
+        """Partition a sequence of callables into a dictionary of lists of
+        callables by name."""
+        result: defaultdict[str, list[_Callable_T]] = defaultdict(list)
+        for cb in callables:
+            result[cb.ident].append(cb)
+        return result
+
+    def _partition_potentially_overlapping_overloads(
+        self,
+        callables: Sequence[_Callable_T],
+    ) -> dict[reflection.CallableSignature, list[_Callable_T]]:
+        """Partition a sequence of callables into a dictionary of lists of
+        callables that _can_ overlap."""
+        result: defaultdict[
+            reflection.CallableSignature, list[_Callable_T]
+        ] = defaultdict(list)
+
+        # Group callables by overlapping signatures
+        for cb in callables:
+            sig = cb.signature
+
+            # Find if this signature overlaps with any existing signature
+            overlapping_sig = None
+            for existing_sig in result:
+                if sig.overlaps(existing_sig):
+                    overlapping_sig = existing_sig
+                    break
+
+            if overlapping_sig is not None:
+                # Add to existing overlapping group
+                result[overlapping_sig].append(cb)
+            else:
+                # Create new group for this signature
+                result[sig].append(cb)
+
+        return result
+
+    def _write_callables(
+        self,
+        callables: Iterable[_Callable_T],
+        *,
+        style: Literal["method", "function", "constructor"],
+        type_ignore: Sequence[str] = (),
+        param_getter: reflection.CallableParamGetter[
+            _Callable_T
+        ] = operator.attrgetter("params"),
+        node_ctor: Callable[[_Callable_T], None] | None = None,
+        excluded_param_types: Mapping[
+            _Callable_T,
+            dict[reflection.CallableParamKey, frozenset[reflection.Type]],
+        ]
+        | None = None,
+    ) -> None:
+        partitions = self._partition_nominal_overloads(callables)
+        for overloads in partitions.values():
+            self._write_nominal_overloads(
+                overloads,
+                style=style,
+                type_ignore=type_ignore,
+                param_getter=param_getter,
+                node_ctor=node_ctor,
+                excluded_param_types=excluded_param_types,
+            )
+
+    def _write_nominal_overloads(
+        self,
+        overloads: Sequence[_Callable_T],
+        *,
+        style: Literal["method", "function", "constructor"],
+        type_ignore: Sequence[str] = (),
+        param_getter: reflection.CallableParamGetter[_Callable_T],
+        node_ctor: Callable[[_Callable_T], None] | None = None,
+        excluded_param_types: Mapping[
+            _Callable_T,
+            dict[reflection.CallableParamKey, frozenset[reflection.Type]],
+        ]
+        | None = None,
+    ) -> None:
+        """Generate code for a group of function overloads with the same name.
+
+        Processes overloads by minimizing and sorting them, partitioning them
+        into potentially overlapping groups, and generating both the individual
+        overload implementations and a dispatcher function when multiple
+        overloads exist.
+
+        Args:
+            overloads: Sequence of callable objects to generate overloads for
+            style: Code generation style (method, function, or constructor)
+            type_ignore: Additional mypy type ignore codes to include
+            param_getter: Function to extract parameters from callables
+            node_ctor: Custom node constructor for query building
+            excluded_param_types: Parameter types to exclude from specific
+                overloads to prevent type conflicts
+        """
+        if len(overloads) > 1:
+            # Remove redundant overloads and sort by type generality
+            overloads = self._sort_and_minimize_overloads(
+                overloads,
+                param_getter=param_getter,
+            )
+
+        # Group overloads that might have overlapping parameter types
+        partitions = self._partition_potentially_overlapping_overloads(
+            overloads
+        )
+        for overlapping in partitions.values():
+            self._write_potentially_overlapping_overloads(
+                overlapping,
+                style=style,
+                nominal_overloads_total=len(overloads),
+                type_ignore=type_ignore,
+                param_getter=param_getter,
+                node_ctor=node_ctor,
+                excluded_param_types=excluded_param_types,
+            )
+        if len(overloads) > 1:
+            # Generate dispatcher that delegates to appropriate overload
+            self._write_function_overload_dispatcher(
+                overloads[0],
+                style=style,
+                type_ignore=type_ignore,
+            )
+
+    def _write_potentially_overlapping_overloads(
+        self,
+        overloads: list[_Callable_T],
+        *,
+        style: Literal["method", "function", "constructor"],
+        type_ignore: Sequence[str] = (),
+        nominal_overloads_total: int,
+        param_getter: reflection.CallableParamGetter[_Callable_T],
+        node_ctor: Callable[[_Callable_T], None] | None = None,
+        excluded_param_types: Mapping[
+            _Callable_T,
+            dict[reflection.CallableParamKey, frozenset[reflection.Type]],
+        ]
+        | None = None,
+    ) -> None:
+        """Generate overloads that may have overlapping parameter types.
+
+        Performs type expansion by adding implicit casts and Python type
+        coercions while avoiding conflicts. Each overload gets expanded to
+        accept additional compatible types through implicit casting, but
+        only if doing so wouldn't create ambiguous dispatch with other
+        overloads in the same group.
+
+        The process:
+        1. Collect explicit parameter types from all overloads
+        2. Add implicit casts where they don't create overlaps
+        3. Add Python type coercions with proper ranking while also checking
+           for overlaps
+        4. Generate the final overload implementations
+
+        Args:
+            overloads: List of potentially overlapping overloads to process
+            style: Code generation style (method, function, or constructor)
+            type_ignore: Additional mypy type ignore codes
+            nominal_overloads_total: Total number of nominal overloads
+            param_getter: Function to extract parameters from callables
+            node_ctor: Custom node constructor for query building
+            excluded_param_types: Parameter types to exclude from overloads
+        """
+        # Track which types are explicitly used to avoid creating overlaps
+        # when adding implicit casts
+        param_type_usages: defaultdict[
+            reflection.CallableParamKey, set[reflection.Type]
+        ] = defaultdict(set)
+        for overload in overloads:
+            for param in overload.params:
+                param_type = self._types[param.type.id]
+                # Unwrap the variadic type (it is reflected as an array of T)
+                if param.kind is reflection.CallableParamKind.Variadic:
+                    assert reflection.is_array_type(param_type)
+                    param_type = self._types[param_type.element_type_id]
+                param_type_usages[param.key].add(param_type)
+
+        annotated_overloads: dict[
+            _Callable_T, reflection.CallableParamTypeMap
+        ] = {}
+        param_overload_map: defaultdict[
+            reflection.CallableParamKey, set[_Callable_T]
+        ] = defaultdict(set)
+        implicit_casts_map = self._casts.implicit_casts_to
+        for overload in overloads:
+            annotated_overloads[overload] = {}
+            for param in param_getter(overload):
+                param_overload_map[param.key].add(overload)
+                param_type = self._types[param.type.id]
+                # Unwrap the variadic type (it is reflected as an array of T)
+                if param.kind is reflection.CallableParamKind.Variadic:
+                    assert reflection.is_array_type(param_type)
+                    param_type = self._types[param_type.element_type_id]
+                # Start with the base parameter type
+                annotated_overloads[overload][param.key] = [param_type]
+
+        # Add implicit casts to each overload where they don't cause conflicts
+        for overload in overloads:
+            overload_param_types = annotated_overloads[overload]
+
+            for param in param_getter(overload):
+                param_types = overload_param_types[param.key]
+                param_type = self._types[param.type.id]
+                # Find overloads that could potentially conflict
+                potentially_overlapping_overloads = {
+                    k: v
+                    for k, v in annotated_overloads.items()
+                    if k in param_overload_map[param.key]
+                }
+                # Try to add each available implicit cast
+                if icasts := implicit_casts_map.get(param_type.id):
+                    # Only consider casts not already explicitly used
+                    icast_types = sorted(
+                        {
+                            self._types[icast_id] for icast_id in icasts
+                        }.difference(param_type_usages[param.key]),
+                        key=lambda t: t.name,
+                    )
+                    for icast_type in icast_types:
+                        param_types.append(icast_type)
+                        # Remove the cast if it would cause overlap
+                        if self._would_cause_overlap(
+                            overload,
+                            overload_param_types,
+                            potentially_overlapping_overloads,
+                        ):
+                            param_types.pop()
+
+        # Build mapping of Python types to overloads with ranking
+        # (lower rank == higher priority for overload).
+        param_py_overload_map: defaultdict[
+            reflection.CallableParamKey,
+            defaultdict[
+                PyTypeName,
+                list[tuple[int, _Callable_T, reflection.Type]],
+            ],
+        ] = defaultdict(lambda: defaultdict(list))
+
+        # Collect Python type coercions for scalar parameters
+        for overload, params in list(annotated_overloads.items()):
+            if excluded_param_types is not None:
+                ov_excluded = excluded_param_types.get(overload, {})
+            else:
+                ov_excluded = {}
+            for param_key, param_types in params.items():
+                excluded = ov_excluded.get(param_key)
+                for stype in param_types:
+                    # Only process scalar types that aren't excluded
+                    if not isinstance(stype, reflection.ScalarType) or (
+                        excluded is not None and stype in excluded
+                    ):
+                        continue
+
+                    # Get corresponding Python types for this scalar type
+                    py_types = _qbmodel.get_py_type_for_scalar_hierarchy(
+                        self._get_scalar_hierarchy(stype),
+                        consider_generic=True,
+                    )
+                    for py_type in py_types:
+                        # Rank how well this Python type matches the scalar
+                        scalar_rank = _qbmodel.get_py_type_scalar_match_rank(
+                            py_type, stype.name
+                        )
+                        if scalar_rank is not None:
+                            param_py_overload_map[param_key][py_type].append(
+                                (scalar_rank, overload, stype)
                             )
-                            if scalar_rank is None:
-                                # No unabiguous cast from py to db,
-                                # e.g `local_datetime -> datetime -> ?`
-                                continue
-                            assert scalar_rank is not None
-                            rank = (cast_rank, scalar_rank)
-                            prev = py_cast_ranking.get(py_type)
-                            if prev is None or prev[0] > rank:
-                                py_cast_ranking[py_type] = (rank, i, stype)
 
-        py_casts: defaultdict[
-            tuple[tuple[str, ...], str],
-            defaultdict[int, dict[tuple[str, str], reflection.ScalarType]],
+        # Track which Python types are successfully added to each overload
+        param_py_scalar_map: defaultdict[
+            reflection.CallableParamKey,
+            defaultdict[PyTypeName, dict[_Callable_T, reflection.Type]],
         ] = defaultdict(lambda: defaultdict(dict))
 
-        for op_key, py_cast_ranking in py_cast_rankings.items():
-            for py_type, (
-                _,
-                overload_idx,
-                canon_type,
-            ) in py_cast_ranking.items():
-                py_casts[op_key][overload_idx][py_type] = canon_type
+        # Add Python type coercions in ranking order, avoiding overlaps
+        for param_key, param_py_ranks in param_py_overload_map.items():
+            potentially_overlapping_py_overloads = {
+                k: v
+                for k, v in annotated_overloads.items()
+                if k in param_overload_map[param_key]
+            }
+            for py_type, ranked_overloads in param_py_ranks.items():
+                # Process overloads in rank order (best matches first)
+                ranked_overloads.sort(key=operator.itemgetter(0))
+                for _, overload, st in ranked_overloads:
+                    overload_param_py_types = annotated_overloads[overload]
+                    param_py_types = overload_param_py_types[param_key]
+                    param_py_types.append(py_type)
+                    # Check if adding this Python type would cause overlap
+                    if self._would_cause_overlap(
+                        overload,
+                        overload_param_py_types,
+                        potentially_overlapping_py_overloads,
+                    ):
+                        param_py_types.pop()
+                    else:
+                        # Successfully added - record the mapping
+                        param_py_scalar_map[param_key][py_type][overload] = st
 
-        for op_key, overloads in opmap.items():
-            fnames, opname = op_key
-            opcls = op_classes[opname]
-            meth = ident(fnames[0])
-            param_py_types_map = py_casts[op_key]
-            overload = len(overloads) > 1
-            swapped_overloads: list[
-                tuple[
-                    dict[str, str],
-                    tuple[
-                        frozenset[reflection.AnyType],
-                        reflection.AnyType,
-                        str,
-                        str,
-                    ],
-                ]
-            ] = []
-            for i, (
-                (self_type, ret_type, ret_typemod),
-                other_types,
-            ) in enumerate(overloads.items()):
-                rtype = self.render_callable_return_type(
-                    ret_type,
-                    ret_typemod,
-                )
-                rtype_rt = self.render_callable_runtime_return_type(
-                    ret_type,
-                    ret_typemod,
-                )
-                other_type_union: list[str] = []
-                for t in other_types:
-                    tstr = self.get_type(t, import_time=ImportTime.typecheck)
-                    other_type_union.append(f"{type_}[{tstr}]")
-                    if reflection.is_primitive_type(t):
-                        other_type_union.append(tstr)
+        # Generate the final overload implementations with expanded types
+        for overload, params in annotated_overloads.items():
+            param_cast_map: dict[
+                reflection.CallableParamKey, dict[str, str]
+            ] = {}
+            param_type_unions: dict[
+                reflection.CallableParamKey, list[reflection.Type]
+            ] = {}
+            if excluded_param_types is not None:
+                overload_excluded_pt = excluded_param_types.get(overload)
+            else:
+                overload_excluded_pt = None
+            for param_idx, param_types in params.items():
+                param_type_union: list[reflection.Type] = []
+                py_coerce_map: dict[str, str] = {}
+                if overload_excluded_pt is not None:
+                    excluded = overload_excluded_pt.get(param_idx)
+                else:
+                    excluded = None
+                for t in param_types:
+                    if isinstance(t, reflection.Type):
+                        if excluded is not None and t in excluded:
+                            continue
+                        param_type_union.append(t)
+                    else:
+                        # Handle Python type coercions
+                        st = param_py_scalar_map[param_idx][t][overload]
+                        py_type = t
 
-                param_py_types = param_py_types_map.get(i)
-                if param_py_types:
-                    py_coerce_map: dict[str, str] = {}
-                    for py_type, stype in param_py_types.items():
+                        # Import the Python type symbol
                         if proto := _qbmodel.maybe_get_protocol_for_py_type(
                             py_type
                         ):
@@ -2055,226 +2698,27 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                                 *py_type, directly=False
                             )
 
+                        # Map Python type to canonical Gel scalar type
                         py_coerce_map[ptype_sym] = self.get_type(
-                            stype, import_time=ImportTime.late_runtime
-                        )
-                    other_type_union.extend(py_coerce_map)
-                    coerce_cases = {
-                        f"{py_tname}()": f"other = {s_tname}(other)"
-                        for py_tname, s_tname in py_coerce_map.items()
-                    }
-
-                    if len(fnames) > 1:
-                        swapped_overloads.append(
-                            (
-                                py_coerce_map,
-                                (self_type, ret_type, rtype, rtype_rt),
-                            )
-                        )
-                else:
-                    coerce_cases = None
-
-                other_type_union.sort()
-                other_type = " | ".join(other_type_union)
-
-                if style == "method":
-                    defn = self._method_def(
-                        meth,
-                        ["cls", f"other: {other_type}"],
-                        rtype,
-                        overload=overload,
-                        line_comment="type: ignore [override, unused-ignore]",
-                        implicit_param=False,
-                    )
-                else:
-                    self_type_str = " | ".join(
-                        sorted(
-                            self.get_type(
-                                st,
-                                import_time=ImportTime.typecheck,
-                            )
-                            for st in self_type
-                        )
-                    )
-                    defn = self._func_def(
-                        meth,
-                        [
-                            f"cls: {type_}[{self_type_str}]",
-                            f"other: {other_type}",
-                        ],
-                        rtype,
-                        overload=overload or bool(swapped_overloads),
-                    )
-
-                with defn:
-                    if coerce_cases:
-                        self.write("match other:")
-                        with self.indented():
-                            for cond, code in coerce_cases.items():
-                                self.write(f"case {cond}:")
-                                with self.indented():
-                                    self.write(code)
-                    if any(reflection.is_tuple_type(ot) for ot in other_types):
-                        self.write(
-                            f"rexpr: {expr_compat} = other"
-                            f"  # type: ignore [assignment]"
-                        )
-                    else:
-                        self.write(f"rexpr: {expr_compat} = other")
-
-                    args = [
-                        "lexpr=cls",
-                        f'op="{opname}"',
-                        "rexpr=rexpr",
-                        f"type_={self._render_obj_schema_path(ret_type)}",
-                    ]
-                    self.write(
-                        self.format_list(f"op = {opcls}({{list}})", args)
-                    )
-                    self.write(
-                        self.format_list(
-                            f"return {aexpr}({{list}})",
-                            [rtype_rt, "op"],
-                            first_line_comment="type: ignore [return-value]",
-                        )
-                    )
-                self.write()
-
-            num_swapped_overloads = len(swapped_overloads)
-            rmeth = ident(fnames[1]) if len(fnames) > 1 else meth
-            if overload and (meth != rmeth or num_swapped_overloads == 0):
-                dispatch = self.import_name(BASE_IMPL, "dispatch_overload")
-                if style == "method":
-                    with self._method_def(
-                        meth,
-                        ["cls", f"*args: {any_}", f"**kwargs: {any_}"],
-                        type_,
-                        implicit_param=False,
-                    ):
-                        self.write(
-                            f"return {dispatch}(cls.{meth}, *args, **kwargs)"
-                            f"  # type: ignore [no-any-return]"
-                        )
-                else:
-                    with self._func_def(
-                        meth,
-                        [f"*args: {any_}", f"**kwargs: {any_}"],
-                        type_,
-                    ):
-                        self.write(
-                            f"return {dispatch}({meth}, *args, **kwargs)"
-                            f"  # type: ignore [no-any-return]"
+                            st, import_time=ImportTime.late_runtime
                         )
 
-                self.write()
+                param_cast_map[param_idx] = py_coerce_map
+                param_type_unions[param_idx] = param_type_union
 
-            if num_swapped_overloads > 0:
-                expr_compat = self.import_name(BASE_IMPL, "ExprCompatible")
-                swapped_overload = num_swapped_overloads > 1 or rmeth == meth
-                for py_coerce_map, (
-                    self_type,
-                    ret_type,
-                    rtype,
-                    rtype_rt,
-                ) in swapped_overloads:
-                    rev_op_type = " | ".join(sorted(py_coerce_map))
+            # Generate the actual overload implementation
+            self._write_function_overload(
+                overload,
+                num_overloads_total=nominal_overloads_total,
+                param_types=param_type_unions,
+                cast_map=param_cast_map,
+                style=style,
+                type_ignore=type_ignore,
+                param_getter=param_getter,
+                node_ctor=node_ctor,
+            )
 
-                    if style == "method":
-                        defn = self._method_def(
-                            rmeth,
-                            ["cls", f"other: {rev_op_type}"],
-                            rtype,
-                            overload=swapped_overload,
-                            line_comment=(
-                                "type: ignore [override, unused-ignore]"
-                            ),
-                            implicit_param=False,
-                        )
-                    else:
-                        self_type_str = " | ".join(
-                            sorted(
-                                self.get_type(
-                                    st,
-                                    import_time=ImportTime.typecheck,
-                                )
-                                for st in self_type
-                            )
-                        )
-                        defn = self._func_def(
-                            rmeth,
-                            [
-                                f"other: {rev_op_type}",
-                                f"cls: {type_}[{self_type_str}]",
-                            ],
-                            rtype,
-                            overload=True,
-                        )
-
-                    with defn:
-                        self.write(f"operand: {expr_compat}")
-                        coerce_cases = {
-                            f"{py_tname}()": f"operand = {s_tname}(other)"
-                            for py_tname, s_tname in py_coerce_map.items()
-                        }
-                        coerce_cases["_"] = "operand = other"
-                        self.write("match other:")
-                        with self.indented():
-                            for cond, code in coerce_cases.items():
-                                self.write(f"case {cond}:")
-                                with self.indented():
-                                    self.write(code)
-
-                        args = [
-                            "lexpr=operand",
-                            f'op="{opname}"',
-                            "rexpr=cls",
-                            f"type_={self._render_obj_schema_path(ret_type)}",
-                        ]
-                        self.write(
-                            self.format_list(f"op = {opcls}({{list}})", args)
-                        )
-                        self.write(
-                            self.format_list(
-                                f"return {aexpr}({{list}})",
-                                [rtype_rt, "op"],
-                                first_line_comment=(
-                                    "type: ignore [return-value]"
-                                ),
-                            )
-                        )
-                    self.write()
-
-                if swapped_overload:
-                    dispatch = self.import_name(BASE_IMPL, "dispatch_overload")
-                    if style == "method":
-                        with self._method_def(
-                            rmeth,
-                            ["cls", f"*args: {any_}", f"**kwargs: {any_}"],
-                            type_,
-                            implicit_param=False,
-                        ):
-                            self.write(
-                                f"return {dispatch}(cls.{meth}, *args,"
-                                f" **kwargs)  # type: ignore [no-any-return]"
-                            )
-                    else:
-                        with self._func_def(
-                            rmeth,
-                            [f"*args: {any_}", f"**kwargs: {any_}"],
-                            type_,
-                        ):
-                            self.write(
-                                f"return {dispatch}({meth}, *args, **kwargs)"
-                                f"  # type: ignore [no-any-return]"
-                            )
-                    self.write()
-
-    def _render_obj_schema_path(
-        self,
-        obj: reflection.AnyType,
-    ) -> str:
-        schemapath = self.import_name(BASE_IMPL, "SchemaPath")
-        return obj.schemapath.as_code(schemapath)
+            self.write()
 
     def write_object_types(
         self,
@@ -2454,17 +2898,13 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         class_kwargs = {}
 
         if not base_types:
-            bin_ops = self._operators.binary_ops.get(objtype.id, [])
-            un_ops = self._operators.unary_ops.get(objtype.id, [])
-            un_ops = [op for op in un_ops if op.py_magic is not None]
             metaclass = f"__{name}_ops__"
 
             with self._class_def(metaclass, meta_base_types):
-                if not bin_ops and not un_ops:
+                un_ops = self._write_prefix_operator_methods(objtype)
+                bin_ops = self._write_infix_operator_methods(objtype)
+                if not un_ops and not bin_ops:
                     self.write("pass")
-                else:
-                    self._write_prefix_operator_methods(un_ops)
-                    self._write_infix_operator_methods(bin_ops)
             with self.type_checking():
                 self.write(f"__{name}_meta__ = __{name}_ops__")
             with self.not_type_checking():
@@ -3151,169 +3591,760 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                 self.write("pass")
                 self.write()
 
-    def write_functions(self, functions: list[reflection.Function]) -> None:
-        param_map: defaultdict[str, defaultdict[str, set[str]]] = defaultdict(
-            lambda: defaultdict(set)
-        )
-        funcmap: defaultdict[str, list[reflection.Function]] = defaultdict(
-            list
-        )
-        for function in functions:
-            for param in function.params:
-                param_map[function.name][param.name].add(param.type.id)
-            funcname = reflection.parse_name(function.name)
-            funcmap[funcname.name].append(function)
-
-        for fname, overloads in funcmap.items():
-            self._write_function(fname, overloads, param_map)
-
-    def _write_function(
+    def write_functions(
         self,
-        fname: str,
-        overloads: list[reflection.Function],
-        param_map: defaultdict[str, defaultdict[str, set[str]]],
+        functions: list[reflection.Function],
+        *,
+        style: Literal["constructor", "method", "function"] = "function",
+        type_ignore: Sequence[str] = (),
     ) -> None:
-        if len(overloads) > 1:
-            for overload in overloads:
-                self._write_function_overload(
-                    overload, param_map, overload=True
-                )
-            any_ = self.import_name(
-                "typing", "Any", import_time=ImportTime.typecheck
+        self._write_callables(functions, style=style, type_ignore=type_ignore)
+
+    def _get_type_generality_score(self, fn: reflection.Callable) -> int:
+        """Calculate how generic a function is based on its parameter and
+        return types. Lower score means more specific, higher score means
+        more general.
+        """
+        score = 0
+
+        # Score based on return type
+        return_type = self._types[fn.return_type.id]
+        # Generic types get a higher score
+        if return_type.contained_generics(self._types):
+            score += 100
+
+        # Score based on inheritance depth
+        if isinstance(return_type, reflection.InheritingType):
+            score += len(return_type.ancestors)
+
+        # Score based on parameter types
+        for param in fn.params:
+            param_type = self._types.get(param.type.id)
+            if param_type:
+                # Generic types get a higher score
+                if param_type.contained_generics(self._types):
+                    score += 100
+
+                # Score based on inheritance depth
+                if isinstance(param_type, reflection.InheritingType):
+                    score += len(param_type.ancestors)
+
+        return score
+
+    def _sort_and_minimize_overloads(
+        self,
+        overloads: Sequence[_Callable_T],
+        param_getter: reflection.CallableParamGetter[_Callable_T],
+    ) -> Sequence[_Callable_T]:
+        """Minimize the number of overloads by removing those that are subsumed
+        by more general ones, and sort them from least generic to most generic.
+        """
+
+        if len(overloads) <= 1:
+            return overloads
+
+        schema = self._types
+
+        def assignable(a: _Callable_T, b: _Callable_T) -> bool:
+            return a.assignable_from(
+                b, schema=schema, param_getter=param_getter
             )
-            gel_type_t = self.import_name(
-                BASE_IMPL, "GelType", import_time=ImportTime.typecheck
-            )
-            type_t = self.import_name(
-                "builtins", "type", import_time=ImportTime.typecheck
-            )
-            dispatch = self.import_name(BASE_IMPL, "dispatch_overload")
-            with self._func_def(
-                fname,
-                [f"*args: {any_}", f"**kwargs: {any_}"],
-                f"{type_t}[{gel_type_t}]",
-            ):
-                self.write(
-                    f"return {dispatch}({fname}, *args, **kwargs)"
-                    f"  # type: ignore [no-any-return]"
-                )
-            self.write()
+
+        # Remove overloads that can be assigned to more general overloads.
+        minimized: list[_Callable_T] = []
+        for fn in overloads:
+            # Check if this function is subsumed by any function already in
+            # minimized
+            if not any(assignable(existing, fn) for existing in minimized):
+                # If not subsumed, add it and remove any functions it subsumes
+                minimized = [ex for ex in minimized if not assignable(fn, ex)]
+                minimized.append(fn)
+
+        # Sort by generality score (less generic first)
+        return sorted(minimized, key=self._get_type_generality_score)
+
+    def _write_function_overload_dispatcher(
+        self,
+        function: reflection.Callable,
+        *,
+        style: Literal["constructor", "method", "function"] = "function",
+        type_ignore: Sequence[str] = (),
+    ) -> None:
+        any_ = self.import_name(
+            "typing", "Any", import_time=ImportTime.typecheck
+        )
+        dispatch = self.import_name(BASE_IMPL, "dispatch_overload")
+        fdef = (
+            self._method_def
+            if style in {"method", "constructor"}
+            else self._func_def
+        )
+        fdef = (
+            self._method_def
+            if style in {"method", "constructor"}
+            else self._func_def
+        )
+        params = [f"*args: {any_}", f"**kwargs: {any_}"]
+        if style == "constructor":
+            fdef_name = "__new__"
+            params.insert(0, "cls")
+            implicit_param = False
         else:
-            self._write_function_overload(
-                overloads[0],
-                param_map,
-                overload=False,
-                allow_pybase_args=True,
+            fdef_name = ident(function.ident)
+            implicit_param = True
+
+        with fdef(
+            fdef_name,
+            params,
+            any_,
+            type_ignore=type_ignore,
+            implicit_param=implicit_param,
+            decorators=(dispatch,),
+        ):
+            self.write("pass")
+        self.write()
+
+    def _would_cause_overlap(
+        self,
+        overload: _Callable_T,
+        overload_param_types: reflection.CallableParamTypeMap,
+        other_overloads: dict[_Callable_T, reflection.CallableParamTypeMap],
+    ) -> bool:
+        """Check if adding a type to a parameter union in a callable form
+        would cause an overload overlap.
+        """
+        schema = self._types
+        return bool(other_overloads) and any(
+            overload != other_overload
+            and overload.overlaps(
+                other_overload,
+                param_types=other_param_types,
+                other_param_types=overload_param_types,
+                schema=schema,
             )
+            for other_overload, other_param_types in other_overloads.items()
+        )
+
+    def _partition_function_params(
+        self,
+        params: list[str],
+        omittable_params: set[str],
+        nullable_params: Mapping[str, str],
+        params_casts: Mapping[str, str],
+    ) -> tuple[list[str], list[str]]:
+        """Partition function parameters into mandatory and omittable groups
+        with transformations.
+
+        Takes a list of parameter names and applies various transformations
+        based on their characteristics (nullable, requiring casts, etc.), then
+        splits them into two groups for code generation purposes.
+
+        Args:
+            params: List of all parameter names to process
+            omittable_params: Set of parameter names that can be omitted
+            nullable_params: Map of parameter names that can be empty along
+                             with their canonical type.
+            params_casts: Mapping from parameter names to type strings for
+                          parameters requiring casts
+
+        Returns:
+            Tuple of (mandatory_params, omittable_params) where each list
+            contains the processed parameter expressions ready for code
+            generation. Nullable parameters are wrapped with
+            empty_set_if_none() calls, and parameters requiring casts are
+            wrapped with typing.cast() calls.
+        """
+        mandatory = [a for a in params if a not in omittable_params]
+        omittable = [a for a in params if a in omittable_params]
+
+        if nullable_params:
+            empty_set = self.import_name(BASE_IMPL, "empty_set_if_none")
+            mandatory = [
+                (
+                    f"{empty_set}({a}, {st})"
+                    if (st := nullable_params.get(a)) is not None
+                    else a
+                )
+                for a in mandatory
+            ]
+
+            omittable = [
+                (
+                    f"{empty_set}({a}, {st})"
+                    if (st := nullable_params.get(a)) is not None
+                    else a
+                )
+                for a in omittable
+            ]
+
+        if params_casts:
+            cast_ = self.import_name("typing", "cast")
+
+            mandatory = [
+                (
+                    f"{cast_}({t!r}, {a})"
+                    if (t := params_casts.get(a)) is not None
+                    else a
+                )
+                for a in mandatory
+            ]
+
+            omittable = [
+                (
+                    f"{cast_}({t!r}, {a})"
+                    if (t := params_casts.get(a)) is not None
+                    else a
+                )
+                for a in omittable
+            ]
+
+        return mandatory, omittable
+
+    def _write_function_positional_args_collection(
+        self,
+        params: list[str],
+        omittable_params: set[str],
+        nullable_params: Mapping[str, str],
+        *,
+        variadic_name: str | None,
+        var: str,
+        params_casts: Mapping[str, str],
+    ) -> None:
+        """Generate code to collect positional function arguments into a list.
+
+        Creates a list variable containing all positional arguments, filtering
+        out any omittable parameters that have Unspecified values at runtime.
+
+        Args:
+            params: Names of all positional parameters
+            omittable_params: Set of parameter names that can be omitted
+            nullable_params: Map of parameter names that can be empty along
+                             with their canonical type.
+            variadic_name: Name of variadic parameter if any.
+            params_casts: Type checking workarounds for buggy situations.
+            var: Name of the variable to assign the argument list to.
+        """
+        expr_compat = self.import_name(BASE_IMPL, "ExprCompatible")
+        list_ = self.import_name("builtins", "list")
+
+        args_def = f"{var}: {list_}[{expr_compat}]"
+        mandatory, omittable = self._partition_function_params(
+            params, omittable_params, nullable_params, params_casts
+        )
+        if omittable or variadic_name:
+            unsp_t = self.import_name(BASE_IMPL, "UnspecifiedType")
+            isinst = self.import_name("builtins", "isinstance", directly=True)
+
+            def write_omittable() -> None:
+                # Filter out unspecified
+                self.write("__v__")
+                self.write(
+                    self.format_list("for __v__ in ({list})", omittable)
+                )
+                self.write(f"if not {isinst}(__v__, {unsp_t})")
+
+            self.write(f"{args_def} = [")
+            with self.indented():
+                # Include all mandatory parameters first
+                if mandatory:
+                    self.write(self.format_list("*({list}),", mandatory))
+                if omittable:
+                    self.write("*(")
+                    with self.indented():
+                        write_omittable()
+                    self.write("),")
+                if variadic_name:
+                    # Note that we don't use variadic_name directly here
+                    # because it might have been transformed by the
+                    # type coercion block.
+                    self.write("*__variadic__,")
+            self.write("]")
+        else:
+            # Simple case: all parameters are mandatory
+            self.write(
+                self.format_list(f"{args_def} = [{{list}}]", mandatory),
+            )
+
+    def _write_function_keyword_args_collection(
+        self,
+        params: list[str],
+        omittable_params: set[str],
+        nullable_params: Mapping[str, str],
+        *,
+        var: str,
+        params_casts: Mapping[str, str],
+    ) -> None:
+        """Generate code to collect keyword function arguments into a
+        dictionary.
+
+        Creates a dictionary variable containing all keyword arguments,
+        filtering out any omittable parameters that have Unspecified values at
+        runtime.
+
+        Args:
+            params: Names of all keyword parameters
+            omittable_params: Set of parameter names that can be omitted
+            nullable_params: Map of parameter names that can be empty along
+                             with their canonical type.
+            params_casts: Type checking workarounds for buggy situations.
+            var: Name of the variable to assign the argument list to.
+        """
+        expr_compat = self.import_name(BASE_IMPL, "ExprCompatible")
+        dict_ = self.import_name("builtins", "dict")
+        str_ = self.import_name("builtins", "str")
+
+        args_def = f"{var}: {dict_}[{str_}, {expr_compat}]"
+        mandatory, omittable = self._partition_function_params(
+            params, omittable_params, nullable_params, params_casts
+        )
+        if omittable:
+            unsp_t = self.import_name(BASE_IMPL, "UnspecifiedType")
+            isinst = self.import_name("builtins", "isinstance", directly=True)
+
+            def write_omittable() -> None:
+                # Generate dict comprehension to filter out Unspecified values
+                self.write("__k__: __v__")
+                self.write(
+                    self.format_list(
+                        "for __k__, __v__ in {{{list}}}.items()",
+                        [f'"{n}": {n}' for n in omittable],
+                    )
+                )
+                self.write(f"if not {isinst}(__v__, {unsp_t})")
+
+            self.write(f"{args_def} = {{")
+            with self.indented():
+                if mandatory:
+                    # Include all mandatory parameters first
+                    self.write(
+                        self.format_list(
+                            "**{{{list}}},",
+                            [f'"{n}": {n}' for n in mandatory],
+                        ),
+                    )
+                    self.write("**{")
+                    with self.indented():
+                        write_omittable()
+                    self.write("},")
+                else:
+                    write_omittable()
+            self.write("}")
+        else:
+            # Simple case: all parameters are mandatory
+            self.write(
+                self.format_list(
+                    f"{args_def} = {{{{{{list}}}}}}",
+                    [f'"{n}": {n}' for n in mandatory],
+                ),
+            )
+
+    def _write_func_node_ctor(
+        self,
+        function: reflection.Callable,
+    ) -> None:
+        fcall = self.import_name(BASE_IMPL, "FuncCall")
+        self.write(f"{fcall}(")
+        sig = function.signature
+        with self.indented():
+            self.write(f'fname="{function.name}",')
+            if sig.num_pos > 0 or sig.has_variadic:
+                self.write("args=__args__,")
+            if bool(sig.kwargs):
+                self.write("kwargs=__kwargs__,")
+            self.write("type_=__rtype__.__gel_reflection__.name,")
+        self.write(")")
 
     def _write_function_overload(
         self,
-        function: reflection.Function,
-        param_map: defaultdict[str, defaultdict[str, set[str]]],
+        function: _Callable_T,
         *,
-        overload: bool,
-        generic_signature: bool = False,
-        allow_pybase_args: bool = False,
+        num_overloads_total: int,
+        param_types: Mapping[
+            reflection.CallableParamKey,
+            Sequence[reflection.Type],
+        ]
+        | None = None,
+        cast_map: Mapping[reflection.CallableParamKey, dict[str, str]]
+        | None = None,
+        style: Literal["constructor", "method", "function"] = "function",
+        type_ignore: Sequence[str] = (),
+        param_getter: Callable[
+            [_Callable_T], Iterable[reflection.CallableParam]
+        ] = operator.attrgetter("params"),
+        node_ctor: Callable[[_Callable_T], None] | None = None,
     ) -> None:
-        name = reflection.parse_name(function.name)
-        args = []
-        arg_names: list[str] = []
+        """Generate a single function overload with proper type resolution.
+
+        This is a complex code generator that handles Gel function overloads
+        with support for generics, type casting, optional parameters, and
+        runtime type inference. The generated code includes both static type
+        annotations and runtime type resolution logic.
+
+        Key behaviors:
+        - Generic types are resolved at runtime by inspecting parameter types
+        - Constructor-style functions get special generic type fallback
+          handling
+        - Tuple parameters get ExprCompatible casting to work around type
+          system limitations
+        - Optional parameters are handled with proper null checking and
+          default values
+        - Generated functions return AnnotatedExpr objects for Gel query
+          building
+
+        Args:
+            function: The callable object to generate code for.
+            num_overloads_total: Total number of overloads (affects @overload
+                decorator usage).
+            param_types: Override parameter types for this specific overload.
+            cast_map: Additional type casts to apply to specific parameters.
+            style: Style of callable to generate (method, function, ctor).
+            type_ignore: Type ignore codes to annotate generated `def` with.
+            param_getter:
+                attribute)
+            node_ctor: QB node constructor (default is _write_func_node_ctor).
+        """
+        params = []
         kwargs = []
-        kwarg_names: list[str] = []
-        variadic = None
-        for param in function.params:
-            pt = self.render_callable_sig_type(
-                self._types[param.type.id],
+        pos_names: list[str] = []
+        kw_names: list[str] = []
+        variadic: str | None = None
+
+        generic_param_map = function.generics(self._types)
+        # Create TypeVars for generic params
+        typevars: dict[reflection.Type, str] = {}
+        for typ in itertools.chain.from_iterable(generic_param_map.values()):
+            typevar_name = f"_T_{ident(typ.schemapath.name)}"
+            bound = self.get_type(
+                typ,
+                import_time=ImportTime.typecheck,
+            )
+            typevars[typ] = self.declare_typevar(
+                typevar_name,
+                bound=bound,
+            )
+
+        required_generic_params: set[str] = set()
+        optional_generic_params: set[str] = set()
+        omittable_params: set[str] = set()
+        param_workaround_casts: dict[str, str] = {}
+        nullable_param_types: dict[str, reflection.Type] = {}
+        generic_params: defaultdict[
+            reflection.Type,
+            set[tuple[reflection.CallableParam, Indirection]],
+        ] = defaultdict(set)
+        for param in param_getter(function):
+            # Track which parameters contribute to generic type resolution
+            if (generics := generic_param_map.get(param.key)) is not None:
+                for gt, paths in generics.items():
+                    for path in paths:
+                        generic_params[gt].add((param, path))
+                # Required params used first for generic type inference
+                # at runtime.
+                if (
+                    param.default is None
+                    and param.typemod is not reflection.TypeModifier.Optional
+                ):
+                    required_generic_params.add(param.name)
+                else:
+                    optional_generic_params.add(param.name)
+
+            if param.default is not None:
+                omittable_params.add(param.name)
+
+            if param_types is not None:
+                param_type = param_types.get(param.key)
+            else:
+                param_type = None
+            if param_type is None:
+                param_type = [self._types[param.type.id]]
+
+            if param.typemod is TypeModifier.Optional:
+                nullable_param_types[param.name] = param_type[0]
+
+            # Tuple types need special handling due to a possible mypy bug.
+            if any(reflection.is_tuple_type(t) for t in param_type):
+                expr_compat = self.import_name(BASE_IMPL, "ExprCompatible")
+                param_workaround_casts[param.name] = expr_compat
+
+            # Build the union type for parameter.
+            union = []
+            for item in param_type:
+                # The type class (i.e another qb expression)
+                pt_str = self.get_type_type(
+                    item,
+                    import_time=ImportTime.late_runtime,
+                    typevars=typevars,
+                )
+                union.append(pt_str)
+                # For primitives, also accept the values
+                if reflection.is_primitive_type(item):
+                    pt_str = self.get_type(
+                        item,
+                        import_time=ImportTime.late_runtime,
+                        typevars=typevars,
+                    )
+                    union.append(pt_str)
+
+            if cast_map is not None and (
+                (param_casts := cast_map.get(param.key)) is not None
+            ):
+                union.extend(param_casts)
+
+            pt = self._render_callable_sig_type(
+                " | ".join(sorted(union)),
                 param.typemod,
                 param.default,
-                include_pybase=allow_pybase_args,
             )
+            pident = ident(param.name)
+
             param_decl = f"{param.name}: {pt}"
             if param.kind == reflection.CallableParamKind.Positional:
-                args.append(param_decl)
-                arg_names.append(param.name)
+                params.append(param_decl)
+                pos_names.append(pident)
             elif param.kind == reflection.CallableParamKind.Variadic:
+                # Gel functions should have at most one variadic parameter
                 if variadic is not None:
                     raise AssertionError(
-                        f"multiple variadict parameters declared "
-                        f"in function {name}"
+                        f"multiple variadic parameters "
+                        f"declared in {function.name}"
                     )
                 variadic = param_decl
             elif param.kind == reflection.CallableParamKind.NamedOnly:
                 kwargs.append(param_decl)
-                kwarg_names.append(param.name)
+                kw_names.append(pident)
             else:
                 raise AssertionError(
-                    f"unexpected parameter kind in {name}: {param.kind}"
+                    f"unexpected parameter kind in {function.name}: "
+                    f"{param.kind}"
                 )
 
-        if variadic is None and kwargs:
-            args.append("*")
-        args.extend(kwargs)
+        if variadic is not None:
+            params.append(f"*{variadic}")
+        elif kwargs:
+            params.append("*")
+        params.extend(kwargs)
 
         ret_type = self._types[function.return_type.id]
         rtype = self.render_callable_return_type(
             ret_type,
             function.return_typemod,
+            typevars=typevars,
+            import_time=ImportTime.late_runtime,
         )
 
-        rtype_rt = self.render_callable_runtime_return_type(
-            ret_type,
-            function.return_typemod,
+        fname = ident(function.ident)
+        fdef = (
+            self._method_def
+            if style in {"method", "constructor"}
+            else self._func_def
         )
+        def_kwargs: dict[str, Any] = {}
+        # Constructor functions use __new__ and need explicit cls parameter
+        if style == "constructor":
+            fname = "__new__"
+            params.insert(0, "cls")
+            def_kwargs["implicit_param"] = False
 
-        fname = ident(name.name)
-
-        if overload:
-            line_comment = (
-                "type: ignore [overload-cannot-match, unused-ignore]"
-            )
-        else:
-            line_comment = None
-
-        with self._func_def(
+        with fdef(
             fname,
-            args,
+            params,
             rtype,
-            overload=overload,
-            line_comment=line_comment,
+            overload=num_overloads_total > 1,
+            type_ignore=type_ignore,
+            **def_kwargs,
         ):
             aexpr = self.import_name(BASE_IMPL, "AnnotatedExpr")
-            fcall = self.import_name(BASE_IMPL, "FuncCall")
             unsp = self.import_name(BASE_IMPL, "Unspecified")
-            any_ = self.import_name("typing", "Any")
-            dict_ = self.import_name("builtins", "dict")
-            str_ = self.import_name("builtins", "str")
+            expr_compat = self.import_name(BASE_IMPL, "ExprCompatible")
             list_ = self.import_name("builtins", "list")
-            self.write(
-                self.format_list(
-                    f"args: {list_}[{any_}] = [{{list}}]",
-                    arg_names,
-                ),
-            )
-            self.write(
-                self.format_list(
-                    f"kw: {dict_}[{str_}, {any_}] = {{{{{{list}}}}}}",
-                    [f'"{n}": {n}' for n in kwarg_names],
+
+            if cast_map is None:
+                cast_map = {}
+
+            # Build a `match` block for Python-to-Gel coercion of values.
+            for param in function.params:
+                if param_cast := cast_map.get(param.key):
+                    pident = ident(param.name)
+                    if param.is_variadic:
+                        new_list = "__variadic__"
+                        self.write(f"{new_list}: {list_}[{expr_compat}] = []")
+                        it = f"{dunder(param.name)}el__"
+                        self.write(f"for {it} in {pident}:")
+                        with self.indented():
+                            self.write(f"match {it}:")
+                            with self.indented():
+                                for py_type, cast_t in param_cast.items():
+                                    self.write(f"case {py_type}():")
+                                    with self.indented():
+                                        self.write(f"{it} = {cast_t}({it})")
+                            self.write(f"{new_list}.append({it})")
+                    else:
+                        self.write(f"match {pident}:")
+                        with self.indented():
+                            for py_type, cast_t in param_cast.items():
+                                self.write(f"case {py_type}():")
+                                with self.indented():
+                                    self.write(
+                                        f"{pident} = {cast_t}({pident})"
+                                    )
+                elif param.is_variadic:
+                    self.write(f"__variadic__ = {ident(param.name)}")
+
+            rt_generics = generic_param_map.get("__return__")
+            if rt_generics is None and not optional_generic_params:
+                # Simple case: no generic type inference needed
+                rtype_rt = self.get_type(
+                    ret_type,
+                    import_time=ImportTime.late_runtime,
                 )
+                nullable_params = {
+                    n: self.get_type(
+                        t,
+                        import_time=ImportTime.late_runtime,
+                        typevars=typevars,
+                    )
+                    for n, t in nullable_param_types.items()
+                }
+            else:
+                # Need runtime generic type inference
+                isinstance_ = self.import_name("builtins", "isinstance")
+                alias = self.import_name(BASE_IMPL, "BaseAlias")
+                anytype = self.get_type_type(
+                    self._types_by_name["anytype"],
+                    import_time=ImportTime.typecheck,
+                )
+                rtypevars = {}
+                for gt in typevars:
+                    sources = generic_params[gt]
+                    gtvar = dunder(gt.name)  # e.g., __anytype__
+                    rtypevars[gt] = gtvar
+                    self.write(f"{gtvar}: {anytype}")
+
+                    def resolve(
+                        pn: str, path: Indirection, gtvar: str = gtvar
+                    ) -> None:
+                        """Navigate type indirection *path* and assign
+                        the result to *gtvar* for a *pn* parameter."""
+
+                        # Majority of non-value arguments would be other
+                        # qb expressions aka ExprAlias.
+                        self.write(
+                            f"__t__ = {pn}.__gel_origin__ "
+                            f"if {isinstance_}({pn}, {alias}) "
+                            f"else {pn}"
+                        )
+                        # Navigate through type path (e.g., container elements)
+                        if path:
+                            t = "__t__." + ".".join(
+                                f"{s[0]}[{s[1]}]"
+                                if isinstance(s, tuple)
+                                else s
+                                for s in path
+                            )
+                        else:
+                            t = "__t__"
+
+                        self.write(
+                            f"{gtvar} = {t}  "
+                            f"# type: ignore [assignment, misc, unused-ignore]"
+                        )
+
+                    # Try to infer generic type from required params first
+                    for param, path in sources:
+                        if param.name in required_generic_params:
+                            pn = ident(param.name)
+                            resolve(pn, path)
+                            break
+                    else:
+                        # Fall back to optional params with null/unspecified
+                        # checks
+                        for i, (param, path) in enumerate(sources):
+                            pn = ident(param.name)
+                            conds = []
+                            if (
+                                param.typemod
+                                is reflection.TypeModifier.Optional
+                            ):
+                                conds.append(f"{pn} is not None")
+                            if param.default is not None:
+                                conds.append(f"{pn} is not {unsp}")
+                            cond = " and ".join(conds)
+                            ctl = self.if_ if i == 0 else self.elif_
+                            with ctl(cond):
+                                resolve(pn, path)
+
+                        with self.else_():
+                            # Special handling for single-generic constructors
+                            # e.g std::range()
+                            if style == "constructor" and len(typevars) == 1:
+                                self.write("try:")
+                                with self.indented():
+                                    self.write(
+                                        f"{gtvar} = cls.__element_type__"
+                                    )
+                                self.write("except AttributeError:")
+                                with self.indented():
+                                    fname = function.schemapath.name
+                                    msg = (
+                                        f"empty `{fname}` must be "
+                                        f"explicitly parametrized, for example"
+                                        f": `{fname}[std.int64]`"
+                                    )
+                                    self.write(
+                                        f"raise TypeError({msg!r}) from None"
+                                    )
+                            else:
+                                # Default to the generic type itself
+                                # TODO: should we raise instead?
+                                gt_t = self.get_type(gt)
+                                self.write(f"{gtvar} = {gt_t}")
+
+                # Use the resolved runtime type variables
+                # for return type generic.
+                rtype_rt = self.get_type(ret_type, typevars=rtypevars)
+                nullable_params = {
+                    n: self.get_type(
+                        t,
+                        import_time=ImportTime.late_runtime,
+                        typevars=rtypevars,
+                    )
+                    for n, t in nullable_param_types.items()
+                }
+
+            # Generate positional argument collection code (__args__ tuple)
+            if pos_names or variadic:
+                self._write_function_positional_args_collection(
+                    pos_names,
+                    omittable_params,
+                    nullable_params,
+                    variadic_name=variadic,
+                    params_casts=param_workaround_casts,
+                    var="__args__",
+                )
+
+            # Generate keyword argument collection code (__kwargs__ dict)
+            if kw_names:
+                self._write_function_keyword_args_collection(
+                    kw_names,
+                    omittable_params,
+                    nullable_params,
+                    params_casts=param_workaround_casts,
+                    var="__kwargs__",
+                )
+
+            self.write(
+                f"__rtype__ = {rtype_rt}  "
+                f"# type: ignore [valid-type, unused-ignore]"
             )
+            # The result is always an ExprAlias with return type origin
+            # and the expression in the metadata.
             self.write(f"return {aexpr}(  # type: ignore [return-value]")
+            if node_ctor is None:
+                node_ctor = self._write_func_node_ctor
             with self.indented():
-                self.write(f"{rtype_rt},")
-                self.write(f"{fcall}(")
-                with self.indented():
-                    self.write(f'fname="{function.name}",')
-                    self.write(
-                        f"args=[v for v in args if v is not {unsp}],",
-                    )
-                    self.write(
-                        f"kwargs={{n: v for n, v in kw.items() "
-                        f"if v is not {unsp}}},"
-                    )
-                    self.write(
-                        f"type_={self._render_obj_schema_path(ret_type)},"
-                    )
-                self.write(")")
+                self.write("__rtype__,")
+                # Generate the actual qb node (FuncCall, etc.)
+                node_ctor(function)
             self.write(")")
 
         self.write()
@@ -3570,11 +4601,11 @@ class GeneratedGlobalModule(BaseGeneratedModule):
     ) -> bool:
         return py_file.has_content()
 
-    def process(self, types: Mapping[str, reflection.AnyType]) -> None:
+    def process(self, types: Mapping[str, reflection.Type]) -> None:
         graph: defaultdict[str, set[str]] = defaultdict(set)
 
         @functools.singledispatch
-        def type_dispatch(t: reflection.AnyType, ref_t: str) -> None:
+        def type_dispatch(t: reflection.Type, ref_t: str) -> None:
             if reflection.is_named_tuple_type(t):
                 graph[ref_t].add(t.id)
                 for elem in t.tuple_elements:
