@@ -383,6 +383,28 @@ class TestModelGenerator(tb.ModelTestCase):
         )
 
     @tb.typecheck
+    def test_modelgen_query_methods_on_instances(self):
+        import models
+
+        q = models.default.Post.limit(1).__gel_assert_single__()
+        d = self.client.query(q)[0]
+
+        for method in (
+            "delete",
+            "update",
+            "select",
+            "filter",
+            "order_by",
+            "limit",
+            "offset",
+        ):
+            with self.assertRaisesRegex(
+                AttributeError,
+                "class-only method",
+            ):
+                getattr(d, method)
+
+    @tb.typecheck
     def test_modelgen_data_model_validation_1(self):
         from typing import cast
         from gel._internal._dlist import DistinctList
@@ -424,7 +446,7 @@ class TestModelGenerator(tb.ModelTestCase):
 
         # Check that `groups` is not an allowed keyword-arg for `User.update`
         self.assertEqual(
-            reveal_type(u.update),
+            reveal_type(default.User.update),
             "def (*, "
             "name: Union[builtins.str, type[models.__variants__.std.str], "
             "gel._internal._utils.UnspecifiedType] =, "

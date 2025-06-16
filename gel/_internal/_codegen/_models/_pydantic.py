@@ -497,19 +497,54 @@ CORE_OBJECTS = {
 }
 
 
+def _filter_pointers(
+    pointers: Iterable[tuple[reflection.Pointer, reflection.ObjectType]],
+    filters: Iterable[
+        Callable[[reflection.Pointer, reflection.ObjectType], bool]
+    ] = (),
+    *,
+    owned_only: bool = True,
+    exclude_id: bool = True,
+    exclude_type: bool = True,
+) -> list[tuple[reflection.Pointer, reflection.ObjectType]]:
+    excluded = set()
+    if exclude_id:
+        excluded.add("id")
+    if exclude_type:
+        excluded.add("__type__")
+    if excluded:
+        filters = [lambda ptr, obj: ptr.name not in excluded, *filters]
+    else:
+        filters = list(filters)
+
+    filters.append(
+        lambda ptr, obj: (
+            obj.schemapath.parts[0] != "schema"
+            or not ptr.name.startswith("is_")
+            or not ptr.is_computed
+        )
+    )
+
+    return [
+        (ptr, objtype)
+        for ptr, objtype in pointers
+        if all(f(ptr, objtype) for f in filters)
+    ]
+
+
 def _get_object_type_body(
     objtype: reflection.ObjectType,
-    filters: Iterable[Callable[[reflection.Pointer], bool]] = (),
+    filters: Iterable[
+        Callable[[reflection.Pointer, reflection.ObjectType], bool]
+    ] = (),
 ) -> list[reflection.Pointer]:
-    filters = [
-        lambda ptr: ptr.name not in {"id", "__type__"},
-        *filters,
-    ]
-    if objtype.name.startswith("schema::"):
-        filters.append(
-            lambda ptr: not ptr.name.startswith("is_") or not ptr.is_computed
+    return [
+        p
+        for p, _ in _filter_pointers(
+            ((ptr, objtype) for ptr in objtype.pointers),
+            filters,
         )
-    return [ptr for ptr in objtype.pointers if all(f(ptr) for f in filters)]
+    ]
 
 
 class BaseGeneratedModule:
@@ -2261,29 +2296,37 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         self.write()
         self.write()
 
-        class_kwargs = {}
-        class_r_kwargs = {"__gel_type_id__": f"{uuid}(int={objtype.uuid.int})"}
+        gel_model_meta = self.import_name(BASE_IMPL, "GelModelMeta")
         if not base_types:
             gel_model = self.import_name(BASE_IMPL, "GelModel")
+            meta_base_types = [gel_model_meta]
             vbase_types = [gel_model]
+        else:
+            meta_base_types = _map_name(lambda s: f"__{s}_ops__", base_types)
+            vbase_types = base_types
+
+        class_kwargs = {}
+
+        if not base_types:
             bin_ops = self._operators.binary_ops.get(objtype.id, [])
             un_ops = self._operators.unary_ops.get(objtype.id, [])
-            gel_model_meta = self.import_name(BASE_IMPL, "GelModelMeta")
             metaclass = f"__{name}_ops__"
-            with self._class_def(metaclass, [gel_model_meta]):
+
+            with self._class_def(metaclass, meta_base_types):
                 if not bin_ops and not un_ops:
                     self.write("pass")
                 else:
                     self.write_unary_operator_overloads(un_ops)
                     self.write_binary_operator_overloads(bin_ops)
+
             with self.type_checking():
                 self.write(f"__{name}_meta__ = __{name}_ops__")
             with self.not_type_checking():
                 self.write(f"__{name}_meta__ = {gel_model_meta}")
-            class_kwargs["metaclass"] = f"__{name}_meta__"
-        else:
-            vbase_types = base_types
 
+            class_kwargs["metaclass"] = f"__{name}_meta__"
+
+        class_r_kwargs = {"__gel_type_id__": f"{uuid}(int={objtype.uuid.int})"}
         with self._class_def(
             name,
             [typeof_class, *vbase_types],
@@ -2293,6 +2336,8 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                 with self.not_type_checking():
                     self.write(f"__gel_type_class__ = __{name}_ops__")
             self._write_base_object_type_body(objtype, typeof_class)
+            with self.type_checking():
+                self._write_object_type_qb_methods(objtype)
             self.write()
 
             with self._class_def(
@@ -2315,6 +2360,8 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                     inherit_from_base_variant=False,
                 ):
                     self._write_base_object_type_body(objtype, typeof_class)
+                    with self.type_checking():
+                        self._write_object_type_qb_methods(objtype)
 
                 with self._object_type_variant(
                     objtype,
@@ -2326,7 +2373,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                 ):
                     ptrs = _get_object_type_body(
                         objtype,
-                        filters=[lambda ptr: not ptr.card.is_optional()],
+                        filters=[lambda ptr, _: not ptr.card.is_optional()],
                     )
                     if ptrs:
                         localns = frozenset(ptr.name for ptr in ptrs)
@@ -2464,88 +2511,26 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         ):
             yield
 
-    def _write_base_object_type_body(
+    def _write_object_type_qb_methods(
         self,
         objtype: reflection.ObjectType,
-        typeof_class: str,
     ) -> None:
-        if objtype.name == "std::BaseObject":
-            gmm = self.import_name(BASE_IMPL, "GelModelMeta")
-            for ptr in objtype.pointers:
-                if ptr.name == "__type__":
-                    ptr_type = self.get_ptr_type(
-                        objtype,
-                        ptr,
-                        aspect=ModuleAspect.MAIN,
-                        cardinality=reflection.Cardinality.One,
-                    )
-                    with self._property_def(ptr.name, [], ptr_type):
-                        self.write(
-                            "tid = self.__class__.__gel_reflection__.id"
-                        )
-                        self.write(f"actualcls = {gmm}.get_class_by_id(tid)")
-                        self.write(
-                            "return actualcls.__gel_reflection__.object"
-                            "  # type: ignore [attr-defined, no-any-return]"
-                        )
-                elif ptr.name == "id":
-                    priv_type = self.import_name("uuid", "UUID")
-                    ptr_type = self.get_ptr_type(objtype, ptr)
-                    desc = self.import_name(BASE_IMPL, "IdProperty")
-                    self.write(
-                        f"id: {desc}[{ptr_type}, {priv_type}]"
-                        f" # type: ignore [assignment]"
-                    )
-                self.write()
-
-        def _filter(
-            v: tuple[reflection.Pointer, reflection.ObjectType],
-        ) -> bool:
-            ptr, owning_objtype = v
-            if ptr.name == "__type__":
-                return False
-            # Skip deprecated schema props (is_-prefixed).
-            return not (
-                owning_objtype.name.startswith("schema::")
-                and ptr.name.startswith("is_")
-                and ptr.is_computed
-            )
-
-        reg_pointers = list(
-            filter(_filter, self._get_pointer_origins(objtype))
+        reg_pointers = _filter_pointers(
+            self._get_pointer_origins(objtype), exclude_id=False
         )
-        init_pointers = [
-            (ptr, obj)
-            for ptr, obj in reg_pointers
-            if (ptr.name != "id" and not ptr.is_computed)
-            or objtype.name.startswith("schema::")
-        ]
-        init_args = []
-        if init_pointers:
-            init_args.extend(["/", "*"])
-        for ptr, org_objtype in init_pointers:
-            ptr_t = self.get_ptr_type(
-                org_objtype,
-                ptr,
-                style="arg",
-                prefer_broad_target_type=True,
-                consider_default=True,
-            )
-            init_args.append(f"{ptr.name}: {ptr_t}")
-
         std_bool = self.get_type(
             self._types_by_name["std::bool"],
             import_time=ImportTime.typecheck,
         )
+        type_ = self.import_name("builtins", "type")
+        self_ = self.import_name("typing_extensions", "Self")
+        type_self = f"{type_}[{self_}]"
         builtin_bool = self.import_name("builtins", "bool", directly=False)
         builtin_str = self.import_name("builtins", "str", directly=False)
         callable_ = self.import_name("collections.abc", "Callable")
-        self_ = self.import_name("typing_extensions", "Self")
         literal_ = self.import_name("typing", "Literal")
         literal_star = f'{literal_}["*"]'
-        type_ = self.import_name("builtins", "type")
         tuple_ = self.import_name("builtins", "tuple")
-        type_self = f"{type_}[{self_}]"
         expr_proto = self.import_name(BASE_IMPL, "ExprCompatible")
         py_const = self.import_name(BASE_IMPL, "PyConstType")
         expr_closure = f"{callable_}[[{type_self}], {expr_proto}]"
@@ -2614,6 +2599,144 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         if update_args:
             update_args = ["/", "*", *update_args]
 
+        with self._classmethod_def(
+            "update",
+            update_args,
+            type_self,
+            # Ignore override errors, because we type select **computed
+            # as type[GelType], which is incompatible with bool and
+            # UnspecifiedType.
+            line_comment="type: ignore [misc, override, unused-ignore]",
+        ):
+            self.write(f'"""Update {objtype.name} instances in the database.')
+            self.write('"""')
+            self.write("...")
+            self.write()
+
+        with self._classmethod_def(
+            "select",
+            select_args,
+            type_self,
+            # Ignore override errors, because we type select **computed
+            # as type[GelType], which is incompatible with bool and
+            # UnspecifiedType.
+            line_comment="type: ignore [misc, override, unused-ignore]",
+        ):
+            self.write(f'"""Fetch {objtype.name} instances from the database.')
+            self.write('"""')
+            self.write("...")
+            self.write()
+
+        with self._classmethod_def(
+            "filter",
+            filter_args,
+            type_self,
+            line_comment="type: ignore [misc, override, unused-ignore]",
+        ):
+            self.write(f'"""Fetch {objtype.name} instances from the database.')
+            self.write('"""')
+            self.write("...")
+            self.write()
+
+        with self._classmethod_def(
+            "order_by",
+            order_args,
+            type_self,
+            line_comment="type: ignore [misc, override, unused-ignore]",
+        ):
+            self.write('"""Specify the sort order for the selection"""')
+            self.write("...")
+            self.write()
+
+        if objtype.name == "std::BaseObject":
+            int64_t = self._types_by_name["std::int64"]
+            assert reflection.is_scalar_type(int64_t)
+            type_ = self.import_name("builtins", "type")
+            std_int = self.get_type(
+                int64_t,
+                import_time=ImportTime.typecheck,
+            )
+
+            builtins_int = self._get_pytype_for_primitive_type(int64_t)
+
+            splice_args = [f"value: {type_}[{std_int}] | {builtins_int}"]
+            with self._classmethod_def(
+                "limit",
+                splice_args,
+                type_self,
+                line_comment="type: ignore [misc, override, unused-ignore]",
+            ):
+                self.write('"""Limit selection to a set number of entries."""')
+                self.write("...")
+                self.write()
+
+            with self._classmethod_def(
+                "offset",
+                splice_args,
+                type_self,
+                line_comment="type: ignore [misc, override, unused-ignore]",
+            ):
+                self.write('"""Start selection from a specific offset."""')
+                self.write("...")
+                self.write()
+
+    def _write_base_object_type_body(
+        self,
+        objtype: reflection.ObjectType,
+        typeof_class: str,
+    ) -> None:
+        if objtype.name == "std::BaseObject":
+            gmm = self.import_name(BASE_IMPL, "GelModelMeta")
+            for ptr in objtype.pointers:
+                if ptr.name == "__type__":
+                    ptr_type = self.get_ptr_type(
+                        objtype,
+                        ptr,
+                        aspect=ModuleAspect.MAIN,
+                        cardinality=reflection.Cardinality.One,
+                    )
+                    with self._property_def(ptr.name, [], ptr_type):
+                        self.write(
+                            "tid = self.__class__.__gel_reflection__.id"
+                        )
+                        self.write(f"actualcls = {gmm}.get_class_by_id(tid)")
+                        self.write(
+                            "return actualcls.__gel_reflection__.object"
+                            "  # type: ignore [attr-defined, no-any-return]"
+                        )
+                elif ptr.name == "id":
+                    priv_type = self.import_name("uuid", "UUID")
+                    ptr_type = self.get_ptr_type(objtype, ptr)
+                    desc = self.import_name(BASE_IMPL, "IdProperty")
+                    self.write(
+                        f"id: {desc}[{ptr_type}, {priv_type}]"
+                        f" # type: ignore [assignment]"
+                    )
+                self.write()
+
+        init_pointers = _filter_pointers(
+            self._get_pointer_origins(objtype),
+            filters=[
+                lambda ptr, obj: (
+                    (ptr.name != "id" and not ptr.is_computed)
+                    or objtype.name.startswith("schema::")
+                ),
+            ],
+            exclude_id=False,
+        )
+        init_args = []
+        if init_pointers:
+            init_args.extend(["/", "*"])
+            for ptr, org_objtype in init_pointers:
+                ptr_t = self.get_ptr_type(
+                    org_objtype,
+                    ptr,
+                    style="arg",
+                    prefer_broad_target_type=True,
+                    consider_default=True,
+                )
+                init_args.append(f"{ptr.name}: {ptr_t}")
+
         with self.type_checking():
             with self._method_def("__init__", init_args):
                 self.write(
@@ -2628,89 +2751,6 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                 self.write('"""')
                 self.write("...")
                 self.write()
-
-            self_ = self.import_name("typing_extensions", "Self")
-            with self._classmethod_def(
-                "update",
-                update_args,
-                f"type[{self_}]",
-                # Ignore override errors, because we type select **computed
-                # as type[GelType], which is incompatible with bool and
-                # UnspecifiedType.
-                line_comment="type: ignore [override, unused-ignore]",
-            ):
-                self.write(
-                    f'"""Update {objtype.name} instances in the database.'
-                )
-                self.write('"""')
-                self.write("...")
-                self.write()
-
-            self_ = self.import_name("typing_extensions", "Self")
-            with self._classmethod_def(
-                "select",
-                select_args,
-                f"type[{self_}]",
-                # Ignore override errors, because we type select **computed
-                # as type[GelType], which is incompatible with bool and
-                # UnspecifiedType.
-                line_comment="type: ignore [override, unused-ignore]",
-            ):
-                self.write(
-                    f'"""Fetch {objtype.name} instances from the database.'
-                )
-                self.write('"""')
-                self.write("...")
-                self.write()
-
-            with self._classmethod_def(
-                "filter",
-                filter_args,
-                "type[Self]",
-                line_comment="type: ignore [override, unused-ignore]",
-            ):
-                self.write(
-                    f'"""Fetch {objtype.name} instances from the database.'
-                )
-                self.write('"""')
-                self.write("...")
-                self.write()
-
-            with self._classmethod_def(
-                "order_by",
-                order_args,
-                "type[Self]",
-                line_comment="type: ignore [override, unused-ignore]",
-            ):
-                self.write('"""Specify the sort order for the selection"""')
-                self.write("...")
-                self.write()
-
-            if objtype.name == "std::BaseObject":
-                int64_t = self._types_by_name["std::int64"]
-                assert reflection.is_scalar_type(int64_t)
-                type_ = self.import_name("builtins", "type")
-                std_int = self.get_type(
-                    int64_t,
-                    import_time=ImportTime.typecheck,
-                )
-
-                builtins_int = self._get_pytype_for_primitive_type(int64_t)
-
-                splice_args = [f"value: {type_}[{std_int}] | {builtins_int}"]
-                with self._classmethod_def("limit", splice_args, "type[Self]"):
-                    self.write(
-                        '"""Limit selection to a set number of entries."""'
-                    )
-                    self.write("...")
-                    self.write()
-
-                with self._classmethod_def(
-                    "offset", splice_args, "type[Self]"
-                ):
-                    self.write('"""Start selection from a specific offset."""')
-                    self.write("...")
-                    self.write()
 
         if objtype.name == "schema::ObjectType":
             any_ = self.import_name("typing", "Any")
