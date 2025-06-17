@@ -523,6 +523,21 @@ class ProxyModel(GelModel, Generic[_MT_co]):
                 schema=handler.generate_schema(cls.__proxy_of__),
             )
 
+    @classmethod
+    def __gel_proxy_construct__(
+        cls,
+        obj: _MT_co,  # type: ignore [misc]
+        lprops: dict[str, Any],
+    ) -> Self:
+        pnv = cls.__gel_model_construct__(None)
+        object.__setattr__(pnv, "_p__obj__", obj)
+        object.__setattr__(
+            pnv,
+            "__linkprops__",
+            cls.__lprops__.__gel_model_construct__(lprops),
+        )
+        return pnv
+
     def __repr_name__(self) -> str:
         cls = type(self)
         base_cls = cls.__bases__[0]
