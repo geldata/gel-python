@@ -943,7 +943,7 @@ class SaveExecutor:
                         f"}})"
                     )
 
-                else:  # noqa: PLR5501
+                else:
                     if ch.info.cardinality.is_optional():
                         arg = add_arg(
                             "array<tuple<std::uuid>>",
