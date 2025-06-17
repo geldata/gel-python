@@ -35,7 +35,7 @@ from pydantic._internal import _model_construction  # noqa: PLC2701
 
 from gel._internal import _qb
 from gel._internal import _typing_inspect
-from gel._internal import _unsetid
+from gel._internal._unsetid import UNSET_UUID
 
 from gel._internal._qbmodel import _abstract
 
@@ -383,7 +383,7 @@ class GelModel(
 
     def __gel_commit__(self, new_id: uuid.UUID | None = None) -> None:
         if new_id is not None:
-            if self.id is not _unsetid.UNSET_UUID:
+            if self.id is not UNSET_UUID:
                 raise ValueError(
                     f"cannot set id on {self!r} after it has been set"
                 )
@@ -392,19 +392,60 @@ class GelModel(
         super().__gel_commit__()
 
     def __eq__(self, other: object) -> bool:
-        if not isinstance(other, GelModel):
+        # We make two models equal to each other if they:
+        #
+        #   - both have the same *set* UUID (not UNSET_UUID)
+        #     (ignoring differences in their data attributes)
+        #
+        #   - if they are both ProxyModels and wrap objects
+        #     with equal *set* UUIDs.
+        #
+        #   - if one is a ProxyModel and the other is not
+        #     if they wrap objects with equal *set* UUIDs,
+        #     regardless of whether those proxies have
+        #     different __linkprops__ or not.
+        #
+        # Why do we want equality by id?:
+        #
+        #   - In EdgeQL objects are compared by theid IDs only.
+        #
+        #   - It'd be hard to reason about / compare objects in
+        #     Python code, unless objects are always fetched
+        #     in the same way. This is the reason why all ORMs
+        #     do the same.
+        #
+        #   - ProxyModels act as a fully transparent wrapper
+        #     around GelModels. They are meant to be used as
+        #     transitive objects acting exactly like the objects
+        #     they wrap, PLUS having link properties data.
+        #
+        #   - ProxyModels have to be designed this way or
+        #     refactoring schema becomes incredibly hard --
+        #     adding the first link property to a link would
+        #     change types and runtime behavior incompatibly
+        #     in your Python code.
+        if self is other:
+            return True
+
+        is_other_proxy = isinstance(other, ProxyModel)
+        if not is_other_proxy and not isinstance(other, GelModel):
             return NotImplemented
 
-        if self.id is None or other.id is None:
-            return False
-        else:
-            return self.id == other.id
+        other_obj = cast(
+            "GelModel",
+            ll_getattr(other, "_p__obj__") if is_other_proxy else other,
+        )
+
+        if self is other_obj:
+            return True
+
+        return self.id == other_obj.id
 
     def __hash__(self) -> int:
-        if self.id is _unsetid.UNSET_UUID:
+        mid = self.id
+        if mid is UNSET_UUID:
             raise TypeError("Model instances without id value are unhashable")
-
-        return hash(self.id)
+        return hash(mid)
 
     def __repr_name__(self) -> str:
         cls = type(self)
@@ -555,6 +596,31 @@ class ProxyModel(GelModel, Generic[_MT_co]):
             cls.__lprops__.__gel_model_construct__(lprops),
         )
         return pnv
+
+    def __eq__(self, other: object) -> bool:
+        if self is other:
+            return True
+
+        is_other_proxy = isinstance(other, ProxyModel)
+        if not is_other_proxy and not isinstance(other, GelModel):
+            return NotImplemented
+
+        other_obj = cast(
+            "GelModel",
+            ll_getattr(other, "_p__obj__") if is_other_proxy else other,
+        )
+        self_obj: GelModel = ll_getattr(self, "_p__obj__")
+
+        if self_obj is other_obj:
+            return True
+
+        return self_obj.id == other_obj.id
+
+    def __hash__(self) -> int:
+        mid = ll_getattr(self, "_p__obj__").id
+        if mid is UNSET_UUID:
+            raise TypeError("Model instances without id value are unhashable")
+        return hash(mid)
 
     def __repr_name__(self) -> str:
         cls = type(self)
