@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import collections
 import dataclasses
+import weakref
 
 from typing import (
     TYPE_CHECKING,
@@ -27,6 +28,7 @@ from gel._internal._dlist import (
 )
 from gel._internal._unsetid import UNSET_UUID
 from gel._internal._edgeql import PointerKind, quote_ident
+from gel._internal._qbmodel._pydantic._fields import _UpcastingDistinctList
 
 if TYPE_CHECKING:
     import uuid
@@ -44,6 +46,11 @@ T = TypeVar("T")
 V = TypeVar("V")
 
 _unset = object()
+
+_sorted_pointers_cache: weakref.WeakKeyDictionary[
+    type[GelSourceModel], Iterable[GelPointerReflection]
+] = weakref.WeakKeyDictionary()
+
 
 _ll_getattr = object.__getattribute__
 
@@ -246,36 +253,43 @@ def is_link_list(val: object) -> TypeGuard[DistinctList[GelModel]]:
     )
 
 
+def is_proxy_link_list(
+    val: object,
+) -> TypeGuard[_UpcastingDistinctList[ProxyModel[GelModel], GelModel]]:
+    return isinstance(val, _UpcastingDistinctList)
+
+
 def unwrap_proxy(val: GelModel) -> GelModel:
     if isinstance(val, ProxyModel):
         # This is perf-sensitive function as it's called on
         # every edge of the graph multiple times.
-        obj = _ll_getattr(val, "_p__obj__")
-        assert isinstance(obj, GelModel)
-        return obj
+        return _ll_getattr(val, "_p__obj__")  # type: ignore [no-any-return]
     else:
         return val
+
+
+def unwrap_proxy_no_check(val: ProxyModel[GelModel]) -> GelModel:
+    return _ll_getattr(val, "_p__obj__")  # type: ignore [no-any-return]
 
 
 def unwrap_dlist(val: Iterable[GelModel]) -> list[GelModel]:
     return [unwrap_proxy(o) for o in val]
 
 
-def unwrap(val: GelModel) -> tuple[ProxyModel[GelModel] | None, GelModel]:
-    if isinstance(val, ProxyModel):
-        obj = _ll_getattr(val, "_p__obj__")
-        assert isinstance(obj, GelModel)
-        return val, obj
-    else:
-        return None, val
-
-
-def get_pointers(tp: type[GelSourceModel]) -> list[GelPointerReflection]:
+def get_pointers(tp: type[GelSourceModel]) -> Iterable[GelPointerReflection]:
     # We sort pointers to produce similar queies regardless of Python
     # hashing -- this is to maximize the probability of a generated
     # uodate/insert query to hit the Gel's compiled cache.
+
+    try:
+        return _sorted_pointers_cache[tp]
+    except KeyError:
+        pass
+
     pointers = tp.__gel_reflection__.pointers
-    return [pointers[name] for name in sorted(pointers)]
+    ret = tuple(pointers[name] for name in sorted(pointers))
+    _sorted_pointers_cache[tp] = ret
+    return ret
 
 
 def iter_graph(objs: Iterable[GelModel]) -> Iterable[GelModel]:
@@ -284,8 +298,6 @@ def iter_graph(objs: Iterable[GelModel]) -> Iterable[GelModel]:
     visited: IDTracker[GelModel, None] = IDTracker()
 
     def _traverse(obj: GelModel) -> Iterable[GelModel]:
-        obj = unwrap_proxy(obj)
-
         if obj in visited:
             return
 
@@ -307,12 +319,15 @@ def iter_graph(objs: Iterable[GelModel]) -> Iterable[GelModel]:
                 continue
 
             if prop.cardinality.is_multi():
-                assert is_link_list(linked)
-                for ref in linked:
-                    yield from _traverse(ref)
+                if is_proxy_link_list(linked):
+                    for proxy in linked:
+                        yield from _traverse(unwrap_proxy_no_check(proxy))
+                else:
+                    assert is_link_list(linked)
+                    for lobj in linked:
+                        yield from _traverse(lobj)
             else:
-                assert isinstance(linked, GelModel)
-                yield from _traverse(linked)
+                yield from _traverse(unwrap_proxy(cast("GelModel", linked)))
 
     for o in objs:
         yield from _traverse(o)
@@ -788,12 +803,13 @@ class SaveExecutor:
         visited: IDTracker[GelModel, None] = IDTracker()
 
         def _traverse(obj: GelModel) -> None:
-            if not isinstance(obj, GelModel) or obj in visited:
+            if obj in visited:
                 return
 
+            assert not isinstance(obj, ProxyModel)
+
             visited.track(obj)
-            unwrapped = unwrap_proxy(obj)
-            unwrapped.__gel_commit__(self.object_ids.get(id(unwrapped)))
+            obj.__gel_commit__(self.object_ids.get(id(obj)))
 
             for prop in get_pointers(type(obj)):
                 if prop.computed:
@@ -814,17 +830,21 @@ class SaveExecutor:
 
                 if prop.kind is PointerKind.Link:
                     if prop.cardinality.is_multi():
-                        assert is_link_list(linked)
-                        for ref in linked:
-                            if isinstance(ref, ProxyModel):
-                                ref.__linkprops__.__gel_commit__()
-                                _traverse(unwrap_proxy(ref))
-                            else:
-                                _traverse(ref)
+                        if is_proxy_link_list(linked):
+                            for proxy in linked:
+                                proxy.__linkprops__.__gel_commit__()
+                                _traverse(unwrap_proxy_no_check(proxy))
+                        else:
+                            assert is_link_list(linked)
+                            for model in linked:
+                                _traverse(model)
                         linked.__gel_commit__()
                     else:
-                        assert isinstance(linked, GelModel)
-                        _traverse(unwrap_proxy(linked))
+                        if isinstance(linked, ProxyModel):
+                            linked.__linkprops__.__gel_commit__()
+                            _traverse(unwrap_proxy_no_check(linked))
+                        else:
+                            _traverse(cast("GelModel", linked))
 
                 else:
                     assert prop.kind is PointerKind.Property

@@ -804,13 +804,6 @@ class _MultiLink(
             )
 
 
-@functools.cache
-def _make_dlist_type(
-    types: tuple[type[_PT_co], type[_BMT_co]],
-) -> type[_UpcastingDistinctList[_PT_co, _BMT_co]]:
-    return _UpcastingDistinctList[types[0], types[1]]  # type: ignore [valid-type]
-
-
 class _MultiLinkWithProps(
     _MultiPointer[_PT_co, _BMT_co],
     _abstract.LinkDescriptor[_PT_co, _BMT_co],
@@ -840,7 +833,10 @@ class _MultiLinkWithProps(
         cls,
         type_args: tuple[type[Any]] | tuple[type[Any], type[Any]],
     ) -> _dlist.DistinctList[_MT_co]:
-        return _make_dlist_type(type_args)  # type: ignore [return-value]
+        return _UpcastingDistinctList[
+            type_args[0],  # type: ignore [valid-type]
+            type_args[1],  # type: ignore [valid-type]
+        ]  # type: ignore [return-value]
 
     @classmethod
     def _validate(
@@ -848,8 +844,11 @@ class _MultiLinkWithProps(
         value: Any,
         generic_args: tuple[type[Any], type[Any]],
     ) -> _UpcastingDistinctList[_PT_co, _BMT_co]:
-        lt: type[_UpcastingDistinctList[_PT_co, _BMT_co]] = _make_dlist_type(
-            generic_args
+        lt: type[_UpcastingDistinctList[_PT_co, _BMT_co]] = (
+            _UpcastingDistinctList[
+                generic_args[0],  # type: ignore [valid-type]
+                generic_args[1],  # type: ignore [valid-type]
+            ]
         )
         if type(lt) is list:  # type: ignore [comparison-overlap]
             # Optimization for the most common scenario - user passes
