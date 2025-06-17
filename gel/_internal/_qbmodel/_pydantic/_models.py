@@ -242,7 +242,10 @@ def _process_pydantic_fields(
 
 _unset: object = object()
 _empty_str_set: frozenset[str] = frozenset()
-_setattr = object.__setattr__
+
+# Low-level attribute functions
+ll_setattr = object.__setattr__
+ll_getattr = object.__getattribute__
 
 
 class GelSourceModel(
@@ -262,13 +265,13 @@ class GelSourceModel(
     def __gel_model_construct__(cls, __dict__: dict[str, Any] | None) -> Self:
         self = cls.__new__(cls)
         if __dict__ is not None:
-            _setattr(self, "__dict__", __dict__)
-            _setattr(self, "__pydantic_fields_set__", set(__dict__.keys()))
+            ll_setattr(self, "__dict__", __dict__)
+            ll_setattr(self, "__pydantic_fields_set__", set(__dict__.keys()))
         else:
-            _setattr(self, "__pydantic_fields_set__", set())
-        _setattr(self, "__pydantic_extra__", None)
-        _setattr(self, "__pydantic_private__", None)
-        _setattr(self, "__gel_changed_fields__", None)
+            ll_setattr(self, "__pydantic_fields_set__", set())
+        ll_setattr(self, "__pydantic_extra__", None)
+        ll_setattr(self, "__pydantic_private__", None)
+        ll_setattr(self, "__gel_changed_fields__", None)
         return self
 
     @classmethod
@@ -276,12 +279,12 @@ class GelSourceModel(
         cls, _fields_set: set[str] | None = None, **values: Any
     ) -> Self:
         self = super().model_construct(_fields_set, **values)
-        _setattr(self, "__gel_changed_fields__", None)
+        ll_setattr(self, "__gel_changed_fields__", None)
         return self
 
     def __init__(self, /, **kwargs: Any) -> None:
         super().__init__(**kwargs)
-        _setattr(
+        ll_setattr(
             self, "__gel_changed_fields__", set(self.__pydantic_fields_set__)
         )
 
@@ -294,7 +297,7 @@ class GelSourceModel(
         return dirty
 
     def __gel_commit__(self) -> None:
-        _setattr(self, "__gel_changed_fields__", None)
+        ll_setattr(self, "__gel_changed_fields__", None)
 
     def __setattr__(self, name: str, value: Any) -> None:
         if name not in self.__pydantic_fields__:
@@ -481,20 +484,35 @@ class ProxyModel(GelModel, Generic[_MT_co]):
                 f"only instances of {self.__proxy_of__.__name__} are allowed, "
                 f"got {type(obj).__name__}",
             )
-        object.__setattr__(self, "_p__obj__", obj)
+        ll_setattr(self, "_p__obj__", obj)
 
     def __getattribute__(self, name: str) -> Any:
+        if (
+            name == "_p__obj__"  # noqa: PLR1714
+            or name == "__linkprops__"
+            or name == "__class__"
+        ):
+            # Fast path for the wrapped object itself / linkprops model
+            # (this optimization is informed by profiling model
+            # instantiation and save() operation)
+            return ll_getattr(self, name)
+
+        if name == "id" or not name.startswith("_"):
+            # Faster path for "public-like" attributes
+            return ll_getattr(ll_getattr(self, "_p__obj__"), name)
+
         model_fields = type(self).__proxy_of__.model_fields
         if name in model_fields:
-            base = object.__getattribute__(self, "_p__obj__")
+            base = ll_getattr(self, "_p__obj__")
             return getattr(base, name)
+
         return super().__getattribute__(name)
 
     def __setattr__(self, name: str, value: Any) -> None:
         model_fields = type(self).__proxy_of__.model_fields
         if name in model_fields:
             # writing to a field: mutate the  wrapped model
-            base = object.__getattribute__(self, "_p__obj__")
+            base = ll_getattr(self, "_p__obj__")
             setattr(base, name, value)
         else:
             # writing anything else (including _proxied) is normal
