@@ -105,7 +105,15 @@ class GelObjectType(
     _qb.GelObjectTypeMetadata,
     metaclass=GelObjectTypeMeta,
 ):
-    pass
+    __gel_variant__: ClassVar[str | None] = None
+
+    def __init_subclass__(cls) -> None:
+        super().__init_subclass__()
+        cls.__gel_variant__ = None
+
+
+def is_gel_object_type(t: Any) -> TypeGuard[type[GelObjectType]]:
+    return isinstance(t, type) and issubclass(t, GelObjectType)
 
 
 @final

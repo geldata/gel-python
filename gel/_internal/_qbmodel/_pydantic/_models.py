@@ -57,6 +57,7 @@ class GelModelMeta(_model_construction.ModelMetaclass, _abstract.GelModelMeta):
         namespace: dict[str, Any],
         *,
         __gel_type_id__: uuid.UUID | None = None,
+        __gel_variant__: str | None = None,
         **kwargs: Any,
     ) -> GelModelMeta:
         with warnings.catch_warnings():
@@ -91,6 +92,9 @@ class GelModelMeta(_model_construction.ModelMetaclass, _abstract.GelModelMeta):
 
         if __gel_type_id__ is not None:
             mcls.register_class(__gel_type_id__, cls)
+
+        if __gel_variant__ is not None:
+            cls.set_variant(__gel_variant__)
 
         return cls
 
@@ -151,7 +155,7 @@ def _resolve_pointers(cls: type[GelSourceModel]) -> dict[str, type[GelType]]:
             raise TypeError(
                 f"the type of '{cls}.{ptr_name}' has not been resolved"
             )
-        tgeneric = descriptor.get_resolved_type_generic()
+        tgeneric = descriptor.get_resolved_pointer_descriptor()
         if tgeneric is not None:
             torigin = typing.get_origin(tgeneric)
             if (

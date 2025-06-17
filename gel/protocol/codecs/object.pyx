@@ -342,7 +342,17 @@ cdef class ObjectCodec(BaseNamedRecordCodec):
             # per Object codec's entire lifespan.
             return
 
-        if not hasattr(return_type, '__gel_model_construct__'):
+        refl = getattr(return_type, "__gel_reflection__", None)
+        if (
+            refl is None
+            or not hasattr(return_type, '__gel_model_construct__')
+        ):
+            raise TypeError(
+                'only GelModel subclasses are supported in the decoding pipeline'
+            )
+
+        prefl = getattr(refl, "pointers", None)
+        if prefl is None:
             raise TypeError(
                 'only GelModel subclasses are supported in the decoding pipeline'
             )
@@ -357,35 +367,30 @@ cdef class ObjectCodec(BaseNamedRecordCodec):
             self.cached_return_type = return_type
             self.cached_return_type_proxy = None
 
-        tid_map = {}
-        try:
-            refl = return_type.__gel_reflection__
-        except AttributeError:
-            pass
-        else:
-            # Store base type's tid in the mapping *also* to exclude
-            # subclasses of base type, e.g. if we have this:
-            #
-            #    class CustomContent(default.Content):
-            #        pass
-            #
-            # then default.Content.__subclasses__() will contain
-            # CustomContent, which we don't want to be there.
+        # Store base type's tid in the mapping *also* to exclude
+        # subclasses of base type, e.g. if we have this:
+        #
+        #    class CustomContent(default.Content):
+        #        pass
+        #
+        # then default.Content.__subclasses__() will contain
+        # CustomContent, which we don't want to be there.
 
-            tid_map[refl.id.bytes] = return_type
+        tid_map = {refl.id.bytes: return_type}
 
-            for ch in return_type.__subclasses__():
-                try:
-                    refl = ch.__gel_reflection__
-                except AttributeError:
-                    pass
-                else:
-                    if refl.id.bytes not in tid_map:
-                        tid_map[refl.id.bytes] = ch
+        for ch in return_type.__subclasses__():
+            try:
+                refl = ch.__gel_reflection__
+            except AttributeError:
+                pass
+            else:
+                if refl.id.bytes not in tid_map:
+                    tid_map[refl.id.bytes] = ch
 
         subs = []
         dlists = []
         origins = []
+        ptrtypes = return_type.__gel_pointers__()
         for i, name in enumerate(names):
             if flags[i] & datatypes._EDGE_POINTER_IS_LINKPROP:
                 subs.append(None)
@@ -411,30 +416,27 @@ cdef class ObjectCodec(BaseNamedRecordCodec):
                 subs.append(sub.__gel_origin__)
 
                 dlist_factory = None
-                desc = inspect.getattr_static(origin, name, None)
-                if desc is not None and hasattr(desc, '__gel_resolved_type__'):
-                    target = desc.get_resolved_type_generic()
-                    if target is not None:
-                        torigin = typing.get_origin(target)
-                        if hasattr(torigin, '__gel_resolve_dlist__'):
-                            dlist_factory = torigin.__gel_resolve_dlist__(
-                                typing.get_args(target),
+
+                ptr = prefl.get(name)
+                ptrtype = ptrtypes.get(name)
+                if (
+                    ptr is not None
+                    and ptr.cardinality.is_multi()
+                    and ptrtype is not None
+                ):
+                    if isinstance(ptrtype, typing.GenericAlias):
+                        ptrtype = typing.get_origin(ptrtype)
+
+                    if (
+                        isinstance(ptrtype, type)
+                        and (
+                            issubclass(
+                                ptrtype,
+                                (_dlist.AbstractTrackedList, tuple),
                             )
-
-                            if isinstance(dlist_factory, typing.GenericAlias):
-                                dlist_factory = typing.get_origin(dlist_factory)
-
-                            if (not (
-                                isinstance(dlist_factory, type) and (
-                                    issubclass(dlist_factory, _dlist.AbstractTrackedList)
-                                    or issubclass(dlist_factory, tuple)
-                                )
-                            )):
-                                raise RuntimeError(
-                                    f'invalid type returned from __gel_resolve_dlist__(), '
-                                    f'a TrackedList was expected, got {dlist_factory!r}'
-                                )
-
+                        )
+                    ):
+                        dlist_factory = ptrtype
                 dlists.append(dlist_factory)
 
         self.cached_return_type_subcodecs = tuple(subs)

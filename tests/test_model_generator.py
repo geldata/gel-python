@@ -1611,8 +1611,7 @@ class TestEmptyAiModelGenerator(tb.ModelTestCase):
             models.sys.ExtensionPackage.__name__, "ExtensionPackage"
         )
 
-    @tb.to_be_fixed
-    # @tb.typecheck
+    @tb.typecheck
     def test_modelgen_empty_ai_schema_2(self):
         # This is it, we're just testing empty import.
         from models.ext import ai  # noqa: F401
