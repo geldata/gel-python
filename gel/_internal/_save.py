@@ -801,21 +801,6 @@ class SaveExecutor:
         else:
             return self.object_ids[id(obj)]
 
-    def _compile_link_prop_expr(
-        self,
-        proxy: ProxyModel[GelModel],
-        obj_ql: str,
-    ) -> str:
-        if proxy is None:
-            return obj_ql
-
-        changes = proxy.__gel_get_changed_fields__()
-        if not changes:
-            return obj_ql
-
-        # for field_name in changes:
-        raise RuntimeError
-
     def _compile_change(
         self, change: ModelChange, /, *, for_insert: bool
     ) -> QueryWithArgs:
