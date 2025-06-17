@@ -582,7 +582,7 @@ class _UpcastingDistinctList(
         # An optimized version of `extend()`
 
         if not values:
-            # empty list? easy return
+            # Empty list => early return
             return
 
         if values is self:
@@ -604,7 +604,7 @@ class _UpcastingDistinctList(
         for v in values:
             if type(v) is t.__proxy_of__:
                 # Fast path -- `v` is an instance of the base type.
-                # It has no link props, so wrap it in a proxy in
+                # It has no link props, wrap it in a proxy in
                 # a fast way.
                 proxy = t.__gel_proxy_construct__(v, {})
                 obj = v
