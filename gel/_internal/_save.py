@@ -750,6 +750,8 @@ class SaveExecutor:
             self._compile_change(obj, for_insert=for_insert) for obj in batch
         ]
 
+        # Queries must be independent of each other within the same
+        # ChangeBatch, so we can sort them to group queries.
         compiled.sort(key=lambda x: x.single_query)
 
         icomp = iter(compiled)
@@ -1077,19 +1079,19 @@ class SaveExecutor:
             """  # noqa: S608
 
         single_query = f"""
-            with Q := (
+            with __query := (
                 with __data := <tuple<{",".join(args_types)}>>$0
                 select {query}
-            ) select Q.id
+            ) select __query.id
         """
 
         multi_query = f"""
-            with Q := (
+            with __query := (
                 with __all_data := <array<tuple<{",".join(args_types)}>>>$0
                 for __data in array_unpack(__all_data) union (
                     ({query})
                 )
-            ) select Q.id
+            ) select __query.id
         """
 
         return CompiledQuery(
