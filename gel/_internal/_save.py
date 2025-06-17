@@ -45,6 +45,8 @@ V = TypeVar("V")
 
 _unset = object()
 
+_ll_getattr = object.__getattribute__
+
 
 LinkPropertiesValues = TypeAliasType(
     "LinkPropertiesValues", dict[str, object | None]
@@ -244,8 +246,11 @@ def is_link_list(val: object) -> TypeGuard[DistinctList[GelModel]]:
 
 def unwrap_proxy(val: GelModel) -> GelModel:
     if isinstance(val, ProxyModel):
-        assert isinstance(val._p__obj__, GelModel)
-        return val._p__obj__
+        # This is perf-sensitive function as it's called on
+        # every edge of the graph multiple times.
+        obj = _ll_getattr(val, "_p__obj__")
+        assert isinstance(obj, GelModel)
+        return obj
     else:
         return val
 
@@ -256,8 +261,9 @@ def unwrap_dlist(val: Iterable[GelModel]) -> list[GelModel]:
 
 def unwrap(val: GelModel) -> tuple[ProxyModel[GelModel] | None, GelModel]:
     if isinstance(val, ProxyModel):
-        assert isinstance(val._p__obj__, GelModel)
-        return val, val._p__obj__
+        obj = _ll_getattr(val, "_p__obj__")
+        assert isinstance(obj, GelModel)
+        return val, obj
     else:
         return None, val
 
