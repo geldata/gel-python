@@ -192,10 +192,13 @@ class HookInstance(Generic[T, S]):
             )
 
         def wrapper(func: Handler[T]) -> Handler[T]:
+            call = functools.partial(func, cast("T", None))
+            # __globals__ is used by FastAPI get_typed_signature()
+            call.__globals__ = func.__globals__  # type: ignore [attr-defined]
             dependant = dep_utils.get_dependant(
                 path=self._path,
                 name=self._name,
-                call=functools.partial(func, cast("T", None)),
+                call=call,
             )
 
             if dependant.path_params:
