@@ -157,6 +157,10 @@ def _resolve_pointers(cls: type[GelSourceModel]) -> dict[str, type[GelType]]:
     return pointers
 
 
+_NO_DEFAULT = frozenset({pydantic_core.PydanticUndefined, None})
+"""Field default values that signal that a schema default is to be used."""
+
+
 def _process_pydantic_fields(
     cls: type[GelModel],
     fields: dict[str, pydantic.fields.FieldInfo],
@@ -165,11 +169,6 @@ def _process_pydantic_fields(
         fdef = field.default
         overrides: dict[str, Any] = {}
         ptr = cls.__gel_reflection__.pointers.get(fn)
-
-        if ptr is not None and ptr.has_default and fn != "id":
-            overrides["default"] = _abstract.DEFAULT_VALUE
-        elif _qb.is_pointer_descriptor(fdef):
-            overrides["default"] = ...
 
         anno = _typing_inspect.inspect_annotation(
             field.annotation,
@@ -187,6 +186,21 @@ def _process_pydantic_fields(
                 overrides["annotation"] = field.annotation
         else:
             field_infos = []
+
+        fdef_is_desc = _qb.is_pointer_descriptor(fdef)
+        if (
+            ptr is not None
+            and ptr.has_default
+            and fn != "id"
+            and (fdef_is_desc or fdef in _NO_DEFAULT)
+            and all(
+                fi.default in _NO_DEFAULT and fi.default_factory is None
+                for fi in field_infos
+            )
+        ):
+            overrides["default"] = _abstract.DEFAULT_VALUE
+        elif fdef_is_desc:
+            overrides["default"] = ...
 
         if overrides:
             field_attrs = dict(field._attributes_set)

@@ -37,6 +37,7 @@ from gel._internal._qb import (
 from gel._internal._qbmodel._abstract import (
     DEFAULT_VALUE,
     AnyEnum,
+    AnyNamedTuple,
     AnyTuple,
     BaseScalar,
     DateImpl,
@@ -90,6 +91,7 @@ __all__ = (
     "DEFAULT_VALUE",
     "AnnotatedExpr",
     "AnyEnum",
+    "AnyNamedTuple",
     "AnyTuple",
     "Array",
     "BaseScalar",

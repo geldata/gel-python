@@ -94,13 +94,17 @@ class BaseScalar(GelPrimitiveType):
 if TYPE_CHECKING:
     from typing import NamedTupleMeta  # type: ignore [attr-defined]
 
-    class AnyTupleMeta(NamedTupleMeta, GelTypeMeta):  # type: ignore [misc]
+    class AnyNamedTupleMeta(NamedTupleMeta, GelTypeMeta):  # type: ignore [misc]
         ...
 else:
-    AnyTupleMeta = type(GelPrimitiveType)
+    AnyNamedTupleMeta = type(GelPrimitiveType)
 
 
-class AnyTuple(GelPrimitiveType, metaclass=AnyTupleMeta):
+class AnyTuple(GelPrimitiveType):
+    pass
+
+
+class AnyNamedTuple(AnyTuple, metaclass=AnyNamedTupleMeta):
     pass
 
 
@@ -141,20 +145,21 @@ if TYPE_CHECKING:
     class _TupleMeta(GelTypeMeta, typing._ProtocolMeta):
         pass
 else:
-    _TupleMeta = type(tuple)
+    _TupleMeta = type(AnyTuple)
 
 
 _Ts = TypeVarTuple("_Ts")
 
 
 class HeterogeneousCollection(
-    _typing_parametric.ParametricType, GelPrimitiveType, Generic[Unpack[_Ts]]
+    _typing_parametric.ParametricType, Generic[Unpack[_Ts]]
 ):
     __element_types__: ClassVar[Annotated[tuple[type[Any], ...], Unpack[_Ts]]]
 
 
 class Tuple(  # type: ignore[misc]
     HeterogeneousCollection[Unpack[_Ts]],
+    AnyTuple,
     tuple[Unpack[_Ts]],
     metaclass=_TupleMeta,
 ):
