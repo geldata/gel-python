@@ -611,7 +611,10 @@ class DatabaseTestCase(ClusterTestCase, ConnectedTestCaseMixin):
                 with open(val, "r") as sf:
                     module = sf.read()
 
-                schema.append(f"\nmodule {module_name} {{ {module} }}")
+                if f"module {module_name}" not in module:
+                    schema.append(f"\nmodule {module_name} {{ {module} }}")
+                else:
+                    schema.append(module)
 
         # Don't wrap the script into a transaction here, so that
         # potentially it's easier to stitch multiple such scripts

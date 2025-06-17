@@ -708,7 +708,7 @@ class BaseGeneratedModule:
         for aspect, py_file in self.py_files.items():
             if not py_file.has_content() and (
                 self._schema_part is not reflection.SchemaPart.STD
-                or aspect is not ModuleAspect.MAIN
+                and aspect is not ModuleAspect.MAIN
             ):
                 continue
 
@@ -1805,6 +1805,10 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         self,
         ops: list[reflection.Operator],
     ) -> None:
+        if not ops:
+            # Exit early, don't generate imports we won't use.
+            return
+
         aexpr = self.import_name(BASE_IMPL, "AnnotatedExpr")
         pfxop = self.import_name(BASE_IMPL, "PrefixOp")
         for op in ops:
@@ -1887,6 +1891,10 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                 set[reflection.AnyType],
             ],
         ] = defaultdict(lambda: defaultdict(set))
+
+        if not ops:
+            # Exit early, don't generate imports we won't use.
+            return
 
         aexpr = self.import_name(BASE_IMPL, "AnnotatedExpr")
         expr_compat = self.import_name(BASE_IMPL, "ExprCompatible")
