@@ -550,11 +550,12 @@ class Client(base_client.BaseClient, abstract.Executor):
             with tx:
                 executor = make_executor()
 
-                for batch in executor:
-                    for query, args in batch:
-                        tx.send_query_required_single(query, *args)
-                    ids = tx.wait()
-                    executor.feed_ids(ids)
+                for batches in executor:
+                    for batch in batches:
+                        tx.send_query(batch.query, batch.args)
+                    batch_ids = tx.wait()
+                    for ids, batch in zip(batch_ids, batches, strict=True):
+                        batch.feed_ids(ids)
 
                 executor.commit()
 
