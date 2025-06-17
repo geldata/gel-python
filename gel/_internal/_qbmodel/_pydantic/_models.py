@@ -381,6 +381,9 @@ class GelModel(
                 if field.init is False and field_name != "id":
                     self.__dict__.pop(field_name, None)
 
+    def __gel_is_new__(self) -> bool:
+        return self.id is UNSET_UUID
+
     def __gel_commit__(self, new_id: uuid.UUID | None = None) -> None:
         if new_id is not None:
             if self.id is not UNSET_UUID:

@@ -39,6 +39,8 @@ from gel._internal._qbmodel import _abstract
 
 from ._models import GelModel, ProxyModel
 
+from gel._internal._unsetid import UNSET_UUID
+
 if TYPE_CHECKING:
     from typing_extensions import Never
     from collections.abc import Sequence, Iterable
@@ -214,7 +216,7 @@ IdProperty = TypeAliasType(
     "IdProperty",
     Annotated[
         Property[_ST_co, _BT_co],
-        pydantic.Field(default=_unsetid.UNSET_UUID, init=False, frozen=True),
+        pydantic.Field(default=UNSET_UUID, init=False, frozen=True),
         _abstract.PointerInfo(
             computed=True,
             readonly=True,
@@ -540,6 +542,8 @@ OptionalComputedLinkWithProps = TypeAliasType(
     type_params=(_PT_co, _MT_co),
 )
 
+ll_getattr = object.__getattribute__
+
 
 class _UpcastingDistinctList(
     _dlist.DistinctList[_PT_co], Generic[_PT_co, _BMT_co]
@@ -554,19 +558,22 @@ class _UpcastingDistinctList(
             self._wrapped_index = {}
             for item in self._items:
                 assert isinstance(item, ProxyModel)
-                self._wrapped_index[id(item._p__obj__)] = cast("_PT_co", item)
+                wrapped = ll_getattr(item, "_p__obj__")
+                self._wrapped_index[id(wrapped)] = cast("_PT_co", item)
 
     def _track_item(self, item: _PT_co) -> None:  # type: ignore [misc]
         assert isinstance(item, ProxyModel)
         super()._track_item(cast("_PT_co", item))
         assert self._wrapped_index is not None
-        self._wrapped_index[id(item._p__obj__)] = cast("_PT_co", item)
+        wrapped = ll_getattr(item, "_p__obj__")
+        self._wrapped_index[id(wrapped)] = cast("_PT_co", item)
 
     def _untrack_item(self, item: _PT_co) -> None:  # type: ignore [misc]
         assert isinstance(item, ProxyModel)
         super()._untrack_item(cast("_PT_co", item))
         assert self._wrapped_index is not None
-        self._wrapped_index.pop(id(item._p__obj__), None)
+        wrapped = ll_getattr(item, "_p__obj__")
+        self._wrapped_index.pop(id(wrapped), None)
 
     def _is_tracked(self, item: _PT_co | _BMT_co) -> bool:
         self._init_tracking()
@@ -601,19 +608,23 @@ class _UpcastingDistinctList(
         fast_extend = len(self._wrapped_index) == 0
 
         for v in values:
-            if type(v) is t.__proxy_of__:
+            tv = type(v)
+            if tv is t.__proxy_of__:
                 # Fast path -- `v` is an instance of the base type.
                 # It has no link props, wrap it in a proxy in
                 # a fast way.
                 proxy = t.__gel_proxy_construct__(v, {})
                 obj = v
+            elif tv is t:
+                # Another fast path -- `v` is already the correct proxy.
+                proxy = v  # type: ignore [assignment]
+                obj = ll_getattr(v, "_p__obj__")
             else:
                 proxy, obj = self._cast_value(v)
 
             oid = id(obj)
-            try:
-                existing_proxy = self._wrapped_index[oid]
-            except KeyError:
+            existing_proxy = self._wrapped_index.get(oid)
+            if existing_proxy is None:
                 self._wrapped_index[oid] = proxy
             else:
                 if (
@@ -625,10 +636,10 @@ class _UpcastingDistinctList(
                         f"a different set of link properties"
                     )
 
-            try:
-                self._set.add(proxy)
-            except TypeError:
+            if obj.id is UNSET_UUID:
                 self._unhashables[id(proxy)] = proxy
+            else:
+                self._set.add(proxy)
 
             if not fast_extend:
                 self._items.append(proxy)
@@ -642,16 +653,21 @@ class _UpcastingDistinctList(
 
         assert issubclass(t, ProxyModel)
 
-        if type(value) is t.__proxy_of__:
+        tp_value = type(value)
+
+        if tp_value is t.__proxy_of__:
             # Fast path before we make all expensive isinstance calls.
             return (
                 t.__gel_proxy_construct__(value, {}),
                 value,
             )  # type: ignore [return-value]
 
-        if type(value) is t:
+        if tp_value is t:
             # It's a correct proxy for this link... return as is.
-            return value, value._p__obj__  # type: ignore [return-value]
+            return (
+                value,
+                ll_getattr(value, "_p__obj__"),
+            )
 
         if not isinstance(value, ProxyModel) and isinstance(
             value, t.__proxy_of__
@@ -665,7 +681,7 @@ class _UpcastingDistinctList(
 
         raise ValueError(
             f"{cls!r} accepts only values of type {t.__name__} "
-            f"or {t.__proxy_of__.__name__}, got {type(value)!r}",
+            f"or {t.__proxy_of__.__name__}, got {tp_value!r}",
         )
 
     def _check_value(self, value: Any) -> _PT_co:
