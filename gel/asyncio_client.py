@@ -524,11 +524,12 @@ class AsyncIOClient(base_client.BaseClient, abstract.AsyncIOExecutor):
             async with tx:
                 executor = make_executor()
 
-                for batch in executor:
-                    for query, args in batch:
-                        await tx.send_query_required_single(query, *args)
-                    ids = await tx.wait()
-                    executor.feed_ids(ids)
+                for batches in executor:
+                    for batch in batches:
+                        await tx.send_query(batch.query, batch.args)
+                    batch_ids = await tx.wait()
+                    for ids, batch in zip(batch_ids, batches, strict=True):
+                        batch.feed_ids(ids)
 
                 executor.commit()
 

@@ -82,6 +82,11 @@ class SingleLinkChange(BaseFieldChange):
     def __post_init__(self) -> None:
         assert not isinstance(self.target, ProxyModel)
         assert not self.info.cardinality.is_multi()
+        assert (self.props_info is None and self.props is None) or (
+            self.props_info is not None
+            and self.props is not None
+            and self.props_info.keys() == self.props.keys()
+        )
 
 
 @_struct
@@ -167,9 +172,6 @@ class SavePlan(NamedTuple):
     # Optional links of newly inserted objects and changes to
     # links between existing objects.
     update_batch: ChangeBatch
-
-
-QueryWithArgs = TypeAliasType("QueryWithArgs", tuple[str, list[object]])
 
 
 class IDTracker(Generic[T, V]):
@@ -701,6 +703,35 @@ def make_save_executor_constructor(
     return lambda: SaveExecutor(objs, create_batches, updates)
 
 
+# How many INSERT/UPDATE operations can be combined into a single query.
+# Significantly improves performance, but appears to hit the ceiling of
+# improvements at around 100.
+MAX_BATCH_SIZE = 1280
+
+
+@_struct
+class QueryBatch:
+    executor: SaveExecutor
+    query: str
+    args: list[tuple[object, ...]]
+    changes: list[ModelChange]
+    insert: bool
+
+    def feed_ids(self, obj_ids: Iterable[uuid.UUID]) -> None:
+        if not self.insert:
+            return
+        for obj_id, change in zip(obj_ids, self.changes, strict=True):
+            self.executor.object_ids[id(change.model)] = obj_id
+
+
+@_struct
+class CompiledQuery:
+    single_query: str
+    multi_query: str
+    arg: tuple[object, ...]
+    change: ModelChange
+
+
 @dataclasses.dataclass
 class SaveExecutor:
     objs: tuple[GelModel, ...]
@@ -708,43 +739,50 @@ class SaveExecutor:
     updates: ChangeBatch
 
     object_ids: dict[int, uuid.UUID] = dataclasses.field(init=False)
-    iter_index: int = dataclasses.field(init=False)
 
     def __post_init__(self) -> None:
         self.object_ids = {}
-        self.iter_index = 0
 
-    def __iter__(self) -> Iterator[list[QueryWithArgs]]:
-        return self
+    def _compile_batch(
+        self, batch: ChangeBatch, /, *, for_insert: bool
+    ) -> list[QueryBatch]:
+        compiled = [
+            self._compile_change(obj, for_insert=for_insert) for obj in batch
+        ]
 
-    def __next__(self) -> list[QueryWithArgs]:
-        if self.iter_index < len(self.create_batches):
-            batch = self.create_batches[self.iter_index]
-            self.iter_index += 1
-            return [
-                self._compile_change(obj, for_insert=True) for obj in batch
-            ]
-        elif self.iter_index == len(self.create_batches):
-            self.iter_index += 1
-            return [
-                self._compile_change(change, for_insert=False)
-                for change in self.updates
-            ]
-        else:
-            raise StopIteration
+        compiled.sort(key=lambda x: x.single_query)
 
-    def feed_ids(self, obj_ids: Iterable[uuid.UUID]) -> None:
-        if self.iter_index > len(self.create_batches):
-            return
+        icomp = iter(compiled)
+        local_queries = [[next(icomp)]]
 
-        for obj_id, change in zip(
-            obj_ids, self.create_batches[self.iter_index - 1], strict=True
-        ):
-            self.object_ids[id(change.model)] = obj_id
+        for cq in icomp:
+            if (
+                cq.single_query == local_queries[-1][0].single_query
+                and len(local_queries[-1]) < MAX_BATCH_SIZE
+            ):
+                local_queries[-1].append(cq)
+            else:
+                local_queries.append([cq])
+
+        return [
+            QueryBatch(
+                executor=self,
+                query=lqs[0].multi_query,
+                args=[lq.arg for lq in lqs],
+                changes=[lq.change for lq in lqs],
+                insert=for_insert,
+            )
+            for lqs in local_queries
+        ]
+
+    def __iter__(self) -> Iterator[list[QueryBatch]]:
+        if self.create_batches:
+            for batch in self.create_batches:
+                yield self._compile_batch(batch, for_insert=True)
+        if self.updates:
+            yield self._compile_batch(self.updates, for_insert=False)
 
     def commit(self) -> None:
-        assert self.iter_index == len(self.create_batches) + 1
-
         visited: IDTracker[GelModel, None] = IDTracker()
 
         def _traverse(obj: GelModel) -> None:
@@ -803,35 +841,40 @@ class SaveExecutor:
 
     def _compile_change(
         self, change: ModelChange, /, *, for_insert: bool
-    ) -> QueryWithArgs:
+    ) -> CompiledQuery:
         shape_parts: list[str] = []
-        with_clauses: list[str] = []
+
         args: list[object] = []
+        args_types: list[str] = []
 
         def add_arg(
             type_ql: str,
             value: Any,
-            /,
-            *,
-            optional: bool = False,
         ) -> str:
-            arg = str(len(args))
-            opt = "optional " if optional else ""
-            with_clauses.append(f"__a_{arg} := <{opt}{type_ql}>${arg}")
+            argnum = str(len(args))
+            args_types.append(type_ql)
             args.append(value)
-            return f"__a_{arg}"
+            return f"__data.{argnum}"
 
         obj = change.model
         type_name = obj_to_name_ql(obj)
 
         for ch in change.fields.values():
             if isinstance(ch, PropertyChange):
-                arg = add_arg(
-                    ch.info.typexpr,
-                    ch.value,
-                    optional=ch.info.cardinality.is_optional(),
-                )
-                shape_parts.append(f"{quote_ident(ch.name)} := {arg}")
+                if ch.info.cardinality.is_optional():
+                    arg = add_arg(
+                        f"array<tuple<{ch.info.typexpr}>>",
+                        [(ch.value,)] if ch.value is not None else [],
+                    )
+                    shape_parts.append(
+                        f"{quote_ident(ch.name)} := ("
+                        f"  select array_unpack({arg}).0 limit 1"
+                        f")"
+                    )
+                else:
+                    assert ch.value is not None
+                    arg = add_arg(ch.info.typexpr, ch.value)
+                    shape_parts.append(f"{quote_ident(ch.name)} := {arg}")
 
             elif isinstance(ch, MultiPropAdd):
                 # Since we're passing a set of values packed into an array
@@ -857,47 +900,66 @@ class SaveExecutor:
                 )
 
             elif isinstance(ch, SingleLinkChange):
-                if ch.target is None:
-                    shape_parts.append(f"{quote_ident(ch.name)} := {{}}")
-                    continue
+                tid = (
+                    self._get_id(ch.target) if ch.target is not None else None
+                )
+                linked_name = ch.info.typexpr
 
-                tid = self._get_id(ch.target)
-                linked_name = obj_to_name_ql(ch.target)
-
-                if ch.props:
+                if ch.props and ch.target is not None:
                     assert ch.props_info is not None
+                    assert tid is not None
 
-                    id_arg = add_arg("std::uuid", tid)
+                    sl_subt = [
+                        f"array<tuple<{ch.props_info[k].typexpr}>>"
+                        for k in ch.props_info
+                    ]
 
-                    subq_shape: list[str] = []
+                    sl_args = [
+                        tid,
+                        *(
+                            [] if ch.props[k] is None else [(ch.props[k],)]
+                            for k in ch.props_info
+                        ),
+                    ]
 
-                    for pname, pval in ch.props.items():
-                        parg = add_arg(
-                            ch.props_info[pname].typexpr,
-                            pval,
-                            optional=ch.props_info[
-                                pname
-                            ].cardinality.is_optional(),
-                        )
-                        subq_shape.append(f"@{quote_ident(pname)} := {parg}")
+                    arg = add_arg(
+                        f"tuple<std::uuid, {','.join(sl_subt)}>",
+                        sl_args,
+                    )
+
+                    subq_shape = [
+                        f"@{quote_ident(pname)} := ("
+                        f"  select array_unpack({arg}.{i}).0 limit 1"
+                        f")"
+                        for i, pname in enumerate(ch.props.keys(), 1)
+                    ]
 
                     shape_parts.append(
                         f"{quote_ident(ch.name)} := "
-                        f"(select (<{linked_name}>{id_arg}) {{ "
+                        f"(select (<{linked_name}>{arg}.0) {{ "
                         f"  {', '.join(subq_shape)}"
                         f"}})"
                     )
 
-                else:
-                    arg = add_arg(
-                        "std::uuid",
-                        tid,
-                        optional=ch.info.cardinality.is_optional(),
-                    )
-                    shape_parts.append(
-                        f"{quote_ident(ch.name)} := "
-                        f"<{linked_name}><std::uuid>{arg}"
-                    )
+                else:  # noqa: PLR5501
+                    if ch.info.cardinality.is_optional():
+                        arg = add_arg(
+                            "array<tuple<std::uuid>>",
+                            [(tid,)] if tid is not None else [],
+                        )
+                        shape_parts.append(
+                            f"{quote_ident(ch.name)} := "
+                            f"<{linked_name}><std::uuid>("
+                            f"  select array_unpack({arg}).0 limit 1"
+                            f")"
+                        )
+                    else:
+                        assert tid is not None
+                        arg = add_arg("std::uuid", tid)
+                        shape_parts.append(
+                            f"{quote_ident(ch.name)} := "
+                            f"<{linked_name}><std::uuid>{arg}"
+                        )
 
             elif isinstance(ch, MultiLinkRemove):
                 assert not for_insert
@@ -1014,9 +1076,25 @@ class SaveExecutor:
                 set {{ {shape} }}
             """  # noqa: S608
 
-        if with_clauses:
-            query = f"with\n{', '.join(with_clauses)}\n\n{query}"
+        single_query = f"""
+            with Q := (
+                with __data := <tuple<{",".join(args_types)}>>$0
+                select {query}
+            ) select Q.id
+        """
 
-        query = f"with Q := ({query}) select Q.id"
+        multi_query = f"""
+            with Q := (
+                with __all_data := <array<tuple<{",".join(args_types)}>>>$0
+                for __data in array_unpack(__all_data) union (
+                    ({query})
+                )
+            ) select Q.id
+        """
 
-        return query, args
+        return CompiledQuery(
+            single_query=single_query,
+            multi_query=multi_query,
+            arg=tuple(args),
+            change=change,
+        )
