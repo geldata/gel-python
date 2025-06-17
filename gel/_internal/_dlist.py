@@ -74,6 +74,8 @@ class AbstractTrackedList(
         else:
             self._initial_items = []
             self._items = []
+            # 'extend' is optimized in _UpcastingDistinctList
+            # for use in __init__
             self.extend(iterable)
 
     def _ensure_snapshot(self) -> None:
@@ -368,6 +370,8 @@ class AbstractDistinctList(AbstractTrackedList[_HT_co]):
             self._set.add(item)
         except TypeError:
             pass
+        else:
+            return
 
         assert self._unhashables is not None
         self._unhashables[id(item)] = item
@@ -375,9 +379,12 @@ class AbstractDistinctList(AbstractTrackedList[_HT_co]):
     def _untrack_item(self, item: _HT_co) -> None:  # type: ignore [misc]
         assert self._set is not None
         try:
-            self._set.discard(item)
-        except TypeError:
+            self._set.remove(item)
+        except (TypeError, KeyError):
+            # Either unhashable or not in the list
             pass
+        else:
+            return
 
         assert self._unhashables is not None
         self._unhashables.pop(id(item), None)

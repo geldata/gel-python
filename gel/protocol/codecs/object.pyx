@@ -313,15 +313,7 @@ cdef class ObjectCodec(BaseNamedRecordCodec):
 
         if return_type_proxy is not None:
             nested = current_ret_type.__gel_model_construct__(result_dict)
-            result = return_type_proxy.__gel_model_construct__(None)
-            object.__setattr__(result, '_p__obj__', nested)
-            object.__setattr__(
-                result,
-                '__linkprops__',
-                return_type_proxy.__lprops__.__gel_model_construct__(
-                    lprops_dict
-                )
-            )
+            result = return_type_proxy.__gel_proxy_construct__(nested, lprops_dict)
         else:
             result = current_ret_type.__gel_model_construct__(result_dict)
 
