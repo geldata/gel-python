@@ -34,7 +34,6 @@ from pydantic_core import core_schema
 from gel._internal import _dlist
 from gel._internal import _edgeql
 from gel._internal import _typing_inspect
-from gel._internal import _unsetid
 
 from gel._internal._qbmodel import _abstract
 
