@@ -17,8 +17,6 @@
 #
 
 from __future__ import annotations
-
-from __future__ import annotations
 from typing import Any
 
 import contextlib
@@ -422,7 +420,15 @@ class BatchIteration(transaction.BaseTransaction):
 
     def __exit__(self, extype, ex, tb):
         with self._exclusive():
-            iter_coroutine(self._wait())
+            if extype is None:
+                try:
+                    iter_coroutine(self._wait())
+                except Exception as ex:
+                    self._managed = False
+                    if iter_coroutine(self._exit(type(ex), ex)):
+                        return True
+                    else:
+                        raise
             self._managed = False
             return iter_coroutine(self._exit(extype, ex))
 

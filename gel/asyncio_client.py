@@ -369,7 +369,16 @@ class AsyncIOBatchIteration(transaction.BaseTransaction):
         return self
 
     async def __aexit__(self, extype, ex, tb):
-        await self.wait()
+        if extype is None:
+            try:
+                await self.wait()
+            except Exception as ex:
+                with self._exclusive():
+                    self._managed = False
+                    if await self._exit(type(ex), ex):
+                        return True
+                    else:
+                        raise
         with self._exclusive():
             self._managed = False
             return await self._exit(extype, ex)

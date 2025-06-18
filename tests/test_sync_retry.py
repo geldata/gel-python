@@ -217,6 +217,93 @@ class TestSyncRetry(tb.SyncQueryTestCase):
         self.assertEqual(results, {1, 2})
         self.assertEqual(iterations, 3)
 
+    def test_sync_batch_retry_conflict(self):
+        self.batch_conflict('counter4')
+        self.assertEqual(
+            self.client.query_single(
+                '''
+                SELECT (
+                    SELECT test::Counter
+                    FILTER .name = <str>$name
+                ).value
+                '''
+                , name='counter4'
+            ),
+            2,
+        )
+
+    def test_sync_batch_conflict_no_retry(self):
+        with self.assertRaises(gel.TransactionSerializationError):
+            self.batch_conflict(
+                'counter5',
+                gel.RetryOptions(attempts=1, backoff=gel.default_backoff)
+            )
+        self.assertEqual(
+            self.client.query_single(
+                '''
+                SELECT (
+                    SELECT test::Counter
+                    FILTER .name = <str>$name
+                ).value
+                '''
+                , name='counter5'
+            ),
+            1,
+        )
+
+    def batch_conflict(self, name, options=None):
+        con_args = self.get_connect_args().copy()
+        con_args.update(database=self.get_database_name())
+        client2 = gel.create_client(**con_args)
+        self.addCleanup(client2.close)
+
+        barrier = Barrier(2)
+        lock = threading.Lock()
+
+        iterations = 0
+
+        def transaction1(client):
+            for tx in client._batch():
+                nonlocal iterations
+                iterations += 1
+                with tx:
+                    # Actually ensure the transaction is started in backend
+                    tx.send_query("SELECT 1")
+                    tx.wait()
+
+                    # Start both transactions at the same initial data.
+                    # One should succeed other should fail and retry.
+                    # On next attempt, the latter should succeed
+                    barrier.ready()
+
+                    lock.acquire()
+                    tx.send_query_single('''
+                        SELECT (
+                            INSERT test::Counter {
+                                name := <str>$name,
+                                value := 1,
+                            } UNLESS CONFLICT ON .name
+                            ELSE (
+                                UPDATE test::Counter
+                                SET { value := .value + 1 }
+                            )
+                        ).value
+                    ''', name=name)
+                lock.release()
+
+        client = self.client
+        if options:
+            client = client.with_retry_options(options)
+            client2 = client2.with_retry_options(options)
+
+        with futures.ThreadPoolExecutor(2) as pool:
+            f1 = pool.submit(transaction1, client)
+            f2 = pool.submit(transaction1, client2)
+        f1.result()
+        f2.result()
+
+        self.assertEqual(iterations, 3)
+
     def test_sync_transaction_interface_errors(self):
         with self.assertRaisesRegex(
             AttributeError,
