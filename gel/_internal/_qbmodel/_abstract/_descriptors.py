@@ -155,7 +155,16 @@ class ModelFieldDescriptor(_qb.AbstractFieldDescriptor):
             raise AttributeError(f"{self.__gel_name__!r} is not set")
         else:
             assert owner is not None
-            return self.get(owner)
+            cache_attr = f"__cached_path_{self.__gel_name__}"
+
+            try:
+                return object.__getattribute__(owner, cache_attr)
+            except AttributeError:
+                pass
+
+            path = self.get(owner)
+            setattr(owner, cache_attr, path)
+            return path
 
 
 def field_descriptor(
