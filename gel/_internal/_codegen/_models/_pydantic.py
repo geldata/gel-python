@@ -703,13 +703,15 @@ class BaseGeneratedModule:
         # ensure `path` directory contains `__init__.py`
         (path / "__init__.py").touch()
 
+    def should_write(
+        self, py_file: GeneratedModule, aspect: ModuleAspect
+    ) -> bool:
+        return py_file.has_content() or aspect is ModuleAspect.MAIN
+
     def write_files(self, path: pathlib.Path) -> set[pathlib.Path]:
         written: set[pathlib.Path] = set()
         for aspect, py_file in self.py_files.items():
-            if not py_file.has_content() and (
-                self._schema_part is not reflection.SchemaPart.STD
-                or aspect is not ModuleAspect.MAIN
-            ):
+            if not self.should_write(py_file, aspect):
                 continue
 
             with self._open_py_file(
@@ -1805,6 +1807,10 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         self,
         ops: list[reflection.Operator],
     ) -> None:
+        if not ops:
+            # Exit early, don't generate imports we won't use.
+            return
+
         aexpr = self.import_name(BASE_IMPL, "AnnotatedExpr")
         pfxop = self.import_name(BASE_IMPL, "PrefixOp")
         for op in ops:
@@ -1887,6 +1893,10 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                 set[reflection.AnyType],
             ],
         ] = defaultdict(lambda: defaultdict(set))
+
+        if not ops:
+            # Exit early, don't generate imports we won't use.
+            return
 
         aexpr = self.import_name(BASE_IMPL, "AnnotatedExpr")
         expr_compat = self.import_name(BASE_IMPL, "ExprCompatible")
@@ -3569,6 +3579,11 @@ class GeneratedSchemaModule(BaseGeneratedModule):
 
 
 class GeneratedGlobalModule(BaseGeneratedModule):
+    def should_write(
+        self, py_file: GeneratedModule, aspect: ModuleAspect
+    ) -> bool:
+        return py_file.has_content()
+
     def process(self, types: Mapping[str, reflection.AnyType]) -> None:
         graph: defaultdict[str, set[str]] = defaultdict(set)
 

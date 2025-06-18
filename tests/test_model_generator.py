@@ -216,7 +216,7 @@ class TestModelGenerator(tb.ModelTestCase):
             .filter(
                 lambda p: p.body == "Hello",
                 lambda p: 1 * std.len(p.body) == 5,
-                lambda p: std.or_(p.body[0] == "H", std.like(p.body, "Hello"))
+                lambda p: std.or_(p.body[0] == "H", std.like(p.body, "Hello")),
             )
             .limit(1)
         )
@@ -1596,3 +1596,23 @@ class TestModelGenerator(tb.ModelTestCase):
             ntup_t.as_schema_name(),
             "tuple<a:std::str, b:tuple<c:std::int64, d:std::str>>",
         )
+
+
+class TestEmptyAiModelGenerator(tb.ModelTestCase):
+    DEFAULT_MODULE = "default"
+    SCHEMA = os.path.join(os.path.dirname(__file__), "dbsetup", "empty_ai.gel")
+
+    @tb.typecheck
+    def test_modelgen_empty_ai_schema_1(self):
+        # This is it, we're just testing empty import.
+        import models
+
+        self.assertEqual(
+            models.sys.ExtensionPackage.__name__, "ExtensionPackage"
+        )
+
+    @tb.to_be_fixed
+    # @tb.typecheck
+    def test_modelgen_empty_ai_schema_2(self):
+        # This is it, we're just testing empty import.
+        from models.ext import ai  # noqa: F401

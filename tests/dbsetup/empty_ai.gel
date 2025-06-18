@@ -1,0 +1,3 @@
+# keep at as is, don't add stuff; regression test.
+using extension ai;
+module default {}
