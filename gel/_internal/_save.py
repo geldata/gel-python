@@ -52,7 +52,7 @@ _sorted_pointers_cache: weakref.WeakKeyDictionary[
 ] = weakref.WeakKeyDictionary()
 
 
-_ll_getattr = object.__getattribute__
+ll_attr = object.__getattribute__
 
 
 LinkPropertiesValues = TypeAliasType(
@@ -263,13 +263,13 @@ def unwrap_proxy(val: GelModel) -> GelModel:
     if isinstance(val, ProxyModel):
         # This is perf-sensitive function as it's called on
         # every edge of the graph multiple times.
-        return _ll_getattr(val, "_p__obj__")  # type: ignore [no-any-return]
+        return ll_attr(val, "_p__obj__")  # type: ignore [no-any-return]
     else:
         return val
 
 
 def unwrap_proxy_no_check(val: ProxyModel[GelModel]) -> GelModel:
-    return _ll_getattr(val, "_p__obj__")  # type: ignore [no-any-return]
+    return ll_attr(val, "_p__obj__")  # type: ignore [no-any-return]
 
 
 def unwrap_dlist(val: Iterable[GelModel]) -> list[GelModel]:
@@ -477,7 +477,9 @@ def make_plan(objs: Iterable[GelModel]) -> SavePlan:
                     if prop.properties:
                         assert isinstance(val, ProxyModel)
                         link_prop_variant = bool(
-                            val.__linkprops__.__gel_get_changed_fields__()
+                            ll_attr(
+                                val, "__linkprops__"
+                            ).__gel_get_changed_fields__()
                         )
 
                     if link_prop_variant:
@@ -486,7 +488,9 @@ def make_plan(objs: Iterable[GelModel]) -> SavePlan:
                         ptrs = get_pointers(val.__lprops__)
 
                         props = {
-                            p.name: getattr(val.__linkprops__, p.name, None)
+                            p.name: getattr(
+                                ll_attr(val, "__linkprops__"), p.name, None
+                            )
                             for p in ptrs
                         }
 
@@ -600,7 +604,9 @@ def make_plan(objs: Iterable[GelModel]) -> SavePlan:
                     assert isinstance(el, ProxyModel)
                     if el in added_index:
                         continue
-                    if el.__linkprops__.__gel_get_changed_fields__():
+
+                    lp = ll_attr(el, "__linkprops__")
+                    if lp.__gel_get_changed_fields__():
                         added.append(el)
 
             # No adds or changes for this link? Continue to the next one.
@@ -611,7 +617,7 @@ def make_plan(objs: Iterable[GelModel]) -> SavePlan:
 
             # Simple case -- no link props!
             if not prop.properties or all(
-                not link.__linkprops__.__gel_get_changed_fields__()
+                not ll_attr(link, "__linkprops__").__gel_get_changed_fields__()
                 for link in added_proxies
             ):
                 mch = MultiLinkAdd(
@@ -639,7 +645,9 @@ def make_plan(objs: Iterable[GelModel]) -> SavePlan:
                 added=unwrap_dlist(added),
                 added_props=[
                     {
-                        p.name: getattr(link.__linkprops__, p.name, None)
+                        p.name: getattr(
+                            ll_attr(link, "__linkprops__"), p.name, None
+                        )
                         for p in props_info
                     }
                     for link in cast("list[ProxyModel[GelModel]]", added)
@@ -832,7 +840,9 @@ class SaveExecutor:
                     if prop.cardinality.is_multi():
                         if is_proxy_link_list(linked):
                             for proxy in linked:
-                                proxy.__linkprops__.__gel_commit__()
+                                ll_attr(
+                                    proxy, "__linkprops__"
+                                ).__gel_commit__()
                                 _traverse(unwrap_proxy_no_check(proxy))
                         else:
                             assert is_link_list(linked)
@@ -841,7 +851,7 @@ class SaveExecutor:
                         linked.__gel_commit__()
                     else:
                         if isinstance(linked, ProxyModel):
-                            linked.__linkprops__.__gel_commit__()
+                            ll_attr(linked, "__linkprops__").__gel_commit__()
                             _traverse(unwrap_proxy_no_check(linked))
                         else:
                             _traverse(cast("GelModel", linked))

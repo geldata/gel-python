@@ -22,6 +22,7 @@ from __future__ import annotations
 from typing import Any
 
 import contextlib
+import collections
 import datetime
 import queue
 import socket
@@ -558,6 +559,35 @@ class Client(base_client.BaseClient, abstract.Executor):
                         batch.feed_ids(ids)
 
                 executor.commit()
+
+    def __debug_save__(self, *objs: GelModel) -> dict[str, float]:
+        timings = collections.defaultdict(float)
+        nqueries = collections.defaultdict(int)
+
+        ns = time.monotonic_ns()
+        make_executor = make_save_executor_constructor(objs)
+        timings["__create_plan__"] = time.monotonic_ns() - ns
+        nqueries["__create_plan__"] = 1
+
+        for tx in self._batch():
+            with tx:
+                executor = make_executor()
+
+                for batches in executor:
+                    for batch in batches:
+                        ns = time.monotonic_ns()
+                        tx.send_query(batch.query, batch.args)
+                        batch_ids = tx.wait()
+                        timings[batch.query] += time.monotonic_ns() - ns
+                        nqueries[batch.query] += 1
+                        batch.feed_ids(batch_ids[0])
+
+                executor.commit()
+
+        return {
+            k: (v / 1_000_000.0, nqueries[k])
+            for k, v in sorted(timings.items(), key=lambda kv: kv[1])
+        }
 
     def _query(self, query_context: abstract.QueryContext):
         return iter_coroutine(super()._query(query_context))
