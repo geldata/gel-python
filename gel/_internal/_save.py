@@ -742,6 +742,7 @@ MAX_BATCH_SIZE = 1280
 class QueryBatch:
     executor: SaveExecutor
     query: str
+    args_query: str
     args: list[tuple[object, ...]]
     changes: list[ModelChange]
     insert: bool
@@ -757,6 +758,7 @@ class QueryBatch:
 class CompiledQuery:
     single_query: str
     multi_query: str
+    args_query: str
     arg: tuple[object, ...]
     change: ModelChange
 
@@ -799,6 +801,7 @@ class SaveExecutor:
             QueryBatch(
                 executor=self,
                 query=lqs[0].multi_query,
+                args_query=lqs[0].args_query,
                 args=[lq.arg for lq in lqs],
                 changes=[lq.change for lq in lqs],
                 insert=for_insert,
@@ -1086,7 +1089,7 @@ class SaveExecutor:
                     )
 
                     lp_assign = ", ".join(
-                        f"@{p} := {arg_casts[p][1](f'tup.{i + 1}')}"
+                        f"@{p} := {arg_casts[p][1](f'__tup.{i + 1}')}"
                         for i, p in enumerate(ch.props_info)
                     )
 
@@ -1095,8 +1098,8 @@ class SaveExecutor:
                     shape_parts.append(
                         f"{quote_ident(ch.name)} {assign_op} "
                         f"assert_distinct(("
-                        f"for tup in array_unpack({arg}) union ("
-                        f"select (<{ch.info.typexpr}>tup.0) {{ "
+                        f"for __tup in array_unpack({arg}) union ("
+                        f"select (<{ch.info.typexpr}>__tup.0) {{ "
                         f"{lp_assign}"
                         f"}})))"
                     )
@@ -1148,9 +1151,15 @@ class SaveExecutor:
             ) select __query.id
         """
 
+        args_query = f"""
+            with __all_data := <array<tuple<{",".join(args_types)}>>>$0
+            select count(array_unpack(__all_data))
+        """
+
         return CompiledQuery(
             single_query=single_query,
             multi_query=multi_query,
+            args_query=args_query,
             arg=tuple(args),
             change=change,
         )
