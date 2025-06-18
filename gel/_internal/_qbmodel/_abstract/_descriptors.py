@@ -17,7 +17,11 @@ from gel._internal import _typing_eval
 from gel._internal import _typing_inspect
 from gel._internal import _utils
 
-from ._base import GelObjectType, GelType, is_gel_type, is_gel_object_type
+from ._base import (
+    GelType,
+    is_gel_type,
+    maybe_collapse_object_type_variant_union,
+)
 
 
 if TYPE_CHECKING:
@@ -86,25 +90,15 @@ class ModelFieldDescriptor(_qb.AbstractFieldDescriptor):
 
         if t is not None:
             if _typing_inspect.is_union_type(t):
-                default_variant: type[GelObjectType] | None = None
-                typename = None
-                for union_arg in typing.get_args(t):
-                    if not is_gel_object_type(union_arg):
-                        break
-                    if typename is None:
-                        typename = union_arg.__gel_reflection__.name
-                    elif typename != union_arg.__gel_reflection__.name:
-                        break
-                    if union_arg.__gel_variant__ is None:
-                        default_variant = union_arg
-                else:
-                    if default_variant is not None:
-                        t = default_variant
+                collapsed = maybe_collapse_object_type_variant_union(t)
+                if collapsed is not None:
+                    t = collapsed
 
             if not is_gel_type(t):
                 raise AssertionError(
                     f"{self._fqname} type argument is not a GelType: {t}"
                 )
+
             self.__gel_resolved_type__ = t
 
         return t
