@@ -417,7 +417,7 @@ class TestModelGenerator(tb.ModelTestCase):
         with self.assertRaisesRegex(
             ValueError, r"(?s)only instances of User are allowed, got .*int"
         ):
-            default.GameSession.players(1)  # type: ignore
+            default.GameSession.players.link(1)  # type: ignore
 
         u = default.User(name="batman")
         p = default.Post(body="aaa", author=u)
@@ -425,6 +425,14 @@ class TestModelGenerator(tb.ModelTestCase):
             ValueError, r"(?s)prayers.*Extra inputs are not permitted"
         ):
             default.GameSession(num=7, prayers=[p])  # type: ignore
+
+        gp = default.GameSession.players(name="johny")
+        self.assertIsInstance(gp, default.User)
+        self.assertIsInstance(gp, default.GameSession.players)
+        self.assertIsInstance(gp._p__obj__, default.User)
+        self.assertEqual(gp.name, "johny")
+        self.assertEqual(gp._p__obj__.name, "johny")
+        self.assertIsNotNone(gp.__linkprops__)
 
         # Check that `groups` is not an allowed keyword-arg for `User.__init__`
         self.assertEqual(

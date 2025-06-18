@@ -2826,6 +2826,32 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                 self.write("...")
                 self.write()
 
+    def _generate_init_args(self, objtype: reflection.ObjectType) -> list[str]:
+        init_pointers = _filter_pointers(
+            self._get_pointer_origins(objtype),
+            filters=[
+                lambda ptr, _: (
+                    (ptr.name != "id" and not ptr.is_computed)
+                    or objtype.name.startswith("schema::")
+                ),
+            ],
+            exclude_id=False,
+        )
+        init_args: list[str] = []
+        if init_pointers:
+            init_args.extend(["/", "*"])
+            for ptr, org_objtype in init_pointers:
+                ptr_t = self.get_ptr_type(
+                    org_objtype,
+                    ptr,
+                    style="arg",
+                    prefer_broad_target_type=True,
+                    consider_default=True,
+                )
+                init_args.append(f"{ptr.name}: {ptr_t}")
+
+        return init_args
+
     def _write_base_object_type_body(
         self,
         objtype: reflection.ObjectType,
@@ -2860,28 +2886,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                     )
                 self.write()
 
-        init_pointers = _filter_pointers(
-            self._get_pointer_origins(objtype),
-            filters=[
-                lambda ptr, obj: (
-                    (ptr.name != "id" and not ptr.is_computed)
-                    or objtype.name.startswith("schema::")
-                ),
-            ],
-            exclude_id=False,
-        )
-        init_args = []
-        if init_pointers:
-            init_args.extend(["/", "*"])
-            for ptr, org_objtype in init_pointers:
-                ptr_t = self.get_ptr_type(
-                    org_objtype,
-                    ptr,
-                    style="arg",
-                    prefer_broad_target_type=True,
-                    consider_default=True,
-                )
-                init_args.append(f"{ptr.name}: {ptr_t}")
+        init_args = self._generate_init_args(objtype)
 
         with self.type_checking():
             with self._method_def("__init__", init_args):
@@ -3004,6 +3009,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         ptr = pointer
         pname = ptr.name
         target_type = self._types[ptr.target_id]
+        assert isinstance(target_type, reflection.ObjectType)
         import_time = (
             ImportTime.typecheck
             if is_forward_decl
@@ -3086,40 +3092,20 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             self.write("__linkprops__: __lprops__")
             self.write()
             if is_forward_decl:
-                args = [f"obj: {target}", "/", "*", *lprops]
-                with self._method_def("__init__", args):
+                init_args = self._generate_init_args(target_type)
+                with self._method_def("__init__", init_args):
                     self.write("...")
-            else:
-                # It's important to just forward '**link_props' to
-                # the constructor of `__lprops__` -- otherwise pydantic's
-                # tracking and our's own tracking would assume that argument
-                # defaults (Nones in this case) were explicitly set by the user
-                # leading to inefficient queries in save().
-                args = ["obj", "/", "**link_props"]
-                with self._method_def("__init__", args):
-                    obj = self.import_name("builtins", "object")
-                    self.write(f"{proxymodel_t}.__init__(self, obj)")
-                    self.write(
-                        "lprops = self.__class__.__lprops__(**link_props)"
-                    )
-                    self.write(
-                        f'{obj}.__setattr__(self, "__linkprops__", lprops)'
-                    )
 
             self.write()
             if is_forward_decl:
                 args = [f"obj: {target}", "/", "*", *lprops]
-                with self._classmethod_def("link", args, self_t):
+                with self._classmethod_def(
+                    "link",
+                    args,
+                    self_t,
+                    line_comment="type: ignore[override]",
+                ):
                     self.write("...")
-            else:
-                args = ["obj", "/", "**link_props"]
-                with self._classmethod_def("link", args, self_t):
-                    self.write(
-                        self.format_list(
-                            "return cls({list})",
-                            ["obj", "**link_props"],
-                        ),
-                    )
 
             self.write()
 
