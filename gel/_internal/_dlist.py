@@ -74,7 +74,7 @@ class AbstractTrackedList(
         else:
             self._initial_items = []
             self._items = []
-            # 'extend' is optimized in _UpcastingDistinctList
+            # 'extend' is optimized in ProxyDistinctList
             # for use in __init__
             self.extend(iterable)
 

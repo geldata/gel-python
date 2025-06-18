@@ -34,8 +34,8 @@ from gel._internal._reflection import SchemaPath
 from gel._internal._qbmodel._pydantic._models import GelModel
 from gel._internal._dlist import DistinctList
 from gel._internal._edgeql import Cardinality, PointerKind
-from gel._internal._qbmodel._pydantic._fields import (
-    _UpcastingDistinctList,
+from gel._internal._qbmodel._pydantic._pdlist import (
+    ProxyDistinctList,
 )
 
 
@@ -116,18 +116,18 @@ class TestModelGenerator(tb.ModelTestCase):
                             f"type is {e.type!r}",
                         )
 
-                if issubclass(p.type, _UpcastingDistinctList):
-                    if not issubclass(e.type, _UpcastingDistinctList):
+                if issubclass(p.type, ProxyDistinctList):
+                    if not issubclass(e.type, ProxyDistinctList):
                         self.fail(
                             f"{obj.__name__}.{p.name} eq_type check "
-                            f" failed: p.type is _UpcastingDistinctList, "
+                            f" failed: p.type is ProxyDistinctList, "
                             f"but expected type is {e.type!r}",
                         )
                 else:
-                    if issubclass(e.type, _UpcastingDistinctList):
+                    if issubclass(e.type, ProxyDistinctList):
                         self.fail(
                             f"{obj.__name__}.{p.name} eq_type check failed: "
-                            f"p.type is not a _UpcastingDistinctList, but "
+                            f"p.type is not a ProxyDistinctList, but "
                             f"expected type is {e.type!r}",
                         )
 
