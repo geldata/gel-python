@@ -370,14 +370,23 @@ class AsyncIOBatchIteration(transaction.BaseTransaction):
 
     async def __aexit__(self, extype, ex, tb):
         if extype is None:
+            # Normal exit, wait for the remaining batched operations
+            # to complete, discarding any results.
             try:
                 await self.wait()
             except Exception as ex:
+                # If an exception occurs while waiting, we need to
+                # ensure that the transaction is exited properly,
+                # including to consider that exception for retry.
                 with self._exclusive():
                     self._managed = False
                     if await self._exit(type(ex), ex):
+                        # Shall retry, mute the exception
                         return True
                     else:
+                        # Shall not retry, re-raise the exception.
+                        # Note: we cannot simply return False here,
+                        # because the outer `extype` and `ex` are all None.
                         raise
         with self._exclusive():
             self._managed = False

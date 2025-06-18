@@ -421,13 +421,22 @@ class BatchIteration(transaction.BaseTransaction):
     def __exit__(self, extype, ex, tb):
         with self._exclusive():
             if extype is None:
+                # Normal exit, wait for the remaining batched operations
+                # to complete, discarding any results.
                 try:
                     iter_coroutine(self._wait())
                 except Exception as ex:
+                    # If an exception occurs while waiting, we need to
+                    # ensure that the transaction is exited properly,
+                    # including to consider that exception for retry.
                     self._managed = False
                     if iter_coroutine(self._exit(type(ex), ex)):
+                        # Shall retry, mute the exception
                         return True
                     else:
+                        # Shall not retry, re-raise the exception.
+                        # Note: we cannot simply return False here,
+                        # because the outer `extype` and `ex` are all None.
                         raise
             self._managed = False
             return iter_coroutine(self._exit(extype, ex))
