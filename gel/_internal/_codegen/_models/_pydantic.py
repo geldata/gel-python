@@ -2502,7 +2502,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                     variant="Base",
                     base_types=variant_base_types,
                     static_bases=[typeof_class],
-                    class_kwargs=class_kwargs,
+                    class_kwargs=class_kwargs | {"__gel_variant__": '"Base"'},
                     inherit_from_base_variant=False,
                 ):
                     self._write_base_object_type_body(objtype, typeof_class)
@@ -2514,7 +2514,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                     variant="Required",
                     base_types=variant_base_types,
                     static_bases=[],
-                    class_kwargs={},
+                    class_kwargs={"__gel_variant__": '"Required"'},
                     inherit_from_base_variant=True,
                 ):
                     ptrs = _get_object_type_body(
@@ -2541,7 +2541,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                     variant="PartialBase",
                     base_types=variant_base_types,
                     static_bases=[typeof_partial_class],
-                    class_kwargs={},
+                    class_kwargs={"__gel_variant__": '"PartialBase"'},
                     inherit_from_base_variant=True,
                     line_comment="type: ignore [misc, unused-ignore]",
                 ):
@@ -2553,7 +2553,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                     variant="Partial",
                     base_types=variant_base_types,
                     static_bases=["PartialBase"],
-                    class_kwargs={},
+                    class_kwargs={"__gel_variant__": '"Partial"'},
                     inherit_from_base_variant=False,
                     line_comment="type: ignore [misc, unused-ignore]",
                 ):

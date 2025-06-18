@@ -45,11 +45,14 @@ class GelModelMeta(GelObjectTypeMeta):
         namespace: dict[str, Any],
         *,
         __gel_type_id__: uuid.UUID | None = None,
+        __gel_variant__: str | None = None,
         **kwargs: Any,
     ) -> GelModelMeta:
         cls = super().__new__(mcls, name, bases, namespace, **kwargs)
         if __gel_type_id__ is not None:
             mcls.__gel_class_registry__[__gel_type_id__] = cls
+        if __gel_variant__ is not None:
+            cls.set_variant(__gel_variant__)
         return cls
 
     @classmethod
@@ -64,6 +67,9 @@ class GelModelMeta(GelObjectTypeMeta):
     @classmethod
     def register_class(cls, tid: uuid.UUID, type_: type[GelModel]) -> None:
         cls.__gel_class_registry__[tid] = cls
+
+    def set_variant(self, variant: str | None) -> None:
+        self.__gel_variant__ = variant
 
 
 class GelSourceModel(_qb.GelSourceMetadata):
