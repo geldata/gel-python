@@ -401,7 +401,7 @@ class _AnyLink(Generic[_MT_co, _BMT_co]):
         if value is None or isinstance(value, mt):
             return value
         elif isinstance(value, bmt):
-            return mt(value)  # type: ignore [no-any-return]
+            return mt.link(value)  # type: ignore [no-any-return]
         else:
             raise TypeError(
                 f"could not convert {type(value)} to {mt.__name__}"
@@ -437,7 +437,7 @@ class _Link(
         if isinstance(value, mt):
             return value  # type: ignore [no-any-return]
         elif isinstance(value, bmt):
-            return mt(value)  # type: ignore [no-any-return]
+            return mt.link(value)  # type: ignore [no-any-return]
         else:
             raise TypeError(
                 f"could not convert {type(value)} to {mt.__name__}"
