@@ -28,7 +28,7 @@ from gel._internal._dlist import (
 )
 from gel._internal._unsetid import UNSET_UUID
 from gel._internal._edgeql import PointerKind, quote_ident
-from gel._internal._qbmodel._pydantic._fields import _UpcastingDistinctList
+from gel._internal._qbmodel._pydantic._pdlist import ProxyDistinctList
 
 if TYPE_CHECKING:
     import uuid
@@ -255,8 +255,8 @@ def is_link_list(val: object) -> TypeGuard[DistinctList[GelModel]]:
 
 def is_proxy_link_list(
     val: object,
-) -> TypeGuard[_UpcastingDistinctList[ProxyModel[GelModel], GelModel]]:
-    return isinstance(val, _UpcastingDistinctList)
+) -> TypeGuard[ProxyDistinctList[ProxyModel[GelModel], GelModel]]:
+    return isinstance(val, ProxyDistinctList)
 
 
 def unwrap_proxy(val: GelModel) -> GelModel:
@@ -626,7 +626,7 @@ def make_plan(objs: Iterable[GelModel]) -> SavePlan:
             #
             # First, we iterate through the list of added new objects
             # to the list. All of them should be ProxyModels
-            # (as we use UpcastingDistinctList for links with props.)
+            # (as we use ProxyDistinctList for links with props.)
             # Our goal is to segregate different combinations of
             # set link properties into separate groups.
             link_tp = type(added_proxies[0])
