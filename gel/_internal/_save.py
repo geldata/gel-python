@@ -98,14 +98,20 @@ class SingleLinkChange(BaseFieldChange):
 
 @_struct
 class MultiLinkAdd(BaseFieldChange):
-    added: Iterable[GelModel]
+    added: list[GelModel]
 
-    added_props: Iterable[LinkPropertiesValues] | None = None
+    added_props: list[LinkPropertiesValues] | None = None
     props_info: dict[str, GelPointerReflection] | None = None
 
     def __post_init__(self) -> None:
         assert not any(isinstance(o, ProxyModel) for o in self.added)
         assert self.info.cardinality.is_multi()
+        assert self.added_props is None or (
+            self.props_info is not None
+            and len(self.added_props) > 0
+            and len(self.added) == len(self.added_props)
+            and next(iter(self.added_props)).keys() == self.props_info.keys()
+        )
 
 
 @_struct
@@ -879,6 +885,36 @@ class SaveExecutor:
         args: list[object] = []
         args_types: list[str] = []
 
+        def arg_cast(
+            type_ql: str,
+        ) -> tuple[str, Callable[[str], str], Callable[[object], object]]:
+            # As a workaround for the current limitation
+            # of EdgeQL (tuple arguments can't have empty
+            # sets as elements, and free objects input
+            # hasn't yet landed), we represent empty set
+            # as an empty array, and non-empty values as
+            # an array of one element. More specifically,
+            # if a link property has type `<optional T>`, then
+            # its value will be represented here as
+            # `<array<tuple<T>>`. When the value is empty
+            # set, the argument will be an empty array,
+            # when it's non-empty, it will be a one-element
+            # array with a one-element tuple. Then to unpack:
+            #
+            #    @prop := (array_unpack(val).0 limit 1)
+            #
+            # The nested tuple indirection is needed to support
+            # link props that have types of arrays.
+            if type_ql.startswith("array<"):
+                cast = f"array<tuple<{type_ql}>>"
+                ret = lambda x: f"(select array_unpack({x}).0 limit 1)"  # noqa: E731
+                arg_pack = lambda x: [(x,)] if x is not None else []  # noqa: E731
+            else:
+                cast = f"array<{type_ql}>"
+                ret = lambda x: f"(select array_unpack({x}) limit 1)"  # noqa: E731
+                arg_pack = lambda x: [x] if x is not None else []  # noqa: E731
+            return cast, ret, arg_pack
+
         def add_arg(
             type_ql: str,
             value: Any,
@@ -894,14 +930,13 @@ class SaveExecutor:
         for ch in change.fields.values():
             if isinstance(ch, PropertyChange):
                 if ch.info.cardinality.is_optional():
+                    tp_ql, tp_unpack, arg_pack = arg_cast(ch.info.typexpr)
                     arg = add_arg(
-                        f"array<tuple<{ch.info.typexpr}>>",
-                        [(ch.value,)] if ch.value is not None else [],
+                        tp_ql,
+                        arg_pack(ch.value),
                     )
                     shape_parts.append(
-                        f"{quote_ident(ch.name)} := ("
-                        f"  select array_unpack({arg}).0 limit 1"
-                        f")"
+                        f"{quote_ident(ch.name)} := {tp_unpack(arg)}"
                     )
                 else:
                     assert ch.value is not None
@@ -912,24 +947,38 @@ class SaveExecutor:
                 # Since we're passing a set of values packed into an array
                 # we need to wrap elements in tuples to allow multi props
                 # or arrays etc.
-                arg_t = f"array<tuple<{ch.info.typexpr}>>"
 
                 assign_op = ":=" if for_insert else "+="
-
-                arg = add_arg(arg_t, [(el,) for el in ch.added])
-                shape_parts.append(
-                    f"{quote_ident(ch.name)} {assign_op} array_unpack({arg}).0"
-                )
+                if ch.info.typexpr.startswith("array<"):
+                    arg_t = f"array<tuple<{ch.info.typexpr}>>"
+                    arg = add_arg(arg_t, [(el,) for el in ch.added])
+                    shape_parts.append(
+                        f"{quote_ident(ch.name)} {assign_op} "
+                        f"array_unpack({arg}).0"
+                    )
+                else:
+                    arg_t = f"array<{ch.info.typexpr}>"
+                    arg = add_arg(arg_t, ch.added)
+                    shape_parts.append(
+                        f"{quote_ident(ch.name)} {assign_op} "
+                        f"array_unpack({arg})"
+                    )
 
             elif isinstance(ch, MultiPropRemove):
-                arg_t = f"array<tuple<{ch.info.typexpr}>>"
-
                 assert not for_insert
 
-                arg = add_arg(arg_t, [(el,) for el in ch.removed])
-                shape_parts.append(
-                    f"{quote_ident(ch.name)} -= array_unpack({arg}).0"
-                )
+                if ch.info.typexpr.startswith("array<"):
+                    arg_t = f"array<tuple<{ch.info.typexpr}>>"
+                    arg = add_arg(arg_t, [(el,) for el in ch.removed])
+                    shape_parts.append(
+                        f"{quote_ident(ch.name)} -= array_unpack({arg}).0"
+                    )
+                else:
+                    arg_t = f"array<{ch.info.typexpr}>"
+                    arg = add_arg(arg_t, ch.removed)
+                    shape_parts.append(
+                        f"{quote_ident(ch.name)} -= array_unpack({arg})"
+                    )
 
             elif isinstance(ch, SingleLinkChange):
                 tid = (
@@ -941,17 +990,16 @@ class SaveExecutor:
                     assert ch.props_info is not None
                     assert tid is not None
 
-                    sl_subt = [
-                        f"array<tuple<{ch.props_info[k].typexpr}>>"
+                    arg_casts = {
+                        k: arg_cast(ch.props_info[k].typexpr)
                         for k in ch.props_info
-                    ]
+                    }
+
+                    sl_subt = [arg_casts[k][0] for k in ch.props_info]
 
                     sl_args = [
                         tid,
-                        *(
-                            [] if ch.props[k] is None else [(ch.props[k],)]
-                            for k in ch.props_info
-                        ),
+                        *(arg_casts[k][2](ch.props[k]) for k in ch.props_info),
                     ]
 
                     arg = add_arg(
@@ -960,10 +1008,9 @@ class SaveExecutor:
                     )
 
                     subq_shape = [
-                        f"@{quote_ident(pname)} := ("
-                        f"  select array_unpack({arg}.{i}).0 limit 1"
-                        f")"
-                        for i, pname in enumerate(ch.props.keys(), 1)
+                        f"@{quote_ident(pname)} := "
+                        f"{arg_casts[pname][1](f'{arg}.{i}')}"
+                        for i, pname in enumerate(ch.props_info, 1)
                     ]
 
                     shape_parts.append(
@@ -976,13 +1023,13 @@ class SaveExecutor:
                 else:
                     if ch.info.cardinality.is_optional():
                         arg = add_arg(
-                            "array<tuple<std::uuid>>",
-                            [(tid,)] if tid is not None else [],
+                            "array<std::uuid>",
+                            [tid] if tid is not None else [],
                         )
                         shape_parts.append(
                             f"{quote_ident(ch.name)} := "
                             f"<{linked_name}><std::uuid>("
-                            f"  select array_unpack({arg}).0 limit 1"
+                            f"  select array_unpack({arg}) limit 1"
                             f")"
                         )
                     else:
@@ -1008,53 +1055,30 @@ class SaveExecutor:
 
             elif isinstance(ch, MultiLinkAdd):
                 if ch.added_props:
-                    assert ch.props_info is not None
+                    assert ch.props_info
 
                     link_args: list[tuple[Any, ...]] = []
-                    prop_order = None
                     tuple_subt: list[str] | None = None
+
+                    arg_casts = {
+                        k: arg_cast(ch.props_info[k].typexpr)
+                        for k in ch.props_info
+                    }
+
+                    tuple_subt = [arg_casts[k][0] for k in ch.props_info]
 
                     for addo, addp in zip(
                         ch.added, ch.added_props, strict=True
                     ):
-                        if prop_order is None:
-                            prop_order = addp.keys()
-                            # As a workaround for the current limitation
-                            # of EdgeQL (tuple arguments can't have empty
-                            # sets as elements, and free objects input
-                            # hasn't yet landed), we represent empty set
-                            # as an empty array, and non-empty values as
-                            # an array of one element. More specifically,
-                            # if a link property has type `<optional T>`, then
-                            # its value will be represented here as
-                            # `<array<tuple<T>>`. When the value is empty
-                            # set, the argument will be an empty array,
-                            # when it's non-empty, it will be a one-element
-                            # array with a one-element tuple. Then to unpack:
-                            #
-                            #    @prop := (array_unpack(val).0 limit 1)
-                            #
-                            # The nested tuple indirection is needed to support
-                            # link props that have types of arrays.
-                            tuple_subt = [
-                                f"array<tuple<{ch.props_info[k].typexpr}>>"
-                                for k in prop_order
-                            ]
-
-                        assert prop_order == addp.keys()
-
                         link_args.append(
                             (
                                 self._get_id(addo),
                                 *(
-                                    [] if addp[k] is None else [(addp[k],)]
-                                    for k in prop_order
+                                    arg_casts[k][2](addp[k])
+                                    for k in ch.props_info
                                 ),
                             )
                         )
-
-                    assert prop_order
-                    assert tuple_subt
 
                     arg = add_arg(
                         f"array<tuple<std::uuid, {','.join(tuple_subt)}>>",
@@ -1062,8 +1086,8 @@ class SaveExecutor:
                     )
 
                     lp_assign = ", ".join(
-                        f"@{p} := (select array_unpack(tup.{i + 1}).0 limit 1)"
-                        for i, p in enumerate(prop_order)
+                        f"@{p} := {arg_casts[p][1](f'tup.{i + 1}')}"
+                        for i, p in enumerate(ch.props_info)
                     )
 
                     assign_op = ":=" if for_insert else "+="
