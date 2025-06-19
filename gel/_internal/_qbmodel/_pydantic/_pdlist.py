@@ -85,6 +85,7 @@ class ProxyDistinctList(_dlist.DistinctList[_PT_co], Generic[_PT_co, _BMT_co]):
 
         cls = type(self)
         t = cls.type
+        proxy_of = t.__proxy_of__
 
         assert self._wrapped_index is not None
         assert self._set is not None
@@ -92,11 +93,11 @@ class ProxyDistinctList(_dlist.DistinctList[_PT_co], Generic[_PT_co, _BMT_co]):
 
         # For an empty list we can call one extend() call instead
         # of slow iterative appends.
-        fast_extend = len(self._wrapped_index) == 0
+        empty_items = len(self._wrapped_index) == len(self._items) == 0
 
         for v in values:
             tv = type(v)
-            if tv is t.__proxy_of__:
+            if tv is proxy_of:
                 # Fast path -- `v` is an instance of the base type.
                 # It has no link props, wrap it in a proxy in
                 # a fast way.
@@ -128,11 +129,12 @@ class ProxyDistinctList(_dlist.DistinctList[_PT_co], Generic[_PT_co, _BMT_co]):
             else:
                 self._set.add(proxy)
 
-            if not fast_extend:
+            if not empty_items:
                 self._items.append(proxy)
 
-        if fast_extend:
-            self._items.extend(self._wrapped_index.values())
+        if empty_items:
+            # A LOT faster than `extend()` ¯\_(ツ)_/¯
+            self._items = list(self._wrapped_index.values())
 
     def _cast_value(self, value: Any) -> tuple[_PT_co, _BMT_co]:
         cls = type(self)
