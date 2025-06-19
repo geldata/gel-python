@@ -347,9 +347,40 @@ class GelModel(
 
     if TYPE_CHECKING:
         id: uuid.UUID
+        __gel_computed_fields__: frozenset[str] | None
 
-    def __init__(self, /, **kwargs: Any) -> None:
+    @classmethod
+    def __gel_gen_computed_fields__(cls) -> frozenset[str] | None:
+        cls.model_rebuild()
+        ret: set[str] = set()
+        for field_name, field in cls.__pydantic_fields__.items():
+            # ignore `field.init=None` - unset, so we're fine with it.
+            if field.init is False:
+                ret.add(field_name)
+        ret.discard("id")
+        comp_fields = frozenset(ret) if ret else None
+        cls.__gel_computed_fields__ = comp_fields
+        return comp_fields
+
+    def __init__(
+        self,
+        /,
+        *,
+        id: uuid.UUID = UNSET_UUID,  # noqa: A002
+        **kwargs: Any,
+    ) -> None:
         cls = type(self)
+
+        try:
+            comp_fields = type.__getattribute__(cls, "__gel_computed_fields__")
+        except AttributeError:
+            comp_fields = cls.__gel_gen_computed_fields__()
+
+        if id is not UNSET_UUID:
+            raise ValueError(
+                "models do not support setting `id` on construction; "
+                "`id` is set automatically by the `client.save()` method"
+            )
 
         # Prohibit passing computed fields to the constructor.
         # Unfortunately `init=False` doesn't work with BaseModel
@@ -358,16 +389,15 @@ class GelModel(
         #
         # We can potentially optimize this by caching a frozenset
         # of field names that are computed.
-        has_computed_fields = False
-        cls.model_rebuild()
-        for field_name, field in cls.__pydantic_fields__.items():
-            # ignore `field.init=None` - unset, so we're fine with it.
-            if field.init is False:
-                has_computed_fields = True
-                if field_name in kwargs:
-                    raise ValueError(
-                        f"cannot set field {field_name!r} on {cls.__name__}"
-                    )
+        if comp_fields is not None and (
+            comp_args := comp_fields & kwargs.keys()
+        ):
+            comp_arg = next(iter(comp_args))
+            raise ValueError(
+                f"{cls.__qualname__} model does not accept {comp_arg!r} "
+                f"argument, it is a computed field "
+                f"(the database computes it for you)"
+            )
 
         super().__init__(**kwargs)
 
@@ -379,11 +409,10 @@ class GelModel(
         # want those None values to ever surface anywhere, be that
         # attribute access or serialization or anything else that
         # reads from __dict__.
-        if has_computed_fields:
-            for field_name, field in cls.__pydantic_fields__.items():
-                # ignore `field.init=None` - unset, so we're fine with it.
-                if field.init is False and field_name != "id":
-                    self.__dict__.pop(field_name, None)
+        if comp_fields is not None:
+            pop = self.__dict__.pop
+            for field_name in comp_fields:
+                pop(field_name, None)
 
     def __gel_is_new__(self) -> bool:
         return self.id is UNSET_UUID

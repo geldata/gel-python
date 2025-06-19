@@ -490,13 +490,15 @@ class TestModelGenerator(tb.ModelTestCase):
 
         # Let's test computed link as an arg
         with self.assertRaisesRegex(
-            ValueError, r"(?s)cannot set field .groups. on User"
+            ValueError,
+            r"(?s)User model does not accept .groups.*computed field",
         ):
             default.User(name="aaaa", groups=(1, 2, 3))  # type: ignore
 
         # Let's test computed property as an arg
         with self.assertRaisesRegex(
-            ValueError, r"(?s)cannot set field .name_len. on User"
+            ValueError,
+            r"(?s)User model does not accept .name_len.*computed field",
         ):
             default.User(name="aaaa", name_len=123)  # type: ignore
 
