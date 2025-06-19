@@ -643,7 +643,7 @@ class _MultiLinkWithProps(
             generic_args[1],  # type: ignore [valid-type]
         ]
 
-        if type(lt) is list:  # type: ignore [comparison-overlap]
+        if type(value) is list:
             # Optimization for the most common scenario - user passes
             # a list of objects to the constructor.
             return lt(value)
