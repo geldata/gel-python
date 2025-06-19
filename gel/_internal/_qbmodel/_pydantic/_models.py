@@ -250,6 +250,7 @@ _empty_str_set: frozenset[str] = frozenset()
 # Low-level attribute functions
 ll_setattr = object.__setattr__
 ll_getattr = object.__getattribute__
+ll_type_getattr = type.__getattribute__
 
 
 class GelSourceModel(
@@ -547,15 +548,16 @@ class ProxyModel(GelModel, Generic[_MT_co]):
 
     @classmethod
     def link(cls, obj: _MT_co, /, **link_props: Any) -> Self:  # type: ignore [misc]
-        self = cls.__new__(cls)
+        proxy_of = ll_type_getattr(cls, "__proxy_of__")
+        lprops_cls = ll_type_getattr(cls, "__lprops__")
 
-        if type(obj) is not self.__proxy_of__:
+        if type(obj) is not proxy_of:
             if isinstance(obj, ProxyModel):
                 raise TypeError(
-                    f"ProxyModel {type(self).__qualname__} cannot wrap "
+                    f"ProxyModel {cls.__qualname__} cannot wrap "
                     f"another ProxyModel {type(obj).__qualname__}"
                 )
-            if not isinstance(obj, self.__proxy_of__):
+            if not isinstance(obj, proxy_of):
                 # A long time of debugging revealed that it's very important to
                 # check `obj` being of a correct type. Pydantic can instantiate
                 # a ProxyModel with an incorrect type, e.g. when you pass
@@ -571,23 +573,27 @@ class ProxyModel(GelModel, Generic[_MT_co]):
                 # If it ever has to be removed, make sure to at least check
                 # that `obj` is an instance of `GelModel`.
                 raise ValueError(
-                    f"only instances of {self.__proxy_of__.__name__} "
+                    f"only instances of {proxy_of.__name__} "
                     f"are allowed, got {type(obj).__name__}",
                 )
 
-        ll_setattr(self, "_p__obj__", obj)
+        self = cls.__new__(cls)
 
-        lprops = cls.__lprops__(**link_props)
+        lprops = lprops_cls(**link_props)
         ll_setattr(self, "__linkprops__", lprops)
+
+        ll_setattr(self, "_p__obj__", obj)
 
         return self
 
     def __getattribute__(self, name: str) -> Any:
-        if (
-            name == "_p__obj__"  # noqa: PLR1714
-            or name == "__linkprops__"
-            or name == "__class__"
-        ):
+        if name in {
+            "_p__obj__",
+            "__linkprops__",
+            "__proxy_of__",
+            "__class__",
+            "__lprops__",
+        }:
             # Fast path for the wrapped object itself / linkprops model
             # (this optimization is informed by profiling model
             # instantiation and save() operation)
