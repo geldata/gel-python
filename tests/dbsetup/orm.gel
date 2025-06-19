@@ -145,3 +145,10 @@ type KitchenSink {
     ts: datetime;
     lts: cal::local_datetime;
 }
+
+type AllOptional {
+    # Don't add anything else to this type or alter
+    # it in any way.
+    field: str;
+    pointer: AllOptional;
+}
