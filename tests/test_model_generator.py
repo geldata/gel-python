@@ -1332,6 +1332,30 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(res[2].next.label, "start")
 
     @tb.typecheck
+    def test_modelgen_save_22(self):
+        # Test empty object insertion; regression test for
+        # https://github.com/geldata/gel-python/issues/720
+
+        from models import default
+        from gel._internal._unsetid import UNSET_UUID
+
+        x = default.AllOptional()
+        y = default.AllOptional()
+        z = default.AllOptional(pointer=x)
+
+        self.client.save(z)
+        self.client.save(y)
+
+        self.assertIsNot(x.id, UNSET_UUID)
+        self.assertIsNot(y.id, UNSET_UUID)
+        self.assertIsNot(z.id, UNSET_UUID)
+
+        self.assertIsNotNone(z.pointer)
+        assert z.pointer is not None
+        self.assertEqual(z.pointer.id, x.id)
+        self.assertIs(z.pointer, x)
+
+    @tb.typecheck
     def test_modelgen_save_collections_1(self):
         from models import default
         # insert an object with an optional single: with link props

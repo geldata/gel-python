@@ -743,7 +743,7 @@ class QueryBatch:
     executor: SaveExecutor
     query: str
     args_query: str
-    args: list[tuple[object, ...]]
+    args: list[tuple[object, ...] | int]
     changes: list[ModelChange]
     insert: bool
 
@@ -759,7 +759,7 @@ class CompiledQuery:
     single_query: str
     multi_query: str
     args_query: str
-    arg: tuple[object, ...]
+    arg: tuple[object, ...] | int
     change: ModelChange
 
 
@@ -1126,8 +1126,16 @@ class SaveExecutor:
         shape = ", ".join(shape_parts)
         query: str
         if for_insert:
-            query = f"insert {q_type_name} {{ {shape} }}"
+            if shape:
+                assert args_types
+                query = f"insert {q_type_name} {{ {shape} }}"
+            else:
+                assert not args_types
+                query = f"insert {q_type_name}"
         else:
+            assert shape
+            assert args_types
+
             arg = add_arg("std::uuid", self._get_id(obj))
             query = f"""\
                 update {q_type_name}
@@ -1135,31 +1143,59 @@ class SaveExecutor:
                 set {{ {shape} }}
             """  # noqa: S608
 
-        single_query = f"""
-            with __query := (
-                with __data := <tuple<{",".join(args_types)}>>$0
-                select {query}
-            ) select __query.id
-        """
+        ret_args: tuple[object, ...] | int
 
-        multi_query = f"""
-            with __query := (
+        if args_types:
+            assert args
+            ret_args = tuple(args)
+
+            single_query = f"""
+                with __query := (
+                    with __data := <tuple<{",".join(args_types)}>>$0
+                    select ({query})
+                ) select __query.id
+            """
+
+            multi_query = f"""
+                with __query := (
+                    with __all_data := <array<tuple<{",".join(args_types)}>>>$0
+                    for __data in array_unpack(__all_data) union (
+                        ({query})
+                    )
+                ) select __query.id
+            """
+
+            args_query = f"""
                 with __all_data := <array<tuple<{",".join(args_types)}>>>$0
-                for __data in array_unpack(__all_data) union (
-                    ({query})
-                )
-            ) select __query.id
-        """
+                select count(array_unpack(__all_data))
+            """
 
-        args_query = f"""
-            with __all_data := <array<tuple<{",".join(args_types)}>>>$0
-            select count(array_unpack(__all_data))
-        """
+        else:
+            assert not args
+            ret_args = 0
+
+            single_query = f"""
+                with __query := (
+                    with __data := <int64>$0
+                    select ({query})
+                ) select __query.id
+            """
+
+            multi_query = f"""
+                with __query := (
+                    with __all_data := <array<int64>>$0
+                    for __data in array_unpack(__all_data) union (
+                        ({query})
+                    )
+                ) select __query.id
+            """
+
+            args_query = "select 'no args'"
 
         return CompiledQuery(
             single_query=single_query,
             multi_query=multi_query,
             args_query=args_query,
-            arg=tuple(args),
+            arg=ret_args,
             change=change,
         )
