@@ -57,6 +57,7 @@ T = typing.TypeVar("T")
 class SaveDebug:
     queries: list[SaveQueryDebug]
     plan_time: float
+    total_time: float
 
 
 @dataclasses.dataclass
@@ -580,7 +581,7 @@ class Client(base_client.BaseClient, abstract.Executor):
                 executor.commit()
 
     def __debug_save__(self, *objs: GelModel) -> SaveDebug:
-        ns = time.monotonic_ns()
+        started_at = ns = time.monotonic_ns()
         make_executor = make_save_executor_constructor(objs)
         plan_time = time.monotonic_ns() - ns
 
@@ -620,12 +621,15 @@ class Client(base_client.BaseClient, abstract.Executor):
 
                 executor.commit()
 
+        total_time = time.monotonic_ns() - started_at
+
         for qdebug in queries.values():
             qdebug.total_exec_time /= 1_000_000.0
 
         return SaveDebug(
             queries=sorted(queries.values(), key=lambda q: q.total_exec_time),
             plan_time=plan_time / 1_000_000.0,
+            total_time=total_time / 1_000_000.0,
         )
 
     def _query(self, query_context: abstract.QueryContext):

@@ -3,6 +3,7 @@ from __future__ import annotations
 import collections
 import dataclasses
 import weakref
+import uuid
 
 from typing import (
     TYPE_CHECKING,
@@ -61,6 +62,8 @@ LinkPropertiesValues = TypeAliasType(
 
 
 _dataclass = dataclasses.dataclass(frozen=True, kw_only=True)
+
+_ZERO_UUID = uuid.UUID(int=0)
 
 
 @dataclass_transform(
@@ -755,6 +758,14 @@ class QueryBatch:
 
 
 @_struct
+class ArgCast:
+    cast: str
+    ret: Callable[[str], str]
+    arg_pack: Callable[[object], object]
+    unnest: bool
+
+
+@_struct
 class CompiledQuery:
     single_query: str
     multi_query: str
@@ -880,34 +891,57 @@ class SaveExecutor:
         else:
             return self.object_ids[id(obj)]
 
-    def _compile_change(
-        self, change: ModelChange, /, *, for_insert: bool
-    ) -> CompiledQuery:
-        shape_parts: list[str] = []
+    def _default_for(self, type_ql: str) -> object:
+        match type_ql:
+            case (
+                "std::int64"
+                | "std::int32"
+                | "std::int16"
+                | "std::float64"
+                | "std::float32"
+                | "std::bigint"
+            ):
+                return 0
+            case a if a.startswith("array<"):
+                return []
+            case "std::str" | "std::json":
+                return ""
+            case "std::bytes":
+                return b""
+            case "std::bool":
+                return False
+            case "std::uuid":
+                return _ZERO_UUID
+        return None
 
-        args: list[object] = []
-        args_types: list[str] = []
-
-        def arg_cast(
-            type_ql: str,
-        ) -> tuple[str, Callable[[str], str], Callable[[object], object]]:
-            # As a workaround for the current limitation
-            # of EdgeQL (tuple arguments can't have empty
-            # sets as elements, and free objects input
-            # hasn't yet landed), we represent empty set
-            # as an empty array, and non-empty values as
-            # an array of one element. More specifically,
-            # if a link property has type `<optional T>`, then
-            # its value will be represented here as
-            # `<array<tuple<T>>`. When the value is empty
-            # set, the argument will be an empty array,
-            # when it's non-empty, it will be a one-element
-            # array with a one-element tuple. Then to unpack:
-            #
-            #    @prop := (array_unpack(val).0 limit 1)
-            #
-            # The nested tuple indirection is needed to support
-            # link props that have types of arrays.
+    def _arg_cast(self, type_ql: str) -> ArgCast:
+        # As a workaround for the current limitation
+        # of EdgeQL (tuple arguments can't have empty
+        # sets as elements, and free objects input
+        # hasn't yet landed), we represent empty set
+        # as an empty array, and non-empty values as
+        # an array of one element. More specifically,
+        # if a link property has type `<optional T>`, then
+        # its value will be represented here as
+        # `<array<tuple<T>>`. When the value is empty
+        # set, the argument will be an empty array,
+        # when it's non-empty, it will be a one-element
+        # array with a one-element tuple. Then to unpack:
+        #
+        #    @prop := (array_unpack(val).0 limit 1)
+        #
+        # The nested tuple indirection is needed to support
+        # link props that have types of arrays.
+        dfl = self._default_for(type_ql)
+        unnest = bool(dfl)
+        arg_pack: Callable[[object], object]
+        if dfl is not None:
+            cast = f"tuple<std::bool, {type_ql}>"
+            ret = lambda x: f"({x}.1 if {x}.0 else <{type_ql}>{{}})"  # noqa: E731
+            arg_pack = (  # noqa: E731
+                lambda x: (True, x) if x is not None else (False, dfl)
+            )
+        else:
             if type_ql.startswith("array<"):
                 cast = f"array<tuple<{type_ql}>>"
                 ret = lambda x: f"(select array_unpack({x}).0 limit 1)"  # noqa: E731
@@ -916,7 +950,16 @@ class SaveExecutor:
                 cast = f"array<{type_ql}>"
                 ret = lambda x: f"(select array_unpack({x}) limit 1)"  # noqa: E731
                 arg_pack = lambda x: [x] if x is not None else []  # noqa: E731
-            return cast, ret, arg_pack
+
+        return ArgCast(cast=cast, ret=ret, arg_pack=arg_pack, unnest=unnest)
+
+    def _compile_change(
+        self, change: ModelChange, /, *, for_insert: bool
+    ) -> CompiledQuery:
+        shape_parts: list[str] = []
+
+        args: list[object] = []
+        args_types: list[str] = []
 
         def add_arg(
             type_ql: str,
@@ -933,13 +976,13 @@ class SaveExecutor:
         for ch in change.fields.values():
             if isinstance(ch, PropertyChange):
                 if ch.info.cardinality.is_optional():
-                    tp_ql, tp_unpack, arg_pack = arg_cast(ch.info.typexpr)
+                    ac = self._arg_cast(ch.info.typexpr)
                     arg = add_arg(
-                        tp_ql,
-                        arg_pack(ch.value),
+                        ac.cast,
+                        ac.arg_pack(ch.value),
                     )
                     shape_parts.append(
-                        f"{quote_ident(ch.name)} := {tp_unpack(arg)}"
+                        f"{quote_ident(ch.name)} := {ac.ret(arg)}"
                     )
                 else:
                     assert ch.value is not None
@@ -992,15 +1035,18 @@ class SaveExecutor:
                     assert tid is not None
 
                     arg_casts = {
-                        k: arg_cast(ch.props_info[k].typexpr)
+                        k: self._arg_cast(ch.props_info[k].typexpr)
                         for k in ch.props_info
                     }
 
-                    sl_subt = [arg_casts[k][0] for k in ch.props_info]
+                    sl_subt = [arg_casts[k].cast for k in ch.props_info]
 
                     sl_args = [
                         tid,
-                        *(arg_casts[k][2](ch.props[k]) for k in ch.props_info),
+                        *(
+                            arg_casts[k].arg_pack(ch.props[k])
+                            for k in ch.props_info
+                        ),
                     ]
 
                     arg = add_arg(
@@ -1010,7 +1056,7 @@ class SaveExecutor:
 
                     subq_shape = [
                         f"@{quote_ident(pname)} := "
-                        f"{arg_casts[pname][1](f'{arg}.{i}')}"
+                        f"{arg_casts[pname].ret(f'{arg}.{i}')}"
                         for i, pname in enumerate(ch.props_info, 1)
                     ]
 
@@ -1062,11 +1108,11 @@ class SaveExecutor:
                     tuple_subt: list[str] | None = None
 
                     arg_casts = {
-                        k: arg_cast(ch.props_info[k].typexpr)
+                        k: self._arg_cast(ch.props_info[k].typexpr)
                         for k in ch.props_info
                     }
 
-                    tuple_subt = [arg_casts[k][0] for k in ch.props_info]
+                    tuple_subt = [arg_casts[k].cast for k in ch.props_info]
 
                     for addo, addp in zip(
                         ch.added, ch.added_props, strict=True
@@ -1075,7 +1121,7 @@ class SaveExecutor:
                             (
                                 self._get_id(addo),
                                 *(
-                                    arg_casts[k][2](addp[k])
+                                    arg_casts[k].arg_pack(addp[k])
                                     for k in ch.props_info
                                 ),
                             )
@@ -1087,7 +1133,7 @@ class SaveExecutor:
                     )
 
                     lp_assign = ", ".join(
-                        f"@{p} := {arg_casts[p][1](f'__tup.{i + 1}')}"
+                        f"@{p} := {arg_casts[p].ret(f'__tup.{i + 1}')}"
                         for i, p in enumerate(ch.props_info)
                     )
 
