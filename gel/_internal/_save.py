@@ -761,6 +761,7 @@ class QueryBatch:
 class ArgCast:
     cast: str
     ret: Callable[[str], str]
+    ret_unnested: Callable[[str, int], str] | None
     arg_pack: Callable[[object], object]
     unnest: bool
 
@@ -914,7 +915,9 @@ class SaveExecutor:
                 return _ZERO_UUID
         return None
 
-    def _arg_cast(self, type_ql: str) -> ArgCast:
+    def _arg_cast(
+        self, type_ql: str, *, allow_unnest: bool = False
+    ) -> ArgCast:
         # As a workaround for the current limitation
         # of EdgeQL (tuple arguments can't have empty
         # sets as elements, and free objects input
@@ -933,11 +936,17 @@ class SaveExecutor:
         # The nested tuple indirection is needed to support
         # link props that have types of arrays.
         dfl = self._default_for(type_ql)
-        unnest = bool(dfl)
+        unnest = False
         arg_pack: Callable[[object], object]
-        if dfl is not None:
-            cast = f"tuple<std::bool, {type_ql}>"
+        ret_unnested: Callable[[str, int], str] | None = None
+        if allow_unnest and dfl is not None:
+            unnest = True
+            cast = f"std::bool,{type_ql}"
             ret = lambda x: f"({x}.1 if {x}.0 else <{type_ql}>{{}})"  # noqa: E731
+            ret_unnested = (  # noqa: E731
+                lambda x,
+                pos: f"(  {x}.{pos + 1} if {x}.{pos} else <{type_ql}>{{}}  )"
+            )
             arg_pack = (  # noqa: E731
                 lambda x: (True, x) if x is not None else (False, dfl)
             )
@@ -951,7 +960,13 @@ class SaveExecutor:
                 ret = lambda x: f"(select array_unpack({x}) limit 1)"  # noqa: E731
                 arg_pack = lambda x: [x] if x is not None else []  # noqa: E731
 
-        return ArgCast(cast=cast, ret=ret, arg_pack=arg_pack, unnest=unnest)
+        return ArgCast(
+            cast=cast,
+            ret=ret,
+            arg_pack=arg_pack,
+            unnest=unnest,
+            ret_unnested=ret_unnested,
+        )
 
     def _compile_change(
         self, change: ModelChange, /, *, for_insert: bool
@@ -1105,37 +1120,45 @@ class SaveExecutor:
                     assert ch.props_info
 
                     link_args: list[tuple[Any, ...]] = []
-                    tuple_subt: list[str] | None = None
 
                     arg_casts = {
-                        k: self._arg_cast(ch.props_info[k].typexpr)
+                        k: self._arg_cast(
+                            ch.props_info[k].typexpr, allow_unnest=True
+                        )
                         for k in ch.props_info
                     }
-
-                    tuple_subt = [arg_casts[k].cast for k in ch.props_info]
 
                     for addo, addp in zip(
                         ch.added, ch.added_props, strict=True
                     ):
-                        link_args.append(
-                            (
-                                self._get_id(addo),
-                                *(
-                                    arg_casts[k].arg_pack(addp[k])
-                                    for k in ch.props_info
-                                ),
-                            )
-                        )
+                        link_arg: list[Any] = [self._get_id(addo)]
+                        for k, ac in arg_casts.items():
+                            if ac.unnest:
+                                link_arg.extend(ac.arg_pack(addp[k]))
+                            else:
+                                link_arg.append(ac.arg_pack(addp[k]))
 
+                        link_args.append(tuple(link_arg))
+
+                    tuple_subt = [arg_casts[k].cast for k in ch.props_info]
                     arg = add_arg(
                         f"array<tuple<std::uuid, {','.join(tuple_subt)}>>",
                         link_args,
                     )
 
-                    lp_assign = ", ".join(
-                        f"@{p} := {arg_casts[p].ret(f'__tup.{i + 1}')}"
-                        for i, p in enumerate(ch.props_info)
-                    )
+                    ass: list[str] = []
+                    idx = 1
+                    for k, ac in arg_casts.items():
+                        if ac.unnest:
+                            ass.append(
+                                f"@{k} := {ac.ret_unnested('__tup', idx)}"
+                            )
+                            idx += 2
+                        else:
+                            ass.append(f"@{k} := {ac.ret(f'__tup.{idx}')}")
+                            idx += 1
+
+                    lp_assign = ", ".join(ass)
 
                     assign_op = ":=" if for_insert else "+="
 
