@@ -34,8 +34,8 @@ from gel._internal._reflection import SchemaPath
 from gel._internal._qbmodel._pydantic._models import GelModel
 from gel._internal._dlist import DistinctList
 from gel._internal._edgeql import Cardinality, PointerKind
-from gel._internal._qbmodel._pydantic._fields import (
-    _UpcastingDistinctList,
+from gel._internal._qbmodel._pydantic._pdlist import (
+    ProxyDistinctList,
 )
 
 
@@ -116,18 +116,18 @@ class TestModelGenerator(tb.ModelTestCase):
                             f"type is {e.type!r}",
                         )
 
-                if issubclass(p.type, _UpcastingDistinctList):
-                    if not issubclass(e.type, _UpcastingDistinctList):
+                if issubclass(p.type, ProxyDistinctList):
+                    if not issubclass(e.type, ProxyDistinctList):
                         self.fail(
                             f"{obj.__name__}.{p.name} eq_type check "
-                            f" failed: p.type is _UpcastingDistinctList, "
+                            f" failed: p.type is ProxyDistinctList, "
                             f"but expected type is {e.type!r}",
                         )
                 else:
-                    if issubclass(e.type, _UpcastingDistinctList):
+                    if issubclass(e.type, ProxyDistinctList):
                         self.fail(
                             f"{obj.__name__}.{p.name} eq_type check failed: "
-                            f"p.type is not a _UpcastingDistinctList, but "
+                            f"p.type is not a ProxyDistinctList, but "
                             f"expected type is {e.type!r}",
                         )
 
@@ -417,7 +417,7 @@ class TestModelGenerator(tb.ModelTestCase):
         with self.assertRaisesRegex(
             ValueError, r"(?s)only instances of User are allowed, got .*int"
         ):
-            default.GameSession.players(1)  # type: ignore
+            default.GameSession.players.link(1)  # type: ignore
 
         u = default.User(name="batman")
         p = default.Post(body="aaa", author=u)
@@ -425,6 +425,14 @@ class TestModelGenerator(tb.ModelTestCase):
             ValueError, r"(?s)prayers.*Extra inputs are not permitted"
         ):
             default.GameSession(num=7, prayers=[p])  # type: ignore
+
+        gp = default.GameSession.players(name="johny")
+        self.assertIsInstance(gp, default.User)
+        self.assertIsInstance(gp, default.GameSession.players)
+        self.assertIsInstance(gp._p__obj__, default.User)
+        self.assertEqual(gp.name, "johny")
+        self.assertEqual(gp._p__obj__.name, "johny")
+        self.assertIsNotNone(gp.__linkprops__)
 
         # Check that `groups` is not an allowed keyword-arg for `User.__init__`
         self.assertEqual(
@@ -482,13 +490,15 @@ class TestModelGenerator(tb.ModelTestCase):
 
         # Let's test computed link as an arg
         with self.assertRaisesRegex(
-            ValueError, r"(?s)cannot set field .groups. on User"
+            ValueError,
+            r"(?s)User model does not accept .groups.*computed field",
         ):
             default.User(name="aaaa", groups=(1, 2, 3))  # type: ignore
 
         # Let's test computed property as an arg
         with self.assertRaisesRegex(
-            ValueError, r"(?s)cannot set field .name_len. on User"
+            ValueError,
+            r"(?s)User model does not accept .name_len.*computed field",
         ):
             default.User(name="aaaa", name_len=123)  # type: ignore
 
@@ -1320,6 +1330,30 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(res[1].next.label, "step 2")
         self.assertEqual(res[2].label, "step 2")
         self.assertEqual(res[2].next.label, "start")
+
+    @tb.typecheck
+    def test_modelgen_save_22(self):
+        # Test empty object insertion; regression test for
+        # https://github.com/geldata/gel-python/issues/720
+
+        from models import default
+        from gel._internal._unsetid import UNSET_UUID
+
+        x = default.AllOptional()
+        y = default.AllOptional()
+        z = default.AllOptional(pointer=x)
+
+        self.client.save(z)
+        self.client.save(y)
+
+        self.assertIsNot(x.id, UNSET_UUID)
+        self.assertIsNot(y.id, UNSET_UUID)
+        self.assertIsNot(z.id, UNSET_UUID)
+
+        self.assertIsNotNone(z.pointer)
+        assert z.pointer is not None
+        self.assertEqual(z.pointer.id, x.id)
+        self.assertIs(z.pointer, x)
 
     @tb.typecheck
     def test_modelgen_save_collections_1(self):

@@ -250,6 +250,7 @@ _empty_str_set: frozenset[str] = frozenset()
 # Low-level attribute functions
 ll_setattr = object.__setattr__
 ll_getattr = object.__getattribute__
+ll_type_getattr = type.__getattribute__
 
 
 class GelSourceModel(
@@ -347,9 +348,40 @@ class GelModel(
 
     if TYPE_CHECKING:
         id: uuid.UUID
+        __gel_computed_fields__: frozenset[str] | None
 
-    def __init__(self, /, **kwargs: Any) -> None:
+    @classmethod
+    def __gel_gen_computed_fields__(cls) -> frozenset[str] | None:
+        cls.model_rebuild()
+        ret: set[str] = set()
+        for field_name, field in cls.__pydantic_fields__.items():
+            # ignore `field.init=None` - unset, so we're fine with it.
+            if field.init is False:
+                ret.add(field_name)
+        ret.discard("id")
+        comp_fields = frozenset(ret) if ret else None
+        cls.__gel_computed_fields__ = comp_fields
+        return comp_fields
+
+    def __init__(
+        self,
+        /,
+        *,
+        id: uuid.UUID = UNSET_UUID,  # noqa: A002
+        **kwargs: Any,
+    ) -> None:
         cls = type(self)
+
+        try:
+            comp_fields = type.__getattribute__(cls, "__gel_computed_fields__")
+        except AttributeError:
+            comp_fields = cls.__gel_gen_computed_fields__()
+
+        if id is not UNSET_UUID:
+            raise ValueError(
+                "models do not support setting `id` on construction; "
+                "`id` is set automatically by the `client.save()` method"
+            )
 
         # Prohibit passing computed fields to the constructor.
         # Unfortunately `init=False` doesn't work with BaseModel
@@ -358,16 +390,15 @@ class GelModel(
         #
         # We can potentially optimize this by caching a frozenset
         # of field names that are computed.
-        has_computed_fields = False
-        cls.model_rebuild()
-        for field_name, field in cls.__pydantic_fields__.items():
-            # ignore `field.init=None` - unset, so we're fine with it.
-            if field.init is False:
-                has_computed_fields = True
-                if field_name in kwargs:
-                    raise ValueError(
-                        f"cannot set field {field_name!r} on {cls.__name__}"
-                    )
+        if comp_fields is not None and (
+            comp_args := comp_fields & kwargs.keys()
+        ):
+            comp_arg = next(iter(comp_args))
+            raise ValueError(
+                f"{cls.__qualname__} model does not accept {comp_arg!r} "
+                f"argument, it is a computed field "
+                f"(the database computes it for you)"
+            )
 
         super().__init__(**kwargs)
 
@@ -379,11 +410,10 @@ class GelModel(
         # want those None values to ever surface anywhere, be that
         # attribute access or serialization or anything else that
         # reads from __dict__.
-        if has_computed_fields:
-            for field_name, field in cls.__pydantic_fields__.items():
-                # ignore `field.init=None` - unset, so we're fine with it.
-                if field.init is False and field_name != "id":
-                    self.__dict__.pop(field_name, None)
+        if comp_fields is not None:
+            pop = self.__dict__.pop
+            for field_name in comp_fields:
+                pop(field_name, None)
 
     def __gel_is_new__(self) -> bool:
         return self.id is UNSET_UUID
@@ -492,7 +522,7 @@ _MT_co = TypeVar("_MT_co", bound=GelModel, covariant=True)
 
 
 class ProxyModel(GelModel, Generic[_MT_co]):
-    __slots__ = ("_p__obj__",)
+    __slots__ = ("__linkprops__", "_p__obj__")
 
     __gel_proxied_dunders__: ClassVar[frozenset[str]] = frozenset(
         {
@@ -507,39 +537,63 @@ class ProxyModel(GelModel, Generic[_MT_co]):
         __linkprops__: GelLinkModel
         __lprops__: ClassVar[type[GelLinkModel]]
 
-    def __init__(self, obj: _MT_co, /) -> None:
-        if isinstance(obj, ProxyModel):
-            raise TypeError(
-                f"ProxyModel {type(self).__qualname__} cannot wrap "
-                f"another ProxyModel {type(obj).__qualname__}"
-            )
-        if not isinstance(obj, self.__proxy_of__):
-            # A long time of debugging revealed that it's very important to
-            # check `obj` being of a correct type. Pydantic can instantiate
-            # a ProxyModel with an incorrect type, e.g. when you pass
-            # a list like `[1]` into a MultiLinkWithProps field --
-            # Pydantic will try to wrap `[1]` into a list of ProxyModels.
-            # And when it eventually fails to do so, everything is broken,
-            # even error reporting and repr().
-            #
-            # Codegen'ed ProxyModel subclasses explicitly call
-            # ProxyModel.__init__() in their __init__() methods to
-            # make sure that this check is always performed.
-            #
-            # If it ever has to be removed, make sure to at least check
-            # that `obj` is an instance of `GelModel`.
-            raise ValueError(
-                f"only instances of {self.__proxy_of__.__name__} are allowed, "
-                f"got {type(obj).__name__}",
-            )
+    def __init__(self, /, **kwargs: Any) -> None:
+        # We want ProxyModel to be a trasparent wrapper, so we
+        # forward the constructor arguments to the wrapped object.
+        wrapped = self.__proxy_of__(**kwargs)
+        ll_setattr(self, "_p__obj__", wrapped)
+        ll_setattr(
+            self, "__linkprops__", self.__lprops__.__gel_model_construct__({})
+        )
+
+    @classmethod
+    def link(cls, obj: _MT_co, /, **link_props: Any) -> Self:  # type: ignore [misc]
+        proxy_of = ll_type_getattr(cls, "__proxy_of__")
+        lprops_cls = ll_type_getattr(cls, "__lprops__")
+
+        if type(obj) is not proxy_of:
+            if isinstance(obj, ProxyModel):
+                raise TypeError(
+                    f"ProxyModel {cls.__qualname__} cannot wrap "
+                    f"another ProxyModel {type(obj).__qualname__}"
+                )
+            if not isinstance(obj, proxy_of):
+                # A long time of debugging revealed that it's very important to
+                # check `obj` being of a correct type. Pydantic can instantiate
+                # a ProxyModel with an incorrect type, e.g. when you pass
+                # a list like `[1]` into a MultiLinkWithProps field --
+                # Pydantic will try to wrap `[1]` into a list of ProxyModels.
+                # And when it eventually fails to do so, everything is broken,
+                # even error reporting and repr().
+                #
+                # Codegen'ed ProxyModel subclasses explicitly call
+                # ProxyModel.__init__() in their __init__() methods to
+                # make sure that this check is always performed.
+                #
+                # If it ever has to be removed, make sure to at least check
+                # that `obj` is an instance of `GelModel`.
+                raise ValueError(
+                    f"only instances of {proxy_of.__name__} "
+                    f"are allowed, got {type(obj).__name__}",
+                )
+
+        self = cls.__new__(cls)
+
+        lprops = lprops_cls(**link_props)
+        ll_setattr(self, "__linkprops__", lprops)
+
         ll_setattr(self, "_p__obj__", obj)
 
+        return self
+
     def __getattribute__(self, name: str) -> Any:
-        if (
-            name == "_p__obj__"  # noqa: PLR1714
-            or name == "__linkprops__"
-            or name == "__class__"
-        ):
+        if name in {
+            "_p__obj__",
+            "__linkprops__",
+            "__proxy_of__",
+            "__class__",
+            "__lprops__",
+        }:
             # Fast path for the wrapped object itself / linkprops model
             # (this optimization is informed by profiling model
             # instantiation and save() operation)
@@ -557,6 +611,11 @@ class ProxyModel(GelModel, Generic[_MT_co]):
         return super().__getattribute__(name)
 
     def __setattr__(self, name: str, value: Any) -> None:
+        if not name.startswith("_"):
+            base = ll_getattr(self, "_p__obj__")
+            setattr(base, name, value)
+            return
+
         model_fields = type(self).__proxy_of__.model_fields
         if name in model_fields:
             # writing to a field: mutate the  wrapped model

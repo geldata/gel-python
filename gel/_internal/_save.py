@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import collections
 import dataclasses
+import weakref
 
 from typing import (
     TYPE_CHECKING,
@@ -27,6 +28,7 @@ from gel._internal._dlist import (
 )
 from gel._internal._unsetid import UNSET_UUID
 from gel._internal._edgeql import PointerKind, quote_ident
+from gel._internal._qbmodel._pydantic._pdlist import ProxyDistinctList
 
 if TYPE_CHECKING:
     import uuid
@@ -45,7 +47,12 @@ V = TypeVar("V")
 
 _unset = object()
 
-_ll_getattr = object.__getattribute__
+_sorted_pointers_cache: weakref.WeakKeyDictionary[
+    type[GelSourceModel], Iterable[GelPointerReflection]
+] = weakref.WeakKeyDictionary()
+
+
+ll_attr = object.__getattribute__
 
 
 LinkPropertiesValues = TypeAliasType(
@@ -91,14 +98,20 @@ class SingleLinkChange(BaseFieldChange):
 
 @_struct
 class MultiLinkAdd(BaseFieldChange):
-    added: Iterable[GelModel]
+    added: list[GelModel]
 
-    added_props: Iterable[LinkPropertiesValues] | None = None
+    added_props: list[LinkPropertiesValues] | None = None
     props_info: dict[str, GelPointerReflection] | None = None
 
     def __post_init__(self) -> None:
         assert not any(isinstance(o, ProxyModel) for o in self.added)
         assert self.info.cardinality.is_multi()
+        assert self.added_props is None or (
+            self.props_info is not None
+            and len(self.added_props) > 0
+            and len(self.added) == len(self.added_props)
+            and next(iter(self.added_props)).keys() == self.props_info.keys()
+        )
 
 
 @_struct
@@ -246,36 +259,43 @@ def is_link_list(val: object) -> TypeGuard[DistinctList[GelModel]]:
     )
 
 
+def is_proxy_link_list(
+    val: object,
+) -> TypeGuard[ProxyDistinctList[ProxyModel[GelModel], GelModel]]:
+    return isinstance(val, ProxyDistinctList)
+
+
 def unwrap_proxy(val: GelModel) -> GelModel:
     if isinstance(val, ProxyModel):
         # This is perf-sensitive function as it's called on
         # every edge of the graph multiple times.
-        obj = _ll_getattr(val, "_p__obj__")
-        assert isinstance(obj, GelModel)
-        return obj
+        return ll_attr(val, "_p__obj__")  # type: ignore [no-any-return]
     else:
         return val
+
+
+def unwrap_proxy_no_check(val: ProxyModel[GelModel]) -> GelModel:
+    return ll_attr(val, "_p__obj__")  # type: ignore [no-any-return]
 
 
 def unwrap_dlist(val: Iterable[GelModel]) -> list[GelModel]:
     return [unwrap_proxy(o) for o in val]
 
 
-def unwrap(val: GelModel) -> tuple[ProxyModel[GelModel] | None, GelModel]:
-    if isinstance(val, ProxyModel):
-        obj = _ll_getattr(val, "_p__obj__")
-        assert isinstance(obj, GelModel)
-        return val, obj
-    else:
-        return None, val
-
-
-def get_pointers(tp: type[GelSourceModel]) -> list[GelPointerReflection]:
+def get_pointers(tp: type[GelSourceModel]) -> Iterable[GelPointerReflection]:
     # We sort pointers to produce similar queies regardless of Python
     # hashing -- this is to maximize the probability of a generated
     # uodate/insert query to hit the Gel's compiled cache.
+
+    try:
+        return _sorted_pointers_cache[tp]
+    except KeyError:
+        pass
+
     pointers = tp.__gel_reflection__.pointers
-    return [pointers[name] for name in sorted(pointers)]
+    ret = tuple(pointers[name] for name in sorted(pointers))
+    _sorted_pointers_cache[tp] = ret
+    return ret
 
 
 def iter_graph(objs: Iterable[GelModel]) -> Iterable[GelModel]:
@@ -284,8 +304,6 @@ def iter_graph(objs: Iterable[GelModel]) -> Iterable[GelModel]:
     visited: IDTracker[GelModel, None] = IDTracker()
 
     def _traverse(obj: GelModel) -> Iterable[GelModel]:
-        obj = unwrap_proxy(obj)
-
         if obj in visited:
             return
 
@@ -307,12 +325,15 @@ def iter_graph(objs: Iterable[GelModel]) -> Iterable[GelModel]:
                 continue
 
             if prop.cardinality.is_multi():
-                assert is_link_list(linked)
-                for ref in linked:
-                    yield from _traverse(ref)
+                if is_proxy_link_list(linked):
+                    for proxy in linked:
+                        yield from _traverse(unwrap_proxy_no_check(proxy))
+                else:
+                    assert is_link_list(linked)
+                    for lobj in linked:
+                        yield from _traverse(lobj)
             else:
-                assert isinstance(linked, GelModel)
-                yield from _traverse(linked)
+                yield from _traverse(unwrap_proxy(cast("GelModel", linked)))
 
     for o in objs:
         yield from _traverse(o)
@@ -462,7 +483,9 @@ def make_plan(objs: Iterable[GelModel]) -> SavePlan:
                     if prop.properties:
                         assert isinstance(val, ProxyModel)
                         link_prop_variant = bool(
-                            val.__linkprops__.__gel_get_changed_fields__()
+                            ll_attr(
+                                val, "__linkprops__"
+                            ).__gel_get_changed_fields__()
                         )
 
                     if link_prop_variant:
@@ -471,7 +494,9 @@ def make_plan(objs: Iterable[GelModel]) -> SavePlan:
                         ptrs = get_pointers(val.__lprops__)
 
                         props = {
-                            p.name: getattr(val.__linkprops__, p.name, None)
+                            p.name: getattr(
+                                ll_attr(val, "__linkprops__"), p.name, None
+                            )
                             for p in ptrs
                         }
 
@@ -585,7 +610,9 @@ def make_plan(objs: Iterable[GelModel]) -> SavePlan:
                     assert isinstance(el, ProxyModel)
                     if el in added_index:
                         continue
-                    if el.__linkprops__.__gel_get_changed_fields__():
+
+                    lp = ll_attr(el, "__linkprops__")
+                    if lp.__gel_get_changed_fields__():
                         added.append(el)
 
             # No adds or changes for this link? Continue to the next one.
@@ -596,7 +623,7 @@ def make_plan(objs: Iterable[GelModel]) -> SavePlan:
 
             # Simple case -- no link props!
             if not prop.properties or all(
-                not link.__linkprops__.__gel_get_changed_fields__()
+                not ll_attr(link, "__linkprops__").__gel_get_changed_fields__()
                 for link in added_proxies
             ):
                 mch = MultiLinkAdd(
@@ -611,7 +638,7 @@ def make_plan(objs: Iterable[GelModel]) -> SavePlan:
             #
             # First, we iterate through the list of added new objects
             # to the list. All of them should be ProxyModels
-            # (as we use UpcastingDistinctList for links with props.)
+            # (as we use ProxyDistinctList for links with props.)
             # Our goal is to segregate different combinations of
             # set link properties into separate groups.
             link_tp = type(added_proxies[0])
@@ -624,7 +651,9 @@ def make_plan(objs: Iterable[GelModel]) -> SavePlan:
                 added=unwrap_dlist(added),
                 added_props=[
                     {
-                        p.name: getattr(link.__linkprops__, p.name, None)
+                        p.name: getattr(
+                            ll_attr(link, "__linkprops__"), p.name, None
+                        )
                         for p in props_info
                     }
                     for link in cast("list[ProxyModel[GelModel]]", added)
@@ -713,7 +742,8 @@ MAX_BATCH_SIZE = 1280
 class QueryBatch:
     executor: SaveExecutor
     query: str
-    args: list[tuple[object, ...]]
+    args_query: str
+    args: list[tuple[object, ...] | int]
     changes: list[ModelChange]
     insert: bool
 
@@ -728,7 +758,8 @@ class QueryBatch:
 class CompiledQuery:
     single_query: str
     multi_query: str
-    arg: tuple[object, ...]
+    args_query: str
+    arg: tuple[object, ...] | int
     change: ModelChange
 
 
@@ -770,6 +801,7 @@ class SaveExecutor:
             QueryBatch(
                 executor=self,
                 query=lqs[0].multi_query,
+                args_query=lqs[0].args_query,
                 args=[lq.arg for lq in lqs],
                 changes=[lq.change for lq in lqs],
                 insert=for_insert,
@@ -788,12 +820,13 @@ class SaveExecutor:
         visited: IDTracker[GelModel, None] = IDTracker()
 
         def _traverse(obj: GelModel) -> None:
-            if not isinstance(obj, GelModel) or obj in visited:
+            if obj in visited:
                 return
 
+            assert not isinstance(obj, ProxyModel)
+
             visited.track(obj)
-            unwrapped = unwrap_proxy(obj)
-            unwrapped.__gel_commit__(self.object_ids.get(id(unwrapped)))
+            obj.__gel_commit__(self.object_ids.get(id(obj)))
 
             for prop in get_pointers(type(obj)):
                 if prop.computed:
@@ -814,17 +847,23 @@ class SaveExecutor:
 
                 if prop.kind is PointerKind.Link:
                     if prop.cardinality.is_multi():
-                        assert is_link_list(linked)
-                        for ref in linked:
-                            if isinstance(ref, ProxyModel):
-                                ref.__linkprops__.__gel_commit__()
-                                _traverse(unwrap_proxy(ref))
-                            else:
-                                _traverse(ref)
+                        if is_proxy_link_list(linked):
+                            for proxy in linked:
+                                ll_attr(
+                                    proxy, "__linkprops__"
+                                ).__gel_commit__()
+                                _traverse(unwrap_proxy_no_check(proxy))
+                        else:
+                            assert is_link_list(linked)
+                            for model in linked:
+                                _traverse(model)
                         linked.__gel_commit__()
                     else:
-                        assert isinstance(linked, GelModel)
-                        _traverse(unwrap_proxy(linked))
+                        if isinstance(linked, ProxyModel):
+                            ll_attr(linked, "__linkprops__").__gel_commit__()
+                            _traverse(unwrap_proxy_no_check(linked))
+                        else:
+                            _traverse(cast("GelModel", linked))
 
                 else:
                     assert prop.kind is PointerKind.Property
@@ -849,6 +888,36 @@ class SaveExecutor:
         args: list[object] = []
         args_types: list[str] = []
 
+        def arg_cast(
+            type_ql: str,
+        ) -> tuple[str, Callable[[str], str], Callable[[object], object]]:
+            # As a workaround for the current limitation
+            # of EdgeQL (tuple arguments can't have empty
+            # sets as elements, and free objects input
+            # hasn't yet landed), we represent empty set
+            # as an empty array, and non-empty values as
+            # an array of one element. More specifically,
+            # if a link property has type `<optional T>`, then
+            # its value will be represented here as
+            # `<array<tuple<T>>`. When the value is empty
+            # set, the argument will be an empty array,
+            # when it's non-empty, it will be a one-element
+            # array with a one-element tuple. Then to unpack:
+            #
+            #    @prop := (array_unpack(val).0 limit 1)
+            #
+            # The nested tuple indirection is needed to support
+            # link props that have types of arrays.
+            if type_ql.startswith("array<"):
+                cast = f"array<tuple<{type_ql}>>"
+                ret = lambda x: f"(select array_unpack({x}).0 limit 1)"  # noqa: E731
+                arg_pack = lambda x: [(x,)] if x is not None else []  # noqa: E731
+            else:
+                cast = f"array<{type_ql}>"
+                ret = lambda x: f"(select array_unpack({x}) limit 1)"  # noqa: E731
+                arg_pack = lambda x: [x] if x is not None else []  # noqa: E731
+            return cast, ret, arg_pack
+
         def add_arg(
             type_ql: str,
             value: Any,
@@ -864,14 +933,13 @@ class SaveExecutor:
         for ch in change.fields.values():
             if isinstance(ch, PropertyChange):
                 if ch.info.cardinality.is_optional():
+                    tp_ql, tp_unpack, arg_pack = arg_cast(ch.info.typexpr)
                     arg = add_arg(
-                        f"array<tuple<{ch.info.typexpr}>>",
-                        [(ch.value,)] if ch.value is not None else [],
+                        tp_ql,
+                        arg_pack(ch.value),
                     )
                     shape_parts.append(
-                        f"{quote_ident(ch.name)} := ("
-                        f"  select array_unpack({arg}).0 limit 1"
-                        f")"
+                        f"{quote_ident(ch.name)} := {tp_unpack(arg)}"
                     )
                 else:
                     assert ch.value is not None
@@ -882,24 +950,38 @@ class SaveExecutor:
                 # Since we're passing a set of values packed into an array
                 # we need to wrap elements in tuples to allow multi props
                 # or arrays etc.
-                arg_t = f"array<tuple<{ch.info.typexpr}>>"
 
                 assign_op = ":=" if for_insert else "+="
-
-                arg = add_arg(arg_t, [(el,) for el in ch.added])
-                shape_parts.append(
-                    f"{quote_ident(ch.name)} {assign_op} array_unpack({arg}).0"
-                )
+                if ch.info.typexpr.startswith("array<"):
+                    arg_t = f"array<tuple<{ch.info.typexpr}>>"
+                    arg = add_arg(arg_t, [(el,) for el in ch.added])
+                    shape_parts.append(
+                        f"{quote_ident(ch.name)} {assign_op} "
+                        f"array_unpack({arg}).0"
+                    )
+                else:
+                    arg_t = f"array<{ch.info.typexpr}>"
+                    arg = add_arg(arg_t, ch.added)
+                    shape_parts.append(
+                        f"{quote_ident(ch.name)} {assign_op} "
+                        f"array_unpack({arg})"
+                    )
 
             elif isinstance(ch, MultiPropRemove):
-                arg_t = f"array<tuple<{ch.info.typexpr}>>"
-
                 assert not for_insert
 
-                arg = add_arg(arg_t, [(el,) for el in ch.removed])
-                shape_parts.append(
-                    f"{quote_ident(ch.name)} -= array_unpack({arg}).0"
-                )
+                if ch.info.typexpr.startswith("array<"):
+                    arg_t = f"array<tuple<{ch.info.typexpr}>>"
+                    arg = add_arg(arg_t, [(el,) for el in ch.removed])
+                    shape_parts.append(
+                        f"{quote_ident(ch.name)} -= array_unpack({arg}).0"
+                    )
+                else:
+                    arg_t = f"array<{ch.info.typexpr}>"
+                    arg = add_arg(arg_t, ch.removed)
+                    shape_parts.append(
+                        f"{quote_ident(ch.name)} -= array_unpack({arg})"
+                    )
 
             elif isinstance(ch, SingleLinkChange):
                 tid = (
@@ -911,17 +993,16 @@ class SaveExecutor:
                     assert ch.props_info is not None
                     assert tid is not None
 
-                    sl_subt = [
-                        f"array<tuple<{ch.props_info[k].typexpr}>>"
+                    arg_casts = {
+                        k: arg_cast(ch.props_info[k].typexpr)
                         for k in ch.props_info
-                    ]
+                    }
+
+                    sl_subt = [arg_casts[k][0] for k in ch.props_info]
 
                     sl_args = [
                         tid,
-                        *(
-                            [] if ch.props[k] is None else [(ch.props[k],)]
-                            for k in ch.props_info
-                        ),
+                        *(arg_casts[k][2](ch.props[k]) for k in ch.props_info),
                     ]
 
                     arg = add_arg(
@@ -930,10 +1011,9 @@ class SaveExecutor:
                     )
 
                     subq_shape = [
-                        f"@{quote_ident(pname)} := ("
-                        f"  select array_unpack({arg}.{i}).0 limit 1"
-                        f")"
-                        for i, pname in enumerate(ch.props.keys(), 1)
+                        f"@{quote_ident(pname)} := "
+                        f"{arg_casts[pname][1](f'{arg}.{i}')}"
+                        for i, pname in enumerate(ch.props_info, 1)
                     ]
 
                     shape_parts.append(
@@ -946,13 +1026,13 @@ class SaveExecutor:
                 else:
                     if ch.info.cardinality.is_optional():
                         arg = add_arg(
-                            "array<tuple<std::uuid>>",
-                            [(tid,)] if tid is not None else [],
+                            "array<std::uuid>",
+                            [tid] if tid is not None else [],
                         )
                         shape_parts.append(
                             f"{quote_ident(ch.name)} := "
                             f"<{linked_name}><std::uuid>("
-                            f"  select array_unpack({arg}).0 limit 1"
+                            f"  select array_unpack({arg}) limit 1"
                             f")"
                         )
                     else:
@@ -978,53 +1058,30 @@ class SaveExecutor:
 
             elif isinstance(ch, MultiLinkAdd):
                 if ch.added_props:
-                    assert ch.props_info is not None
+                    assert ch.props_info
 
                     link_args: list[tuple[Any, ...]] = []
-                    prop_order = None
                     tuple_subt: list[str] | None = None
+
+                    arg_casts = {
+                        k: arg_cast(ch.props_info[k].typexpr)
+                        for k in ch.props_info
+                    }
+
+                    tuple_subt = [arg_casts[k][0] for k in ch.props_info]
 
                     for addo, addp in zip(
                         ch.added, ch.added_props, strict=True
                     ):
-                        if prop_order is None:
-                            prop_order = addp.keys()
-                            # As a workaround for the current limitation
-                            # of EdgeQL (tuple arguments can't have empty
-                            # sets as elements, and free objects input
-                            # hasn't yet landed), we represent empty set
-                            # as an empty array, and non-empty values as
-                            # an array of one element. More specifically,
-                            # if a link property has type `<optional T>`, then
-                            # its value will be represented here as
-                            # `<array<tuple<T>>`. When the value is empty
-                            # set, the argument will be an empty array,
-                            # when it's non-empty, it will be a one-element
-                            # array with a one-element tuple. Then to unpack:
-                            #
-                            #    @prop := (array_unpack(val).0 limit 1)
-                            #
-                            # The nested tuple indirection is needed to support
-                            # link props that have types of arrays.
-                            tuple_subt = [
-                                f"array<tuple<{ch.props_info[k].typexpr}>>"
-                                for k in prop_order
-                            ]
-
-                        assert prop_order == addp.keys()
-
                         link_args.append(
                             (
                                 self._get_id(addo),
                                 *(
-                                    [] if addp[k] is None else [(addp[k],)]
-                                    for k in prop_order
+                                    arg_casts[k][2](addp[k])
+                                    for k in ch.props_info
                                 ),
                             )
                         )
-
-                    assert prop_order
-                    assert tuple_subt
 
                     arg = add_arg(
                         f"array<tuple<std::uuid, {','.join(tuple_subt)}>>",
@@ -1032,8 +1089,8 @@ class SaveExecutor:
                     )
 
                     lp_assign = ", ".join(
-                        f"@{p} := (select array_unpack(tup.{i + 1}).0 limit 1)"
-                        for i, p in enumerate(prop_order)
+                        f"@{p} := {arg_casts[p][1](f'__tup.{i + 1}')}"
+                        for i, p in enumerate(ch.props_info)
                     )
 
                     assign_op = ":=" if for_insert else "+="
@@ -1041,8 +1098,8 @@ class SaveExecutor:
                     shape_parts.append(
                         f"{quote_ident(ch.name)} {assign_op} "
                         f"assert_distinct(("
-                        f"for tup in array_unpack({arg}) union ("
-                        f"select (<{ch.info.typexpr}>tup.0) {{ "
+                        f"for __tup in array_unpack({arg}) union ("
+                        f"select (<{ch.info.typexpr}>__tup.0) {{ "
                         f"{lp_assign}"
                         f"}})))"
                     )
@@ -1069,8 +1126,16 @@ class SaveExecutor:
         shape = ", ".join(shape_parts)
         query: str
         if for_insert:
-            query = f"insert {q_type_name} {{ {shape} }}"
+            if shape:
+                assert args_types
+                query = f"insert {q_type_name} {{ {shape} }}"
+            else:
+                assert not args_types
+                query = f"insert {q_type_name}"
         else:
+            assert shape
+            assert args_types
+
             arg = add_arg("std::uuid", self._get_id(obj))
             query = f"""\
                 update {q_type_name}
@@ -1078,25 +1143,59 @@ class SaveExecutor:
                 set {{ {shape} }}
             """  # noqa: S608
 
-        single_query = f"""
-            with __query := (
-                with __data := <tuple<{",".join(args_types)}>>$0
-                select {query}
-            ) select __query.id
-        """
+        ret_args: tuple[object, ...] | int
 
-        multi_query = f"""
-            with __query := (
+        if args_types:
+            assert args
+            ret_args = tuple(args)
+
+            single_query = f"""
+                with __query := (
+                    with __data := <tuple<{",".join(args_types)}>>$0
+                    select ({query})
+                ) select __query.id
+            """
+
+            multi_query = f"""
+                with __query := (
+                    with __all_data := <array<tuple<{",".join(args_types)}>>>$0
+                    for __data in array_unpack(__all_data) union (
+                        ({query})
+                    )
+                ) select __query.id
+            """
+
+            args_query = f"""
                 with __all_data := <array<tuple<{",".join(args_types)}>>>$0
-                for __data in array_unpack(__all_data) union (
-                    ({query})
-                )
-            ) select __query.id
-        """
+                select count(array_unpack(__all_data))
+            """
+
+        else:
+            assert not args
+            ret_args = 0
+
+            single_query = f"""
+                with __query := (
+                    with __data := <int64>$0
+                    select ({query})
+                ) select __query.id
+            """
+
+            multi_query = f"""
+                with __query := (
+                    with __all_data := <array<int64>>$0
+                    for __data in array_unpack(__all_data) union (
+                        ({query})
+                    )
+                ) select __query.id
+            """
+
+            args_query = "select 'no args'"
 
         return CompiledQuery(
             single_query=single_query,
             multi_query=multi_query,
-            arg=tuple(args),
+            args_query=args_query,
+            arg=ret_args,
             change=change,
         )
