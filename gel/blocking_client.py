@@ -662,6 +662,8 @@ class Client(base_client.BaseClient, abstract.Executor):
     def _batch(self) -> Batch:
         return Batch(
             self.with_config(
+                # We only need to disable transaction idle timeout;
+                # session idle timeouts can't interrupt transactions.
                 session_idle_transaction_timeout=datetime.timedelta()
             )
         )
