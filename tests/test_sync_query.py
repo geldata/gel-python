@@ -1162,3 +1162,13 @@ class TestSyncQuery(tb.SyncQueryTestCase):
                 bx.send_query_single('SELECT <test::MyType2>$0', 42)
                 bx.send_query_single('SELECT <test::MyType3>$0', 42)
                 self.assertEqual(bx.wait(), [42, 42, 42])
+
+    def test_batch_07(self):
+        c = self.client.with_config(session_idle_transaction_timeout=0.2)
+        for bx in c._batch():
+            with bx:
+                bx.send_query_single("select 42")
+                self.assertEqual(bx.wait(), [42])
+                time.sleep(0.6)
+                bx.send_query_single("select 42")
+                self.assertEqual(bx.wait(), [42])

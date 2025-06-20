@@ -202,6 +202,93 @@ class TestAsyncRetry(tb.AsyncQueryTestCase):
         self.assertEqual(set(results), {1, 2})
         self.assertEqual(iterations, 3)
 
+    async def test_async_batch_retry_conflict(self):
+        await self.batch_conflict('counter4')
+        self.assertEqual(
+            await self.client.query_single(
+                '''
+                SELECT (
+                    SELECT test::Counter
+                    FILTER .name = <str>$name
+                ).value
+                '''
+                , name='counter4'
+            ),
+            2,
+        )
+
+    async def test_async_batch_conflict_no_retry(self):
+        with self.assertRaises(gel.TransactionSerializationError):
+            await self.batch_conflict(
+                'counter5',
+                RetryOptions(attempts=1, backoff=gel.default_backoff)
+            )
+        self.assertEqual(
+            await self.client.query_single(
+                '''
+                SELECT (
+                    SELECT test::Counter
+                    FILTER .name = <str>$name
+                ).value
+                '''
+                , name='counter5'
+            ),
+            1,
+        )
+
+    async def batch_conflict(self, name, options=None):
+        client2 = self.make_test_client(database=self.get_database_name())
+        self.addCleanup(client2.aclose)
+
+        barrier = Barrier(2)
+        lock = asyncio.Lock()
+        iterations = 0
+
+        async def transaction1(client):
+            async for tx in client._batch():
+                nonlocal iterations
+                iterations += 1
+                async with tx:
+                    # Actually ensure the transaction is started in backend
+                    await tx.send_query("SELECT 1")
+                    await tx.wait()
+
+                    # Start both transactions at the same initial data.
+                    # One should succeed other should fail and retry.
+                    # On next attempt, the latter should succeed
+                    await barrier.ready()
+
+                    await lock.acquire()
+                    await tx.send_query_single('''
+                        SELECT (
+                            INSERT test::Counter {
+                                name := <str>$name,
+                                value := 1,
+                            } UNLESS CONFLICT ON .name
+                            ELSE (
+                                UPDATE test::Counter
+                                SET { value := .value + 1 }
+                            )
+                        ).value
+                    ''', name=name)
+                lock.release()
+
+        client = self.client
+        if options:
+            client = client.with_retry_options(options)
+            client2 = client2.with_retry_options(options)
+
+        results = await asyncio.wait_for(asyncio.gather(
+            transaction1(client),
+            transaction1(client2),
+            return_exceptions=True,
+        ), 10)
+        for e in results:
+            if isinstance(e, BaseException):
+                raise e
+
+        self.assertEqual(iterations, 3)
+
     async def test_async_retry_conflict_nontx_01(self):
         await self.execute_nontx_conflict(
             'counter_nontx_01',
