@@ -4,9 +4,12 @@
 
 from __future__ import annotations
 from typing import (
+    Annotated,
     Any,
     cast,
     Generic,
+    get_args,
+    get_origin,
     Optional,
     overload,
     Protocol,
@@ -20,18 +23,23 @@ import contextlib
 import functools
 import os
 import re
+import sys
 import traceback
 import warnings
 
 import fastapi
-from fastapi import exceptions, responses, routing, types, utils
+from fastapi import exceptions, params, responses, routing, types, utils
 from fastapi.datastructures import Default, DefaultPlaceholder
 from fastapi.dependencies import models, utils as dep_utils
+from fastapi.openapi import utils as openapi_utils
 from starlette import concurrency
+from starlette.routing import Match
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Sequence
     from fastapi._compat import ModelField
+    from starlette.routing import BaseRoute
+    from starlette.types import Scope, Receive, Send
 
 
 class ConfigSubject(Protocol):
@@ -403,3 +411,180 @@ class ConfigInstance(Generic[T, S]):
             return self._value
         except AttributeError:
             return self._default()
+
+
+class OneOf:
+    bodies: dict[str, params.Body]
+
+    def __init__(self, *bodies: params.Body):
+        if len(bodies) == 0:
+            raise ValueError("OneOf must have at least one body")
+        self.bodies = {}
+        for body in bodies:
+            if body.media_type in self.bodies:
+                raise ValueError(
+                    f"OneOf bodies must have unique media types, "
+                    f"got {body.media_type}"
+                )
+            self.bodies[body.media_type] = body
+
+
+class ContentTypeRoute(routing.APIRoute):
+    routes: dict[str, routing.APIRoute]
+
+    def __init__(
+        self, path: str, endpoint: Callable[..., Any], **kwargs: Any
+    ) -> None:
+        self.routes = {}
+        explicit_sig = getattr(endpoint, "__signature__", None)
+        orig_sig = dep_utils.get_typed_signature(endpoint)
+        orig_params = orig_sig.parameters
+
+        # Find all media types from OneOf annotations
+        is_accept = False
+        media_types: dict[str, params.Body] = {}  # actually an ordered set
+        for param in orig_params.values():
+            anno = param.annotation
+            if get_origin(anno) is not Annotated:
+                continue
+            for arg in reversed(get_args(anno)[1:]):
+                if isinstance(arg, OneOf):
+                    is_accept = True
+                    accept_types = arg.bodies
+                    break
+                elif isinstance(arg, params.Body):
+                    accept_types = {arg.media_type: arg}
+                    break
+            else:
+                continue
+            if media_types:
+                if set(media_types) != set(accept_types):
+                    raise ValueError(
+                        "OneOf bodies must have the same media types, "
+                        f"got {set(media_types)} and {set(accept_types)}"
+                    )
+            else:
+                media_types = accept_types
+
+        if not is_accept:
+            super().__init__(path, endpoint, **kwargs)
+            return
+
+        try:
+            # Create routes for each media type
+            extras = []
+            for i, media_type in enumerate(media_types):
+                new_params = []
+                for param in orig_params.values():
+                    anno = param.annotation
+                    if get_origin(anno) is not Annotated:
+                        new_params.append(param)
+                    else:
+                        args = get_args(anno)
+                        new_args = []
+                        is_accept = False
+                        for arg in reversed(args[1:]):
+                            if not is_accept and isinstance(arg, OneOf):
+                                is_accept = True
+                                new_args.append(arg.bodies[media_type])
+                            else:
+                                new_args.append(arg)
+                        if is_accept:
+                            new_args.append(args[0])
+                            new_args.reverse()
+                            if sys.version_info >= (3, 11):
+                                anno = Annotated.__getitem__(tuple(new_args))
+                            else:
+                                anno = Annotated[tuple(new_args)]
+                            new_params.append(param.replace(annotation=anno))
+                        else:
+                            new_params.append(param)
+                endpoint.__signature__ = orig_sig.replace(  # type: ignore [attr-defined]
+                    parameters=new_params
+                )
+                if i == 0:
+                    super().__init__(path, endpoint, **kwargs)
+                    self.routes[media_type.lower()] = self
+                else:
+                    route = routing.APIRoute(path, endpoint, **kwargs)
+                    self.routes[media_type.lower()] = route
+                    extras.append(route.body_field)
+            if self.body_field is not None:
+                self.body_field.__gel_extras__ = extras  # type: ignore [attr-defined]
+
+        finally:
+            # Restore the original signature if it was set
+            if explicit_sig is None:
+                delattr(endpoint, "__signature__")
+            else:
+                endpoint.__signature__ = explicit_sig  # type: ignore [attr-defined]
+
+    def matches(self, scope: Scope) -> tuple[Match, Scope]:
+        if self.routes:
+            for k, v in scope["headers"]:
+                if k == b"content-type":
+                    route = self.routes.get(v.decode("latin-1").lower(), None)
+                    if route is self:
+                        return super().matches(scope)
+                    elif route is None:
+                        return Match.NONE, {}
+                    else:
+                        return route.matches(scope)
+        return super().matches(scope)
+
+    async def handle(self, scope: Scope, receive: Receive, send: Send) -> None:
+        route = scope.get("route", self)
+        if route is self:
+            await super().handle(scope, receive, send)
+        else:
+            await route.handle(scope, receive, send)
+
+
+orig_get_openapi_operation_request_body = (
+    openapi_utils.get_openapi_operation_request_body
+)
+
+
+def get_openapi_operation_request_body(
+    *,
+    body_field: Optional[ModelField],
+    **kwargs: Any,
+) -> Optional[dict[str, Any]]:
+    rv = orig_get_openapi_operation_request_body(
+        body_field=body_field, **kwargs
+    )
+    if rv is None:
+        return None
+    extras = getattr(body_field, "__gel_extras__", None)
+    if extras:
+        for extra_body_field in extras:
+            doc = orig_get_openapi_operation_request_body(
+                body_field=extra_body_field, **kwargs
+            )
+            if doc:
+                rv["content"].update(doc["content"])
+    return rv
+
+
+openapi_utils.get_openapi_operation_request_body = (
+    get_openapi_operation_request_body
+)
+
+
+orig_get_fields_from_routes = openapi_utils.get_fields_from_routes
+
+
+def get_fields_from_routes(routes: Sequence[BaseRoute]) -> list[ModelField]:
+    all_routes: list[BaseRoute] = []
+    for route in routes:
+        if isinstance(route, ContentTypeRoute):
+            if route.routes:
+                all_routes.extend(route.routes.values())
+            else:
+                all_routes.append(route)
+        else:
+            all_routes.append(route)
+    return orig_get_fields_from_routes(all_routes)
+
+
+openapi_utils.get_fields_from_routes = get_fields_from_routes

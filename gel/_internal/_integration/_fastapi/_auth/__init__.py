@@ -240,6 +240,7 @@ class GelAuth(client_mod.Extension):
         router = fastapi.APIRouter(
             prefix=self.auth_path_prefix.value,
             tags=self.tags.value,
+            route_class=utils.ContentTypeRoute,
         )
         insts: list[Optional[Installable]] = []
         if self.auto_detection.value:
