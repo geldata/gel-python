@@ -660,7 +660,11 @@ class Client(base_client.BaseClient, abstract.Executor):
         return Retry(self)
 
     def _batch(self) -> Batch:
-        return Batch(self)
+        return Batch(
+            self.with_config(
+                session_idle_transaction_timeout=datetime.timedelta()
+            )
+        )
 
     def close(self, timeout=None):
         """Attempt to gracefully close all connections in the client.

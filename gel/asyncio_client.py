@@ -23,6 +23,7 @@ from typing_extensions import Self
 
 import asyncio
 import contextlib
+import datetime
 import logging
 import socket
 import ssl
@@ -533,7 +534,11 @@ class AsyncIOClient(base_client.BaseClient, abstract.AsyncIOExecutor):
         return AsyncIORetry(self)
 
     def _batch(self) -> AsyncIOBatch:
-        return AsyncIOBatch(self)
+        return AsyncIOBatch(
+            self.with_config(
+                session_idle_transaction_timeout=datetime.timedelta()
+            )
+        )
 
     async def save(self, *objs: GelModel) -> None:
         make_executor = make_save_executor_constructor(objs)
