@@ -536,7 +536,9 @@ class AsyncIOClient(base_client.BaseClient, abstract.AsyncIOExecutor):
     def _batch(self) -> AsyncIOBatch:
         return AsyncIOBatch(
             self.with_config(
-                session_idle_transaction_timeout=datetime.timedelta()
+# we only need to specify transaction idle timeout,
+# session idle timeouts can't interrupt transactions                
+session_idle_transaction_timeout=datetime.timedelta()
             )
         )
 
