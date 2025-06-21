@@ -37,6 +37,7 @@ from .abstract import (
     AsyncIOExecutor,
     ReadOnlyExecutor,
     AsyncIOReadOnlyExecutor,
+    with_type,
 )
 from .base_client import ConnectionInfo
 
@@ -82,6 +83,7 @@ __all__ = [
     "create_async_client",
     "create_client",
     "default_backoff",
+    "with_type",
 ]
 
 

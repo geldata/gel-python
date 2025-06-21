@@ -716,6 +716,8 @@ class SyncQueryTestCase(DatabaseTestCase):
 class ModelTestCase(SyncQueryTestCase):
     DEFAULT_MODULE = "default"
 
+    client: typing.ClassVar[gel.Client]
+
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
