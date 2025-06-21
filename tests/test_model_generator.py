@@ -18,7 +18,6 @@
 
 from __future__ import annotations
 
-import dataclasses
 import datetime as dt
 import json
 import os
@@ -46,15 +45,6 @@ from gel._internal._qbmodel._pydantic._pdlist import (
     ProxyDistinctList,
 )
 from gel._internal._schemapath import SchemaPath
-
-
-@dataclasses.dataclass
-class Q:
-    type: typing.Type
-    query: str
-
-    def __edgeql__(self):
-        return (self.type, self.query)
 
 
 class MockPointer(typing.NamedTuple):
@@ -204,10 +194,12 @@ class TestModelGenerator(tb.ModelTestCase):
             "builtins.tuple[models.default.UserGroup, ...]",
         )
 
+    @tb.typecheck
     def test_modelgen_data_unpack_1a(self):
+        import gel
         from models import default
 
-        q = Q(
+        q = gel.with_type(
             default.Post,
             """
             select Post {
@@ -220,6 +212,9 @@ class TestModelGenerator(tb.ModelTestCase):
         )
 
         d = self.client.query_single(q)
+
+        assert d is not None
+        self.assertEqual(reveal_type(d), "models.default.Post")
 
         self.assertIsInstance(d, default.Post)
         self.assertEqual(d.body, "Hello")
@@ -1133,6 +1128,35 @@ class TestModelGenerator(tb.ModelTestCase):
             reveal_type(models.sub.TypeInSub.post),
             "type[models.default.Post]",
         )
+
+    @tb.typecheck
+    def test_modelgen_query_with_type(self):
+        import gel
+        import models
+
+        client: gel.Executor = self.client
+
+        q = "select Post filter .body = 'Hello' limit 1"
+        p_expected = self.client.query(q)
+        self.assertEqual(
+            reveal_type(p_expected),
+            "builtins.list[Any]",
+        )
+        p_expected = p_expected[0]
+
+        typed = gel.with_type(models.default.Post, q)
+        p = client.query(typed)
+        self.assertEqual(
+            reveal_type(p),
+            "builtins.list[models.default.Post]",
+        )
+
+        assert len(p) == 1
+
+        with self.assertRaisesRegex(AttributeError, "'body' is not set"):
+            p[0].body
+
+        self.assertEqual(p[0].id, p_expected.id)
 
     @tb.typecheck
     def test_modelgen_query_methods_on_instances(self):
