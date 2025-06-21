@@ -37,6 +37,7 @@ import sys
 import tempfile
 import textwrap
 import time
+import typing
 import unittest
 import warnings
 
@@ -704,6 +705,8 @@ class SyncQueryTestCase(DatabaseTestCase):
 
 class ModelTestCase(SyncQueryTestCase):
     DEFAULT_MODULE = "default"
+
+    client: typing.ClassVar[gel.Client]
 
     @classmethod
     def setUpClass(cls):
