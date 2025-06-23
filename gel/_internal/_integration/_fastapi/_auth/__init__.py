@@ -8,7 +8,6 @@ from typing_extensions import Self
 
 import contextlib
 import datetime
-import logging
 
 import fastapi
 import jwt
@@ -27,9 +26,6 @@ if TYPE_CHECKING:
     from gel import auth as core
     from .email_password import EmailPassword
     from .builtin_ui import BuiltinUI
-
-
-_logger = logging.getLogger("gel.fastapi.auth")
 
 
 class Installable:
@@ -156,6 +152,14 @@ class GelAuth(client_mod.Extension):
             )(get_auth_token)
         return self._auth_token
 
+    def with_auth_token(
+        self, auth_token: str, request: fastapi.Request
+    ) -> contextlib.AbstractContextManager[None]:
+        dec = self._lifespan.with_global(self.client_token_global.value)
+        dep = dec(lambda: auth_token).dependency
+        call = cast("Callable[[fastapi.Request], Iterator[None]]", dep)
+        return contextlib.contextmanager(call)(request)
+
     async def handle_new_identity(
         self,
         request: fastapi.Request,
@@ -167,13 +171,7 @@ class GelAuth(client_mod.Extension):
             if token_data is None:
                 response = await self.on_new_identity.call(request, result)
             else:
-                dec = self._lifespan.with_global(
-                    self.client_token_global.value
-                )
-                dep = dec(lambda: token_data.auth_token).dependency
-                call = cast("Callable[[fastapi.Request], Iterator[None]]", dep)
-                ctx = contextlib.contextmanager(call)
-                with ctx(request):
+                with self.with_auth_token(token_data.auth_token, request):
                     response = await self.on_new_identity.call(request, result)
             if not isinstance(response, _NoopResponse):
                 return response
@@ -244,22 +242,6 @@ class GelAuth(client_mod.Extension):
         )
         insts: list[Optional[Installable]] = []
         if self.auto_detection.value:
-            ext = await self._lifespan.client.query_single(
-                """
-                select assert_single(
-                    (select schema::Extension filter .name = "auth")
-                )
-                """
-            )
-
-            if not ext:
-                _logger.warning(
-                    "auth extension not installed, add `use extension auth;` "
-                    "to your Gel schema to enable FastAPI auth integration"
-                )
-                await super().on_startup(app)
-                return
-
             config = await self._lifespan.client.query_single(
                 """
                 select assert_single(

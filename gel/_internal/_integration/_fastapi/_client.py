@@ -7,6 +7,7 @@ from typing import (
     Any,
     Annotated,
     cast,
+    Generic,
     Optional,
     ParamSpec,
     TYPE_CHECKING,
@@ -19,6 +20,7 @@ from typing_extensions import Self
 import asyncio
 import importlib.util
 import inspect
+import logging
 
 import fastapi
 import gel
@@ -29,13 +31,15 @@ from . import _utils as utils
 
 if TYPE_CHECKING:
     import types
-    from collections.abc import Callable, Iterator
+    from collections.abc import Callable, Iterator, Sequence
     from ._auth import GelAuth
 
 
+_logger = logging.getLogger("gel.fastapi")
 GEL_STATE_NAMES_STATE = "_gel_state_names"
 P = ParamSpec("P")
 T = TypeVar("T")
+Extension_T = TypeVar("Extension_T", bound="Extension")
 
 
 class Extension:
@@ -52,6 +56,88 @@ class Extension:
         pass
 
 
+class ExtensionShell(Generic[Extension_T]):
+    extension: Optional[Extension_T] = None
+    intro_query = """
+        select exists(select schema::Extension filter .name = <str>$name)
+    """
+
+    def __init__(
+        self,
+        *,
+        package: str,
+        cls: str,
+        extension_name: str,
+        requires: Sequence[str],
+    ) -> None:
+        self._package = package
+        self._cls = cls
+        self._extension_name = extension_name
+        self._requires = requires
+        self._disabled = False
+
+    def ensure_init(
+        self, lifespan: GelLifespan, *, enable: bool = False
+    ) -> Extension_T:
+        if self.extension is None:
+            if lifespan.installed:
+                raise ValueError(
+                    f'Cannot enable "{self._cls}" after installation'
+                )
+            cls = getattr(importlib.import_module(self._package), self._cls)
+            self.extension = cls(lifespan)
+        if enable:
+            self._disabled = False
+        return self.extension
+
+    async def auto_init(self, lifespan: GelLifespan) -> Optional[Extension_T]:
+        if self._disabled:
+            return None
+
+        elif self.extension is None:
+            if await lifespan.client.query_required_single(
+                self.intro_query, name=self._extension_name
+            ):
+                missing_deps = [
+                    dep
+                    for dep in self._requires
+                    if not importlib.util.find_spec(dep)
+                ]
+                if missing_deps:
+                    _logger.warning(
+                        "Required dependencies %r are not installed. "
+                        "Please install them to use the %r extension, "
+                        "or disable the extension to avoid this warning.",
+                        missing_deps,
+                        self._cls,
+                    )
+                    return None
+                else:
+                    return self.ensure_init(lifespan)
+            else:
+                return None
+
+        else:
+            if await lifespan.client.query_required_single(
+                self.intro_query, name=self._extension_name
+            ):
+                return self.extension
+            else:
+                raise RuntimeError(
+                    f'Extension "{self._extension_name}" is not installed, '
+                    f"add `use extension {self._extension_name};` to your Gel "
+                    f"schema to enable it.",
+                )
+
+    def disable(self, lifespan: GelLifespan) -> None:
+        if lifespan.installed:
+            raise ValueError(
+                f'Cannot disable "{self._cls}" after installation'
+            )
+        self._disabled = True
+        self.extension = None
+
+
 class GelLifespan:
     installed: bool = False
     state_name = utils.Config("gel_client")
@@ -65,8 +151,7 @@ class GelLifespan:
     _bio_client: gel.Client
     _client_accessed: bool = False
 
-    _auth: Optional[GelAuth] = None
-    _auto_auth: bool = True
+    _auth: ExtensionShell[GelAuth]
 
     def __init__(
         self,
@@ -76,7 +161,13 @@ class GelLifespan:
         bio_client_creator: Callable[..., gel.Client],
     ) -> None:
         self._app = app
-        self._auth = None
+        self._auth = ExtensionShell(
+            package="gel._internal._integration._fastapi._auth",
+            cls="GelAuth",
+            extension_name="auth",
+            requires=["httpx", "jwt"],
+        )
+        self._shells = [self._auth]
 
         self._client_creator = client_creator
         self._client = client_creator()
@@ -89,20 +180,8 @@ class GelLifespan:
         await self._client.ensure_connected()
         await concurrency.run_in_threadpool(self._bio_client.ensure_connected)
 
-        if (
-            self._auto_auth
-            and self._auth is None
-            and all(
-                [
-                    importlib.util.find_spec("httpx"),
-                    importlib.util.find_spec("python_multipart"),
-                    importlib.util.find_spec("jwt"),
-                ]
-            )
-        ):
-            _ = self.auth
-
-        for ext in [self._auth]:
+        for shell in self._shells:
+            ext = await shell.auto_init(self)
             if ext is not None:
                 await ext.on_startup(self._app)
 
@@ -122,9 +201,9 @@ class GelLifespan:
         exc_val: Optional[BaseException],
         exc_tb: Optional[types.TracebackType],
     ) -> None:
-        for ext in [self._auth]:
-            if ext is not None:
-                await ext.on_shutdown(self._app)
+        for shell in self._shells:
+            if shell.extension is not None:
+                await shell.extension.on_shutdown(self._app)
         timeout = self.shutdown_timeout.value
         if hasattr(asyncio, "timeout"):
             async with asyncio.timeout(timeout):
@@ -258,28 +337,16 @@ class GelLifespan:
 
     @property
     def auth(self) -> GelAuth:
-        if self._auth is None:
-            if self.installed:
-                raise ValueError("Cannot enable auth after installation")
-
-            from ._auth import GelAuth  # noqa: PLC0415
-
-            self._auth = GelAuth(self)
-
-        return self._auth
+        return self._auth.ensure_init(self)
 
     def with_auth(self, **kwargs: Any) -> Self:
-        auth = self.auth
+        auth = self._auth.ensure_init(self, enable=True)
         for key, value in kwargs.items():
             getattr(auth, key)(value)
         return self
 
     def without_auth(self) -> Self:
-        if self.installed:
-            raise ValueError("Cannot disable auth after installation")
-
-        self._auth = None
-        self._auto_auth = False
+        self._auth.disable(self)
         return self
 
 
