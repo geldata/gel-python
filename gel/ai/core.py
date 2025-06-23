@@ -147,7 +147,13 @@ class RAGClient(BaseRAGClient):
                 stream=False,
             ).to_httpx_request()
         )
-        resp.raise_for_status()
+        try:
+            resp.raise_for_status()
+        except httpx.HTTPStatusError as e:
+            error = e.response.json()
+            print(f"{error['type']}: {error['message']}")
+            raise
+
         return BaseRAGClient._parse_rag_response(resp)
 
     def stream_rag(
@@ -162,7 +168,13 @@ class RAGClient(BaseRAGClient):
                 stream=True,
             ).to_httpx_request(),
         ) as event_source:
-            event_source.response.raise_for_status()
+            try:
+                event_source.response.raise_for_status()
+            except httpx.HTTPStatusError as e:
+                error = e.response.json()
+                print(f"{error['type']}: {error['message']}")
+                raise
+
             for sse in event_source.iter_sse():
                 yield sse.data
 
@@ -170,7 +182,13 @@ class RAGClient(BaseRAGClient):
         resp = self.client.post(
             "/embeddings", json={"input": inputs, "model": model}
         )
-        resp.raise_for_status()
+        try:
+            resp.raise_for_status()
+        except httpx.HTTPStatusError as e:
+            error = e.response.json()
+            print(f"{error['type']}: {error['message']}")
+            raise
+
         return resp.json()["data"][0]["embedding"]
 
 
@@ -190,7 +208,13 @@ class AsyncRAGClient(BaseRAGClient):
                 stream=False,
             ).to_httpx_request()
         )
-        resp.raise_for_status()
+        try:
+            resp.raise_for_status()
+        except httpx.HTTPStatusError as e:
+            error = e.response.json()
+            print(f"{error['type']}: {error['message']}")
+            raise
+
         return BaseRAGClient._parse_rag_response(resp)
 
     async def stream_rag(
@@ -205,7 +229,13 @@ class AsyncRAGClient(BaseRAGClient):
                 stream=True,
             ).to_httpx_request(),
         ) as event_source:
-            event_source.response.raise_for_status()
+            try:
+                event_source.response.raise_for_status()
+            except httpx.HTTPStatusError as e:
+                error = e.response.json()
+                print(f"{error['type']}: {error['message']}")
+                raise
+
             async for sse in event_source.aiter_sse():
                 yield sse.data
 
@@ -215,5 +245,11 @@ class AsyncRAGClient(BaseRAGClient):
         resp = await self.client.post(
             "/embeddings", json={"input": inputs, "model": model}
         )
-        resp.raise_for_status()
+        try:
+            resp.raise_for_status()
+        except httpx.HTTPStatusError as e:
+            error = e.response.json()
+            print(f"{error['type']}: {error['message']}")
+            raise
+
         return resp.json()["data"][0]["embedding"]
