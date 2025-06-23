@@ -121,7 +121,7 @@ type StepPath {
 }
 
 type KitchenSink {
-    required p_str: str;
+    required str: str;
     required multi p_multi_str: str;
     p_opt_str: str;
     multi p_opt_multi_str: str;
@@ -144,4 +144,11 @@ type KitchenSink {
     date: cal::local_date;
     ts: datetime;
     lts: cal::local_datetime;
+}
+
+type AllOptional {
+    # Don't add anything else to this type or alter
+    # it in any way.
+    field: str;
+    pointer: AllOptional;
 }

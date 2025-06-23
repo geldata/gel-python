@@ -12,20 +12,24 @@ from typing import (
     TypeVar,
     final,
 )
+from typing_extensions import TypeVarTuple
 
 import dataclasses
+import typing
 
 from gel._internal import _edgeql
 from gel._internal import _qb
-from gel._internal._hybridmethod import hybridmethod
+from gel._internal._xmethod import hybridmethod
 
 if TYPE_CHECKING:
+    import types
     from collections.abc import Iterator
 
 
 T = TypeVar("T")
 T_co = TypeVar("T_co", covariant=True)
 GelType_T = TypeVar("GelType_T", bound="GelType")
+GelType_Tup = TypeVarTuple("GelType_Tup")
 
 
 if TYPE_CHECKING:
@@ -103,7 +107,40 @@ class GelObjectType(
     _qb.GelObjectTypeMetadata,
     metaclass=GelObjectTypeMeta,
 ):
-    pass
+    __gel_variant__: ClassVar[str | None] = None
+    """Auto-reflected model variant marker."""
+
+    def __init_subclass__(cls) -> None:
+        super().__init_subclass__()
+        cls.__gel_variant__ = None
+
+
+def is_gel_object_type(t: Any) -> TypeGuard[type[GelObjectType]]:
+    return isinstance(t, type) and issubclass(t, GelObjectType)
+
+
+def maybe_collapse_object_type_variant_union(
+    t: types.UnionType,
+) -> type[GelObjectType] | None:
+    """If *t* is a Union of GelObjectType reflections of the same object
+    type, find and return the first union component that is a default
+    variant or a user-defined variant (such classes would have
+    ``__gel_variant__`` set to None."""
+    default_variant: type[GelObjectType] | None = None
+    typename = None
+    for union_arg in typing.get_args(t):
+        if not is_gel_object_type(union_arg):
+            # Not an object type reflection union at all!
+            return None
+        if typename is None:
+            typename = union_arg.__gel_reflection__.name
+        elif typename != union_arg.__gel_reflection__.name:
+            # Reflections of different object types, cannot collapse.
+            return None
+        if union_arg.__gel_variant__ is None and default_variant is None:
+            default_variant = union_arg
+
+    return default_variant
 
 
 @final

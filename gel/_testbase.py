@@ -22,9 +22,11 @@ import asyncio
 import atexit
 import contextlib
 import functools
+import gc
 import importlib.util
 import inspect
 import json
+import linecache
 import logging
 import os
 import pathlib
@@ -611,7 +613,10 @@ class DatabaseTestCase(ClusterTestCase, ConnectedTestCaseMixin):
                 with open(val, "r") as sf:
                     module = sf.read()
 
-                schema.append(f"\nmodule {module_name} {{ {module} }}")
+                if f"module {module_name}" not in module:
+                    schema.append(f"\nmodule {module_name} {{ {module} }}")
+                else:
+                    schema.append(module)
 
         # Don't wrap the script into a transaction here, so that
         # potentially it's easier to stitch multiple such scripts
@@ -704,6 +709,9 @@ class ModelTestCase(SyncQueryTestCase):
     def setUpClass(cls):
         super().setUpClass()
 
+        if "models" in sys.modules:
+            raise RuntimeError('"models" module has already been imported')
+
         cls.orm_debug = os.environ.get("GEL_PYTHON_TEST_ORM") in {"1", "true"}
 
         td_kwargs = {}
@@ -739,6 +747,15 @@ class ModelTestCase(SyncQueryTestCase):
             super().tearDownClass()
         finally:
             sys.path.remove(cls.tmp_model_dir.name)
+
+            for mod_name in tuple(sys.modules.keys()):
+                if mod_name.startswith("models.") or mod_name == "models":
+                    del sys.modules[mod_name]
+
+            importlib.invalidate_caches()
+            linecache.clearcache()
+            gc.collect()
+
             if not cls.orm_debug:
                 cls.tmp_model_dir.cleanup()
 

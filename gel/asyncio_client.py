@@ -23,6 +23,7 @@ from typing_extensions import Self
 
 import asyncio
 import contextlib
+import datetime
 import logging
 import socket
 import ssl
@@ -369,7 +370,25 @@ class AsyncIOBatchIteration(transaction.BaseTransaction):
         return self
 
     async def __aexit__(self, extype, ex, tb):
-        await self.wait()
+        if extype is None:
+            # Normal exit, wait for the remaining batched operations
+            # to complete, discarding any results.
+            try:
+                await self.wait()
+            except Exception as ex:
+                # If an exception occurs while waiting, we need to
+                # ensure that the transaction is exited properly,
+                # including to consider that exception for retry.
+                with self._exclusive():
+                    self._managed = False
+                    if await self._exit(type(ex), ex):
+                        # Shall retry, mute the exception
+                        return True
+                    else:
+                        # Shall not retry, re-raise the exception.
+                        # Note: we cannot simply return False here,
+                        # because the outer `extype` and `ex` are all None.
+                        raise
         with self._exclusive():
             self._managed = False
             return await self._exit(extype, ex)
@@ -515,7 +534,13 @@ class AsyncIOClient(base_client.BaseClient, abstract.AsyncIOExecutor):
         return AsyncIORetry(self)
 
     def _batch(self) -> AsyncIOBatch:
-        return AsyncIOBatch(self)
+        return AsyncIOBatch(
+            self.with_config(
+                # We only need to disable transaction idle timeout;
+                # session idle timeouts can't interrupt transactions.
+                session_idle_transaction_timeout=datetime.timedelta()
+            )
+        )
 
     async def save(self, *objs: GelModel) -> None:
         make_executor = make_save_executor_constructor(objs)
@@ -524,11 +549,12 @@ class AsyncIOClient(base_client.BaseClient, abstract.AsyncIOExecutor):
             async with tx:
                 executor = make_executor()
 
-                for batch in executor:
-                    for query, args in batch:
-                        await tx.send_query_required_single(query, *args)
-                    ids = await tx.wait()
-                    executor.feed_ids(ids)
+                for batches in executor:
+                    for batch in batches:
+                        await tx.send_query(batch.query, batch.args)
+                    batch_ids = await tx.wait()
+                    for ids, batch in zip(batch_ids, batches, strict=True):
+                        batch.feed_ids(ids)
 
                 executor.commit()
 

@@ -1332,3 +1332,13 @@ class TestAsyncQuery(tb.AsyncQueryTestCase):
                 await bx.send_query_single('SELECT <test::MyType2>$0', 42)
                 await bx.send_query_single('SELECT <test::MyType3>$0', 42)
                 self.assertEqual(await bx.wait(), [42, 42, 42])
+
+    async def test_batch_07(self):
+        c = self.client.with_config(session_idle_transaction_timeout=0.2)
+        async for bx in c._batch():
+            async with bx:
+                await bx.send_query_single("select 42")
+                self.assertEqual(await bx.wait(), [42])
+                await asyncio.sleep(0.6)
+                await bx.send_query_single("select 42")
+                self.assertEqual(await bx.wait(), [42])

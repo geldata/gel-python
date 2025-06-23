@@ -15,6 +15,7 @@ from gel._internal._lazyprop import LazyClassProperty
 from gel._internal._reflection import SchemaPath
 from gel._internal._typing_dispatch import dispatch_overload
 from gel._internal._utils import UnspecifiedType, Unspecified
+from gel._internal._xmethod import classonlymethod
 
 from gel._internal._qb import (
     AnnotatedExpr,
@@ -36,6 +37,7 @@ from gel._internal._qb import (
 from gel._internal._qbmodel._abstract import (
     DEFAULT_VALUE,
     AnyEnum,
+    AnyNamedTuple,
     AnyTuple,
     BaseScalar,
     DateImpl,
@@ -89,6 +91,7 @@ __all__ = (
     "DEFAULT_VALUE",
     "AnnotatedExpr",
     "AnyEnum",
+    "AnyNamedTuple",
     "AnyTuple",
     "Array",
     "BaseScalar",
@@ -152,6 +155,7 @@ __all__ = (
     "UUIDImpl",
     "Unspecified",
     "UnspecifiedType",
+    "classonlymethod",
     "computed_field",
     "dispatch_overload",
 )

@@ -17,11 +17,11 @@
 #
 
 from __future__ import annotations
-
-from __future__ import annotations
 from typing import Any
 
 import contextlib
+import collections
+import dataclasses
 import datetime
 import queue
 import socket
@@ -49,6 +49,24 @@ MINIMUM_PING_WAIT_TIME = datetime.timedelta(seconds=1)
 
 
 T = typing.TypeVar("T")
+
+
+@dataclasses.dataclass
+class SaveDebug:
+    queries: list[SaveQueryDebug]
+    plan_time: float
+
+
+@dataclasses.dataclass
+class SaveQueryDebug:
+    query: str = ""
+    max_args_number: int = 0
+    total_execs: int = 0
+    total_exec_time: float = 0
+    analyze: str = ""
+    analyze_args: object = None
+    args_query: str = ""
+    args_analyze: object = None
 
 
 def iter_coroutine(coro: typing.Coroutine[None, None, T]) -> T:
@@ -422,7 +440,24 @@ class BatchIteration(transaction.BaseTransaction):
 
     def __exit__(self, extype, ex, tb):
         with self._exclusive():
-            iter_coroutine(self._wait())
+            if extype is None:
+                # Normal exit, wait for the remaining batched operations
+                # to complete, discarding any results.
+                try:
+                    iter_coroutine(self._wait())
+                except Exception as ex:
+                    # If an exception occurs while waiting, we need to
+                    # ensure that the transaction is exited properly,
+                    # including to consider that exception for retry.
+                    self._managed = False
+                    if iter_coroutine(self._exit(type(ex), ex)):
+                        # Shall retry, mute the exception
+                        return True
+                    else:
+                        # Shall not retry, re-raise the exception.
+                        # Note: we cannot simply return False here,
+                        # because the outer `extype` and `ex` are all None.
+                        raise
             self._managed = False
             return iter_coroutine(self._exit(extype, ex))
 
@@ -550,13 +585,63 @@ class Client(base_client.BaseClient, abstract.Executor):
             with tx:
                 executor = make_executor()
 
-                for batch in executor:
-                    for query, args in batch:
-                        tx.send_query_required_single(query, *args)
-                    ids = tx.wait()
-                    executor.feed_ids(ids)
+                for batches in executor:
+                    for batch in batches:
+                        tx.send_query(batch.query, batch.args)
+                    batch_ids = tx.wait()
+                    for ids, batch in zip(batch_ids, batches, strict=True):
+                        batch.feed_ids(ids)
 
                 executor.commit()
+
+    def __debug_save__(self, *objs: GelModel) -> SaveDebug:
+        ns = time.monotonic_ns()
+        make_executor = make_save_executor_constructor(objs)
+        plan_time = time.monotonic_ns() - ns
+
+        queries = collections.defaultdict(SaveQueryDebug)
+
+        for tx in self._batch():
+            with tx:
+                executor = make_executor()
+
+                for batches in executor:
+                    for batch in batches:
+                        qdebug = queries[batch.query]
+
+                        qdebug.total_execs += 1
+                        qdebug.query = batch.query
+                        qdebug.args_query = batch.args_query
+
+                        if not qdebug.analyze:
+                            tx.send_query(f"ANALYZE {batch.query}", batch.args)
+                            qdebug.analyze = tx.wait()[0][0]
+                            tx.send_query(
+                                f"ANALYZE {batch.args_query}", batch.args
+                            )
+                            qdebug.args_analyze = tx.wait()[0][0]
+                            qdebug.analyze_args = batch.args
+
+                        ns = time.monotonic_ns()
+                        tx.send_query(batch.query, batch.args)
+                        batch_ids = tx.wait()
+                        qdebug.total_exec_time += time.monotonic_ns() - ns
+
+                        qdebug.max_args_number = max(
+                            qdebug.max_args_number, len(batch.args)
+                        )
+
+                        batch.feed_ids(batch_ids[0])
+
+                executor.commit()
+
+        for qdebug in queries.values():
+            qdebug.total_exec_time /= 1_000_000.0
+
+        return SaveDebug(
+            queries=sorted(queries.values(), key=lambda q: q.total_exec_time),
+            plan_time=plan_time / 1_000_000.0,
+        )
 
     def _query(self, query_context: abstract.QueryContext):
         return iter_coroutine(super()._query(query_context))
@@ -575,7 +660,13 @@ class Client(base_client.BaseClient, abstract.Executor):
         return Retry(self)
 
     def _batch(self) -> Batch:
-        return Batch(self)
+        return Batch(
+            self.with_config(
+                # We only need to disable transaction idle timeout;
+                # session idle timeouts can't interrupt transactions.
+                session_idle_transaction_timeout=datetime.timedelta()
+            )
+        )
 
     def close(self, timeout=None):
         """Attempt to gracefully close all connections in the client.

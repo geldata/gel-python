@@ -35,7 +35,7 @@ from pydantic._internal import _model_construction  # noqa: PLC2701
 
 from gel._internal import _qb
 from gel._internal import _typing_inspect
-from gel._internal import _unsetid
+from gel._internal._unsetid import UNSET_UUID
 
 from gel._internal._qbmodel import _abstract
 
@@ -57,6 +57,7 @@ class GelModelMeta(_model_construction.ModelMetaclass, _abstract.GelModelMeta):
         namespace: dict[str, Any],
         *,
         __gel_type_id__: uuid.UUID | None = None,
+        __gel_variant__: str | None = None,
         **kwargs: Any,
     ) -> GelModelMeta:
         with warnings.catch_warnings():
@@ -92,6 +93,9 @@ class GelModelMeta(_model_construction.ModelMetaclass, _abstract.GelModelMeta):
         if __gel_type_id__ is not None:
             mcls.register_class(__gel_type_id__, cls)
 
+        if __gel_variant__ is not None:
+            cls.set_variant(__gel_variant__)
+
         return cls
 
     def __setattr__(cls, name: str, value: Any, /) -> None:  # noqa: N805
@@ -118,6 +122,22 @@ class GelModelMeta(_model_construction.ModelMetaclass, _abstract.GelModelMeta):
 
         return result
 
+    # We don't need the complicated isinstance checking inherited
+    # by Pydantic's ModelMetaclass from abc.Meta -- it's incredibly
+    # slow. For GelModels we can just use the built-in
+    # type.__instancecheck__ and type.__subclasscheck__. It's not
+    # clear why an ABC-level "compatibility" would even be useful
+    # for GelModels given how specialized they are.
+    #
+    # Context: without this, IMDBench's data loading takes 2x longer.
+    #
+    # Alternatively, we could just overload these for ProxyModel --
+    # that's where most impact is. So if *you*, the reader of this code,
+    # have a use case for supporting the broader isinstance/issubclass
+    # semantics please onen an issue and let us know.
+    __instancecheck__ = type.__instancecheck__  # type: ignore [assignment]
+    __subclasscheck__ = type.__subclasscheck__  # type: ignore [assignment]
+
 
 def _resolve_pointers(cls: type[GelSourceModel]) -> dict[str, type[GelType]]:
     if not cls.__pydantic_complete__ and cls.model_rebuild() is False:
@@ -135,7 +155,7 @@ def _resolve_pointers(cls: type[GelSourceModel]) -> dict[str, type[GelType]]:
             raise TypeError(
                 f"the type of '{cls}.{ptr_name}' has not been resolved"
             )
-        tgeneric = descriptor.get_resolved_type_generic()
+        tgeneric = descriptor.get_resolved_pointer_descriptor()
         if tgeneric is not None:
             torigin = typing.get_origin(tgeneric)
             if (
@@ -157,6 +177,10 @@ def _resolve_pointers(cls: type[GelSourceModel]) -> dict[str, type[GelType]]:
     return pointers
 
 
+_NO_DEFAULT = frozenset({pydantic_core.PydanticUndefined, None})
+"""Field default values that signal that a schema default is to be used."""
+
+
 def _process_pydantic_fields(
     cls: type[GelModel],
     fields: dict[str, pydantic.fields.FieldInfo],
@@ -165,11 +189,6 @@ def _process_pydantic_fields(
         fdef = field.default
         overrides: dict[str, Any] = {}
         ptr = cls.__gel_reflection__.pointers.get(fn)
-
-        if ptr is not None and ptr.has_default and fn != "id":
-            overrides["default"] = _abstract.DEFAULT_VALUE
-        elif _qb.is_pointer_descriptor(fdef):
-            overrides["default"] = ...
 
         anno = _typing_inspect.inspect_annotation(
             field.annotation,
@@ -187,6 +206,21 @@ def _process_pydantic_fields(
                 overrides["annotation"] = field.annotation
         else:
             field_infos = []
+
+        fdef_is_desc = _qb.is_pointer_descriptor(fdef)
+        if (
+            ptr is not None
+            and ptr.has_default
+            and fn != "id"
+            and (fdef_is_desc or fdef in _NO_DEFAULT)
+            and all(
+                fi.default in _NO_DEFAULT and fi.default_factory is None
+                for fi in field_infos
+            )
+        ):
+            overrides["default"] = _abstract.DEFAULT_VALUE
+        elif fdef_is_desc:
+            overrides["default"] = ...
 
         if overrides:
             field_attrs = dict(field._attributes_set)
@@ -212,7 +246,11 @@ def _process_pydantic_fields(
 
 _unset: object = object()
 _empty_str_set: frozenset[str] = frozenset()
-_setattr = object.__setattr__
+
+# Low-level attribute functions
+ll_setattr = object.__setattr__
+ll_getattr = object.__getattribute__
+ll_type_getattr = type.__getattribute__
 
 
 class GelSourceModel(
@@ -232,13 +270,13 @@ class GelSourceModel(
     def __gel_model_construct__(cls, __dict__: dict[str, Any] | None) -> Self:
         self = cls.__new__(cls)
         if __dict__ is not None:
-            _setattr(self, "__dict__", __dict__)
-            _setattr(self, "__pydantic_fields_set__", set(__dict__.keys()))
+            ll_setattr(self, "__dict__", __dict__)
+            ll_setattr(self, "__pydantic_fields_set__", set(__dict__.keys()))
         else:
-            _setattr(self, "__pydantic_fields_set__", set())
-        _setattr(self, "__pydantic_extra__", None)
-        _setattr(self, "__pydantic_private__", None)
-        _setattr(self, "__gel_changed_fields__", None)
+            ll_setattr(self, "__pydantic_fields_set__", set())
+        ll_setattr(self, "__pydantic_extra__", None)
+        ll_setattr(self, "__pydantic_private__", None)
+        ll_setattr(self, "__gel_changed_fields__", None)
         return self
 
     @classmethod
@@ -246,12 +284,12 @@ class GelSourceModel(
         cls, _fields_set: set[str] | None = None, **values: Any
     ) -> Self:
         self = super().model_construct(_fields_set, **values)
-        _setattr(self, "__gel_changed_fields__", None)
+        ll_setattr(self, "__gel_changed_fields__", None)
         return self
 
     def __init__(self, /, **kwargs: Any) -> None:
         super().__init__(**kwargs)
-        _setattr(
+        ll_setattr(
             self, "__gel_changed_fields__", set(self.__pydantic_fields_set__)
         )
 
@@ -264,7 +302,7 @@ class GelSourceModel(
         return dirty
 
     def __gel_commit__(self) -> None:
-        _setattr(self, "__gel_changed_fields__", None)
+        ll_setattr(self, "__gel_changed_fields__", None)
 
     def __setattr__(self, name: str, value: Any) -> None:
         if name not in self.__pydantic_fields__:
@@ -310,9 +348,40 @@ class GelModel(
 
     if TYPE_CHECKING:
         id: uuid.UUID
+        __gel_computed_fields__: frozenset[str] | None
 
-    def __init__(self, /, **kwargs: Any) -> None:
+    @classmethod
+    def __gel_gen_computed_fields__(cls) -> frozenset[str] | None:
+        cls.model_rebuild()
+        ret: set[str] = set()
+        for field_name, field in cls.__pydantic_fields__.items():
+            # ignore `field.init=None` - unset, so we're fine with it.
+            if field.init is False:
+                ret.add(field_name)
+        ret.discard("id")
+        comp_fields = frozenset(ret) if ret else None
+        cls.__gel_computed_fields__ = comp_fields
+        return comp_fields
+
+    def __init__(
+        self,
+        /,
+        *,
+        id: uuid.UUID = UNSET_UUID,  # noqa: A002
+        **kwargs: Any,
+    ) -> None:
         cls = type(self)
+
+        try:
+            comp_fields = type.__getattribute__(cls, "__gel_computed_fields__")
+        except AttributeError:
+            comp_fields = cls.__gel_gen_computed_fields__()
+
+        if id is not UNSET_UUID:
+            raise ValueError(
+                "models do not support setting `id` on construction; "
+                "`id` is set automatically by the `client.save()` method"
+            )
 
         # Prohibit passing computed fields to the constructor.
         # Unfortunately `init=False` doesn't work with BaseModel
@@ -321,16 +390,15 @@ class GelModel(
         #
         # We can potentially optimize this by caching a frozenset
         # of field names that are computed.
-        has_computed_fields = False
-        cls.model_rebuild()
-        for field_name, field in cls.__pydantic_fields__.items():
-            # ignore `field.init=None` - unset, so we're fine with it.
-            if field.init is False:
-                has_computed_fields = True
-                if field_name in kwargs:
-                    raise ValueError(
-                        f"cannot set field {field_name!r} on {cls.__name__}"
-                    )
+        if comp_fields is not None and (
+            comp_args := comp_fields & kwargs.keys()
+        ):
+            comp_arg = next(iter(comp_args))
+            raise ValueError(
+                f"{cls.__qualname__} model does not accept {comp_arg!r} "
+                f"argument, it is a computed field "
+                f"(the database computes it for you)"
+            )
 
         super().__init__(**kwargs)
 
@@ -342,15 +410,17 @@ class GelModel(
         # want those None values to ever surface anywhere, be that
         # attribute access or serialization or anything else that
         # reads from __dict__.
-        if has_computed_fields:
-            for field_name, field in cls.__pydantic_fields__.items():
-                # ignore `field.init=None` - unset, so we're fine with it.
-                if field.init is False and field_name != "id":
-                    self.__dict__.pop(field_name, None)
+        if comp_fields is not None:
+            pop = self.__dict__.pop
+            for field_name in comp_fields:
+                pop(field_name, None)
+
+    def __gel_is_new__(self) -> bool:
+        return self.id is UNSET_UUID
 
     def __gel_commit__(self, new_id: uuid.UUID | None = None) -> None:
         if new_id is not None:
-            if self.id is not _unsetid.UNSET_UUID:
+            if self.id is not UNSET_UUID:
                 raise ValueError(
                     f"cannot set id on {self!r} after it has been set"
                 )
@@ -359,19 +429,60 @@ class GelModel(
         super().__gel_commit__()
 
     def __eq__(self, other: object) -> bool:
-        if not isinstance(other, GelModel):
+        # We make two models equal to each other if they:
+        #
+        #   - both have the same *set* UUID (not UNSET_UUID)
+        #     (ignoring differences in their data attributes)
+        #
+        #   - if they are both ProxyModels and wrap objects
+        #     with equal *set* UUIDs.
+        #
+        #   - if one is a ProxyModel and the other is not
+        #     if they wrap objects with equal *set* UUIDs,
+        #     regardless of whether those proxies have
+        #     different __linkprops__ or not.
+        #
+        # Why do we want equality by id?:
+        #
+        #   - In EdgeQL objects are compared by theid IDs only.
+        #
+        #   - It'd be hard to reason about / compare objects in
+        #     Python code, unless objects are always fetched
+        #     in the same way. This is the reason why all ORMs
+        #     do the same.
+        #
+        #   - ProxyModels act as a fully transparent wrapper
+        #     around GelModels. They are meant to be used as
+        #     transitive objects acting exactly like the objects
+        #     they wrap, PLUS having link properties data.
+        #
+        #   - ProxyModels have to be designed this way or
+        #     refactoring schema becomes incredibly hard --
+        #     adding the first link property to a link would
+        #     change types and runtime behavior incompatibly
+        #     in your Python code.
+        if self is other:
+            return True
+
+        is_other_proxy = isinstance(other, ProxyModel)
+        if not is_other_proxy and not isinstance(other, GelModel):
             return NotImplemented
 
-        if self.id is None or other.id is None:
-            return False
-        else:
-            return self.id == other.id
+        other_obj = cast(
+            "GelModel",
+            ll_getattr(other, "_p__obj__") if is_other_proxy else other,
+        )
+
+        if self is other_obj:
+            return True
+
+        return self.id == other_obj.id
 
     def __hash__(self) -> int:
-        if self.id is _unsetid.UNSET_UUID:
+        mid = self.id
+        if mid is UNSET_UUID:
             raise TypeError("Model instances without id value are unhashable")
-
-        return hash(self.id)
+        return hash(mid)
 
     def __repr_name__(self) -> str:
         cls = type(self)
@@ -411,7 +522,7 @@ _MT_co = TypeVar("_MT_co", bound=GelModel, covariant=True)
 
 
 class ProxyModel(GelModel, Generic[_MT_co]):
-    __slots__ = ("_p__obj__",)
+    __slots__ = ("__linkprops__", "_p__obj__")
 
     __gel_proxied_dunders__: ClassVar[frozenset[str]] = frozenset(
         {
@@ -426,45 +537,89 @@ class ProxyModel(GelModel, Generic[_MT_co]):
         __linkprops__: GelLinkModel
         __lprops__: ClassVar[type[GelLinkModel]]
 
-    def __init__(self, obj: _MT_co, /) -> None:
-        if isinstance(obj, ProxyModel):
-            raise TypeError(
-                f"ProxyModel {type(self).__qualname__} cannot wrap "
-                f"another ProxyModel {type(obj).__qualname__}"
-            )
-        if not isinstance(obj, self.__proxy_of__):
-            # A long time of debugging revealed that it's very important to
-            # check `obj` being of a correct type. Pydantic can instantiate
-            # a ProxyModel with an incorrect type, e.g. when you pass
-            # a list like `[1]` into a MultiLinkWithProps field --
-            # Pydantic will try to wrap `[1]` into a list of ProxyModels.
-            # And when it eventually fails to do so, everything is broken,
-            # even error reporting and repr().
-            #
-            # Codegen'ed ProxyModel subclasses explicitly call
-            # ProxyModel.__init__() in their __init__() methods to
-            # make sure that this check is always performed.
-            #
-            # If it ever has to be removed, make sure to at least check
-            # that `obj` is an instance of `GelModel`.
-            raise ValueError(
-                f"only instances of {self.__proxy_of__.__name__} are allowed, "
-                f"got {type(obj).__name__}",
-            )
-        object.__setattr__(self, "_p__obj__", obj)
+    def __init__(self, /, **kwargs: Any) -> None:
+        # We want ProxyModel to be a trasparent wrapper, so we
+        # forward the constructor arguments to the wrapped object.
+        wrapped = self.__proxy_of__(**kwargs)
+        ll_setattr(self, "_p__obj__", wrapped)
+        ll_setattr(
+            self, "__linkprops__", self.__lprops__.__gel_model_construct__({})
+        )
+
+    @classmethod
+    def link(cls, obj: _MT_co, /, **link_props: Any) -> Self:  # type: ignore [misc]
+        proxy_of = ll_type_getattr(cls, "__proxy_of__")
+        lprops_cls = ll_type_getattr(cls, "__lprops__")
+
+        if type(obj) is not proxy_of:
+            if isinstance(obj, ProxyModel):
+                raise TypeError(
+                    f"ProxyModel {cls.__qualname__} cannot wrap "
+                    f"another ProxyModel {type(obj).__qualname__}"
+                )
+            if not isinstance(obj, proxy_of):
+                # A long time of debugging revealed that it's very important to
+                # check `obj` being of a correct type. Pydantic can instantiate
+                # a ProxyModel with an incorrect type, e.g. when you pass
+                # a list like `[1]` into a MultiLinkWithProps field --
+                # Pydantic will try to wrap `[1]` into a list of ProxyModels.
+                # And when it eventually fails to do so, everything is broken,
+                # even error reporting and repr().
+                #
+                # Codegen'ed ProxyModel subclasses explicitly call
+                # ProxyModel.__init__() in their __init__() methods to
+                # make sure that this check is always performed.
+                #
+                # If it ever has to be removed, make sure to at least check
+                # that `obj` is an instance of `GelModel`.
+                raise ValueError(
+                    f"only instances of {proxy_of.__name__} "
+                    f"are allowed, got {type(obj).__name__}",
+                )
+
+        self = cls.__new__(cls)
+
+        lprops = lprops_cls(**link_props)
+        ll_setattr(self, "__linkprops__", lprops)
+
+        ll_setattr(self, "_p__obj__", obj)
+
+        return self
 
     def __getattribute__(self, name: str) -> Any:
+        if name in {
+            "_p__obj__",
+            "__linkprops__",
+            "__proxy_of__",
+            "__class__",
+            "__lprops__",
+        }:
+            # Fast path for the wrapped object itself / linkprops model
+            # (this optimization is informed by profiling model
+            # instantiation and save() operation)
+            return ll_getattr(self, name)
+
+        if name == "id" or not name.startswith("_"):
+            # Faster path for "public-like" attributes
+            return ll_getattr(ll_getattr(self, "_p__obj__"), name)
+
         model_fields = type(self).__proxy_of__.model_fields
         if name in model_fields:
-            base = object.__getattribute__(self, "_p__obj__")
+            base = ll_getattr(self, "_p__obj__")
             return getattr(base, name)
+
         return super().__getattribute__(name)
 
     def __setattr__(self, name: str, value: Any) -> None:
+        if not name.startswith("_"):
+            base = ll_getattr(self, "_p__obj__")
+            setattr(base, name, value)
+            return
+
         model_fields = type(self).__proxy_of__.model_fields
         if name in model_fields:
             # writing to a field: mutate the  wrapped model
-            base = object.__getattribute__(self, "_p__obj__")
+            base = ll_getattr(self, "_p__obj__")
             setattr(base, name, value)
         else:
             # writing anything else (including _proxied) is normal
@@ -492,6 +647,46 @@ class ProxyModel(GelModel, Generic[_MT_co]):
                 cls,
                 schema=handler.generate_schema(cls.__proxy_of__),
             )
+
+    @classmethod
+    def __gel_proxy_construct__(
+        cls,
+        obj: _MT_co,  # type: ignore [misc]
+        lprops: dict[str, Any],
+    ) -> Self:
+        pnv = cls.__gel_model_construct__(None)
+        object.__setattr__(pnv, "_p__obj__", obj)
+        object.__setattr__(
+            pnv,
+            "__linkprops__",
+            cls.__lprops__.__gel_model_construct__(lprops),
+        )
+        return pnv
+
+    def __eq__(self, other: object) -> bool:
+        if self is other:
+            return True
+
+        is_other_proxy = isinstance(other, ProxyModel)
+        if not is_other_proxy and not isinstance(other, GelModel):
+            return NotImplemented
+
+        other_obj = cast(
+            "GelModel",
+            ll_getattr(other, "_p__obj__") if is_other_proxy else other,
+        )
+        self_obj: GelModel = ll_getattr(self, "_p__obj__")
+
+        if self_obj is other_obj:
+            return True
+
+        return self_obj.id == other_obj.id
+
+    def __hash__(self) -> int:
+        mid = ll_getattr(self, "_p__obj__").id
+        if mid is UNSET_UUID:
+            raise TypeError("Model instances without id value are unhashable")
+        return hash(mid)
 
     def __repr_name__(self) -> str:
         cls = type(self)

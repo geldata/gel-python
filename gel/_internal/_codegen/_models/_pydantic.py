@@ -17,6 +17,7 @@ import collections
 import dataclasses
 import enum
 import functools
+import itertools
 import json
 import graphlib
 import keyword
@@ -124,6 +125,7 @@ class PydanticModelsGenerator(AbstractCodeGenerator):
             )
 
             outdir = pathlib.Path(tmp_models_root.name)
+            need_dirsync = False
 
             if (
                 file_state is None
@@ -134,6 +136,7 @@ class PydanticModelsGenerator(AbstractCodeGenerator):
                 self._save_std_schema_cache(
                     std_schema, db_state.server_version
                 )
+                need_dirsync = True
             else:
                 std_schema = self._load_std_schema_cache(
                     db_state.server_version,
@@ -142,6 +145,7 @@ class PydanticModelsGenerator(AbstractCodeGenerator):
 
             if (
                 file_state is None
+                or file_state.server_version != db_state.server_version
                 or file_state.top_migration != db_state.top_migration
                 or self._no_cache
             ):
@@ -151,14 +155,16 @@ class PydanticModelsGenerator(AbstractCodeGenerator):
                     std_schema=std_schema,
                 )
                 usr_gen.run(outdir)
+                need_dirsync = True
 
             self._write_state(db_state, outdir)
 
-            for fn in list(std_manifest):
-                # Also keep the directories
-                std_manifest.update(fn.parents)
+            if need_dirsync:
+                for fn in list(std_manifest):
+                    # Also keep the directories
+                    std_manifest.update(fn.parents)
 
-            _dirsync.dirsync(outdir, models_root, keep=std_manifest)
+                _dirsync.dirsync(outdir, models_root, keep=std_manifest)
 
         self.print_msg(f"{C.GREEN}{C.BOLD}Done.{C.ENDC}")
 
@@ -497,19 +503,54 @@ CORE_OBJECTS = {
 }
 
 
+def _filter_pointers(
+    pointers: Iterable[tuple[reflection.Pointer, reflection.ObjectType]],
+    filters: Iterable[
+        Callable[[reflection.Pointer, reflection.ObjectType], bool]
+    ] = (),
+    *,
+    owned_only: bool = True,
+    exclude_id: bool = True,
+    exclude_type: bool = True,
+) -> list[tuple[reflection.Pointer, reflection.ObjectType]]:
+    excluded = set()
+    if exclude_id:
+        excluded.add("id")
+    if exclude_type:
+        excluded.add("__type__")
+    if excluded:
+        filters = [lambda ptr, obj: ptr.name not in excluded, *filters]
+    else:
+        filters = list(filters)
+
+    filters.append(
+        lambda ptr, obj: (
+            obj.schemapath.parts[0] != "schema"
+            or not ptr.name.startswith("is_")
+            or not ptr.is_computed
+        )
+    )
+
+    return [
+        (ptr, objtype)
+        for ptr, objtype in pointers
+        if all(f(ptr, objtype) for f in filters)
+    ]
+
+
 def _get_object_type_body(
     objtype: reflection.ObjectType,
-    filters: Iterable[Callable[[reflection.Pointer], bool]] = (),
+    filters: Iterable[
+        Callable[[reflection.Pointer, reflection.ObjectType], bool]
+    ] = (),
 ) -> list[reflection.Pointer]:
-    filters = [
-        lambda ptr: ptr.name not in {"id", "__type__"},
-        *filters,
-    ]
-    if objtype.name.startswith("schema::"):
-        filters.append(
-            lambda ptr: not ptr.name.startswith("is_") or not ptr.is_computed
+    return [
+        p
+        for p, _ in _filter_pointers(
+            ((ptr, objtype) for ptr in objtype.pointers),
+            filters,
         )
-    return [ptr for ptr in objtype.pointers if all(f(ptr) for f in filters)]
+    ]
 
 
 class BaseGeneratedModule:
@@ -662,13 +703,15 @@ class BaseGeneratedModule:
         # ensure `path` directory contains `__init__.py`
         (path / "__init__.py").touch()
 
+    def should_write(
+        self, py_file: GeneratedModule, aspect: ModuleAspect
+    ) -> bool:
+        return py_file.has_content() or aspect is ModuleAspect.MAIN
+
     def write_files(self, path: pathlib.Path) -> set[pathlib.Path]:
         written: set[pathlib.Path] = set()
         for aspect, py_file in self.py_files.items():
-            if not py_file.has_content() and (
-                self._schema_part is not reflection.SchemaPart.STD
-                or aspect is not ModuleAspect.MAIN
-            ):
+            if not self.should_write(py_file, aspect):
                 continue
 
             with self._open_py_file(
@@ -1067,7 +1110,7 @@ class BaseGeneratedModule:
             if stype.name == "anyobject":
                 return self.import_name(BASE_IMPL, "GelModel")
             elif stype.name == "anytuple":
-                return f"tuple[{self.import_name('typing', 'Any')}, ...]"
+                return self.import_name(BASE_IMPL, "AnyTuple")
             elif stype.name == "anytype":
                 basetype = "GelType_T" if allow_typevars else "GelType"
                 return self.import_name(BASE_IMPL, basetype)
@@ -1323,6 +1366,15 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         self.write_scalar_types(mod["scalar_types"])
         self.write_object_types(mod["object_types"])
         self.write_functions(mod["functions"])
+        self.write_non_magic_infix_operators(
+            [
+                op
+                for op in itertools.chain.from_iterable(
+                    self._operators.binary_ops.values()
+                )
+                if op.schemapath.parent == self.canonical_modpath
+            ]
+        )
 
     def reexport_module(self, mod: GeneratedSchemaModule) -> None:
         exports = sorted(mod.exports)
@@ -1666,8 +1718,10 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             if not bin_ops and not un_ops:
                 self.write("pass")
             else:
-                self.write_unary_operator_overloads(un_ops)
-                self.write_binary_operator_overloads(bin_ops)
+                self._write_prefix_operator_methods(
+                    [op for op in un_ops if op.py_magic is not None]
+                )
+                self._write_infix_operator_methods(bin_ops)
 
         with self.type_checking():
             with self._class_def(
@@ -1749,10 +1803,14 @@ class GeneratedSchemaModule(BaseGeneratedModule):
 
         return result
 
-    def write_unary_operator_overloads(
+    def _write_prefix_operator_methods(
         self,
         ops: list[reflection.Operator],
     ) -> None:
+        if not ops:
+            # Exit early, don't generate imports we won't use.
+            return
+
         aexpr = self.import_name(BASE_IMPL, "AnnotatedExpr")
         pfxop = self.import_name(BASE_IMPL, "PrefixOp")
         for op in ops:
@@ -1790,26 +1848,55 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                 )
             self.write()
 
-    def _render_obj_schema_path(
-        self,
-        obj: reflection.AnyType,
-    ) -> str:
-        type_name = reflection.parse_name(obj.name)
-        type_path = ", ".join(repr(p) for p in type_name.parts)
-        schemapath = self.import_name(BASE_IMPL, "SchemaPath")
-        return f"{schemapath}({type_path})"
-
-    def write_binary_operator_overloads(
+    def write_non_magic_infix_operators(
         self,
         ops: list[reflection.Operator],
+    ) -> None:
+        self._write_binary_operators(
+            [
+                (
+                    (
+                        op.suggested_ident or op.schemapath.name,
+                        op.suggested_ident or op.schemapath.name,
+                    ),
+                    op,
+                )
+                for op in ops
+                if op.py_magic is None
+            ],
+            style="function",
+        )
+
+    def _write_infix_operator_methods(
+        self,
+        ops: list[reflection.Operator],
+    ) -> None:
+        self._write_binary_operators(
+            [(op.py_magic, op) for op in ops if op.py_magic is not None],
+            style="method",
+        )
+
+    def _write_binary_operators(
+        self,
+        ops: list[tuple[tuple[str, ...], reflection.Operator]],
+        *,
+        style: Literal["method", "function"],
     ) -> None:
         opmap: defaultdict[
             tuple[tuple[str, ...], str],
             defaultdict[
-                tuple[reflection.AnyType, reflection.TypeModifier],
+                tuple[
+                    frozenset[reflection.AnyType],
+                    reflection.AnyType,
+                    reflection.TypeModifier,
+                ],
                 set[reflection.AnyType],
             ],
         ] = defaultdict(lambda: defaultdict(set))
+
+        if not ops:
+            # Exit early, don't generate imports we won't use.
+            return
 
         aexpr = self.import_name(BASE_IMPL, "AnnotatedExpr")
         expr_compat = self.import_name(BASE_IMPL, "ExprCompatible")
@@ -1823,18 +1910,17 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         op_classes_to_import: dict[str, str] = {}
 
         explicit_rparams: defaultdict[str, set[str]] = defaultdict(set)
-        for op in ops:
+        for _, op in ops:
             explicit_rparams[op.schemapath.name].add(op.params[1].type.id)
 
-        for op in ops:
-            if op.py_magic is None:
-                raise AssertionError(f"expected {op} to have py_magic set")
+        for fnames, op in ops:
             if op.operator_kind != reflection.OperatorKind.Infix:
                 raise AssertionError(f"expected {op} to be an infix operator")
 
             opname = op.schemapath.name
             op_classes_to_import[opname] = op_map.get(opname, "InfixOp")
             ret_type = self._types[op.return_type.id]
+            left_type = self._types[op.params[0].type.id]
             right_param = op.params[1]
             right_type_id = right_param.type.id
             right_type = self._types[right_type_id]
@@ -1846,9 +1932,20 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                     for ic in set(implicit_casts) - explicit_rparams[opname]
                 )
 
-            op_key = op.py_magic, opname
-            r_key = ret_type, op.return_typemod
-            opmap[op_key][r_key].update(union)
+            op_key = fnames, opname
+
+            if style == "function" and (ex := opmap[op_key]):
+                ex_r_key, right_types = next(iter(ex.items()))
+                r_key = (
+                    ex_r_key[0] | frozenset((left_type,)),
+                    ret_type,
+                    op.return_typemod,
+                )
+                ex.clear()
+                ex[r_key] = right_types | set(union)
+            else:
+                r_key = frozenset((left_type,)), ret_type, op.return_typemod
+                opmap[op_key][r_key].update(union)
 
         op_classes: dict[str, str] = {}
         imported: dict[str, str] = {}
@@ -1910,20 +2007,26 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                 py_casts[op_key][overload_idx][py_type] = canon_type
 
         for op_key, overloads in opmap.items():
-            py_magic, opname = op_key
+            fnames, opname = op_key
             opcls = op_classes[opname]
-            meth = py_magic[0]
+            meth = ident(fnames[0])
             param_py_types_map = py_casts[op_key]
             overload = len(overloads) > 1
             swapped_overloads: list[
                 tuple[
                     dict[str, str],
-                    tuple[reflection.AnyType, str, str],
+                    tuple[
+                        frozenset[reflection.AnyType],
+                        reflection.AnyType,
+                        str,
+                        str,
+                    ],
                 ]
             ] = []
-            for i, ((ret_type, ret_typemod), other_types) in enumerate(
-                overloads.items()
-            ):
+            for i, (
+                (self_type, ret_type, ret_typemod),
+                other_types,
+            ) in enumerate(overloads.items()):
                 rtype = self.render_callable_return_type(
                     ret_type,
                     ret_typemod,
@@ -1961,11 +2064,11 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                         for py_tname, s_tname in py_coerce_map.items()
                     }
 
-                    if len(py_magic) > 1:
+                    if len(fnames) > 1:
                         swapped_overloads.append(
                             (
                                 py_coerce_map,
-                                (ret_type, rtype, rtype_rt),
+                                (self_type, ret_type, rtype, rtype_rt),
                             )
                         )
                 else:
@@ -1974,14 +2077,36 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                 other_type_union.sort()
                 other_type = " | ".join(other_type_union)
 
-                with self._method_def(
-                    meth,
-                    ["cls", f"other: {other_type}"],
-                    rtype,
-                    overload=overload,
-                    line_comment="type: ignore [override, unused-ignore]",
-                    implicit_param=False,
-                ):
+                if style == "method":
+                    defn = self._method_def(
+                        meth,
+                        ["cls", f"other: {other_type}"],
+                        rtype,
+                        overload=overload,
+                        line_comment="type: ignore [override, unused-ignore]",
+                        implicit_param=False,
+                    )
+                else:
+                    self_type_str = " | ".join(
+                        sorted(
+                            self.get_type(
+                                st,
+                                import_time=ImportTime.typecheck,
+                            )
+                            for st in self_type
+                        )
+                    )
+                    defn = self._func_def(
+                        meth,
+                        [
+                            f"cls: {type_}[{self_type_str}]",
+                            f"other: {other_type}",
+                        ],
+                        rtype,
+                        overload=overload or bool(swapped_overloads),
+                    )
+
+                with defn:
                     if coerce_cases:
                         self.write("match other:")
                         with self.indented():
@@ -2015,39 +2140,77 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                     )
                 self.write()
 
-            if overload:
+            num_swapped_overloads = len(swapped_overloads)
+            rmeth = ident(fnames[1]) if len(fnames) > 1 else meth
+            if overload and (meth != rmeth or num_swapped_overloads == 0):
                 dispatch = self.import_name(BASE_IMPL, "dispatch_overload")
-                with self._method_def(
-                    meth,
-                    ["cls", f"*args: {any_}", f"**kwargs: {any_}"],
-                    type_,
-                    implicit_param=False,
-                ):
-                    self.write(
-                        f"return {dispatch}(cls.{meth}, *args, **kwargs)"
-                        f"  # type: ignore [no-any-return]"
-                    )
+                if style == "method":
+                    with self._method_def(
+                        meth,
+                        ["cls", f"*args: {any_}", f"**kwargs: {any_}"],
+                        type_,
+                        implicit_param=False,
+                    ):
+                        self.write(
+                            f"return {dispatch}(cls.{meth}, *args, **kwargs)"
+                            f"  # type: ignore [no-any-return]"
+                        )
+                else:
+                    with self._func_def(
+                        meth,
+                        [f"*args: {any_}", f"**kwargs: {any_}"],
+                        type_,
+                    ):
+                        self.write(
+                            f"return {dispatch}({meth}, *args, **kwargs)"
+                            f"  # type: ignore [no-any-return]"
+                        )
+
                 self.write()
 
-            num_swapped_overloads = len(swapped_overloads)
             if num_swapped_overloads > 0:
                 expr_compat = self.import_name(BASE_IMPL, "ExprCompatible")
-                assert len(py_magic) > 1
-                rmeth = py_magic[1]
+                swapped_overload = num_swapped_overloads > 1 or rmeth == meth
                 for py_coerce_map, (
+                    self_type,
                     ret_type,
                     rtype,
                     rtype_rt,
                 ) in swapped_overloads:
                     rev_op_type = " | ".join(sorted(py_coerce_map))
-                    with self._method_def(
-                        rmeth,
-                        ["cls", f"other: {rev_op_type}"],
-                        rtype,
-                        overload=num_swapped_overloads > 1,
-                        line_comment="type: ignore [override, unused-ignore]",
-                        implicit_param=False,
-                    ):
+
+                    if style == "method":
+                        defn = self._method_def(
+                            rmeth,
+                            ["cls", f"other: {rev_op_type}"],
+                            rtype,
+                            overload=swapped_overload,
+                            line_comment=(
+                                "type: ignore [override, unused-ignore]"
+                            ),
+                            implicit_param=False,
+                        )
+                    else:
+                        self_type_str = " | ".join(
+                            sorted(
+                                self.get_type(
+                                    st,
+                                    import_time=ImportTime.typecheck,
+                                )
+                                for st in self_type
+                            )
+                        )
+                        defn = self._func_def(
+                            rmeth,
+                            [
+                                f"other: {rev_op_type}",
+                                f"cls: {type_}[{self_type_str}]",
+                            ],
+                            rtype,
+                            overload=True,
+                        )
+
+                    with defn:
                         self.write(f"operand: {expr_compat}")
                         coerce_cases = {
                             f"{py_tname}()": f"operand = {s_tname}(other)"
@@ -2081,19 +2244,37 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                         )
                     self.write()
 
-                if num_swapped_overloads > 1:
+                if swapped_overload:
                     dispatch = self.import_name(BASE_IMPL, "dispatch_overload")
-                    with self._method_def(
-                        rmeth,
-                        ["cls", f"*args: {any_}", f"**kwargs: {any_}"],
-                        type_,
-                        implicit_param=False,
-                    ):
-                        self.write(
-                            f"return {dispatch}(cls.{meth}, *args, **kwargs)"
-                            f"  # type: ignore [no-any-return]"
-                        )
+                    if style == "method":
+                        with self._method_def(
+                            rmeth,
+                            ["cls", f"*args: {any_}", f"**kwargs: {any_}"],
+                            type_,
+                            implicit_param=False,
+                        ):
+                            self.write(
+                                f"return {dispatch}(cls.{meth}, *args,"
+                                f" **kwargs)  # type: ignore [no-any-return]"
+                            )
+                    else:
+                        with self._func_def(
+                            rmeth,
+                            [f"*args: {any_}", f"**kwargs: {any_}"],
+                            type_,
+                        ):
+                            self.write(
+                                f"return {dispatch}({meth}, *args, **kwargs)"
+                                f"  # type: ignore [no-any-return]"
+                            )
                     self.write()
+
+    def _render_obj_schema_path(
+        self,
+        obj: reflection.AnyType,
+    ) -> str:
+        schemapath = self.import_name(BASE_IMPL, "SchemaPath")
+        return obj.schemapath.as_code(schemapath)
 
     def write_object_types(
         self,
@@ -2261,29 +2442,37 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         self.write()
         self.write()
 
-        class_kwargs = {}
-        class_r_kwargs = {"__gel_type_id__": f"{uuid}(int={objtype.uuid.int})"}
+        gel_model_meta = self.import_name(BASE_IMPL, "GelModelMeta")
         if not base_types:
             gel_model = self.import_name(BASE_IMPL, "GelModel")
+            meta_base_types = [gel_model_meta]
             vbase_types = [gel_model]
+        else:
+            meta_base_types = _map_name(lambda s: f"__{s}_ops__", base_types)
+            vbase_types = base_types
+
+        class_kwargs = {}
+
+        if not base_types:
             bin_ops = self._operators.binary_ops.get(objtype.id, [])
             un_ops = self._operators.unary_ops.get(objtype.id, [])
-            gel_model_meta = self.import_name(BASE_IMPL, "GelModelMeta")
+            un_ops = [op for op in un_ops if op.py_magic is not None]
             metaclass = f"__{name}_ops__"
-            with self._class_def(metaclass, [gel_model_meta]):
+
+            with self._class_def(metaclass, meta_base_types):
                 if not bin_ops and not un_ops:
                     self.write("pass")
                 else:
-                    self.write_unary_operator_overloads(un_ops)
-                    self.write_binary_operator_overloads(bin_ops)
+                    self._write_prefix_operator_methods(un_ops)
+                    self._write_infix_operator_methods(bin_ops)
             with self.type_checking():
                 self.write(f"__{name}_meta__ = __{name}_ops__")
             with self.not_type_checking():
                 self.write(f"__{name}_meta__ = {gel_model_meta}")
-            class_kwargs["metaclass"] = f"__{name}_meta__"
-        else:
-            vbase_types = base_types
 
+            class_kwargs["metaclass"] = f"__{name}_meta__"
+
+        class_r_kwargs = {"__gel_type_id__": f"{uuid}(int={objtype.uuid.int})"}
         with self._class_def(
             name,
             [typeof_class, *vbase_types],
@@ -2293,6 +2482,8 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                 with self.not_type_checking():
                     self.write(f"__gel_type_class__ = __{name}_ops__")
             self._write_base_object_type_body(objtype, typeof_class)
+            with self.type_checking():
+                self._write_object_type_qb_methods(objtype)
             self.write()
 
             with self._class_def(
@@ -2311,22 +2502,24 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                     variant="Base",
                     base_types=variant_base_types,
                     static_bases=[typeof_class],
-                    class_kwargs=class_kwargs,
+                    class_kwargs=class_kwargs | {"__gel_variant__": '"Base"'},
                     inherit_from_base_variant=False,
                 ):
                     self._write_base_object_type_body(objtype, typeof_class)
+                    with self.type_checking():
+                        self._write_object_type_qb_methods(objtype)
 
                 with self._object_type_variant(
                     objtype,
                     variant="Required",
                     base_types=variant_base_types,
                     static_bases=[],
-                    class_kwargs={},
+                    class_kwargs={"__gel_variant__": '"Required"'},
                     inherit_from_base_variant=True,
                 ):
                     ptrs = _get_object_type_body(
                         objtype,
-                        filters=[lambda ptr: not ptr.card.is_optional()],
+                        filters=[lambda ptr, _: not ptr.card.is_optional()],
                     )
                     if ptrs:
                         localns = frozenset(ptr.name for ptr in ptrs)
@@ -2348,7 +2541,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                     variant="PartialBase",
                     base_types=variant_base_types,
                     static_bases=[typeof_partial_class],
-                    class_kwargs={},
+                    class_kwargs={"__gel_variant__": '"PartialBase"'},
                     inherit_from_base_variant=True,
                     line_comment="type: ignore [misc, unused-ignore]",
                 ):
@@ -2360,7 +2553,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                     variant="Partial",
                     base_types=variant_base_types,
                     static_bases=["PartialBase"],
-                    class_kwargs={},
+                    class_kwargs={"__gel_variant__": '"Partial"'},
                     inherit_from_base_variant=False,
                     line_comment="type: ignore [misc, unused-ignore]",
                 ):
@@ -2464,88 +2657,26 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         ):
             yield
 
-    def _write_base_object_type_body(
+    def _write_object_type_qb_methods(
         self,
         objtype: reflection.ObjectType,
-        typeof_class: str,
     ) -> None:
-        if objtype.name == "std::BaseObject":
-            gmm = self.import_name(BASE_IMPL, "GelModelMeta")
-            for ptr in objtype.pointers:
-                if ptr.name == "__type__":
-                    ptr_type = self.get_ptr_type(
-                        objtype,
-                        ptr,
-                        aspect=ModuleAspect.MAIN,
-                        cardinality=reflection.Cardinality.One,
-                    )
-                    with self._property_def(ptr.name, [], ptr_type):
-                        self.write(
-                            "tid = self.__class__.__gel_reflection__.id"
-                        )
-                        self.write(f"actualcls = {gmm}.get_class_by_id(tid)")
-                        self.write(
-                            "return actualcls.__gel_reflection__.object"
-                            "  # type: ignore [attr-defined, no-any-return]"
-                        )
-                elif ptr.name == "id":
-                    priv_type = self.import_name("uuid", "UUID")
-                    ptr_type = self.get_ptr_type(objtype, ptr)
-                    desc = self.import_name(BASE_IMPL, "IdProperty")
-                    self.write(
-                        f"id: {desc}[{ptr_type}, {priv_type}]"
-                        f" # type: ignore [assignment]"
-                    )
-                self.write()
-
-        def _filter(
-            v: tuple[reflection.Pointer, reflection.ObjectType],
-        ) -> bool:
-            ptr, owning_objtype = v
-            if ptr.name == "__type__":
-                return False
-            # Skip deprecated schema props (is_-prefixed).
-            return not (
-                owning_objtype.name.startswith("schema::")
-                and ptr.name.startswith("is_")
-                and ptr.is_computed
-            )
-
-        reg_pointers = list(
-            filter(_filter, self._get_pointer_origins(objtype))
+        reg_pointers = _filter_pointers(
+            self._get_pointer_origins(objtype), exclude_id=False
         )
-        init_pointers = [
-            (ptr, obj)
-            for ptr, obj in reg_pointers
-            if (ptr.name != "id" and not ptr.is_computed)
-            or objtype.name.startswith("schema::")
-        ]
-        init_args = []
-        if init_pointers:
-            init_args.extend(["/", "*"])
-        for ptr, org_objtype in init_pointers:
-            ptr_t = self.get_ptr_type(
-                org_objtype,
-                ptr,
-                style="arg",
-                prefer_broad_target_type=True,
-                consider_default=True,
-            )
-            init_args.append(f"{ptr.name}: {ptr_t}")
-
         std_bool = self.get_type(
             self._types_by_name["std::bool"],
             import_time=ImportTime.typecheck,
         )
+        type_ = self.import_name("builtins", "type")
+        self_ = self.import_name("typing_extensions", "Self")
+        type_self = f"{type_}[{self_}]"
         builtin_bool = self.import_name("builtins", "bool", directly=False)
         builtin_str = self.import_name("builtins", "str", directly=False)
         callable_ = self.import_name("collections.abc", "Callable")
-        self_ = self.import_name("typing_extensions", "Self")
         literal_ = self.import_name("typing", "Literal")
         literal_star = f'{literal_}["*"]'
-        type_ = self.import_name("builtins", "type")
         tuple_ = self.import_name("builtins", "tuple")
-        type_self = f"{type_}[{self_}]"
         expr_proto = self.import_name(BASE_IMPL, "ExprCompatible")
         py_const = self.import_name(BASE_IMPL, "PyConstType")
         expr_closure = f"{callable_}[[{type_self}], {expr_proto}]"
@@ -2614,6 +2745,149 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         if update_args:
             update_args = ["/", "*", *update_args]
 
+        with self._classmethod_def(
+            "update",
+            update_args,
+            type_self,
+            # Ignore override errors, because we type select **computed
+            # as type[GelType], which is incompatible with bool and
+            # UnspecifiedType.
+            line_comment="type: ignore [misc, override, unused-ignore]",
+        ):
+            self.write(f'"""Update {objtype.name} instances in the database.')
+            self.write('"""')
+            self.write("...")
+            self.write()
+
+        with self._classmethod_def(
+            "select",
+            select_args,
+            type_self,
+            # Ignore override errors, because we type select **computed
+            # as type[GelType], which is incompatible with bool and
+            # UnspecifiedType.
+            line_comment="type: ignore [misc, override, unused-ignore]",
+        ):
+            self.write(f'"""Fetch {objtype.name} instances from the database.')
+            self.write('"""')
+            self.write("...")
+            self.write()
+
+        with self._classmethod_def(
+            "filter",
+            filter_args,
+            type_self,
+            line_comment="type: ignore [misc, override, unused-ignore]",
+        ):
+            self.write(f'"""Fetch {objtype.name} instances from the database.')
+            self.write('"""')
+            self.write("...")
+            self.write()
+
+        with self._classmethod_def(
+            "order_by",
+            order_args,
+            type_self,
+            line_comment="type: ignore [misc, override, unused-ignore]",
+        ):
+            self.write('"""Specify the sort order for the selection"""')
+            self.write("...")
+            self.write()
+
+        if objtype.name == "std::BaseObject":
+            int64_t = self._types_by_name["std::int64"]
+            assert reflection.is_scalar_type(int64_t)
+            type_ = self.import_name("builtins", "type")
+            std_int = self.get_type(
+                int64_t,
+                import_time=ImportTime.typecheck,
+            )
+
+            builtins_int = self._get_pytype_for_primitive_type(int64_t)
+
+            splice_args = [f"value: {type_}[{std_int}] | {builtins_int}"]
+            with self._classmethod_def(
+                "limit",
+                splice_args,
+                type_self,
+                line_comment="type: ignore [misc, override, unused-ignore]",
+            ):
+                self.write('"""Limit selection to a set number of entries."""')
+                self.write("...")
+                self.write()
+
+            with self._classmethod_def(
+                "offset",
+                splice_args,
+                type_self,
+                line_comment="type: ignore [misc, override, unused-ignore]",
+            ):
+                self.write('"""Start selection from a specific offset."""')
+                self.write("...")
+                self.write()
+
+    def _generate_init_args(self, objtype: reflection.ObjectType) -> list[str]:
+        init_pointers = _filter_pointers(
+            self._get_pointer_origins(objtype),
+            filters=[
+                lambda ptr, _: (
+                    (ptr.name != "id" and not ptr.is_computed)
+                    or objtype.name.startswith("schema::")
+                ),
+            ],
+            exclude_id=False,
+        )
+        init_args: list[str] = []
+        if init_pointers:
+            init_args.extend(["/", "*"])
+            for ptr, org_objtype in init_pointers:
+                ptr_t = self.get_ptr_type(
+                    org_objtype,
+                    ptr,
+                    style="arg",
+                    prefer_broad_target_type=True,
+                    consider_default=True,
+                )
+                init_args.append(f"{ptr.name}: {ptr_t}")
+
+        return init_args
+
+    def _write_base_object_type_body(
+        self,
+        objtype: reflection.ObjectType,
+        typeof_class: str,
+    ) -> None:
+        if objtype.name == "std::BaseObject":
+            gmm = self.import_name(BASE_IMPL, "GelModelMeta")
+            for ptr in objtype.pointers:
+                if ptr.name == "__type__":
+                    ptr_type = self.get_ptr_type(
+                        objtype,
+                        ptr,
+                        aspect=ModuleAspect.MAIN,
+                        cardinality=reflection.Cardinality.One,
+                    )
+                    with self._property_def(ptr.name, [], ptr_type):
+                        self.write(
+                            "tid = self.__class__.__gel_reflection__.id"
+                        )
+                        self.write(f"actualcls = {gmm}.get_class_by_id(tid)")
+                        self.write(
+                            "return actualcls.__gel_reflection__.object"
+                            "  # type: ignore [attr-defined, no-any-return]"
+                        )
+                elif ptr.name == "id":
+                    priv_type = self.import_name("uuid", "UUID")
+                    ptr_type = self.get_ptr_type(objtype, ptr)
+                    desc = self.import_name(BASE_IMPL, "IdProperty")
+                    self.write(
+                        f"id: {desc}[{ptr_type}, {priv_type}]"
+                        f" # type: ignore [assignment]"
+                    )
+                self.write()
+
+        init_args = self._generate_init_args(objtype)
+
         with self.type_checking():
             with self._method_def("__init__", init_args):
                 self.write(
@@ -2628,89 +2902,6 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                 self.write('"""')
                 self.write("...")
                 self.write()
-
-            self_ = self.import_name("typing_extensions", "Self")
-            with self._classmethod_def(
-                "update",
-                update_args,
-                f"type[{self_}]",
-                # Ignore override errors, because we type select **computed
-                # as type[GelType], which is incompatible with bool and
-                # UnspecifiedType.
-                line_comment="type: ignore [override, unused-ignore]",
-            ):
-                self.write(
-                    f'"""Update {objtype.name} instances in the database.'
-                )
-                self.write('"""')
-                self.write("...")
-                self.write()
-
-            self_ = self.import_name("typing_extensions", "Self")
-            with self._classmethod_def(
-                "select",
-                select_args,
-                f"type[{self_}]",
-                # Ignore override errors, because we type select **computed
-                # as type[GelType], which is incompatible with bool and
-                # UnspecifiedType.
-                line_comment="type: ignore [override, unused-ignore]",
-            ):
-                self.write(
-                    f'"""Fetch {objtype.name} instances from the database.'
-                )
-                self.write('"""')
-                self.write("...")
-                self.write()
-
-            with self._classmethod_def(
-                "filter",
-                filter_args,
-                "type[Self]",
-                line_comment="type: ignore [override, unused-ignore]",
-            ):
-                self.write(
-                    f'"""Fetch {objtype.name} instances from the database.'
-                )
-                self.write('"""')
-                self.write("...")
-                self.write()
-
-            with self._classmethod_def(
-                "order_by",
-                order_args,
-                "type[Self]",
-                line_comment="type: ignore [override, unused-ignore]",
-            ):
-                self.write('"""Specify the sort order for the selection"""')
-                self.write("...")
-                self.write()
-
-            if objtype.name == "std::BaseObject":
-                int64_t = self._types_by_name["std::int64"]
-                assert reflection.is_scalar_type(int64_t)
-                type_ = self.import_name("builtins", "type")
-                std_int = self.get_type(
-                    int64_t,
-                    import_time=ImportTime.typecheck,
-                )
-
-                builtins_int = self._get_pytype_for_primitive_type(int64_t)
-
-                splice_args = [f"value: {type_}[{std_int}] | {builtins_int}"]
-                with self._classmethod_def("limit", splice_args, "type[Self]"):
-                    self.write(
-                        '"""Limit selection to a set number of entries."""'
-                    )
-                    self.write("...")
-                    self.write()
-
-                with self._classmethod_def(
-                    "offset", splice_args, "type[Self]"
-                ):
-                    self.write('"""Start selection from a specific offset."""')
-                    self.write("...")
-                    self.write()
 
         if objtype.name == "schema::ObjectType":
             any_ = self.import_name("typing", "Any")
@@ -2818,6 +3009,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         ptr = pointer
         pname = ptr.name
         target_type = self._types[ptr.target_id]
+        assert isinstance(target_type, reflection.ObjectType)
         import_time = (
             ImportTime.typecheck
             if is_forward_decl
@@ -2900,40 +3092,20 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             self.write("__linkprops__: __lprops__")
             self.write()
             if is_forward_decl:
-                args = [f"obj: {target}", "/", "*", *lprops]
-                with self._method_def("__init__", args):
+                init_args = self._generate_init_args(target_type)
+                with self._method_def("__init__", init_args):
                     self.write("...")
-            else:
-                # It's important to just forward '**link_props' to
-                # the constructor of `__lprops__` -- otherwise pydantic's
-                # tracking and our's own tracking would assume that argument
-                # defaults (Nones in this case) were explicitly set by the user
-                # leading to inefficient queries in save().
-                args = ["obj", "/", "**link_props"]
-                with self._method_def("__init__", args):
-                    obj = self.import_name("builtins", "object")
-                    self.write(f"{proxymodel_t}.__init__(self, obj)")
-                    self.write(
-                        "lprops = self.__class__.__lprops__(**link_props)"
-                    )
-                    self.write(
-                        f'{obj}.__setattr__(self, "__linkprops__", lprops)'
-                    )
 
             self.write()
             if is_forward_decl:
                 args = [f"obj: {target}", "/", "*", *lprops]
-                with self._classmethod_def("link", args, self_t):
+                with self._classmethod_def(
+                    "link",
+                    args,
+                    self_t,
+                    line_comment="type: ignore[override]",
+                ):
                     self.write("...")
-            else:
-                args = ["obj", "/", "**link_props"]
-                with self._classmethod_def("link", args, self_t):
-                    self.write(
-                        self.format_list(
-                            "return cls({list})",
-                            ["obj", "**link_props"],
-                        ),
-                    )
 
             self.write()
 
@@ -3090,9 +3262,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             function.return_typemod,
         )
 
-        fname = name.name
-        if keyword.iskeyword(fname):
-            fname += "_"
+        fname = ident(name.name)
 
         if overload:
             line_comment = (
@@ -3395,6 +3565,11 @@ class GeneratedSchemaModule(BaseGeneratedModule):
 
 
 class GeneratedGlobalModule(BaseGeneratedModule):
+    def should_write(
+        self, py_file: GeneratedModule, aspect: ModuleAspect
+    ) -> bool:
+        return py_file.has_content()
+
     def process(self, types: Mapping[str, reflection.AnyType]) -> None:
         graph: defaultdict[str, set[str]] = defaultdict(set)
 
@@ -3426,7 +3601,7 @@ class GeneratedGlobalModule(BaseGeneratedModule):
         t: reflection.NamedTupleType,
     ) -> None:
         namedtuple = self.import_name("typing", "NamedTuple")
-        anytuple = self.import_name(BASE_IMPL, "AnyTuple")
+        anytuple = self.import_name(BASE_IMPL, "AnyNamedTuple")
 
         self.write("#")
         self.write(f"# tuple type {t.schemapath.as_schema_name()}")

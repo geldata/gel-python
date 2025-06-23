@@ -11,14 +11,12 @@ from typing import (
     Annotated,
     Any,
     Generic,
-    SupportsIndex,
     TypeVar,
     overload,
 )
 
 from typing_extensions import (
     TypeAliasType,
-    Self,
 )
 
 import functools
@@ -33,15 +31,17 @@ from pydantic_core import core_schema
 from gel._internal import _dlist
 from gel._internal import _edgeql
 from gel._internal import _typing_inspect
-from gel._internal import _unsetid
 
 from gel._internal._qbmodel import _abstract
 
 from ._models import GelModel, ProxyModel
+from ._pdlist import ProxyDistinctList
+
+from gel._internal._unsetid import UNSET_UUID
 
 if TYPE_CHECKING:
     from typing_extensions import Never
-    from collections.abc import Sequence, Iterable
+    from collections.abc import Sequence
 
 
 _T_co = TypeVar("_T_co", covariant=True)
@@ -214,7 +214,7 @@ IdProperty = TypeAliasType(
     "IdProperty",
     Annotated[
         Property[_ST_co, _BT_co],
-        pydantic.Field(default=_unsetid.UNSET_UUID, init=False, frozen=True),
+        pydantic.Field(default=UNSET_UUID, init=False, frozen=True),
         _abstract.PointerInfo(
             computed=True,
             readonly=True,
@@ -401,7 +401,7 @@ class _AnyLink(Generic[_MT_co, _BMT_co]):
         if value is None or isinstance(value, mt):
             return value
         elif isinstance(value, bmt):
-            return mt(value)  # type: ignore [no-any-return]
+            return mt.link(value)  # type: ignore [no-any-return]
         else:
             raise TypeError(
                 f"could not convert {type(value)} to {mt.__name__}"
@@ -437,7 +437,7 @@ class _Link(
         if isinstance(value, mt):
             return value  # type: ignore [no-any-return]
         elif isinstance(value, bmt):
-            return mt(value)  # type: ignore [no-any-return]
+            return mt.link(value)  # type: ignore [no-any-return]
         else:
             raise TypeError(
                 f"could not convert {type(value)} to {mt.__name__}"
@@ -541,92 +541,6 @@ OptionalComputedLinkWithProps = TypeAliasType(
 )
 
 
-class _UpcastingDistinctList(
-    _dlist.DistinctList[_MT_co], Generic[_MT_co, _BMT_co]
-):
-    def _check_value(self, value: Any) -> _MT_co:
-        cls = type(self)
-
-        t = cls.type
-        assert issubclass(t, ProxyModel)
-
-        if not isinstance(value, t):
-            if not isinstance(value, ProxyModel) and isinstance(
-                value, t.__proxy_of__
-            ):
-                value = t(value)
-            else:
-                raise ValueError(
-                    f"{cls!r} accepts only values of type {t.__name__} "
-                    f"or {t.__proxy_of__.__name__}, got {type(value)!r}",
-                )
-
-        if (
-            sub := self._find_proxied_obj(value)
-        ) is not None and sub is not value:
-            assert isinstance(sub, ProxyModel)
-            if sub.__linkprops__.__dict__ != value.__linkprops__.__dict__:
-                raise ValueError(
-                    f"the list already contains {value!r} with "
-                    f" a different set of link properties"
-                )
-            # Return the already present identical proxy instead of inserting
-            # another one
-            return sub  # type: ignore [return-value]
-
-        return value  # type: ignore [no-any-return]
-
-    def _find_proxied_obj(self, item: _MT_co | _BMT_co) -> _MT_co | None:
-        if isinstance(item, ProxyModel):
-            item = item._p__obj__
-
-        for sub in self._unhashables.values():
-            assert isinstance(sub, ProxyModel)
-            if sub._p__obj__ is item:
-                return sub  # type: ignore [return-value]
-
-        for sub in self._set:
-            assert isinstance(sub, ProxyModel)
-            if sub._p__obj__ is item:
-                return sub  # type: ignore [return-value]
-
-        return None
-
-    def __contains__(self, item: Any) -> bool:
-        if id(item) in self._unhashables:
-            return True
-
-        try:
-            return item in self._set
-        except TypeError:
-            pass
-
-        return self._find_proxied_obj(item) is not None
-
-    if TYPE_CHECKING:
-
-        def append(self, value: _MT_co | _BMT_co) -> None: ...
-        def insert(
-            self, index: SupportsIndex, value: _MT_co | _BMT_co
-        ) -> None: ...
-        def __setitem__(
-            self,
-            index: SupportsIndex | slice,
-            value: _MT_co | _BMT_co | Iterable[_MT_co | _BMT_co],
-        ) -> None: ...
-        def extend(self, values: Iterable[_MT_co | _BMT_co]) -> None: ...
-        def remove(self, value: _MT_co | _BMT_co) -> None: ...
-        def index(
-            self,
-            value: _MT_co | _BMT_co,
-            start: SupportsIndex = 0,
-            stop: SupportsIndex | None = None,
-        ) -> int: ...
-        def count(self, value: _MT_co | _BMT_co) -> int: ...
-        def __add__(self, other: Iterable[_MT_co | _BMT_co]) -> Self: ...
-        def __iadd__(self, other: Iterable[_MT_co | _BMT_co]) -> Self: ...
-
-
 class _ComputedMultiLink(
     _ComputedMultiPointer[_MT_co, _BMT_co],
     _abstract.LinkDescriptor[_MT_co, _BMT_co],
@@ -685,27 +599,27 @@ class _MultiLink(
 
 
 class _MultiLinkWithProps(
-    _MultiPointer[_MT_co, _BMT_co],
-    _abstract.LinkDescriptor[_MT_co, _BMT_co],
+    _MultiPointer[_PT_co, _BMT_co],
+    _abstract.LinkDescriptor[_PT_co, _BMT_co],
 ):
     if TYPE_CHECKING:
 
         @overload
-        def __get__(self, obj: None, objtype: type[Any]) -> type[_MT_co]: ...
+        def __get__(self, obj: None, objtype: type[Any]) -> type[_PT_co]: ...
 
         @overload
         def __get__(
             self, obj: object, objtype: Any = None
-        ) -> _UpcastingDistinctList[_MT_co, _BMT_co]: ...
+        ) -> ProxyDistinctList[_PT_co, _BMT_co]: ...
 
         def __get__(
             self,
             obj: Any,
             objtype: Any = None,
-        ) -> type[_MT_co] | _UpcastingDistinctList[_MT_co, _BMT_co] | None: ...
+        ) -> type[_PT_co] | ProxyDistinctList[_PT_co, _BMT_co] | None: ...
 
         def __set__(
-            self, obj: Any, value: Sequence[_MT_co | _BMT_co]
+            self, obj: Any, value: Sequence[_PT_co | _BMT_co]
         ) -> None: ...
 
     @classmethod
@@ -713,21 +627,27 @@ class _MultiLinkWithProps(
         cls,
         type_args: tuple[type[Any]] | tuple[type[Any], type[Any]],
     ) -> _dlist.DistinctList[_MT_co]:
-        return _UpcastingDistinctList[type_args[0], type_args[1]]  # type: ignore [return-value, valid-type]
+        return ProxyDistinctList[
+            type_args[0],  # type: ignore [valid-type]
+            type_args[1],  # type: ignore [valid-type]
+        ]  # type: ignore [return-value]
 
     @classmethod
     def _validate(
         cls,
         value: Any,
         generic_args: tuple[type[Any], type[Any]],
-    ) -> _UpcastingDistinctList[_MT_co, _BMT_co]:
-        lt: type[_UpcastingDistinctList[_MT_co, _BMT_co]] = (
-            _UpcastingDistinctList[
-                generic_args[0],  # type: ignore [valid-type]
-                generic_args[1],  # type: ignore [valid-type]
-            ]
-        )
-        if isinstance(value, lt):
+    ) -> ProxyDistinctList[_PT_co, _BMT_co]:
+        lt: type[ProxyDistinctList[_PT_co, _BMT_co]] = ProxyDistinctList[
+            generic_args[0],  # type: ignore [valid-type]
+            generic_args[1],  # type: ignore [valid-type]
+        ]
+
+        if type(value) is list:
+            # Optimization for the most common scenario - user passes
+            # a list of objects to the constructor.
+            return lt(value)
+        elif isinstance(value, lt):
             return value
         elif isinstance(value, (list, _dlist.DistinctList)):
             return lt(value)

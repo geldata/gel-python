@@ -22,6 +22,10 @@ from ._casts import (
     fetch_casts,
 )
 
+from ._callables import (
+    Callable,
+)
+
 from ._functions import (
     Function,
     fetch_functions,
@@ -73,6 +77,7 @@ __all__ = (
     "AnyType",
     "ArrayType",
     "BranchState",
+    "Callable",
     "CallableParamKind",
     "Cardinality",
     "CastMatrix",

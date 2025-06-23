@@ -17,7 +17,11 @@ from gel._internal import _typing_eval
 from gel._internal import _typing_inspect
 from gel._internal import _utils
 
-from ._base import GelType, is_gel_type
+from ._base import (
+    GelType,
+    is_gel_type,
+    maybe_collapse_object_type_variant_union,
+)
 
 
 if TYPE_CHECKING:
@@ -29,8 +33,8 @@ class ModelFieldDescriptor(_qb.AbstractFieldDescriptor):
         "__gel_annotation__",
         "__gel_name__",
         "__gel_origin__",
+        "__gel_resolved_descriptor__",
         "__gel_resolved_type__",
-        "__gel_resolved_type_generic__",
     )
 
     def __init__(
@@ -43,7 +47,7 @@ class ModelFieldDescriptor(_qb.AbstractFieldDescriptor):
         self.__gel_name__ = name
         self.__gel_annotation__ = annotation
         self.__gel_resolved_type__: type[GelType] | None = None
-        self.__gel_resolved_type_generic__: types.GenericAlias | None = None
+        self.__gel_resolved_descriptor__: types.GenericAlias | None = None
 
     def __repr__(self) -> str:
         qualname = f"{self.__gel_origin__.__qualname__}.{self.__gel_name__}"
@@ -81,26 +85,32 @@ class ModelFieldDescriptor(_qb.AbstractFieldDescriptor):
             and _typing_inspect.is_generic_alias(t)
             and issubclass(typing.get_origin(t), PointerDescriptor)
         ):
-            self.__gel_resolved_type_generic__ = t
+            self.__gel_resolved_descriptor__ = t
             t = typing.get_args(t)[0]
 
         if t is not None:
+            if _typing_inspect.is_union_type(t):
+                collapsed = maybe_collapse_object_type_variant_union(t)
+                if collapsed is not None:
+                    t = collapsed
+
             if not is_gel_type(t):
                 raise AssertionError(
                     f"{self._fqname} type argument is not a GelType: {t}"
                 )
+
             self.__gel_resolved_type__ = t
 
         return t
 
-    def get_resolved_type_generic(self) -> types.GenericAlias | None:
-        t = self.__gel_resolved_type_generic__
+    def get_resolved_pointer_descriptor(self) -> types.GenericAlias | None:
+        t = self.__gel_resolved_descriptor__
         if t is None:
             t = self._try_resolve_type()
         if t is None:
             raise RuntimeError(f"cannot resolve type of {self._fqname}")
         else:
-            return self.__gel_resolved_type_generic__
+            return self.__gel_resolved_descriptor__
 
     def get_resolved_type(self) -> type[GelType] | None:
         t = self.__gel_resolved_type__
@@ -145,7 +155,16 @@ class ModelFieldDescriptor(_qb.AbstractFieldDescriptor):
             raise AttributeError(f"{self.__gel_name__!r} is not set")
         else:
             assert owner is not None
-            return self.get(owner)
+            cache_attr = f"__cached_path_{self.__gel_name__}"
+
+            try:
+                return object.__getattribute__(owner, cache_attr)
+            except AttributeError:
+                pass
+
+            path = self.get(owner)
+            setattr(owner, cache_attr, path)
+            return path
 
 
 def field_descriptor(

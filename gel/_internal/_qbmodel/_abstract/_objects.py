@@ -12,7 +12,7 @@ import functools
 import weakref
 
 from gel._internal import _qb
-from gel._internal._hybridmethod import hybridmethod
+from gel._internal._xmethod import classonlymethod, hybridmethod
 
 from ._base import GelObjectType, GelObjectTypeMeta
 from ._expressions import (
@@ -45,11 +45,14 @@ class GelModelMeta(GelObjectTypeMeta):
         namespace: dict[str, Any],
         *,
         __gel_type_id__: uuid.UUID | None = None,
+        __gel_variant__: str | None = None,
         **kwargs: Any,
     ) -> GelModelMeta:
         cls = super().__new__(mcls, name, bases, namespace, **kwargs)
         if __gel_type_id__ is not None:
             mcls.__gel_class_registry__[__gel_type_id__] = cls
+        if __gel_variant__ is not None:
+            cls.set_variant(__gel_variant__)
         return cls
 
     @classmethod
@@ -64,6 +67,9 @@ class GelModelMeta(GelObjectTypeMeta):
     @classmethod
     def register_class(cls, tid: uuid.UUID, type_: type[GelModel]) -> None:
         cls.__gel_class_registry__[tid] = cls
+
+    def set_variant(self, variant: str | None) -> None:
+        self.__gel_variant__ = variant
 
 
 class GelSourceModel(_qb.GelSourceMetadata):
@@ -117,8 +123,10 @@ class GelModel(
             *,
             message: str | None = None,
         ) -> type[Self]: ...
+
     else:
 
+        @classonlymethod
         @_qb.exprmethod
         @classmethod
         def select(
@@ -133,6 +141,7 @@ class GelModel(
                 select(cls, *elements, __operand__=__operand__, **kwargs),
             )
 
+        @classonlymethod
         @_qb.exprmethod
         @classmethod
         def update(
@@ -146,6 +155,7 @@ class GelModel(
                 update(cls, __operand__=__operand__, **kwargs),
             )
 
+        @classonlymethod
         @_qb.exprmethod
         @classmethod
         def delete(
@@ -158,6 +168,7 @@ class GelModel(
                 delete(cls, __operand__=__operand__),
             )
 
+        @classonlymethod
         @_qb.exprmethod
         @classmethod
         def filter(
@@ -172,6 +183,7 @@ class GelModel(
                 add_filter(cls, *exprs, __operand__=__operand__, **properties),
             )
 
+        @classonlymethod
         @_qb.exprmethod
         @classmethod
         def order_by(
@@ -190,6 +202,7 @@ class GelModel(
                 order_by(cls, *elements, __operand__=__operand__, **kwargs),
             )
 
+        @classonlymethod
         @_qb.exprmethod
         @classmethod
         def limit(
@@ -203,6 +216,7 @@ class GelModel(
                 add_limit(cls, value, __operand__=__operand__),
             )
 
+        @classonlymethod
         @_qb.exprmethod
         @classmethod
         def offset(
@@ -216,6 +230,7 @@ class GelModel(
                 add_offset(cls, value, __operand__=__operand__),
             )
 
+        @classonlymethod
         @_qb.exprmethod
         @classmethod
         def __gel_assert_single__(

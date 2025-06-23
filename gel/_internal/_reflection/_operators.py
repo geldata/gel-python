@@ -60,6 +60,7 @@ INFIX_OPERATOR_MAP: dict[str, str | tuple[str, str]] = {
     "std::%": ("__mod__", "__rmod__"),
     "std::^": ("__pow__", "__rpow__"),
     "std::[]": "__getitem__",
+    "std::IN": "__contains__",
 }
 
 PREFIX_OPERATOR_MAP = {
@@ -110,23 +111,23 @@ def fetch_operators(
         opv = _dataclass_extras.coerce_to_dataclass(
             Operator, op, cast_map={str: (uuid.UUID,)}
         )
-        if (
-            op.operator_kind == _enums.OperatorKind.Infix
-            and op.name in INFIX_OPERATOR_MAP
-        ):
-            py_magic: str | tuple[str, ...] = INFIX_OPERATOR_MAP[op.name]
+        py_magic: str | tuple[str, ...] | None
+        if op.operator_kind == _enums.OperatorKind.Infix:
+            py_magic = INFIX_OPERATOR_MAP.get(op.name)
             if isinstance(py_magic, str):
                 py_magic = (py_magic,)
-            opv = dataclasses.replace(opv, py_magic=py_magic)
+            if py_magic is not None:
+                opv = dataclasses.replace(opv, py_magic=py_magic)
             binary_ops[opv.params[0].type.id].append(opv)
-        elif (
-            op.operator_kind == _enums.OperatorKind.Prefix
-            and op.name in PREFIX_OPERATOR_MAP
-        ):
-            opv = dataclasses.replace(
-                opv, py_magic=(PREFIX_OPERATOR_MAP[op.name],)
-            )
+
+        elif op.operator_kind == _enums.OperatorKind.Prefix:
+            py_magic = PREFIX_OPERATOR_MAP.get(op.name)
+            if isinstance(py_magic, str):
+                py_magic = (py_magic,)
+            if py_magic is not None:
+                opv = dataclasses.replace(opv, py_magic=py_magic)
             unary_ops[opv.params[0].type.id].append(opv)
+
         else:
             other_ops.append(opv)
 

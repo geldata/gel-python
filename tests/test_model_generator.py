@@ -34,8 +34,8 @@ from gel._internal._reflection import SchemaPath
 from gel._internal._qbmodel._pydantic._models import GelModel
 from gel._internal._dlist import DistinctList
 from gel._internal._edgeql import Cardinality, PointerKind
-from gel._internal._qbmodel._pydantic._fields import (
-    _UpcastingDistinctList,
+from gel._internal._qbmodel._pydantic._pdlist import (
+    ProxyDistinctList,
 )
 
 
@@ -116,18 +116,18 @@ class TestModelGenerator(tb.ModelTestCase):
                             f"type is {e.type!r}",
                         )
 
-                if issubclass(p.type, _UpcastingDistinctList):
-                    if not issubclass(e.type, _UpcastingDistinctList):
+                if issubclass(p.type, ProxyDistinctList):
+                    if not issubclass(e.type, ProxyDistinctList):
                         self.fail(
                             f"{obj.__name__}.{p.name} eq_type check "
-                            f" failed: p.type is _UpcastingDistinctList, "
+                            f" failed: p.type is ProxyDistinctList, "
                             f"but expected type is {e.type!r}",
                         )
                 else:
-                    if issubclass(e.type, _UpcastingDistinctList):
+                    if issubclass(e.type, ProxyDistinctList):
                         self.fail(
                             f"{obj.__name__}.{p.name} eq_type check failed: "
-                            f"p.type is not a _UpcastingDistinctList, but "
+                            f"p.type is not a ProxyDistinctList, but "
                             f"expected type is {e.type!r}",
                         )
 
@@ -216,7 +216,7 @@ class TestModelGenerator(tb.ModelTestCase):
             .filter(
                 lambda p: p.body == "Hello",
                 lambda p: 1 * std.len(p.body) == 5,
-                lambda p: p.body[0] == "H",
+                lambda p: std.or_(p.body[0] == "H", std.like(p.body, "Hello")),
             )
             .limit(1)
         )
@@ -383,6 +383,28 @@ class TestModelGenerator(tb.ModelTestCase):
         )
 
     @tb.typecheck
+    def test_modelgen_query_methods_on_instances(self):
+        import models
+
+        q = models.default.Post.limit(1).__gel_assert_single__()
+        d = self.client.query(q)[0]
+
+        for method in (
+            "delete",
+            "update",
+            "select",
+            "filter",
+            "order_by",
+            "limit",
+            "offset",
+        ):
+            with self.assertRaisesRegex(
+                AttributeError,
+                "class-only method",
+            ):
+                getattr(d, method)
+
+    @tb.typecheck
     def test_modelgen_data_model_validation_1(self):
         from typing import cast
         from gel._internal._dlist import DistinctList
@@ -395,7 +417,7 @@ class TestModelGenerator(tb.ModelTestCase):
         with self.assertRaisesRegex(
             ValueError, r"(?s)only instances of User are allowed, got .*int"
         ):
-            default.GameSession.players(1)  # type: ignore
+            default.GameSession.players.link(1)  # type: ignore
 
         u = default.User(name="batman")
         p = default.Post(body="aaa", author=u)
@@ -403,6 +425,14 @@ class TestModelGenerator(tb.ModelTestCase):
             ValueError, r"(?s)prayers.*Extra inputs are not permitted"
         ):
             default.GameSession(num=7, prayers=[p])  # type: ignore
+
+        gp = default.GameSession.players(name="johny")
+        self.assertIsInstance(gp, default.User)
+        self.assertIsInstance(gp, default.GameSession.players)
+        self.assertIsInstance(gp._p__obj__, default.User)
+        self.assertEqual(gp.name, "johny")
+        self.assertEqual(gp._p__obj__.name, "johny")
+        self.assertIsNotNone(gp.__linkprops__)
 
         # Check that `groups` is not an allowed keyword-arg for `User.__init__`
         self.assertEqual(
@@ -424,7 +454,7 @@ class TestModelGenerator(tb.ModelTestCase):
 
         # Check that `groups` is not an allowed keyword-arg for `User.update`
         self.assertEqual(
-            reveal_type(u.update),
+            reveal_type(default.User.update),
             "def (*, "
             "name: Union[builtins.str, type[models.__variants__.std.str], "
             "gel._internal._utils.UnspecifiedType] =, "
@@ -460,13 +490,15 @@ class TestModelGenerator(tb.ModelTestCase):
 
         # Let's test computed link as an arg
         with self.assertRaisesRegex(
-            ValueError, r"(?s)cannot set field .groups. on User"
+            ValueError,
+            r"(?s)User model does not accept .groups.*computed field",
         ):
             default.User(name="aaaa", groups=(1, 2, 3))  # type: ignore
 
         # Let's test computed property as an arg
         with self.assertRaisesRegex(
-            ValueError, r"(?s)cannot set field .name_len. on User"
+            ValueError,
+            r"(?s)User model does not accept .name_len.*computed field",
         ):
             default.User(name="aaaa", name_len=123)  # type: ignore
 
@@ -1300,12 +1332,36 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(res[2].next.label, "start")
 
     @tb.typecheck
+    def test_modelgen_save_22(self):
+        # Test empty object insertion; regression test for
+        # https://github.com/geldata/gel-python/issues/720
+
+        from models import default
+        from gel._internal._unsetid import UNSET_UUID
+
+        x = default.AllOptional()
+        y = default.AllOptional()
+        z = default.AllOptional(pointer=x)
+
+        self.client.save(z)
+        self.client.save(y)
+
+        self.assertIsNot(x.id, UNSET_UUID)
+        self.assertIsNot(y.id, UNSET_UUID)
+        self.assertIsNot(z.id, UNSET_UUID)
+
+        self.assertIsNotNone(z.pointer)
+        assert z.pointer is not None
+        self.assertEqual(z.pointer.id, x.id)
+        self.assertIs(z.pointer, x)
+
+    @tb.typecheck
     def test_modelgen_save_collections_1(self):
         from models import default
         # insert an object with an optional single: with link props
 
         ks = default.KitchenSink(
-            p_str="coll_test_1",
+            str="coll_test_1",
             p_multi_str=["1", "222"],
             array=["foo", "bar"],
             p_multi_arr=[["foo"], ["bar"]],
@@ -1317,7 +1373,7 @@ class TestModelGenerator(tb.ModelTestCase):
         self.client.save(ks)
 
         # Re-fetch and verify
-        ks = self.client.get(default.KitchenSink.filter(p_str="coll_test_1"))
+        ks = self.client.get(default.KitchenSink.filter(str="coll_test_1"))
         self.assertEqual(sorted(ks.p_multi_str), ["1", "222"])
         self.assertEqual(ks.array, ["foo", "bar"])
         self.assertEqual(sorted(ks.p_multi_arr), [["bar"], ["foo"]])
@@ -1331,7 +1387,7 @@ class TestModelGenerator(tb.ModelTestCase):
         ks.p_multi_str.remove("1")
         self.client.save(ks)
 
-        ks3 = self.client.get(default.KitchenSink.filter(p_str="coll_test_1"))
+        ks3 = self.client.get(default.KitchenSink.filter(str="coll_test_1"))
         self.assertEqual(sorted(ks3.p_multi_str), ["222", "zzz", "zzz"])
 
     @tb.typecheck
@@ -1574,3 +1630,22 @@ class TestModelGenerator(tb.ModelTestCase):
             ntup_t.as_schema_name(),
             "tuple<a:std::str, b:tuple<c:std::int64, d:std::str>>",
         )
+
+
+class TestEmptyAiModelGenerator(tb.ModelTestCase):
+    DEFAULT_MODULE = "default"
+    SCHEMA = os.path.join(os.path.dirname(__file__), "dbsetup", "empty_ai.gel")
+
+    @tb.typecheck
+    def test_modelgen_empty_ai_schema_1(self):
+        # This is it, we're just testing empty import.
+        import models
+
+        self.assertEqual(
+            models.sys.ExtensionPackage.__name__, "ExtensionPackage"
+        )
+
+    @tb.typecheck
+    def test_modelgen_empty_ai_schema_2(self):
+        # This is it, we're just testing empty import.
+        from models.ext import ai  # noqa: F401

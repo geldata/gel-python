@@ -16,6 +16,7 @@ from typing import (
 
 import dataclasses
 import functools
+import types
 
 from gel._internal import _edgeql
 from gel._internal import _typing_inspect
@@ -163,6 +164,25 @@ class BaseAlias(metaclass=BaseAliasMeta):
         return f"{_utils.type_repr(type(self))}[{origin}, {metadata}]"
 
     def __getattr__(self, attr: str) -> Any:
+        if attr == "link":
+            # `default.MyType.linkname.link()` is a very common operation:
+            # it can be called millions of times when loading data and
+            # the descriptor lookup with the subsequent `.get()` slow down
+            # instance creation ~40%.
+            #
+            # Given that "link" is a reserved EdgeQL keyword, we can just
+            # resolve it to `ProxyModel.link()` as fast as possible.
+            try:
+                method = type.__getattribute__(self.__gel_origin__, "link")
+            except AttributeError:
+                # Alright, let's try the descriptor lookup.
+                pass
+            else:
+                if isinstance(method, types.MethodType):
+                    # Got it -- cache it so it's even faster next time.
+                    object.__setattr__(self, "link", method)
+                    return method
+
         if (
             not _utils.is_dunder(attr)
             or attr in self.__gel_proxied_dunders__

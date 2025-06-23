@@ -172,9 +172,9 @@ class GeneratedModule:
         def _mangle(name: str) -> str:
             nonlocal ctr
             if ctr == 0:
-                return f"__{name}__"
+                return f"___{name}__"
             else:
-                return f"__{name}_{ctr}__"
+                return f"___{name}_{ctr}__"
 
         mangled = _mangle(name)
         while mangled in self._globals:
