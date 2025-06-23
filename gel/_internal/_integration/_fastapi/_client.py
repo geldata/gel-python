@@ -165,7 +165,7 @@ class GelLifespan:
             package="gel._internal._integration._fastapi._auth",
             cls="GelAuth",
             extension_name="auth",
-            requires=["httpx", "python_multipart", "jwt"],
+            requires=["httpx", "jwt"],
         )
         self._shells = [self._auth]
 

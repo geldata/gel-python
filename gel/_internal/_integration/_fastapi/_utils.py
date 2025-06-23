@@ -21,6 +21,7 @@ from typing_extensions import Self
 import asyncio
 import contextlib
 import functools
+import logging
 import os
 import re
 import sys
@@ -417,16 +418,37 @@ class OneOf:
     bodies: dict[str, params.Body]
 
     def __init__(self, *bodies: params.Body):
-        if len(bodies) == 0:
-            raise ValueError("OneOf must have at least one body")
         self.bodies = {}
+        skipped_forms = False
         for body in bodies:
             if body.media_type in self.bodies:
                 raise ValueError(
                     f"OneOf bodies must have unique media types, "
                     f"got {body.media_type}"
                 )
+
+            if isinstance(body, params.Form):
+                if skipped_forms:
+                    continue
+                logger = logging.getLogger("fastapi")
+                orig_level = logger.level
+                logger.setLevel(logging.CRITICAL)
+                try:
+                    dep_utils.ensure_multipart_is_installed()
+                except Exception:
+                    skipped_forms = True
+                    continue
+                finally:
+                    logger.setLevel(orig_level)
+
             self.bodies[body.media_type] = body
+
+        if not self.bodies:
+            if skipped_forms:
+                # Form is the only body type, but multipart is not installed
+                dep_utils.ensure_multipart_is_installed()
+            else:
+                raise ValueError("OneOf must have at least one body")
 
 
 class ContentTypeRoute(routing.APIRoute):
