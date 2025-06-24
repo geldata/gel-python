@@ -915,7 +915,7 @@ def gen_lock_key():
     return os.getpid() * 1000 + _lock_cnt
 
 
-def typecheck(func):
+def _typecheck(func, imports=None):
     wrapped = inspect.unwrap(func)
     is_async = inspect.iscoroutinefunction(wrapped)
 
@@ -932,11 +932,17 @@ def typecheck(func):
     source_code = "\n".join(lines[body_offset + 1 :])
     dedented_body = textwrap.dedent(source_code)
 
+    if imports is None:
+        add_imports = ""
+    else:
+        add_imports = "\n".join(imports)
+
     source_code = f"""\
 import unittest
 import typing
 
 import gel
+{add_imports}
 
 if not typing.TYPE_CHECKING:
     def reveal_type(_: typing.Any) -> str:
@@ -1038,6 +1044,17 @@ class TestModel(unittest.TestCase):
 
     else:
         return run
+
+
+def typecheck(arg):
+    if callable(arg):
+        return _typecheck(arg)
+    else:
+
+        def decorator(func):
+            return _typecheck(func, arg)
+
+        return decorator
 
 
 def must_fail(f):

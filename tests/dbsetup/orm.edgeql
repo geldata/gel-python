@@ -91,8 +91,33 @@ insert KitchenSink {
 
     p_tuparr := (["foo"],),
     p_multi_tuparr := {(["foo"],), (["bar"],)},
+};
 
-    date := <cal::local_date>'2025-01-26',
-    ts := <datetime>'2025-01-26T20:13:45+00:00',
-    lts := <cal::local_datetime>'2025-01-26T20:13:45',
+insert RangeTest {
+    name := 'test range',
+    int_range := range(23, 45),
+    float_range := range(2.5, inc_lower := false),
+    date_range := range(
+        <cal::local_date>'2025-01-06',
+        <cal::local_date>'2025-02-17',
+    ),
+};
+
+insert MultiRangeTest {
+    name := 'test multirange',
+    int_mrange := multirange([
+        range(2, 4), range(23, 45)
+    ]),
+    float_mrange := multirange([
+        range(2.5, inc_lower := false), range(0, 0.5)
+    ]),
+    date_mrange := multirange([
+        range(
+            <cal::local_date>'2025-01-06',
+            <cal::local_date>'2025-02-17',
+        ),
+        range(
+            <cal::local_date>'2025-03-16',
+        ),
+    ]),
 };
