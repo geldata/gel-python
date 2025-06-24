@@ -413,6 +413,9 @@ class ConfigInstance(Generic[T, S]):
         except AttributeError:
             return self._default()
 
+    def is_set(self) -> bool:
+        return hasattr(self, "_value")
+
 
 class OneOf:
     bodies: dict[str, params.Body]

@@ -45,8 +45,6 @@ class ResetPasswordBody(pydantic.BaseModel):
 
 
 class EmailPassword(Installable):
-    redirect_to: utils.Config[Optional[str]] = utils.Config("/")
-    redirect_to_page_name: utils.Config[Optional[str]] = utils.Config(None)
     error_page_name = utils.Config("error_page")
     sign_in_page_name = utils.Config("sign_in_page")
     reset_password_page_name = utils.Config("reset_password_page")
@@ -171,8 +169,8 @@ class EmailPassword(Installable):
             self, f"{key}_default_response_class"
         ).value
         response_code = getattr(self, f"{key}_default_status_code").value
-        redirect_to = self.redirect_to.value
-        redirect_to_page_name = self.redirect_to_page_name.value
+        redirect_to = self._auth.redirect_to.value
+        redirect_to_page_name = self._auth.redirect_to_page_name.value
         if redirect_to_page_name is not None:
             return response_class(
                 url=request.url_for(redirect_to_page_name),
@@ -225,7 +223,12 @@ class EmailPassword(Installable):
         )
         if response is None:
             if self.on_sign_up_complete.is_set():
-                response = await self.on_sign_up_complete.call(request, result)
+                with self._auth.with_auth_token(
+                    result.token_data.auth_token, request
+                ):
+                    response = await self.on_sign_up_complete.call(
+                        request, result
+                    )
             else:
                 response = self._redirect_success(
                     request, "sign_up", method="on_sign_up_complete"
@@ -312,7 +315,10 @@ class EmailPassword(Installable):
         result: core.SignInCompleteResponse,
     ) -> fastapi.Response:
         if self.on_sign_in_complete.is_set():
-            response = await self.on_sign_in_complete.call(request, result)
+            with self._auth.with_auth_token(
+                result.token_data.auth_token, request
+            ):
+                response = await self.on_sign_in_complete.call(request, result)
         else:
             response = self._redirect_success(
                 request, "sign_in", method="on_sign_in_complete"
@@ -388,15 +394,20 @@ class EmailPassword(Installable):
         result: core.EmailVerificationCompleteResponse,
     ) -> fastapi.Response:
         if self.on_email_verification_complete.is_set():
-            return await self.on_email_verification_complete.call(
-                request, result
-            )
+            with self._auth.with_auth_token(
+                result.token_data.auth_token, request
+            ):
+                response = await self.on_email_verification_complete.call(
+                    request, result
+                )
         else:
-            return self._redirect_success(
+            response = self._redirect_success(
                 request,
                 "email_verification",
                 method="on_email_verification_complete",
             )
+        self._auth.set_auth_cookie(result.token_data.auth_token, response)
+        return response
 
     async def handle_email_verification_missing_proof(
         self,
@@ -547,11 +558,18 @@ class EmailPassword(Installable):
         result: core.PasswordResetCompleteResponse,
     ) -> fastapi.Response:
         if self.on_reset_password_complete.is_set():
-            return await self.on_reset_password_complete.call(request, result)
+            with self._auth.with_auth_token(
+                result.token_data.auth_token, request
+            ):
+                response = await self.on_reset_password_complete.call(
+                    request, result
+                )
         else:
-            return self._redirect_success(
+            response = self._redirect_success(
                 request, "reset_password", method="on_reset_password_complete"
             )
+        self._auth.set_auth_cookie(result.token_data.auth_token, response)
+        return response
 
     async def handle_reset_password_missing_proof(
         self,
