@@ -1,0 +1,48 @@
+type User {
+    required name: str;
+}
+
+scalar type PositiveInt extending int64 {
+    constraint min_value(1);
+}
+
+type AssortedScalars {
+    required name: str;
+
+    date: cal::local_date;
+    ts: datetime;
+    lts: cal::local_datetime;
+    time: cal::local_time;
+    json: json;
+    bstr: bytes;
+
+    nested_mixed: array<tuple<array<int64>, json>>;
+
+    positive: PositiveInt;
+}
+
+# Object with keyword links and props
+type `limit` {
+    `alter`: bool;
+    `like`: str;
+
+    `commit`: User;
+    multi `configure`: User {
+        `create`: bool;
+    }
+}
+
+scalar type Color extending enum<
+    Red,
+    Orange,
+    Yellow,
+    Green,
+    Blue,
+    Indigo,
+    Violet,
+>;
+
+type EnumTest {
+    required name: str;
+    required color: Color;
+}
