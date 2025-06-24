@@ -147,12 +147,9 @@ class RAGClient(BaseRAGClient):
                 stream=False,
             ).to_httpx_request()
         )
-        try:
+        if resp.is_error:
+            logger.error("HTTP error: %(type)s: %(message)s", resp.json())
             resp.raise_for_status()
-        except httpx.HTTPStatusError as e:
-            error = e.response.json()
-            print(f"{error['type']}: {error['message']}")
-            raise
 
         return BaseRAGClient._parse_rag_response(resp)
 
