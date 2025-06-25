@@ -65,13 +65,13 @@ class EmailPassword(Installable):
     sign_up_default_response_class = utils.Config(responses.RedirectResponse)
     sign_up_default_status_code = utils.Config(http.HTTPStatus.SEE_OTHER)
     on_sign_up_complete: utils.Hook[
-        tuple[SignUpBody, core.SignUpCompleteResponse]
+        SignUpBody, core.SignUpCompleteResponse
     ] = utils.Hook("sign_up")
     on_sign_up_verification_required: utils.Hook[
-        core.SignUpVerificationRequiredResponse
+        SignUpBody, core.SignUpVerificationRequiredResponse
     ] = utils.Hook("sign_up")
-    on_sign_up_failed: utils.Hook[core.SignUpFailedResponse] = utils.Hook(
-        "sign_up"
+    on_sign_up_failed: utils.Hook[SignUpBody, core.SignUpFailedResponse] = (
+        utils.Hook("sign_up")
     )
 
     # Sign-in
@@ -238,7 +238,7 @@ class EmailPassword(Installable):
                     result.token_data.auth_token, request
                 ):
                     response = await self.on_sign_up_complete.call(
-                        request, (body, result)
+                        request, body, result
                     )
             else:
                 response = self._redirect_success(
@@ -250,6 +250,7 @@ class EmailPassword(Installable):
     async def handle_sign_up_verification_required(
         self,
         request: fastapi.Request,
+        body: SignUpBody,
         result: core.SignUpVerificationRequiredResponse,
     ) -> fastapi.Response:
         if result.identity_id:
@@ -261,7 +262,7 @@ class EmailPassword(Installable):
         if response is None:
             if self.on_sign_up_verification_required.is_set():
                 response = await self.on_sign_up_verification_required.call(
-                    request, result
+                    request, body, result
                 )
             else:
                 response = self._redirect_sign_in(
@@ -273,6 +274,7 @@ class EmailPassword(Installable):
     async def handle_sign_up_failed(
         self,
         request: fastapi.Request,
+        body: SignUpBody,
         result: core.SignUpFailedResponse,
     ) -> fastapi.Response:
         logger.info(
@@ -281,7 +283,7 @@ class EmailPassword(Installable):
         logger.debug("%r", result)
 
         if self.on_sign_up_failed.is_set():
-            response = await self.on_sign_up_failed.call(request, result)
+            response = await self.on_sign_up_failed.call(request, body, result)
         else:
             response = self._redirect_error(
                 request, "sign_up", error=result.message
@@ -310,10 +312,12 @@ class EmailPassword(Installable):
                     )
                 case core.SignUpVerificationRequiredResponse():
                     return await self.handle_sign_up_verification_required(
-                        request, result
+                        request, sign_up_body, result
                     )
                 case core.SignUpFailedResponse():
-                    return await self.handle_sign_up_failed(request, result)
+                    return await self.handle_sign_up_failed(
+                        request, sign_up_body, result
+                    )
                 case _:
                     raise AssertionError("Invalid sign up response")
 

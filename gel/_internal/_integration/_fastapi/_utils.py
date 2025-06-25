@@ -6,7 +6,6 @@ from __future__ import annotations
 from typing import (
     Annotated,
     Any,
-    cast,
     Generic,
     get_args,
     get_origin,
@@ -16,11 +15,12 @@ from typing import (
     TYPE_CHECKING,
     TypeVar,
 )
-from typing_extensions import Self
+from typing_extensions import Self, TypeVarTuple, Unpack
 
 import asyncio
 import contextlib
-import functools
+import importlib
+import inspect
 import logging
 import os
 import re
@@ -49,15 +49,12 @@ class ConfigSubject(Protocol):
 
 S = TypeVar("S", bound=ConfigSubject)
 T = TypeVar("T")
-T_contra = TypeVar("T_contra", contravariant=True)
+Ts = TypeVarTuple("Ts")
+Handler = TypeVar("Handler", bound="Callable[..., Any]")
 DEBUG_DEPTH = int(os.environ.get("GEL_PYTHON_DEBUG_ACCESS_STACK", "0"))
 
 
-class Handler(Protocol[T_contra]):
-    def __call__(self, result: T_contra, *args: Any, **kwargs: Any) -> Any: ...
-
-
-class Hook(Generic[T]):
+class Hook(Generic[Unpack[Ts]]):
     _key: str
     _hook_name: str
 
@@ -71,21 +68,25 @@ class Hook(Generic[T]):
     def __get__(self, instance: None, owner: type[Any]) -> Self: ...
 
     @overload
-    def __get__(self, instance: S, owner: type[S]) -> HookInstance[T, S]: ...
+    def __get__(
+        self, instance: S, owner: type[S]
+    ) -> HookInstance[S, Unpack[Ts]]: ...
 
     def __get__(
         self, instance: Optional[S], owner: type[S]
-    ) -> Self | HookInstance[T, S]:
+    ) -> Self | HookInstance[S, Unpack[Ts]]:
         if instance is None:
             return self
         return self._get(instance)
 
-    def __set__(self, instance: S, value: Handler[T]) -> None:
+    def __set__(self, instance: S, value: Callable[..., Any]) -> None:
         self._get(instance)(value)
 
-    def _get(self, instance: S) -> HookInstance[T, S]:
+    def _get(self, instance: S) -> HookInstance[S, Unpack[Ts]]:
         prop = f"_{self._hook_name}"
-        rv: Optional[HookInstance[T, S]] = getattr(instance, prop, None)
+        rv: Optional[HookInstance[S, Unpack[Ts]]] = getattr(
+            instance, prop, None
+        )
         if rv is None:
             cls_key = f"{self._key}_default_response_class"
             if hasattr(instance, cls_key):
@@ -103,20 +104,39 @@ class Hook(Generic[T]):
                 name=getattr(instance, f"{self._key}_name").value + prop,
                 default_response_class=default_response_class,
                 default_status_code=default_status_code,
+                param_types=get_args(
+                    dep_utils.get_typed_annotation(
+                        instance.__annotations__[self._hook_name],
+                        vars(importlib.import_module(instance.__module__)),
+                    )
+                ),
             )
             setattr(instance, prop, rv)
         return rv
 
 
-class HookInstance(Generic[T, S]):
+class ParamProvider:
+    def __init__(
+        self,
+        param_types: tuple[tuple[type[Any], Callable[[], None]], ...],
+        args: tuple[Any, ...],
+    ):
+        self.dependency_overrides = {
+            handle: lambda v=arg: v
+            for (_type, handle), arg in zip(param_types, args, strict=True)
+        }
+
+
+class HookInstance(Generic[S, Unpack[Ts]]):
     _subject: S
     _is_set: bool = False
     _path: str
     _name: str
 
-    _func: Handler[T]
+    _func: Callable[..., Any]
     _is_coroutine: bool
     _dependant: models.Dependant
+    _param_types: tuple[tuple[type[Any], Callable[[], None]], ...]
 
     _status_code: Optional[int]
     _response_field: Optional[ModelField]
@@ -138,12 +158,14 @@ class HookInstance(Generic[T, S]):
         name: str,
         default_response_class: type[fastapi.Response],
         default_status_code: Optional[int],
+        param_types: tuple[type[Any], ...],
     ) -> None:
         self._subject = subject
         self._path = path
         self._name = name
         self._default_response_class = default_response_class
         self._default_status_code = default_status_code
+        self._param_types = tuple((t, lambda: None) for t in param_types)
 
     @overload
     def __call__(
@@ -158,12 +180,12 @@ class HookInstance(Generic[T, S]):
         response_model_exclude_defaults: bool = ...,
         response_model_exclude_none: bool = ...,
         response_class: type[fastapi.Response] = ...,
-    ) -> Callable[[Handler[T]], Handler[T]]: ...
+    ) -> Callable[[Handler], Handler]: ...
 
     @overload
     def __call__(
         self,
-        f: Handler[T],
+        f: Handler,
         *,
         response_model: Any = ...,
         status_code: Optional[int] = ...,
@@ -174,11 +196,11 @@ class HookInstance(Generic[T, S]):
         response_model_exclude_defaults: bool = ...,
         response_model_exclude_none: bool = ...,
         response_class: type[fastapi.Response] = ...,
-    ) -> Handler[T]: ...
+    ) -> Handler: ...
 
     def __call__(
         self,
-        f: Optional[Handler[T]] = None,
+        f: Optional[Handler] = None,
         *,
         response_model: Any = Default(None),  # noqa: B008
         status_code: Optional[int] = None,
@@ -191,7 +213,7 @@ class HookInstance(Generic[T, S]):
         response_class: type[fastapi.Response] = Default(  # noqa: B008
             responses.JSONResponse
         ),
-    ) -> Handler[T] | Callable[[Handler[T]], Handler[T]]:
+    ) -> Handler | Callable[[Handler], Handler]:
         if self._subject.installed:
             raise ValueError("cannot set a hook handler after installation")
         if self._is_set:
@@ -200,14 +222,29 @@ class HookInstance(Generic[T, S]):
                 stacklevel=2,
             )
 
-        def wrapper(func: Handler[T]) -> Handler[T]:
-            call = functools.partial(func, cast("T", None))
-            # __globals__ is used by FastAPI get_typed_signature()
-            call.__globals__ = func.__globals__  # type: ignore [attr-defined]
+        def wrapper(func: Handler) -> Handler:
+            sig = inspect.signature(func)
+            parameters = []
+            globalns = getattr(func, "__globals__", {})
+            for param in sig.parameters.values():
+                anno = dep_utils.get_typed_annotation(
+                    param.annotation, globalns
+                )
+                if get_origin(anno) is None:
+                    for param_type, handle in self._param_types:
+                        if issubclass(anno, param_type):
+                            args = (anno, fastapi.Depends(handle))
+                            if sys.version_info >= (3, 11):
+                                anno = Annotated.__getitem__(args)
+                            else:
+                                anno = Annotated[args]
+                            break
+                parameters.append(param.replace(annotation=anno))
+            func.__signature__ = sig.replace(parameters=parameters)  # type: ignore [attr-defined]
             dependant = dep_utils.get_dependant(
                 path=self._path,
                 name=self._name,
-                call=call,
+                call=func,
             )
 
             if dependant.path_params:
@@ -273,8 +310,11 @@ class HookInstance(Generic[T, S]):
         return self._is_set
 
     async def call(
-        self, request: fastapi.Request, result: T
+        self,
+        request: fastapi.Request,
+        *args: Unpack[Ts],
     ) -> fastapi.Response:
+        assert self._is_set
         response: Optional[fastapi.Response] = None
         async with contextlib.AsyncExitStack() as async_exit_stack:
             solved_result = await dep_utils.solve_dependencies(
@@ -282,15 +322,18 @@ class HookInstance(Generic[T, S]):
                 dependant=self._dependant,
                 async_exit_stack=async_exit_stack,
                 embed_body_fields=False,
+                dependency_overrides_provider=ParamProvider(
+                    self._param_types, args
+                ),
             )
             assert not solved_result.errors
             if self._default_status_code is not None:
                 solved_result.response.status_code = self._default_status_code
             if self._is_coroutine:
-                raw_response = await self._func(result, **solved_result.values)
+                raw_response = await self._func(**solved_result.values)
             else:
                 raw_response = await concurrency.run_in_threadpool(
-                    self._func, result, **solved_result.values
+                    self._func, **solved_result.values
                 )
             if isinstance(raw_response, fastapi.Response):
                 if raw_response.background is None:
