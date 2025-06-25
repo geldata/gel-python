@@ -24,8 +24,8 @@ if TYPE_CHECKING:
 
     import gel
     from gel import auth as core
-    from .email_password import EmailPassword
-    from .builtin_ui import BuiltinUI
+    from ._email_password import EmailPassword
+    from ._builtin_ui import BuiltinUI
 
 
 class Installable:
@@ -188,7 +188,7 @@ class GelAuth(client_mod.Extension):
                     "Cannot enable email_password after installation"
                 )
 
-            from .email_password import EmailPassword  # noqa: PLC0415
+            from ._email_password import EmailPassword  # noqa: PLC0415
 
             self._email_password = EmailPassword(self)
 
@@ -216,7 +216,7 @@ class GelAuth(client_mod.Extension):
             if self.installed:
                 raise ValueError("Cannot enable builtin_ui after installation")
 
-            from .builtin_ui import BuiltinUI  # noqa: PLC0415
+            from ._builtin_ui import BuiltinUI  # noqa: PLC0415
 
             self._builtin_ui = BuiltinUI(self)
 
