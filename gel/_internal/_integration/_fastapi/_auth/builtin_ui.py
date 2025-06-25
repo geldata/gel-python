@@ -5,11 +5,13 @@
 from __future__ import annotations
 from typing import Annotated, Any, Literal, Optional, TYPE_CHECKING
 
+import datetime  # noqa: TC003  # for runtime type annotations
 import http
 import inspect
 import itertools
 import logging
 import urllib.parse
+import uuid  # noqa: TC003  # for runtime type annotations
 
 import fastapi
 import pydantic
@@ -22,8 +24,6 @@ from . import Installable
 from .. import _utils as utils
 
 if TYPE_CHECKING:
-    import datetime
-    import uuid
     from collections.abc import Callable
     from gel._internal._auth._token_data import TokenData
 
