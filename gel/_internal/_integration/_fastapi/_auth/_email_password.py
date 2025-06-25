@@ -56,14 +56,17 @@ class EmailPassword(Installable):
 
     # Sign-up
     install_sign_up = utils.Config(True)  # noqa: FBT003
+    sign_up_body: utils.ConfigDecorator[type[SignUpBody]] = (
+        utils.ConfigDecorator(SignUpBody)
+    )
     sign_up_path = utils.Config("/register")
     sign_up_name = utils.Config("gel.auth.email_password.sign_up")
     sign_up_summary = utils.Config("Sign up with email and password")
     sign_up_default_response_class = utils.Config(responses.RedirectResponse)
     sign_up_default_status_code = utils.Config(http.HTTPStatus.SEE_OTHER)
-    on_sign_up_complete: utils.Hook[core.SignUpCompleteResponse] = utils.Hook(
-        "sign_up"
-    )
+    on_sign_up_complete: utils.Hook[
+        tuple[SignUpBody, core.SignUpCompleteResponse]
+    ] = utils.Hook("sign_up")
     on_sign_up_verification_required: utils.Hook[
         core.SignUpVerificationRequiredResponse
     ] = utils.Hook("sign_up")
@@ -223,6 +226,7 @@ class EmailPassword(Installable):
     async def handle_sign_up_complete(
         self,
         request: fastapi.Request,
+        body: SignUpBody,
         result: core.SignUpCompleteResponse,
     ) -> fastapi.Response:
         response = await self._auth.handle_new_identity(
@@ -234,7 +238,7 @@ class EmailPassword(Installable):
                     result.token_data.auth_token, request
                 ):
                     response = await self.on_sign_up_complete.call(
-                        request, result
+                        request, (body, result)
                     )
             else:
                 response = self._redirect_success(
@@ -286,11 +290,6 @@ class EmailPassword(Installable):
         return response
 
     def __install_sign_up(self, router: fastapi.APIRouter) -> None:
-        @router.post(
-            self.sign_up_path.value,
-            name=self.sign_up_name.value,
-            summary=self.sign_up_summary.value,
-        )
         async def sign_up(
             sign_up_body: Annotated[
                 SignUpBody, utils.OneOf(fastapi.Form(), fastapi.Body())
@@ -306,7 +305,9 @@ class EmailPassword(Installable):
             )
             match result:
                 case core.SignUpCompleteResponse():
-                    return await self.handle_sign_up_complete(request, result)
+                    return await self.handle_sign_up_complete(
+                        request, sign_up_body, result
+                    )
                 case core.SignUpVerificationRequiredResponse():
                     return await self.handle_sign_up_verification_required(
                         request, result
@@ -315,6 +316,14 @@ class EmailPassword(Installable):
                     return await self.handle_sign_up_failed(request, result)
                 case _:
                     raise AssertionError("Invalid sign up response")
+
+        sign_up.__globals__["SignUpBody"] = self.sign_up_body.value
+
+        router.post(
+            self.sign_up_path.value,
+            name=self.sign_up_name.value,
+            summary=self.sign_up_summary.value,
+        )(sign_up)
 
     async def handle_sign_in_complete(
         self,

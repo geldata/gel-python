@@ -374,17 +374,13 @@ class Config(Generic[T]):
         return self._default
 
 
-class ConfigInstance(Generic[T, S]):
+class BaseConfigInstance(Generic[T, S]):
     _default: Callable[[], T]
     _subject: S
     _value: T
     _froze_by: Optional[str] = None
 
-    def __init__(self, config: Config[T], subject: S) -> None:
-        self._default = lambda: config.default
-        self._subject = subject
-
-    def __call__(self, value: T) -> S:
+    def _call(self, value: T) -> None:
         if self._subject.installed:
             raise ValueError("cannot set config value after installation")
         if self._froze_by is not None:
@@ -392,7 +388,6 @@ class ConfigInstance(Generic[T, S]):
                 f"cannot set config value after reading it: \n{self._froze_by}"
             )
         self._value = value
-        return self._subject
 
     @property
     def value(self) -> T:
@@ -415,6 +410,67 @@ class ConfigInstance(Generic[T, S]):
 
     def is_set(self) -> bool:
         return hasattr(self, "_value")
+
+
+class ConfigInstance(BaseConfigInstance[T, S], Generic[T, S]):
+    def __init__(self, config: Config[T], subject: S) -> None:
+        self._default = lambda: config.default
+        self._subject = subject
+
+    def __call__(self, value: T) -> S:
+        self._call(value)
+        return self._subject
+
+
+class ConfigDecorator(Generic[T]):
+    _default: T
+    _config_name: str
+
+    def __init__(self, default: T) -> None:
+        self._default = default
+
+    def __set_name__(self, owner: type[Any], name: str) -> None:
+        self._config_name = name
+
+    @overload
+    def __get__(self, instance: None, owner: type[Any]) -> Self: ...
+
+    @overload
+    def __get__(
+        self, instance: S, owner: type[S]
+    ) -> DecoratorInstance[T, S]: ...
+
+    def __get__(
+        self, instance: Optional[S], owner: type[S]
+    ) -> Self | DecoratorInstance[T, S]:
+        if instance is None:
+            return self
+        return self._get(instance)
+
+    def __set__(self, instance: S, value: T) -> None:
+        self._get(instance)(value)
+
+    def _get(self, instance: S) -> DecoratorInstance[T, S]:
+        prop = f"_{self._config_name}"
+        rv: Optional[DecoratorInstance[T, S]] = getattr(instance, prop, None)
+        if rv is None:
+            rv = DecoratorInstance(self, instance)
+            setattr(instance, prop, rv)
+        return rv
+
+    @property
+    def default(self) -> T:
+        return self._default
+
+
+class DecoratorInstance(BaseConfigInstance[T, S], Generic[T, S]):
+    def __init__(self, config: ConfigDecorator[T], subject: S) -> None:
+        self._default = lambda: config.default
+        self._subject = subject
+
+    def __call__(self, value: T) -> T:
+        self._call(value)
+        return value
 
 
 class OneOf:
