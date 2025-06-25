@@ -48,14 +48,41 @@ T_ql = typing.TypeVar("T_ql", covariant=True)
 T_get = typing.TypeVar("T_get")
 
 
-class QueryBuilderExpression(typing.Protocol[T_ql]):
-    def __edgeql__(self) -> typing.Tuple[type[T_ql], str]: ...
+if typing.TYPE_CHECKING:
+    from gel._internal._qbmodel._pydantic._models import GelModel
 
+    TM_ql = typing.TypeVar("TM_ql", covariant=True, bound=GelModel)
 
-AnyEdgeQLQuery = QueryBuilderExpression | str
+    class InstanceSupportsEdgeQL(typing.Protocol, typing.Generic[T_ql]):
+        def __edgeql__(self) -> tuple[type[T_ql], str]: ...
+
+    class TypeSupportsEdgeQL(typing.Protocol, typing.Generic[T_ql]):
+        @classmethod
+        def __edgeql__(cls) -> tuple[type[T_ql], str]: ...
+
+    SupportsEdgeQL = typing.TypeAliasType(
+        "SupportsEdgeQL",
+        InstanceSupportsEdgeQL[T_ql] | type[TypeSupportsEdgeQL[T_ql]],
+        type_params=(T_ql,),
+    )
+
+    AnyEdgeQLQuery = str | SupportsEdgeQL[GelModel]
 
 
 _unset = object()
+
+
+@dataclasses.dataclass(frozen=True)
+class TypeWrapper(typing.Generic[T_ql]):
+    tp: type[T_ql]
+    query: str
+
+    def __edgeql__(self) -> tuple[type[T_ql], str]:
+        return (self.tp, self.query)
+
+
+def with_type(tp: type[T_ql], query: str) -> TypeWrapper[T_ql]:
+    return TypeWrapper(tp, query)
 
 
 class QueryWithArgs(typing.NamedTuple):
@@ -68,7 +95,7 @@ class QueryWithArgs(typing.NamedTuple):
     @classmethod
     def from_query(cls, query: AnyEdgeQLQuery, args, kwargs) -> QueryWithArgs:
         if type(query) is str or isinstance(query, str):
-            return cls(query, None, args, kwargs)
+            return cls(query, None, args, kwargs)  # type: ignore
 
         try:
             eql = query.__edgeql__
@@ -253,13 +280,16 @@ class ReadOnlyExecutor(BaseReadOnlyExecutor):
 
     @typing.overload
     def query(
-        self, query: type[QueryBuilderExpression[T_ql]], **kwargs: typing.Any
-    ) -> list[T_ql]: ...
+        self, query: str, *args: typing.Any, **kwargs: typing.Any
+    ) -> list[typing.Any]: ...
 
     @typing.overload
     def query(
-        self, query: str, *args: typing.Any, **kwargs: typing.Any
-    ) -> list[typing.Any]: ...
+        self,
+        query: SupportsEdgeQL[T_ql],
+        /,
+        **kwargs: typing.Any,
+    ) -> list[T_ql]: ...
 
     def query(
         self, query: AnyEdgeQLQuery, *args: typing.Any, **kwargs: typing.Any
@@ -278,9 +308,17 @@ class ReadOnlyExecutor(BaseReadOnlyExecutor):
         )
 
     @typing.overload
+    def get(self, query: str, /, **kwargs: typing.Any) -> typing.Any: ...
+
+    @typing.overload
+    def get(
+        self, query: str, default: T_get, /, **kwargs: typing.Any
+    ) -> typing.Any | T_get: ...
+
+    @typing.overload
     def get(
         self,
-        query: type[QueryBuilderExpression[T_ql]],
+        query: SupportsEdgeQL[T_ql],
         /,
         **kwargs: typing.Any,
     ) -> T_ql: ...
@@ -288,19 +326,11 @@ class ReadOnlyExecutor(BaseReadOnlyExecutor):
     @typing.overload
     def get(
         self,
-        query: type[QueryBuilderExpression[T_ql]],
+        query: SupportsEdgeQL[T_ql],
         default: T_get,
         /,
         **kwargs: typing.Any,
     ) -> T_ql | T_get: ...
-
-    @typing.overload
-    def get(self, query: str, /, **kwargs: typing.Any) -> typing.Any: ...
-
-    @typing.overload
-    def get(
-        self, query: str, default: T_get, /, **kwargs: typing.Any
-    ) -> typing.Any | T_get: ...
 
     def get(
         self,
@@ -309,7 +339,7 @@ class ReadOnlyExecutor(BaseReadOnlyExecutor):
         **kwargs: typing.Any,
     ) -> typing.Any:
         if hasattr(query, "__edgeql__"):
-            query = query.__gel_assert_single__(
+            query = query.__gel_assert_single__(  # type: ignore
                 message=(
                     "client.get() requires 0 or 1 returned objects, "
                     "got more than that"
@@ -332,13 +362,13 @@ class ReadOnlyExecutor(BaseReadOnlyExecutor):
 
     @typing.overload
     def query_single(
-        self, query: type[QueryBuilderExpression[T_ql]], **kwargs: typing.Any
-    ) -> T_ql | None: ...
+        self, query: str, *args: typing.Any, **kwargs: typing.Any
+    ) -> typing.Any | None: ...
 
     @typing.overload
     def query_single(
-        self, query: str, *args: typing.Any, **kwargs: typing.Any
-    ) -> typing.Any | None: ...
+        self, query: SupportsEdgeQL[T_ql], **kwargs: typing.Any
+    ) -> T_ql | None: ...
 
     def query_single(
         self, query: AnyEdgeQLQuery, *args: typing.Any, **kwargs: typing.Any
@@ -358,13 +388,13 @@ class ReadOnlyExecutor(BaseReadOnlyExecutor):
 
     @typing.overload
     def query_required_single(
-        self, query: type[QueryBuilderExpression[T_ql]], **kwargs: typing.Any
-    ) -> T_ql: ...
+        self, query: str, *args: typing.Any, **kwargs: typing.Any
+    ) -> typing.Any: ...
 
     @typing.overload
     def query_required_single(
-        self, query: str, *args: typing.Any, **kwargs: typing.Any
-    ) -> typing.Any: ...
+        self, query: SupportsEdgeQL[T_ql], **kwargs: typing.Any
+    ) -> T_ql: ...
 
     def query_required_single(
         self, query: AnyEdgeQLQuery, *args: typing.Any, **kwargs: typing.Any
@@ -426,7 +456,12 @@ class ReadOnlyExecutor(BaseReadOnlyExecutor):
             )
         )
 
-    def query_sql(self, query: str, *args, **kwargs) -> list[datatypes.Record]:
+    def query_sql(
+        self,
+        query: str,
+        *args,
+        **kwargs,
+    ) -> list[datatypes.Record]:  # type: ignore
         return self._query(
             QueryContext(
                 query=QueryWithArgs(
@@ -503,13 +538,13 @@ class AsyncIOReadOnlyExecutor(BaseReadOnlyExecutor):
 
     @typing.overload
     async def query(
-        self, query: type[QueryBuilderExpression[T_ql]], **kwargs: typing.Any
-    ) -> list[T_ql]: ...
+        self, query: str, *args: typing.Any, **kwargs: typing.Any
+    ) -> list[typing.Any]: ...
 
     @typing.overload
     async def query(
-        self, query: str, *args: typing.Any, **kwargs: typing.Any
-    ) -> list[typing.Any]: ...
+        self, query: SupportsEdgeQL[T_ql], **kwargs: typing.Any
+    ) -> list[T_ql]: ...
 
     async def query(self, query: AnyEdgeQLQuery, *args, **kwargs) -> list:
         return await self._query(
@@ -526,9 +561,17 @@ class AsyncIOReadOnlyExecutor(BaseReadOnlyExecutor):
         )
 
     @typing.overload
+    async def get(self, query: str, /, **kwargs: typing.Any) -> typing.Any: ...
+
+    @typing.overload
+    async def get(
+        self, query: str, default: T_get, /, **kwargs: typing.Any
+    ) -> typing.Any | T_get: ...
+
+    @typing.overload
     async def get(
         self,
-        query: type[QueryBuilderExpression[T_ql]],
+        query: SupportsEdgeQL[T_ql],
         /,
         **kwargs: typing.Any,
     ) -> T_ql: ...
@@ -536,19 +579,11 @@ class AsyncIOReadOnlyExecutor(BaseReadOnlyExecutor):
     @typing.overload
     async def get(
         self,
-        query: type[QueryBuilderExpression[T_ql]],
+        query: SupportsEdgeQL[T_ql],
         default: T_get,
         /,
         **kwargs: typing.Any,
     ) -> T_ql | T_get: ...
-
-    @typing.overload
-    async def get(self, query: str, /, **kwargs: typing.Any) -> typing.Any: ...
-
-    @typing.overload
-    async def get(
-        self, query: str, default: T_get, /, **kwargs: typing.Any
-    ) -> typing.Any | T_get: ...
 
     async def get(
         self,
@@ -557,7 +592,7 @@ class AsyncIOReadOnlyExecutor(BaseReadOnlyExecutor):
         **kwargs: typing.Any,
     ) -> typing.Any:
         if hasattr(query, "__edgeql__"):
-            query = query.__gel_assert_single__(
+            query = query.__gel_assert_single__(  # type: ignore
                 message=(
                     "client.get() requires 0 or 1 returned objects, "
                     "got more than that"
@@ -580,13 +615,13 @@ class AsyncIOReadOnlyExecutor(BaseReadOnlyExecutor):
 
     @typing.overload
     async def query_single(
-        self, query: type[QueryBuilderExpression[T_ql]], **kwargs: typing.Any
-    ) -> T_ql | None: ...
+        self, query: str, *args: typing.Any, **kwargs: typing.Any
+    ) -> typing.Any | None: ...
 
     @typing.overload
     async def query_single(
-        self, query: str, *args: typing.Any, **kwargs: typing.Any
-    ) -> typing.Any | None: ...
+        self, query: SupportsEdgeQL[T_ql], **kwargs: typing.Any
+    ) -> T_ql | None: ...
 
     async def query_single(
         self, query: AnyEdgeQLQuery, *args, **kwargs
@@ -606,13 +641,13 @@ class AsyncIOReadOnlyExecutor(BaseReadOnlyExecutor):
 
     @typing.overload
     async def query_required_single(
-        self, query: type[QueryBuilderExpression[T_ql]], **kwargs: typing.Any
-    ) -> T_ql: ...
+        self, query: str, *args: typing.Any, **kwargs: typing.Any
+    ) -> typing.Any: ...
 
     @typing.overload
     async def query_required_single(
-        self, query: str, *args: typing.Any, **kwargs: typing.Any
-    ) -> typing.Any: ...
+        self, query: SupportsEdgeQL[T_ql], **kwargs: typing.Any
+    ) -> T_ql: ...
 
     async def query_required_single(
         self, query: AnyEdgeQLQuery, *args, **kwargs
