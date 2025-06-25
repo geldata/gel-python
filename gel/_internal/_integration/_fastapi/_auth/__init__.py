@@ -117,6 +117,10 @@ class GelAuth(client_mod.Extension):
         return self._lifespan.client
 
     @property
+    def blocking_io_client(self) -> gel.Client:
+        return self._lifespan.blocking_io_client
+
+    @property
     def maybe_auth_token(self) -> params.Depends:
         if not hasattr(self, "_maybe_auth_token"):
             auth_token_cookie = security.APIKeyCookie(

@@ -11,6 +11,7 @@ import logging
 import pydantic
 import fastapi
 from fastapi import responses
+from starlette import concurrency
 
 from gel.auth import email_password as core
 
@@ -51,8 +52,10 @@ class EmailPassword(Installable):
 
     _auth: GelAuth
     _core: core.AsyncEmailPassword
+    _blocking_io_core: core.EmailPassword
 
     # Sign-up
+    install_sign_up = utils.Config(True)  # noqa: FBT003
     sign_up_path = utils.Config("/register")
     sign_up_name = utils.Config("gel.auth.email_password.sign_up")
     sign_up_summary = utils.Config("Sign up with email and password")
@@ -69,6 +72,7 @@ class EmailPassword(Installable):
     )
 
     # Sign-in
+    install_sign_in = utils.Config(True)  # noqa: FBT003
     sign_in_path = utils.Config("/authenticate")
     sign_in_name = utils.Config("gel.auth.email_password.sign_in")
     sign_in_summary = utils.Config("Sign in with email and password")
@@ -85,6 +89,7 @@ class EmailPassword(Installable):
     )
 
     # Email verification
+    install_email_verification = utils.Config(True)  # noqa: FBT003
     email_verification_path = utils.Config("/verify")
     email_verification_name = utils.Config(
         "gel.auth.email_password.email_verification"
@@ -107,6 +112,7 @@ class EmailPassword(Installable):
     ] = utils.Hook("email_verification")
 
     # Send password reset
+    install_send_password_reset = utils.Config(True)  # noqa: FBT003
     send_password_reset_email_path = utils.Config("/send-password-reset")
     send_password_reset_email_name = utils.Config(
         "gel.auth.email_password.send_password_reset"
@@ -128,6 +134,7 @@ class EmailPassword(Installable):
     ] = utils.Hook("send_password_reset_email")
 
     # Reset password
+    install_reset_password = utils.Config(True)  # noqa: FBT003
     reset_password_path = utils.Config("/reset-password")
     reset_password_name = utils.Config(
         "gel.auth.email_password.reset_password"
@@ -278,7 +285,7 @@ class EmailPassword(Installable):
         self._auth.set_verifier_cookie(result.verifier, response)
         return response
 
-    def install_sign_up(self, router: fastapi.APIRouter) -> None:
+    def __install_sign_up(self, router: fastapi.APIRouter) -> None:
         @router.post(
             self.sign_up_path.value,
             name=self.sign_up_name.value,
@@ -361,7 +368,7 @@ class EmailPassword(Installable):
         self._auth.set_verifier_cookie(result.verifier, response)
         return response
 
-    def install_sign_in(self, router: fastapi.APIRouter) -> None:
+    def __install_sign_in(self, router: fastapi.APIRouter) -> None:
         @router.post(
             self.sign_in_path.value,
             name=self.sign_in_name.value,
@@ -444,7 +451,7 @@ class EmailPassword(Installable):
                 request, "email_verification", error=result.message
             )
 
-    def install_email_verification(self, router: fastapi.APIRouter) -> None:
+    def __install_email_verification(self, router: fastapi.APIRouter) -> None:
         @router.get(
             self.email_verification_path.value,
             name=self.email_verification_name.value,
@@ -517,7 +524,7 @@ class EmailPassword(Installable):
         self._auth.set_verifier_cookie(result.verifier, response)
         return response
 
-    def install_send_password_reset(self, router: fastapi.APIRouter) -> None:
+    def __install_send_password_reset(self, router: fastapi.APIRouter) -> None:
         @router.post(
             self.send_password_reset_email_path.value,
             name=self.send_password_reset_email_name.value,
@@ -604,7 +611,7 @@ class EmailPassword(Installable):
                 request, "reset_password", error=result.message
             )
 
-    def install_reset_password(self, router: fastapi.APIRouter) -> None:
+    def __install_reset_password(self, router: fastapi.APIRouter) -> None:
         @router.post(
             self.reset_password_path.value,
             name=self.reset_password_name.value,
@@ -640,11 +647,27 @@ class EmailPassword(Installable):
                 case _:
                     raise AssertionError("Invalid reset password response")
 
+    @property
+    def blocking_io_core(self) -> core.EmailPassword:
+        return self._blocking_io_core
+
+    @property
+    def core(self) -> core.AsyncEmailPassword:
+        return self._core
+
     async def install(self, router: fastapi.APIRouter) -> None:
         self._core = await core.make_async(self._auth.client)
-        self.install_sign_up(router)
-        self.install_sign_in(router)
-        self.install_email_verification(router)
-        self.install_send_password_reset(router)
-        self.install_reset_password(router)
+        self._blocking_io_core = await concurrency.run_in_threadpool(
+            core.make, self._auth.blocking_io_client
+        )
+        if self.install_sign_up.value:
+            self.__install_sign_up(router)
+        if self.install_sign_in.value:
+            self.__install_sign_in(router)
+        if self.install_email_verification.value:
+            self.__install_email_verification(router)
+        if self.install_send_password_reset.value:
+            self.__install_send_password_reset(router)
+        if self.install_reset_password.value:
+            self.__install_reset_password(router)
         await super().install(router)
