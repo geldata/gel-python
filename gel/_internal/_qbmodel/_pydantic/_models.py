@@ -258,6 +258,13 @@ class GelSourceModel(
     _abstract.GelSourceModel,
     metaclass=GelModelMeta,
 ):
+    model_config = pydantic.ConfigDict(
+        json_encoders={uuid.UUID: str},
+        validate_assignment=True,
+        defer_build=True,
+        extra="forbid",
+    )
+
     # We use slots because PyDantic overrides `__dict__`
     # making state management for "special" properties like
     # these hard.
@@ -287,6 +294,49 @@ class GelSourceModel(
         ll_setattr(self, "__gel_changed_fields__", None)
         return self
 
+    def __copy__(self) -> Self:
+        cp = super().__copy__()
+
+        changed_fields = ll_getattr(self, "__gel_changed_fields__")
+        ll_setattr(
+            cp,
+            "__gel_changed_fields__",
+            set(changed_fields) if changed_fields is not None else None,
+        )
+        return cp
+
+    def __deepcopy__(self, memo: dict[int, Any] | None = None) -> Self:
+        cp = super().__deepcopy__(memo)
+
+        changed_fields = ll_getattr(self, "__gel_changed_fields__")
+        ll_setattr(
+            cp,
+            "__gel_changed_fields__",
+            set(changed_fields) if changed_fields is not None else None,
+        )
+        return cp
+
+    def model_copy(
+        self, *, update: Mapping[str, Any] | None = None, deep: bool = False
+    ) -> Self:
+        # Mimicking pydantic.BaseModel.model_copy() implementation
+        # but handling __gel_changed_fields__ specially.
+
+        copied = self.__deepcopy__() if deep else self.__copy__()  # noqa: PLC2801
+        if update:
+            copied.__dict__.update(update)
+
+            keys = update.keys()
+            ll_getattr(copied, "__pydantic_fields_set__").update(keys)
+
+            ch_fields = ll_getattr(copied, "__gel_changed_fields__")
+            if ch_fields is not None:
+                ch_fields.update(keys)
+            else:
+                ll_setattr(copied, "__gel_changed_fields__", set(keys))
+
+        return copied
+
     def __init__(self, /, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         ll_setattr(
@@ -294,9 +344,7 @@ class GelSourceModel(
         )
 
     def __gel_get_changed_fields__(self) -> AbstractSet[str]:
-        dirty: set[str] | None = object.__getattribute__(
-            self, "__gel_changed_fields__"
-        )
+        dirty: set[str] | None = ll_getattr(self, "__gel_changed_fields__")
         if dirty is None:
             return _empty_str_set
         return dirty
@@ -339,16 +387,9 @@ class GelModel(
     GelSourceModel,
     _abstract.GelModel,
 ):
-    model_config = pydantic.ConfigDict(
-        json_encoders={uuid.UUID: str},
-        validate_assignment=True,
-        defer_build=True,
-        extra="forbid",
-    )
-
     if TYPE_CHECKING:
         id: uuid.UUID
-        __gel_computed_fields__: frozenset[str] | None
+        __gel_computed_fields__: ClassVar[frozenset[str] | None]
 
     @classmethod
     def __gel_gen_computed_fields__(cls) -> frozenset[str] | None:

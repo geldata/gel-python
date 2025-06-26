@@ -343,6 +343,59 @@ class TestModelGenerator(tb.ModelTestCase):
             d.body
 
     @tb.typecheck
+    def test_modelgen_pydantic_apis(self):
+        # regression test for https://github.com/geldata/gel-python/issues/722
+
+        import pydantic
+        from models import default
+        from gel._internal._unsetid import UNSET_UUID
+
+        class UserUpdate(pydantic.BaseModel):
+            name: str | None = None
+            other: int | None = None
+
+        def run_test(user: default.User, upd: UserUpdate) -> None:
+            orig_name = user.name
+            orig_ch_fields = set(user.__gel_get_changed_fields__())
+
+            user_dct = user.model_dump(exclude_unset=True)
+
+            if user.id is not UNSET_UUID:
+                self.assertEqual(user.id, user_dct["id"])
+                del user_dct["id"]
+
+            self.assertEqual(
+                user_dct,
+                {
+                    "name": user.name,
+                },
+            )
+
+            user_upd = user.model_copy(
+                update=upd.model_dump(exclude_unset=True)
+            )
+
+            self.assertIsNot(user_upd, user)
+            self.assertEqual(user_upd, user)
+            self.assertEqual(user_upd.id, user.id)
+
+            self.assertEqual(user.name, orig_name)
+            self.assertEqual(user_upd.name, upd.name)
+
+            self.assertEqual(
+                set(user.__gel_get_changed_fields__()), orig_ch_fields
+            )
+            self.assertEqual(user_upd.__gel_get_changed_fields__(), {"name"})
+
+        user_loaded = self.client.get(
+            default.User.select(name=True).filter(name="Alice").limit(1)
+        )
+        user_new = default.User(name="Bob")
+
+        run_test(user_loaded, UserUpdate(name="Alice A."))
+        run_test(user_new, UserUpdate(name="Bob B."))
+
+    @tb.typecheck
     def test_modelgen_data_unpack_polymorphic(self):
         from models import default
 
