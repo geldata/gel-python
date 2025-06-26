@@ -103,6 +103,8 @@ class TestConUtils(unittest.TestCase):
     def run_testcase(self, testcase):
         test_env = testcase.get('env', {})
 
+        platform = testcase.get('platform')
+
         fs = testcase.get('fs')
 
         opts = testcase.get('opts', {})
@@ -169,7 +171,8 @@ class TestConUtils(unittest.TestCase):
                 if files:
                     for f, v in files.copy().items():
                         if "${HASH}" in f:
-                            hash = con_utils._hash_path(v['project-path'])
+                            with mock.patch('os.path.realpath', lambda f: f):
+                                hash = con_utils._hash_path(v['project-path'])
                             dir = f.replace("${HASH}", hash)
                             files[dir] = ""
                             instance = os.path.join(dir, 'instance-name')
@@ -205,6 +208,17 @@ class TestConUtils(unittest.TestCase):
                     es.enter_context(
                         mock.patch('os.path.realpath', lambda f: f)
                     )
+
+                    if platform != 'macos':
+                        # We still want tests made for linux to run on macos,
+                        # so we workaround XDG_CONFIG_HOME
+                        es.enter_context(
+                            mock.patch(
+                                'gel._internal._platform.config_dir',
+                                lambda *args, **kwargs:
+                                    pathlib.Path('/home/edgedb/.config/edgedb')
+                            )
+                        )
 
                     def mocked_open(filepath, *args, **kwargs):
                         if str(filepath) in files:
@@ -355,7 +369,7 @@ class TestConUtils(unittest.TestCase):
                 },
             })
 
-    def test_connect_params(self):
+    def test_connect_params_shared(self):
         testcases_path = (
             pathlib.Path(__file__).parent
             / "shared-client-testcases"
@@ -382,8 +396,6 @@ class TestConUtils(unittest.TestCase):
                 platform = testcase.get('platform')
                 if testcase.get('fs') and (
                     sys.platform == 'win32' or platform == 'windows'
-                    or (platform is None and sys.platform == 'darwin')
-                    or (platform == 'macos' and sys.platform != 'darwin')
                 ):
                     continue
 
