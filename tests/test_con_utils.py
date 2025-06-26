@@ -171,7 +171,14 @@ class TestConUtils(unittest.TestCase):
                 if files:
                     for f, v in files.copy().items():
                         if "${HASH}" in f:
-                            with mock.patch('os.path.realpath', lambda f: f):
+                            if sys.platform == 'darwin':
+                                with mock.patch(
+                                    'os.path.realpath', lambda f: f
+                                ):
+                                    hash = con_utils._hash_path(
+                                        v['project-path']
+                                    )
+                            else:
                                 hash = con_utils._hash_path(v['project-path'])
                             dir = f.replace("${HASH}", hash)
                             files[dir] = ""
@@ -209,7 +216,7 @@ class TestConUtils(unittest.TestCase):
                         mock.patch('os.path.realpath', lambda f: f)
                     )
 
-                    if platform != 'macos':
+                    if platform != 'macos' and sys.platform == 'darwin':
                         # We still want tests made for linux to run on macos,
                         # so we workaround XDG_CONFIG_HOME
                         es.enter_context(
