@@ -232,11 +232,7 @@ class HookInstance(Generic[S, Unpack[Ts]]):
                 if get_origin(anno) is None:
                     for param_type, handle in self._param_types:
                         if issubclass(anno, param_type):
-                            args = (anno, fastapi.Depends(handle))
-                            if sys.version_info >= (3, 11):
-                                anno = Annotated.__getitem__(args)
-                            else:
-                                anno = Annotated[args]
+                            anno = Annotated[anno, fastapi.Depends(handle)]
                             break
                 parameters.append(param.replace(annotation=anno))
             func.__signature__ = sig.replace(parameters=parameters)  # type: ignore [attr-defined]
