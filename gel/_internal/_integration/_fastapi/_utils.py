@@ -24,7 +24,6 @@ import inspect
 import logging
 import os
 import re
-import sys
 import traceback
 import warnings
 
@@ -616,11 +615,11 @@ class ContentTypeRoute(routing.APIRoute):
                         if is_accept:
                             new_args.append(args[0])
                             new_args.reverse()
-                            if sys.version_info >= (3, 11):
-                                anno = Annotated.__getitem__(tuple(new_args))
-                            else:
-                                anno = Annotated[tuple(new_args)]
-                            new_params.append(param.replace(annotation=anno))
+                            new_params.append(
+                                param.replace(
+                                    annotation=Annotated[tuple(new_args)]
+                                )
+                            )
                         else:
                             new_params.append(param)
                 endpoint.__signature__ = orig_sig.replace(  # type: ignore [attr-defined]
