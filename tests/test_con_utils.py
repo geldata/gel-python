@@ -1,4 +1,4 @@
-#
+# fmt: off
 # This source file is part of the EdgeDB open source project.
 #
 # Copyright 2019-present MagicStack Inc. and the EdgeDB authors.
