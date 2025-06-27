@@ -22,6 +22,7 @@ from gel._internal._qbmodel._pydantic._models import (
     ProxyModel,
 )
 from gel._internal._dlist import (
+    AbstractDistinctList,
     TrackedList,
     DowncastingTrackedList,
     DistinctList,
@@ -253,8 +254,16 @@ def is_prop_list(val: object) -> TypeGuard[TrackedList[GelPrimitiveType]]:
     ) and issubclass(type(val).type, GelPrimitiveType)  # type: ignore [misc]
 
 
-def is_link_list(val: object) -> TypeGuard[DistinctList[GelModel]]:
+def is_link_dlist(val: object) -> TypeGuard[DistinctList[GelModel]]:
     return isinstance(val, DistinctList) and issubclass(
+        type(val).type, GelModel
+    )
+
+
+def is_link_abstract_dlist(
+    val: object,
+) -> TypeGuard[AbstractDistinctList[GelModel]]:
+    return isinstance(val, AbstractDistinctList) and issubclass(
         type(val).type, GelModel
     )
 
@@ -329,7 +338,7 @@ def iter_graph(objs: Iterable[GelModel]) -> Iterable[GelModel]:
                     for proxy in linked:
                         yield from _traverse(unwrap_proxy_no_check(proxy))
                 else:
-                    assert is_link_list(linked)
+                    assert is_link_dlist(linked)
                     for lobj in linked:
                         yield from _traverse(lobj)
             else:
@@ -360,12 +369,18 @@ def get_linked_new_objects(obj: GelModel) -> Iterable[GelModel]:
             continue
 
         if prop.cardinality.is_multi():
-            assert is_link_list(linked)
-            for ref in linked:
-                unwrapped = unwrap_proxy(ref)
-                if unwrapped.id is UNSET_UUID and unwrapped not in visited:
-                    visited.track(unwrapped)
-                    yield unwrapped
+            if is_proxy_link_list(linked):
+                for pmod in linked:
+                    unwrapped = unwrap_proxy_no_check(pmod)
+                    if unwrapped.id is UNSET_UUID and unwrapped not in visited:
+                        visited.track(unwrapped)
+                        yield unwrapped
+            else:
+                assert is_link_dlist(linked)
+                for mod in linked:
+                    if mod.id is UNSET_UUID and mod not in visited:
+                        visited.track(mod)
+                        yield mod
 
         elif linked is not None:
             assert isinstance(linked, GelModel)
@@ -571,7 +586,7 @@ def make_plan(objs: Iterable[GelModel]) -> SavePlan:
             # `linked` should be either an empty DistinctList or
             # a non-empty one
             assert linked is not None
-            assert is_link_list(linked), (
+            assert is_link_abstract_dlist(linked), (
                 f"`linked` is not dlist, it is {type(linked)}"
             )
 
@@ -854,7 +869,7 @@ class SaveExecutor:
                                 ).__gel_commit__()
                                 _traverse(unwrap_proxy_no_check(proxy))
                         else:
-                            assert is_link_list(linked)
+                            assert is_link_dlist(linked)
                             for model in linked:
                                 _traverse(model)
                         linked.__gel_commit__()
