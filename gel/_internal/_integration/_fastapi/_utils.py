@@ -6,6 +6,7 @@ from __future__ import annotations
 from typing import (
     Annotated,
     Any,
+    cast,
     Generic,
     get_args,
     get_origin,
@@ -46,6 +47,7 @@ class ConfigSubject(Protocol):
     installed: bool
 
 
+C = TypeVar("C")
 S = TypeVar("S", bound=ConfigSubject)
 T = TypeVar("T")
 Ts = TypeVarTuple("Ts")
@@ -243,71 +245,64 @@ class HookInstance(Generic[S, Unpack[Ts]]):
                     name=self._name,
                     call=func,
                 )
-
-                if dependant.path_params:
-                    raise ValueError("cannot depend on path parameters here")
-                if dependant.query_params:
-                    raise ValueError("cannot depend on query parameters here")
-                if dependant.header_params:
-                    raise ValueError("cannot depend on header parameters here")
-                if dependant.cookie_params:
-                    raise ValueError("cannot depend on cookie parameters here")
-                if dependant.body_params:
-                    raise ValueError("cannot depend on body parameters here")
-
-                is_coroutine = asyncio.iscoroutinefunction(func)
-                if response_model:
-                    assert utils.is_body_allowed_for_status_code(
-                        status_code
-                    ), (
-                        f"Status code {status_code} must not "
-                        f"have a response body"
-                    )
-                    response_name = "Response_" + re.sub(
-                        r"\W", "_", self._name
-                    )
-                    response_field = dep_utils.create_model_field(  # type: ignore [attr-defined]
-                        name=response_name,
-                        type_=response_model,
-                        mode="serialization",
-                    )
-                    secure_cloned_response_field: Optional[ModelField] = (
-                        utils.create_cloned_field(response_field)
-                    )
-                else:
-                    secure_cloned_response_field = None
-                current_response_class = utils.get_value_or_default(
-                    response_class, self._default_response_class
-                )
-                if isinstance(current_response_class, DefaultPlaceholder):
-                    actual_response_class: type[fastapi.Response] = (
-                        current_response_class.value
-                    )
-                else:
-                    actual_response_class = current_response_class
-
-                self._is_set = True
-                self._func = func
-                self._is_coroutine = is_coroutine
-                self._dependant = dependant
-                self._status_code = status_code
-                self._response_field = secure_cloned_response_field
-                self._response_model_include = response_model_include
-                self._response_model_exclude = response_model_exclude
-                self._response_model_by_alias = response_model_by_alias
-                self._response_model_exclude_unset = (
-                    response_model_exclude_unset
-                )
-                self._response_model_exclude_defaults = (
-                    response_model_exclude_defaults
-                )
-                self._response_model_exclude_none = response_model_exclude_none
-                self._response_class = actual_response_class
             finally:
                 if orig_sig is None:
                     delattr(func, "__signature__")
                 else:
                     func.__signature__ = orig_sig  # type: ignore [attr-defined]
+
+            if dependant.path_params:
+                raise ValueError("cannot depend on path parameters here")
+            if dependant.query_params:
+                raise ValueError("cannot depend on query parameters here")
+            if dependant.header_params:
+                raise ValueError("cannot depend on header parameters here")
+            if dependant.cookie_params:
+                raise ValueError("cannot depend on cookie parameters here")
+            if dependant.body_params:
+                raise ValueError("cannot depend on body parameters here")
+
+            is_coroutine = asyncio.iscoroutinefunction(func)
+            if response_model:
+                assert utils.is_body_allowed_for_status_code(status_code), (
+                    f"Status code {status_code} must not have a response body"
+                )
+                response_name = "Response_" + re.sub(r"\W", "_", self._name)
+                response_field = dep_utils.create_model_field(  # type: ignore [attr-defined]
+                    name=response_name,
+                    type_=response_model,
+                    mode="serialization",
+                )
+                secure_cloned_response_field: Optional[ModelField] = (
+                    utils.create_cloned_field(response_field)
+                )
+            else:
+                secure_cloned_response_field = None
+            current_response_class = utils.get_value_or_default(
+                response_class, self._default_response_class
+            )
+            if isinstance(current_response_class, DefaultPlaceholder):
+                actual_response_class: type[fastapi.Response] = (
+                    current_response_class.value
+                )
+            else:
+                actual_response_class = current_response_class
+
+            self._is_set = True
+            self._func = func
+            self._is_coroutine = is_coroutine
+            self._dependant = dependant
+            self._status_code = status_code
+            self._response_field = secure_cloned_response_field
+            self._response_model_include = response_model_include
+            self._response_model_exclude = response_model_exclude
+            self._response_model_by_alias = response_model_by_alias
+            self._response_model_exclude_unset = response_model_exclude_unset
+            self._response_model_exclude_defaults = (
+                response_model_exclude_defaults
+            )
+            self._response_model_exclude_none = response_model_exclude_none
+            self._response_class = actual_response_class
             return func
 
         if f is None:
@@ -520,8 +515,8 @@ class DecoratorInstance(BaseConfigInstance[T, S], Generic[T, S]):
         self._default = lambda: config.default
         self._subject = subject
 
-    def __call__(self, value: T) -> T:
-        self._call(value)
+    def __call__(self, value: C) -> C:
+        self._call(cast("T", value))
         return value
 
 
