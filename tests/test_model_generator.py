@@ -343,6 +343,33 @@ class TestModelGenerator(tb.ModelTestCase):
             d.body
 
     @tb.typecheck
+    def test_modelgen_data_init_unfetched_link(self):
+        from gel._internal._dlist import AbstractDistinctList
+        import models as m
+
+        ug = self.client.query_required_single(m.UserGroup.limit(1))
+
+        # Here we test that a link that we haven't fetched is available
+        # as a trackable collection and .append() works on it.
+        #
+        # This is basic usability -- we don't want your code to break
+        # at runtime because you changed the query and `.append()` calls
+        # stopped working.
+        ug.users.append(m.User(name="test test test"))
+        self.assertIsInstance(ug.users, AbstractDistinctList)
+
+        # And now we'll test that the data will actually
+        self.client.save(ug)
+
+        ug2 = self.client.query_required_single(
+            m.UserGroup.filter(
+                lambda ug: m.std.any(ug.users.name == "test test test")
+            ).limit(1)
+        )
+
+        self.assertEqual(ug2.id, ug.id)
+
+    @tb.typecheck
     def test_modelgen_pydantic_apis(self):
         # regression test for https://github.com/geldata/gel-python/issues/722
 
