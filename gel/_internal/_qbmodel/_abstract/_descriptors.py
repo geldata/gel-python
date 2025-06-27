@@ -13,6 +13,7 @@ import typing
 from pydantic._internal import _namespace_utils  # noqa: PLC2701
 
 from gel._internal import _qb
+from gel._internal import _namespace
 from gel._internal import _typing_eval
 from gel._internal import _typing_inspect
 from gel._internal import _utils
@@ -63,7 +64,7 @@ class ModelFieldDescriptor(_qb.AbstractFieldDescriptor):
 
     def _try_resolve_type(self) -> Any:
         origin = self.__gel_origin__
-        globalns = _utils.module_ns_of(origin)
+        globalns = _namespace.module_ns_of(origin)
         ns = _namespace_utils.NsResolver(
             parent_namespace=getattr(
                 origin,

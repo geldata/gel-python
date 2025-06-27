@@ -180,3 +180,191 @@ type MultiRangeTest {
     float_mrange: multirange<float64>;
     date_mrange: multirange<cal::local_date>;
 }
+
+# Functions for testing overloads
+function add_numbers(a: int64, b: int64) -> int64 {
+    using (a + b)
+};
+
+function add_numbers(a: float64, b: float64) -> float64 {
+    using (a + b)
+};
+
+function add_numbers(a: str, b: str) -> str {
+    using (a ++ b)
+};
+
+# Function with optional parameters
+function format_user(name: str, prefix: optional str = "User") -> str {
+    using ((prefix ?? "User") ++ ": " ++ name)
+};
+
+function format_user(name: str, prefix: str, suffix: str) -> str {
+    using (prefix ++ ": " ++ name ++ " " ++ suffix)
+};
+
+# Function with different return types based on input
+function get_value(input: str) -> str {
+    using (input)
+};
+
+function get_value(input: int64) -> int64 {
+    using (input)
+};
+
+function get_value(input: User) -> str {
+    using (input.name)
+};
+
+# Function with array parameters
+function sum_array(values: array<int64>) -> int64 {
+    using (sum(array_unpack(values)))
+};
+
+function sum_array(values: array<float64>) -> float64 {
+    using (sum(array_unpack(values)))
+};
+
+# Function with tuple parameters
+function process_tuple(data: tuple<str, int64>) -> str {
+    using (data.0 ++ " - " ++ <str>data.1)
+};
+
+function process_tuple(data: tuple<str, str>) -> str {
+    using (data.0 ++ " | " ++ data.1)
+};
+
+# Function with complex overloads that might overlap
+function complex_func(x: int64) -> str {
+    using ("int: " ++ <str>x)
+};
+
+function complex_func(x: float64) -> str {
+    using ("float: " ++ <str>x)
+};
+
+function complex_func(x: str) -> str {
+    using ("str: " ++ x)
+};
+
+function complex_func(x: int64, y: str) -> str {
+    using ("int+str: " ++ <str>x ++ " " ++ y)
+};
+
+function complex_func(x: str, y: int64) -> str {
+    using ("str+int: " ++ x ++ " " ++ <str>y)
+};
+
+# Simple function with default parameters
+function simple_add(x: int64, y: int64 = 10) -> int64 {
+    using (x + y)
+};
+
+function simple_concat(text1: str, text2: str = "default") -> str {
+    using (text1 ++ " " ++ text2)
+};
+
+# Function with optional parameter
+function optional_multiply(x: int64, multiplier: optional float64 = <optional float64>{}) -> float64 {
+    using (<float64>x * (multiplier ?? 1.0))
+};
+
+# Function with array parameter and default
+function join_strings(texts: array<str>, separator: str = " ") -> str {
+    using (array_join(texts, separator))
+};
+
+# Function with multiple defaults
+function format_text(
+    text: str,
+    named only prefix: str = "",
+    named only suffix: str = "",
+    named only uppercase: bool = false
+) -> str {
+    using (
+        prefix ++
+        (str_upper(text) if uppercase else text) ++
+        suffix
+    )
+};
+
+# Variadic functions for testing
+function format_text_variadic(
+    s: str,
+    variadic a: int64,
+    named only suffix: str = '-suf',
+    named only prefix: str = 'pref-'
+) -> str {
+    using (
+        prefix ++ s ++ <str>sum(array_unpack(a)) ++ suffix
+    )
+};
+
+function sum_variadic(variadic values: int64) -> int64 {
+    using (sum(array_unpack(values)))
+};
+
+function join_variadic(separator: str, variadic items: str) -> str {
+    using (array_join(items, separator))
+};
+
+
+
+# Function with variadic and regular parameters
+function process_variadic(
+    base: str,
+    variadic numbers: int64,
+    named only multiplier: int64 = 1
+) -> str {
+    using (
+        base ++ ': ' ++ <str>(sum(array_unpack(numbers)) * multiplier)
+    )
+};
+
+# Function with named-only parameters (no variadic)
+function format_with_options(
+    text: str,
+    named only bold: bool = false,
+    named only italic: bool = false,
+    named only prefix: str = '',
+    named only suffix: str = ''
+) -> str {
+    using (
+        prefix ++
+        ('[BOLD]' if bold else '') ++
+        ('[ITALIC]' if italic else '') ++
+        text ++
+        ('[/ITALIC]' if italic else '') ++
+        ('[/BOLD]' if bold else '') ++
+        suffix
+    )
+};
+
+# Function with optional variadic parameters
+function optional_sum(
+    variadic addends: int64,
+    named only base: int64 = 0
+) -> int64 {
+    using (base + sum(array_unpack(addends)))
+};
+
+# Function combining multiple parameter types
+function complex_variadic(
+    required_param: str,
+    optional_param: str = 'default',
+    variadic var_params: int64,
+    named only flag: bool = false,
+    named only multiplier: float64 = 1.0
+) -> str {
+    using (
+        required_param ++
+        ' (' ++ optional_param ++ ')' ++
+        ' sum=' ++ <str>(<int64>(sum(array_unpack(var_params)) * multiplier)) ++
+        (' [FLAG]' if flag else '')
+    )
+};
+
+
+
+
+

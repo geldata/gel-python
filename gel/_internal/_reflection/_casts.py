@@ -22,15 +22,14 @@ from gel._internal import _dataclass_extras
 from . import _enums
 from . import _types
 from . import _query
-from ._struct import struct
+from ._base import struct, sobject
 
 if TYPE_CHECKING:
     from gel import abstract
 
 
-@struct
+@sobject
 class Cast:
-    id: str
     from_type: _types.TypeRef
     to_type: _types.TypeRef
     allow_implicit: bool
@@ -60,7 +59,7 @@ def _trace_all_casts(
     return reachable
 
 
-@dataclasses.dataclass(frozen=True, kw_only=True)
+@struct
 class CastMatrix:
     explicit_casts_from: CastMap
     explicit_casts_to: CastMap

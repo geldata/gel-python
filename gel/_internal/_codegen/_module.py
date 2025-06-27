@@ -20,7 +20,7 @@ from collections import defaultdict
 if TYPE_CHECKING:
     import io
 
-    from collections.abc import Iterator, Mapping
+    from collections.abc import Iterator, Iterable, Mapping
     from collections.abc import Set as AbstractSet
 
 
@@ -87,6 +87,9 @@ class GeneratedModule:
         self._globals: set[str] = set()
         self._exports: set[str] = set()
         self._imported_names: dict[tuple[str, str, ImportTime], str] = {}
+        self._typevars: defaultdict[str, dict[str | None, str]] = defaultdict(
+            dict
+        )
 
     def has_content(self) -> bool:
         return any(
@@ -109,8 +112,21 @@ class GeneratedModule:
     def add_global(self, name: str) -> None:
         self._globals.add(name)
 
-    def udpate_globals(self, names: collections.abc.Iterable[str]) -> None:
+    def update_globals(self, names: collections.abc.Iterable[str]) -> None:
         self._globals.update(names)
+
+    def declare_typevar(
+        self,
+        name: str,
+        *,
+        bound: str | None,
+    ) -> str:
+        typevar = self._typevars[name].get(bound)
+        if typevar is None:
+            typevar = self._disambiguate_name(name)
+            self._typevars[name][bound] = typevar
+            self.add_global(typevar)
+        return typevar
 
     def _get_import_strings(
         self,
@@ -163,7 +179,7 @@ class GeneratedModule:
         for import_kind, import_strings in import_lines.items():
             import_maps[source][import_kind][module].update(import_strings)
 
-    def _disambiguate_import_name(self, name: str) -> str:
+    def _disambiguate_name(self, name: str) -> str:
         if name not in self._globals:
             return name
 
@@ -172,9 +188,9 @@ class GeneratedModule:
         def _mangle(name: str) -> str:
             nonlocal ctr
             if ctr == 0:
-                return f"___{name}__"
+                return f"{name}_"
             else:
-                return f"___{name}_{ctr}__"
+                return f"{name}_{ctr}"
 
         mangled = _mangle(name)
         while mangled in self._globals:
@@ -215,7 +231,7 @@ class GeneratedModule:
                 parent_module += dot
 
             if parent_module:
-                imported_as = self._disambiguate_import_name(
+                imported_as = self._disambiguate_name(
                     suggested_module_alias or tail_module
                 )
                 if imported_as == tail_module:
@@ -224,7 +240,7 @@ class GeneratedModule:
                     imported_aliases[imported_as] = tail_module
                 imported_module = parent_module
             else:
-                imported_as = self._disambiguate_import_name(
+                imported_as = self._disambiguate_name(
                     suggested_module_alias or module
                 )
                 imported_aliases[imported_as] = "."
@@ -348,6 +364,24 @@ class GeneratedModule:
             self._indent_level -= 1
 
     @contextlib.contextmanager
+    def if_(self, cond: str) -> Iterator[None]:
+        self.write(f"if {cond}:")
+        with self.indented():
+            yield
+
+    @contextlib.contextmanager
+    def elif_(self, cond: str) -> Iterator[None]:
+        self.write(f"elif {cond}:")
+        with self.indented():
+            yield
+
+    @contextlib.contextmanager
+    def else_(self) -> Iterator[None]:
+        self.write("else:")
+        with self.indented():
+            yield
+
+    @contextlib.contextmanager
     def type_checking(self) -> Iterator[None]:
         tc = self.import_name("typing", "TYPE_CHECKING")
         self.write(f"if {tc}:")
@@ -406,6 +440,23 @@ class GeneratedModule:
 
     def get_comment_preamble(self) -> str:
         return self._comment_preamble
+
+    def _render_typevar(self, name: str, *, bound: str | None, tv: str) -> str:
+        if bound is None:
+            return f'{name} = {tv}("{name}")'
+        else:
+            return f'{name} = {tv}("{name}", bound={bound!r})'
+
+    def render_typevars(self) -> str:
+        if not self._typevars:
+            return ""
+        else:
+            tv = self.import_name("typing", "TypeVar")
+            return "\n".join(
+                self._render_typevar(name, bound=bound, tv=tv)
+                for bounds in self._typevars.values()
+                for bound, name in bounds.items()
+            )
 
     def render_exports(self) -> str:
         if self._exports:
@@ -528,9 +579,13 @@ class GeneratedModule:
         return result
 
     def output(self, out: io.TextIOWrapper) -> None:
+        typevars = self.render_typevars()
         out.write(self.get_comment_preamble())
         out.write("\n\n")
         out.write(self.render_imports())
+        if typevars:
+            out.write("\n\n\n")
+            out.write(typevars)
         main_code = self._content[CodeSection.main]
         if main_code:
             out.write("\n\n\n")
@@ -552,7 +607,7 @@ class GeneratedModule:
     def format_list(
         self,
         tpl: str,
-        values: list[str],
+        values: Iterable[str],
         *,
         first_line_comment: str | None = None,
         extra_indent: int = 0,
@@ -560,21 +615,26 @@ class GeneratedModule:
         carry_separator: bool = False,
         trailing_separator: bool | None = None,
     ) -> str:
-        list_string = separator.join(values)
+        vlist = list(values)
+        if trailing_separator is None:
+            trailing_separator = not carry_separator
+        list_string = separator.join(vlist)
+        if carry_separator:
+            strip_sep = separator.lstrip()
+        else:
+            strip_sep = separator.rstrip()
+        if list_string and trailing_separator:
+            list_string += strip_sep
         output_string = tpl.format(list=list_string)
         line_length = len(output_string) + len(
             self.current_indentation(extra_indent)
         )
-        if trailing_separator is None:
-            trailing_separator = not carry_separator
         if line_length > MAX_LINE_LENGTH:
             if carry_separator:
-                strip_sep = separator.lstrip()
                 line_sep = f"\n{self.INDENT}{strip_sep}"
             else:
-                strip_sep = separator.rstrip()
                 line_sep = f"{strip_sep}\n{self.INDENT}"
-            list_string = line_sep.join(values)
+            list_string = line_sep.join(vlist)
             if list_string and trailing_separator:
                 list_string += strip_sep
             if first_line_comment:

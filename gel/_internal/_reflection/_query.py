@@ -79,12 +79,12 @@ SELECT Operator {
         kind,
         typemod,
         default,
+        index := @index,
     } ORDER BY @index,
 }
 FILTER
     .builtin = <bool>$builtin
     AND NOT .internal
-    AND NOT .abstract
 """
 
 
@@ -111,6 +111,7 @@ SELECT Function {
         kind,
         typemod,
         default,
+        index := @index,
     } ORDER BY @index,
     preserves_optionality,
 }

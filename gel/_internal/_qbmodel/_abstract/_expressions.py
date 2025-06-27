@@ -5,7 +5,7 @@
 """Base object types used to implement class-based query builders"""
 
 from __future__ import annotations
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, Literal, TypeVar, overload
 from typing_extensions import TypeAliasType
 
 import dataclasses
@@ -29,6 +29,9 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     from ._base import GelType
+
+
+_T = TypeVar("_T")
 
 
 def _get_prefixed_ptr(
@@ -358,7 +361,7 @@ def add_limit(
             fname="std::min",
             args=[
                 _qb.SetLiteral(
-                    items=[stmt.limit.limit, limit],
+                    items=(stmt.limit.limit, limit),
                     type_=limit.type,
                 ),
             ],
@@ -388,7 +391,7 @@ def add_offset(
             fname="std::min",
             args=[
                 _qb.SetLiteral(
-                    items=[stmt.offset.offset, offset],
+                    items=(stmt.offset.offset, offset),
                     type_=offset.type,
                 ),
             ],
@@ -397,3 +400,24 @@ def add_offset(
         )
 
     return dataclasses.replace(stmt, offset=_qb.Offset(offset=offset))
+
+
+@overload
+def empty_set_if_none(
+    val: None,
+    type_: type[GelType],
+) -> _qb.CastOp: ...
+
+
+@overload
+def empty_set_if_none(
+    val: _T,
+    type_: type[GelType],
+) -> _T: ...
+
+
+def empty_set_if_none(
+    val: _T | None,
+    type_: type[GelType],
+) -> _T | _qb.CastOp:
+    return _qb.empty_set_if_none(val, type_=type_.__gel_reflection__.name)
