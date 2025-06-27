@@ -663,6 +663,97 @@ class TestModelGenerator(tb.ModelTestCase):
         )
 
     @tb.typecheck
+    def test_modelgen_pydantic_apis_05(self):
+        # Test pickling a nested model that has a multi link with link props.
+
+        from models import default
+        from gel._testbase import repickle
+
+        sl = self.client.query_required_single(
+            default.GameSession.select(
+                num=True,
+                players=lambda s: s.players.select("*")
+                .order_by(lambda u: u.name)
+                .limit(1),
+            )
+            .filter(num=123)
+            .limit(1)
+        )
+
+        sl2 = repickle(sl)
+        self.assertEqual(sl.model_dump(), sl2.model_dump())
+
+        sl.num += 1
+        pl = sl.players[0]
+        pl.name = "Alice the 2nd"
+        pl.__linkprops__.is_tall_enough = not pl.__linkprops__.is_tall_enough
+
+        sl2 = repickle(sl)
+        self.assertEqual(sl.model_dump(), sl2.model_dump())
+
+        self.assertEqual(
+            sl.__gel_get_changed_fields__(),
+            sl2.__gel_get_changed_fields__(),
+        )
+        self.assertEqual(
+            sl.players[0]._p__obj__.__gel_get_changed_fields__(),
+            sl2.players[0]._p__obj__.__gel_get_changed_fields__(),
+        )
+        self.assertEqual(
+            sl.players[0].__linkprops__.__gel_get_changed_fields__(),
+            sl2.players[0].__linkprops__.__gel_get_changed_fields__(),
+        )
+
+        self.assertIsInstance(sl2.players, type(sl.players))
+
+    @tb.typecheck
+    def test_modelgen_pydantic_apis_06(self):
+        # Test pickling a nested model that has a single link with link props.
+
+        from models import default
+        from gel._testbase import repickle
+
+        sl = self.client.query_required_single(
+            default.StackableLoot.select(
+                name=True,
+                owner=lambda s: s.owner.select(
+                    name=True,
+                    nickname=True,
+                ),
+            )
+            .filter(name="Gold Coin")
+            .limit(1)  # TODO: detect cardinality, name is exclusive
+        )
+
+        sl2 = repickle(sl)
+        self.assertEqual(sl.model_dump(), sl2.model_dump())
+
+        sl.name += "aaa"
+        assert sl.owner is not None
+        sl.owner.name += "Alice the 2nd"
+        sl.owner.__linkprops__.bonus = not sl.owner.__linkprops__.bonus
+
+        sl2 = repickle(sl)
+        self.assertEqual(sl.model_dump(), sl2.model_dump())
+
+        assert sl2.owner is not None
+
+        self.assertEqual(
+            sl.__gel_get_changed_fields__(),
+            sl2.__gel_get_changed_fields__(),
+        )
+        self.assertEqual(
+            sl.owner._p__obj__.__gel_get_changed_fields__(),
+            sl2.owner._p__obj__.__gel_get_changed_fields__(),
+        )
+        self.assertEqual(
+            sl.owner.__linkprops__.__gel_get_changed_fields__(),
+            sl2.owner.__linkprops__.__gel_get_changed_fields__(),
+        )
+
+        self.assertIsInstance(sl2.owner, type(sl.owner))
+
+    @tb.typecheck
     def test_modelgen_data_unpack_polymorphic(self):
         from models import default
 

@@ -351,6 +351,15 @@ class GelSourceModel(
         ll_setattr(self, "__gel_changed_fields__", None)
         return self
 
+    def __getstate__(self) -> dict[Any, Any]:
+        state = super().__getstate__()
+        state["__gel_changed_fields__"] = self.__gel_changed_fields__
+        return state
+
+    def __setstate__(self, state: dict[Any, Any]) -> None:
+        super().__setstate__(state)
+        self.__gel_changed_fields__ = state["__gel_changed_fields__"]
+
     def __copy__(self) -> Self:
         cp = super().__copy__()
 
@@ -916,6 +925,16 @@ class ProxyModel(GelModel, Generic[_MT_co]):
     def model_dump_json(self, /, **kwargs: Any) -> str:
         kwargs = _kwargs_exclude_id(self.id, kwargs)
         return super().model_dump_json(**kwargs)
+
+    def __getstate__(self) -> dict[Any, Any]:
+        return {
+            "obj": ll_getattr(self, "_p__obj__"),
+            "linkprops": ll_getattr(self, "__linkprops__"),
+        }
+
+    def __setstate__(self, state: dict[Any, Any]) -> None:
+        ll_setattr(self, "_p__obj__", state["obj"])
+        ll_setattr(self, "__linkprops__", state["linkprops"])
 
 
 #

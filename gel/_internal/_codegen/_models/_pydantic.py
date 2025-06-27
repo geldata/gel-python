@@ -3577,7 +3577,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                         variant=variant,
                     )
                     self.write(f"{classname}.__name__ = {ptrname!r}")
-                    qualname = f"{obj_class}.{ptrname}"
+                    qualname = f"{obj_class}.__links__.{ptrname}"
                     self.write(f"{classname}.__qualname__ = {qualname!r}")
                     self.write(f"return {classname}")
 
@@ -3681,6 +3681,10 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                     self._write_model_attribute(lprop.name, py_anno)
                     lprop_line = f"{lprop.name}: {pytype} | None = None"
                     lprops.append(lprop_line)
+
+            type_name = reflection.parse_name(objtype.name)
+            qualname = f"{type_name.name}.__links__.{pname}.__lprops__"
+            self.write(f"__lprops__.__qualname__ = {qualname!r}")
 
             self.write("__linkprops__: __lprops__")
             self.write()
