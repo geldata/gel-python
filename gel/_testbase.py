@@ -30,6 +30,7 @@ import linecache
 import logging
 import os
 import pathlib
+import pickle
 import re
 import shutil
 import subprocess
@@ -1102,3 +1103,10 @@ def pop_ids_json(js: str) -> str:
     assert isinstance(dct, (dict, list))
     pop_ids(dct)
     return json.dumps(dct)
+
+
+T = typing.TypeVar("T")
+
+
+def repickle(obj: T) -> T:
+    return pickle.loads(pickle.dumps(obj))

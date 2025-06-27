@@ -224,6 +224,55 @@ class ProxyDistinctList(
         super().clear()
         self._wrapped_index = None
 
+    def __reduce__(self) -> tuple[Any, ...]:
+        return (
+            ProxyDistinctList._reconstruct_from_pickle,
+            (
+                self.type,
+                self.basetype,
+                self._items,
+                self._wrapped_index.values()
+                if self._wrapped_index is not None
+                else None,
+                self._initial_items,
+                self._set,
+                self._unhashables.values()
+                if self._unhashables is not None
+                else None,
+            ),
+        )
+
+    @staticmethod
+    def _reconstruct_from_pickle(  # noqa: PLR0917
+        tp: type[_PT_co],  # type: ignore [valid-type]
+        basetp: type[_BMT_co],  # type: ignore [valid-type]
+        items: list[_PT_co],
+        wrapped_index: list[_PT_co] | None,
+        initial_items: list[_PT_co] | None,
+        hashables: set[_PT_co] | None,
+        unhashables: list[_PT_co] | None,
+    ) -> ProxyDistinctList[_PT_co, _BMT_co]:
+        cls = ProxyDistinctList[tp, basetp]  # type: ignore [valid-type]
+
+        lst = cls.__new__(cls)
+
+        lst._items = items
+        if wrapped_index is None:
+            lst._wrapped_index = None
+        else:
+            lst._wrapped_index = {
+                id(item._p__obj__): item for item in wrapped_index
+            }
+
+        lst._initial_items = initial_items
+        lst._set = hashables
+        if unhashables is None:
+            lst._unhashables = None
+        else:
+            lst._unhashables = {id(item): item for item in unhashables}
+
+        return lst
+
     if TYPE_CHECKING:
 
         def append(self, value: _PT_co | _BMT_co) -> None: ...
