@@ -1354,7 +1354,9 @@ class BaseGeneratedModule:
     ) -> Iterator[None]:
         type_ignore = list(type_ignore)
         if overload:
-            over = self.import_name("typing", "overload")
+            # Must import from `typing_extensions` for `get_overloads`
+            # to work on Python 3.10.
+            over = self.import_name("typing_extensions", "overload")
             # Mypy sometimes complains about the `@overload` line,
             # not the `def` line, so restate the type: ignore comment
             # here (with unused-ignore).

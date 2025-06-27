@@ -30,7 +30,7 @@ _R_co = TypeVar("_R_co", covariant=True)
 
 
 def _isinstance(obj: Any, tp: Any) -> bool:
-    if isinstance(tp, type):
+    if _typing_inspect.is_valid_isinstance_arg(tp):
         return isinstance(obj, tp)
     elif isinstance(tp, tuple):
         return any(_isinstance(obj, el) for el in tp)
