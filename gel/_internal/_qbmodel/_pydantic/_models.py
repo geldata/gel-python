@@ -22,7 +22,6 @@ from typing_extensions import (
 
 import inspect
 import typing
-import uuid
 import warnings
 import weakref
 
@@ -35,12 +34,20 @@ from pydantic._internal import _model_construction  # noqa: PLC2701
 
 from gel._internal import _qb
 from gel._internal import _typing_inspect
+from gel._internal import _utils
 from gel._internal._unsetid import UNSET_UUID
 
 from gel._internal._qbmodel import _abstract
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator, Iterable, Mapping, Set as AbstractSet
+    import uuid
+
+    from collections.abc import (
+        Iterator,
+        Iterable,
+        Mapping,
+        Set as AbstractSet,
+    )
     from gel._internal._qbmodel._abstract import GelType
 
 
@@ -259,7 +266,6 @@ class GelSourceModel(
     metaclass=GelModelMeta,
 ):
     model_config = pydantic.ConfigDict(
-        json_encoders={uuid.UUID: str},
         validate_assignment=True,
         defer_build=True,
         extra="forbid",
@@ -381,6 +387,24 @@ class GelSourceModel(
         raise NotImplementedError(
             'Gel models do not support the "del" operation'
         )
+
+
+def _kwargs_exclude_id(
+    id_: uuid.UUID, kwargs: dict[str, Any], /
+) -> dict[str, Any]:
+    if id_ is UNSET_UUID:
+        try:
+            exclude = kwargs["exclude"]
+        except KeyError:
+            kwargs["exclude"] = {"id"}
+        else:
+            if isinstance(exclude, set):
+                exclude.add("id")
+            else:
+                assert isinstance(exclude, dict)
+                exclude["id"] = True
+
+    return kwargs
 
 
 class GelModel(
@@ -570,6 +594,30 @@ class GelModel(
     def __repr_name__(self) -> str:
         cls = type(self)
         return f"{cls.__module__}.{cls.__qualname__} <{id(self)}>"
+
+    @_utils.inherit_signature(  # type: ignore [arg-type]
+        pydantic.BaseModel.model_dump,
+    )
+    def model_dump(self, /, **kwargs: Any) -> dict[str, Any]:
+        # We omit "id" from *unsaved* new objects when serialized.
+        # While this isn't ideal (the field is "required") it's our best
+        # defense against passing an unsaved object through an API boundary.
+        # Out of all options:
+        #   - return string "unset"
+        #   - return invalid UUID or UUID with all-zero bytes
+        #   - return "null"
+        #   - not include "id" at all
+        # the latter seems like the least bad option and easier to deal
+        # with for the reciever when they validate the data.
+        kwargs = _kwargs_exclude_id(self.id, kwargs)
+        return super().model_dump(**kwargs)
+
+    @_utils.inherit_signature(  # type: ignore [arg-type]
+        pydantic.BaseModel.model_dump_json,
+    )
+    def model_dump_json(self, /, **kwargs: Any) -> str:
+        kwargs = _kwargs_exclude_id(self.id, kwargs)
+        return super().model_dump_json(**kwargs)
 
 
 _T_co = TypeVar("_T_co", covariant=True)
