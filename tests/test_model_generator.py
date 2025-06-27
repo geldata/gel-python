@@ -1620,7 +1620,7 @@ class TestModelGenerator(tb.ModelTestCase):
         self.client.save(user)
 
         user_in = SparseUser(nickname="Lacey")
-        updated = user.model_copy(update=user_in)
+        updated = user.model_copy(update=user_in.model_dump(exclude_none=True))
         self.client.save(updated)
 
         user2 = self.client.get(default.User.filter(name="Alice"))
