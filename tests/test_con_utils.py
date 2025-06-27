@@ -402,7 +402,8 @@ class TestConUtils(unittest.TestCase):
                             wait_until_available)
                 platform = testcase.get('platform')
                 if testcase.get('fs') and (
-                    (platform == 'windows' and sys.platform != 'win32')
+                    platform == 'windows'
+                    or sys.platform == 'win32'
                     or (platform == 'macos' and sys.platform != 'darwin')
                 ):
                     continue
