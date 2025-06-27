@@ -1604,6 +1604,29 @@ class TestModelGenerator(tb.ModelTestCase):
             self.client.save(p)
 
     @tb.typecheck
+    def test_modelgen_save_31(self):
+        """
+        Test that using model_copy with a sparse model updates the target model
+        """
+
+        from models import default
+        from pydantic import BaseModel
+
+        class SparseUser(BaseModel):
+            name: str | None = None
+            nickname: str | None = None
+
+        user = default.User(name="Alice", nickname="Al")
+        self.client.save(user)
+
+        user_in = SparseUser(nickname="Lacey")
+        updated = user.model_copy(update=user_in)
+        self.client.save(updated)
+
+        user2 = self.client.get(default.User.filter(name="Alice"))
+        self.assertEqual(user2.nickname, "Lacey")
+
+    @tb.typecheck
     def test_modelgen_save_collections_01(self):
         from models import default
         # insert an object with an optional single: with link props
