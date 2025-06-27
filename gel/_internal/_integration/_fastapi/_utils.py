@@ -24,7 +24,6 @@ import functools
 import logging
 import os
 import re
-import sys
 import traceback
 import warnings
 
@@ -413,6 +412,9 @@ class ConfigInstance(Generic[T, S]):
         except AttributeError:
             return self._default()
 
+    def is_set(self) -> bool:
+        return hasattr(self, "_value")
+
 
 class OneOf:
     bodies: dict[str, params.Body]
@@ -492,6 +494,7 @@ class ContentTypeRoute(routing.APIRoute):
             super().__init__(path, endpoint, **kwargs)
             return
 
+        sig_replaced = False
         try:
             # Create routes for each media type
             extras = []
@@ -514,16 +517,17 @@ class ContentTypeRoute(routing.APIRoute):
                         if is_accept:
                             new_args.append(args[0])
                             new_args.reverse()
-                            if sys.version_info >= (3, 11):
-                                anno = Annotated.__getitem__(tuple(new_args))
-                            else:
-                                anno = Annotated[tuple(new_args)]
-                            new_params.append(param.replace(annotation=anno))
+                            new_params.append(
+                                param.replace(
+                                    annotation=Annotated[tuple(new_args)]
+                                )
+                            )
                         else:
                             new_params.append(param)
                 endpoint.__signature__ = orig_sig.replace(  # type: ignore [attr-defined]
                     parameters=new_params
                 )
+                sig_replaced = True
                 if i == 0:
                     super().__init__(path, endpoint, **kwargs)
                     self.routes[media_type.lower()] = self
@@ -535,11 +539,12 @@ class ContentTypeRoute(routing.APIRoute):
                 self.body_field.__gel_extras__ = extras  # type: ignore [attr-defined]
 
         finally:
-            # Restore the original signature if it was set
-            if explicit_sig is None:
-                delattr(endpoint, "__signature__")
-            else:
-                endpoint.__signature__ = explicit_sig  # type: ignore [attr-defined]
+            if sig_replaced:
+                # Restore the original signature if it was set
+                if explicit_sig is None:
+                    delattr(endpoint, "__signature__")
+                else:
+                    endpoint.__signature__ = explicit_sig  # type: ignore [attr-defined]
 
     def matches(self, scope: Scope) -> tuple[Match, Scope]:
         if self.routes:

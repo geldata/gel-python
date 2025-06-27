@@ -50,6 +50,8 @@ class GelAuth(client_mod.Extension):
     verifier_cookie_name = utils.Config("gel_verifier")
     tags: utils.Config[list[str | enum.Enum]] = utils.Config(["Gel Auth"])
     secure_cookie = utils.Config(True)  # noqa: FBT003
+    redirect_to: utils.Config[Optional[str]] = utils.Config("/")
+    redirect_to_page_name: utils.Config[Optional[str]] = utils.Config(None)
 
     _email_password: Optional[EmailPassword] = None
     _auto_email_password: bool = True
