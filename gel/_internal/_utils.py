@@ -4,7 +4,19 @@
 
 """Miscellaneous utilities."""
 
-from typing import Any, final
+from __future__ import annotations
+
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    final,
+    ParamSpec,
+    TypeVar,
+)
+
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 
 @final
@@ -23,3 +35,18 @@ def type_repr(t: Any) -> str:
             return f"{t.__module__}.{t.__qualname__}"
     else:
         return repr(t)
+
+
+P = ParamSpec("P")
+R = TypeVar("R")
+
+
+def inherit_signature(
+    func: Callable[P, R],
+) -> Callable[[Callable[P, R]], Callable[P, R]]:
+    """Decorator to make the wrapper have the same signature as the wrapped."""
+
+    def decorator(wrapper: Callable[P, R]) -> Callable[P, R]:
+        return wrapper
+
+    return decorator
