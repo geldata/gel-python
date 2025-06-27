@@ -284,7 +284,7 @@ class TestModelGenerator(tb.ModelTestCase):
     def test_modelgen_data_unpack_3(self):
         from models import default
 
-        from gel._internal._dlist import DistinctList
+        from gel._internal._qbmodel._pydantic._pdlist import ProxyDistinctList
 
         q = (
             default.GameSession.select(
@@ -312,7 +312,7 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertIsInstance(d, default.GameSession)
 
         # Test that links are unpacked into a DistinctList, not a vanilla list
-        self.assertIsInstance(d.players, DistinctList)
+        self.assertIsInstance(d.players, ProxyDistinctList)
         self.assertIsInstance(d.players[0].groups, tuple)
 
         post = default.Post(author=d.players[0], body="test")
@@ -341,6 +341,20 @@ class TestModelGenerator(tb.ModelTestCase):
 
         with self.assertRaisesRegex(AttributeError, r".body. is not set"):
             d.body
+
+    @tb.typecheck
+    def test_modelgen_pdlist_parametrized(self):
+        from models import default
+        from gel._internal._qbmodel._pydantic._pdlist import (
+            ProxyDistinctList,
+        )
+
+        sess = default.GameSession(num=1, public=False)
+        pl = sess.players
+
+        self.assertIsInstance(pl, ProxyDistinctList)
+        self.assertIs(pl.type, default.GameSession.__links__.players)
+        self.assertIs(pl.basetype, default.User)
 
     @tb.typecheck
     def test_modelgen_data_init_unfetched_link(self):
@@ -494,10 +508,10 @@ class TestModelGenerator(tb.ModelTestCase):
 
         from models import default, std
 
-        from gel._internal._dlist import DistinctList
+        from gel._internal._qbmodel._pydantic._pdlist import ProxyDistinctList
 
         gs = default.GameSession(num=7)
-        self.assertIsInstance(gs.players, DistinctList)
+        self.assertIsInstance(gs.players, ProxyDistinctList)
 
         with self.assertRaisesRegex(
             ValueError, r"(?s)only instances of User are allowed, got .*int"
