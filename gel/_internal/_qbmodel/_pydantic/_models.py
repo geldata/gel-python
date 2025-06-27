@@ -456,6 +456,48 @@ class GelModel(
             for field_name in comp_fields:
                 pop(field_name, None)
 
+    def __getattr__(self, name: str) -> Any:
+        cls = type(self)
+
+        cls.model_rebuild()
+        try:
+            field = cls.__pydantic_fields__[name]
+        except KeyError:
+            # Not a field.
+            #
+            # We call `object.__getattribute__` here because we want to
+            # the descriptor to be called and raise a proper error or
+            # do something else.
+            return object.__getattribute__(self, name)
+
+        # We're accesing a field that was not set. Let's check if it's
+        # a "multi link". If it is, we have to create an empty list,
+        # so that the caller can append to it and save() later.
+        # This happens when an object is fetched from the database
+        # without the link specified, in which case the codec wouldn't
+        # construct the list; we can do that lazily.
+
+        if field.default_factory is list:
+            # A multi link?
+            ptrs = cls.__gel_reflection__.pointers
+            ptr = ptrs.get(name)
+            if ptr is not None and ptr.cardinality.is_multi():
+                # Definitely a multi link.
+
+                # This is a hack... we need to force Pydantic to apply its
+                # `Field(validate_default=True)` logic and the safest way to
+                # do that without using a whole bunch of private APIs is to
+                # simply call `__setattr__` directly.
+                pydantic.BaseModel.__setattr__(
+                    self, name, field.get_default(call_default_factory=True)
+                )
+                # Fetch the validated/coerced value (`list` will be converted
+                # to a variant of TrackedList.)
+                return getattr(self, name)
+
+        # Delegate to the descriptor.
+        return object.__getattribute__(self, name)
+
     def __gel_is_new__(self) -> bool:
         return self.id is UNSET_UUID
 
