@@ -16,6 +16,7 @@ import uuid  # noqa: TC003  # for runtime type annotations
 import fastapi
 import pydantic
 from fastapi import responses
+from starlette import concurrency
 
 from gel.auth import builtin_ui as core
 
@@ -35,7 +36,9 @@ InstallMode = Literal["no", "strict", "permissive"]
 class BuiltinUI(Installable):
     _auth: GelAuth
     _core: core.AsyncBuiltinUI
+    _blocking_io_core: core.BuiltinUI
 
+    install_sign_in_page = utils.Config(True)  # noqa: FBT003
     sign_in_path = utils.Config("/sign-in")
     sign_in_name = utils.Config("gel.auth.builtin_ui.sign_in")
     sign_in_summary = utils.Config(
@@ -44,6 +47,7 @@ class BuiltinUI(Installable):
     sign_in_default_response_class = utils.Config(responses.RedirectResponse)
     sign_in_default_status_code = utils.Config(http.HTTPStatus.SEE_OTHER)
 
+    install_sign_up_page = utils.Config(True)  # noqa: FBT003
     sign_up_path = utils.Config("/sign-up")
     sign_up_name = utils.Config("gel.auth.builtin_ui.sign_up")
     sign_up_summary = utils.Config(
@@ -68,7 +72,7 @@ class BuiltinUI(Installable):
     def __init__(self, auth: GelAuth) -> None:
         self._auth = auth
 
-    def install_sign_in_page(self, router: fastapi.APIRouter) -> None:
+    def __install_sign_in_page(self, router: fastapi.APIRouter) -> None:
         @router.get(
             self.sign_in_path.value,
             name=self.sign_in_name.value,
@@ -81,7 +85,7 @@ class BuiltinUI(Installable):
             self._auth.set_verifier_cookie(result.verifier, response)
             return str(result.redirect_url)
 
-    def install_sign_up_page(self, router: fastapi.APIRouter) -> None:
+    def __install_sign_up_page(self, router: fastapi.APIRouter) -> None:
         @router.get(
             self.sign_up_path.value,
             name=self.sign_up_name.value,
@@ -413,10 +417,23 @@ class BuiltinUI(Installable):
                 summary=self.callback_summary.value,
             )(self.make_auth_callback_handler(for_sign_in=False))
 
+    @property
+    def blocking_io_core(self) -> core.BuiltinUI:
+        return self._blocking_io_core
+
+    @property
+    def core(self) -> core.AsyncBuiltinUI:
+        return self._core
+
     async def install(self, router: fastapi.APIRouter) -> None:
         self._core = await core.make_async(self._auth.client)
-        self.install_sign_in_page(router)
-        self.install_sign_up_page(router)
+        self._blocking_io_core = await concurrency.run_in_threadpool(
+            core.make, self._auth.blocking_io_client
+        )
+        if self.install_sign_in_page.value:
+            self.__install_sign_in_page(router)
+        if self.install_sign_up_page.value:
+            self.__install_sign_up_page(router)
         if self.install_callback.value != "no":
             prefix = router.prefix
             router.prefix = ""
