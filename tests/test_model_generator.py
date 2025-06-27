@@ -384,7 +384,7 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(ug2.id, ug.id)
 
     @tb.typecheck
-    def test_modelgen_pydantic_apis(self):
+    def test_modelgen_pydantic_apis_01(self):
         # regression test for https://github.com/geldata/gel-python/issues/722
 
         import pydantic
@@ -435,6 +435,61 @@ class TestModelGenerator(tb.ModelTestCase):
 
         run_test(user_loaded, UserUpdate(name="Alice A."))
         run_test(user_new, UserUpdate(name="Bob B."))
+
+    @tb.typecheck(["import json"])
+    def test_modelgen_pydantic_apis_02(self):
+        from models import default
+
+        user_loaded = self.client.get(
+            default.User.select(name=True).filter(name="Alice").limit(1)
+        )
+        user_new = default.User(name="Bob")
+
+        self.assertEqual(
+            user_loaded.model_dump(),
+            {"id": user_loaded.id, "name": "Alice"},
+        )
+
+        self.assertEqual(
+            user_new.model_dump(exclude_unset=True),
+            {"name": "Bob"},
+        )
+
+        self.assertEqual(
+            user_new.model_dump(exclude_unset=True, include={"id", "name"}),
+            {"name": "Bob"},
+        )
+
+        self.assertEqual(
+            user_new.model_dump(),
+            {"name": "Bob", "nickname": None},
+        )
+
+        self.assertEqual(
+            user_new.model_dump(exclude={"nickname"}),
+            {"name": "Bob"},
+        )
+
+        self.assertEqual(
+            user_new.model_dump(exclude={"nickname": True}),
+            {"name": "Bob"},
+        )
+
+        self.assertEqual(
+            user_loaded.model_dump_json(),
+            json.dumps(
+                {"id": str(user_loaded.id), "name": "Alice"},
+                separators=(",", ":"),
+            ),
+        )
+
+        self.assertEqual(
+            user_new.model_dump_json(exclude_unset=True),
+            json.dumps(
+                {"name": "Bob"},
+                separators=(",", ":"),
+            ),
+        )
 
     @tb.typecheck
     def test_modelgen_data_unpack_polymorphic(self):
