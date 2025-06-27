@@ -1141,13 +1141,8 @@ def _resolve_config_options(
             resolved_config.set_host(creds.get("host"), source)
             resolved_config.set_port(creds.get("port"), source)
             if "database" in creds and resolved_config._database is None:
-                # Only update the config if 'branch' has not been already
-                # resolved.
                 resolved_config.set_database(creds.get("database"), source)
-
             if "branch" in creds and resolved_config._branch is None:
-                # Only update the config if 'database' has not been already
-                # resolved.
                 resolved_config.set_branch(creds.get("branch"), source)
             resolved_config.set_user(creds.get("user"), source)
             resolved_config.set_password(creds.get("password"), source)
