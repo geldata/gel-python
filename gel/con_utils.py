@@ -311,23 +311,23 @@ class ResolvedConnectConfig:
     # and _branch.
     @property
     def database(self):
-        return (
-            self._database
-            if self._database
-            else self._branch
-            if self._branch
-            else "edgedb"
-        )
+        if self._branch and self._branch != "__default__":
+            # If branch is set return it.
+            return self.branch
+
+        # Legacy pre-branch support.
+        return self._database or "edgedb"
 
     @property
     def branch(self):
-        return (
-            self._database
-            if self._database
-            else self._branch
-            if self._branch
-            else "__default__"
-        )
+        if self._branch:
+            # If branch is set return it.
+            return self._branch
+
+        # Else, if we have the database set -- use it as the branch name
+        # (backwards compat). Default to "__default__" if no branch and no
+        # database are set.
+        return self._database or "__default__"
 
     @property
     def user(self):
@@ -684,7 +684,7 @@ def _parse_connect_dsn_and_args(
         cloud_profile=cloud_profile_tuple,
     )
 
-    if has_compound_options is False:
+    if not has_compound_options:
         env_port_tuple = _get("PORT")
         if (
             resolved_config._port is None
@@ -983,6 +983,12 @@ def _parse_cloud_instance_name_into_config(
         )
     secret_key = resolved_config.secret_key
     if secret_key is None:
+        secret_key, secret_key_env = _getenv_and_key("SECRET_KEY")
+        resolved_config.set_secret_key(
+            secret_key,
+            f"{secret_key_env} env variable",
+        )
+    if secret_key is None:
         try:
             config_dir = _platform.config_dir()
             if resolved_config._cloud_profile is None:
@@ -1045,11 +1051,15 @@ def _resolve_config_options(
             # Only update the config if 'branch' has not been already
             # resolved.
             resolved_config.set_database(*database)
+
     if branch is not None:
         if resolved_config._database is None:
             # Only update the config if 'database' has not been already
             # resolved.
             resolved_config.set_branch(*branch)
+    elif database is not None:
+        resolved_config.set_branch(database[0], database[1])
+
     if user is not None:
         resolved_config.set_user(*user)
     if password is not None:
@@ -1130,19 +1140,15 @@ def _resolve_config_options(
 
             resolved_config.set_host(creds.get("host"), source)
             resolved_config.set_port(creds.get("port"), source)
-            if "database" in creds and resolved_config._branch is None:
-                # Only update the config if 'branch' has not been already
-                # resolved.
+            if "database" in creds and resolved_config._database is None:
                 resolved_config.set_database(creds.get("database"), source)
-
-            elif "branch" in creds and resolved_config._database is None:
-                # Only update the config if 'database' has not been already
-                # resolved.
+            if "branch" in creds and resolved_config._branch is None:
                 resolved_config.set_branch(creds.get("branch"), source)
             resolved_config.set_user(creds.get("user"), source)
             resolved_config.set_password(creds.get("password"), source)
             resolved_config.set_tls_ca_data(creds.get("tls_ca"), source)
             resolved_config.set_tls_security(creds.get("tls_security"), source)
+            resolved_config.set_secret_key(creds.get("secret_key"), source)
 
         return True
 

@@ -19,6 +19,8 @@
 from __future__ import annotations
 
 import dataclasses
+import datetime as dt
+import json
 import os
 import sys
 import typing
@@ -27,16 +29,16 @@ import unittest
 if typing.TYPE_CHECKING:
     from typing import reveal_type
 
+from gel import MultiRange, Range, errors
 from gel import _testbase as tb
-
 from gel._internal import _typing_inspect
-from gel._internal._reflection import SchemaPath
-from gel._internal._qbmodel._pydantic._models import GelModel
 from gel._internal._dlist import DistinctList
 from gel._internal._edgeql import Cardinality, PointerKind
+from gel._internal._qbmodel._pydantic._models import GelModel
 from gel._internal._qbmodel._pydantic._pdlist import (
     ProxyDistinctList,
 )
+from gel._internal._reflection import SchemaPath
 
 
 @dataclasses.dataclass
@@ -281,6 +283,7 @@ class TestModelGenerator(tb.ModelTestCase):
     @tb.typecheck
     def test_modelgen_data_unpack_3(self):
         from models import default
+
         from gel._internal._dlist import DistinctList
 
         q = (
@@ -355,6 +358,7 @@ class TestModelGenerator(tb.ModelTestCase):
     @tb.typecheck
     def test_modelgen_assert_single(self):
         from models import default
+
         from gel import errors
 
         q = default.Post.limit(1).__gel_assert_single__()
@@ -407,9 +411,10 @@ class TestModelGenerator(tb.ModelTestCase):
     @tb.typecheck
     def test_modelgen_data_model_validation_1(self):
         from typing import cast
+
+        from models import default, std
+
         from gel._internal._dlist import DistinctList
-        from models import default
-        from models import std
 
         gs = default.GameSession(num=7)
         self.assertIsInstance(gs.players, DistinctList)
@@ -586,6 +591,7 @@ class TestModelGenerator(tb.ModelTestCase):
     @tb.typecheck
     def test_modelgen_save_02(self):
         import uuid
+
         from models import default
         # insert an object with a required multi: no link props, one object
         # added to the link
@@ -1337,6 +1343,7 @@ class TestModelGenerator(tb.ModelTestCase):
         # https://github.com/geldata/gel-python/issues/720
 
         from models import default
+
         from gel._internal._unsetid import UNSET_UUID
 
         x = default.AllOptional()
@@ -1356,7 +1363,248 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertIs(z.pointer, x)
 
     @tb.typecheck
-    def test_modelgen_save_collections_1(self):
+    def test_modelgen_save_23(self):
+        from models import default
+
+        p = default.Post(body="save 23", author=default.User(name="Sally"))
+
+        self.client.save(p)
+
+        p2 = self.client.query_required_single("""
+            select Post {body, author: {name}}
+            filter .author.name = 'Sally'
+            limit 1
+        """)
+
+        self.assertEqual(p2.body, "save 23")
+        self.assertEqual(p2.author.name, "Sally")
+        self.assertEqual(p.id, p2.id)
+        self.assertEqual(p.author.id, p2.author.id)
+
+    @tb.typecheck
+    def test_modelgen_save_24(self):
+        from models import default
+
+        z = self.client.get(default.User.filter(name="Zoe"))
+        p = self.client.get(
+            default.Post.select(body=True).filter(body="Hello")
+        )
+
+        self.assertEqual(p.body, "Hello")
+
+        p.body = "Hello world"
+        p.author = z
+        self.client.save(p)
+
+        p2 = self.client.query_required_single("""
+            select Post {body, author: {name}}
+            filter .body = 'Hello world'
+            limit 1
+        """)
+
+        self.assertEqual(p2.body, "Hello world")
+        self.assertEqual(p2.author.name, "Zoe")
+
+    @tb.typecheck
+    def test_modelgen_save_25(self):
+        from models import default
+
+        g = self.client.get(
+            default.UserGroup.select(
+                name=True,
+                mascot=True,
+            ).filter(name="red")
+        )
+
+        self.assertEqual(g.mascot, "dragon")
+
+        g.mascot = "iguana"
+        self.client.save(g)
+
+        g2 = self.client.get(
+            default.UserGroup.select(
+                name=True,
+                mascot=True,
+            ).filter(name="red")
+        )
+        self.assertEqual(g2.mascot, "iguana")
+
+    @tb.xfail
+    @tb.typecheck
+    def test_modelgen_save_26(self):
+        from models import default
+
+        l0 = default.ImpossibleLink0(val="A", il1=default.BaseLink(val="X"))
+        l1 = default.ImpossibleLink1(val="2nd", il0=l0)
+        # change the prop an dlink of l0
+        l0.val = "1st"
+        l0.il1 = l1
+
+        # check the state before saving
+        self.assertEqual(l0.val, "1st")
+        self.assertEqual(l1.il0.val, "1st")
+        self.assertEqual(l0.il1.val, "2nd")
+        self.assertEqual(l0.il1.il0.val, "1st")
+
+        # this should now be an impossible to save loop
+        self.client.save(l0, l1)
+
+    @tb.typecheck
+    def test_modelgen_save_27(self):
+        from models import default
+
+        a = self.client.get(default.User.filter(name="Alice"))
+        b = self.client.get(default.User.filter(name="Billie"))
+        p = default.Raid(
+            name="2 people",
+            members=[
+                default.Raid.members.link(a, rank=1),
+                default.Raid.members.link(b, rank=2),
+            ],
+        )
+        self.client.save(p)
+
+        # Fetch and verify
+        res = self.client.get(
+            default.Raid.select(
+                name=True,
+                members=True,
+            ).filter(name="2 people")
+        )
+        self.assertEqual(res.name, "2 people")
+        self.assertEqual(len(res.members), 2)
+        self.assertEqual(
+            {(m.name, m.__linkprops__.rank) for m in res.members},
+            {("Alice", 1), ("Billie", 2)},
+        )
+
+        # technically this won't change things
+        p.members.extend(p.members)
+        self.client.save(p)
+
+        # Fetch and verify
+        res2 = self.client.get(
+            default.Raid.select(
+                name=True,
+                members=True,
+            ).filter(name="2 people")
+        )
+        self.assertEqual(res2.name, "2 people")
+        self.assertEqual(len(res2.members), 2)
+        self.assertEqual(
+            {(m.name, m.__linkprops__.rank) for m in res2.members},
+            {("Alice", 1), ("Billie", 2)},
+        )
+
+    @tb.typecheck
+    def test_modelgen_save_28(self):
+        from models import default
+
+        a = self.client.get(default.User.filter(name="Alice"))
+        p = default.Raid(
+            name="mixed raid",
+            members=[
+                default.Raid.members.link(a, rank=1),
+            ],
+        )
+        self.client.save(p)
+
+        # Fetch and verify
+        res = self.client.get(
+            default.Raid.select(
+                name=True,
+                members=True,
+            ).filter(name="mixed raid")
+        )
+        self.assertEqual(res.name, "mixed raid")
+        self.assertEqual(len(res.members), 1)
+        m = res.members[0]
+        self.assertEqual(m.name, "Alice")
+        self.assertEqual(m.__linkprops__.rank, 1)
+
+        x = default.CustomUser(name="Xavier")
+        p.members.extend([x])
+        self.client.save(p)
+
+        res2 = self.client.get(
+            default.Raid.select(
+                name=True,
+                members=True,
+            ).filter(name="mixed raid")
+        )
+        self.assertEqual(res2.name, "mixed raid")
+        self.assertEqual(len(res2.members), 2)
+        self.assertEqual(
+            {(m.name, m.__linkprops__.rank) for m in res2.members},
+            {("Alice", 1), ("Xavier", None)},
+        )
+
+    @tb.typecheck
+    def test_modelgen_save_29(self):
+        from models import default
+
+        a = self.client.get(default.User.filter(name="Alice"))
+        p = default.Raid(
+            name="bad raid",
+            members=[
+                default.Raid.members.link(a, rank=1),
+            ],
+        )
+        self.client.save(p)
+
+        # Fetch and verify
+        res = self.client.get(
+            default.Raid.select(
+                name=True,
+                members=True,
+            ).filter(name="bad raid")
+        )
+        self.assertEqual(res.name, "bad raid")
+        self.assertEqual(len(res.members), 1)
+        m = res.members[0]
+        self.assertEqual(m.name, "Alice")
+        self.assertEqual(m.__linkprops__.rank, 1)
+
+        with self.assertRaisesRegex(
+            ValueError, r"the list already contains.+User"
+        ):
+            p.members.extend([a])
+
+    @tb.typecheck(["from gel import errors"])
+    def test_modelgen_save_30(self):
+        from models import default
+
+        a = self.client.get(default.User.filter(name="Alice"))
+        p = default.Raid(
+            name="mixed raid",
+            members=[
+                default.Raid.members.link(a, rank=1),
+            ],
+        )
+        self.client.save(p)
+
+        # Fetch and verify
+        res = self.client.get(
+            default.Raid.select(
+                name=True,
+                members=True,
+            ).filter(name="mixed raid")
+        )
+        self.assertEqual(res.name, "mixed raid")
+        self.assertEqual(len(res.members), 1)
+        m = res.members[0]
+        self.assertEqual(m.name, "Alice")
+        self.assertEqual(m.__linkprops__.rank, 1)
+
+        p.members.clear()
+        with self.assertRaisesRegex(
+            errors.MissingRequiredError,
+            "missing value for required link 'members'",
+        ):
+            self.client.save(p)
+
+    @tb.typecheck
+    def test_modelgen_save_collections_01(self):
         from models import default
         # insert an object with an optional single: with link props
 
@@ -1389,6 +1637,302 @@ class TestModelGenerator(tb.ModelTestCase):
 
         ks3 = self.client.get(default.KitchenSink.filter(str="coll_test_1"))
         self.assertEqual(sorted(ks3.p_multi_str), ["222", "zzz", "zzz"])
+
+    @tb.xfail
+    @tb.typecheck
+    def test_modelgen_save_collections_02(self):
+        from models import default
+
+        ks = default.KitchenSink(
+            str="coll_test_2",
+            p_multi_str=[""],
+            p_opt_str=None,
+            array=[],
+            p_multi_arr=[[]],
+            p_arrtup=[],
+            p_multi_arrtup=[[]],
+            p_tuparr=([],),
+            p_multi_tuparr=[([],)],
+        )
+        self.client.save(ks)
+
+        # Re-fetch and verify
+        ks2 = self.client.get(default.KitchenSink.filter(str="coll_test_2"))
+        self.assertEqual(ks2.p_multi_str, [""])
+        self.assertEqual(ks2.p_opt_str, None)
+        self.assertEqual(ks2.p_opt_multi_str, [])
+        self.assertEqual(ks2.array, [])
+        self.assertEqual(ks2.p_multi_arr, [[]])
+        self.assertEqual(ks2.p_arrtup, [])
+        self.assertEqual(ks2.p_multi_arrtup, [[]])
+        self.assertEqual(ks2.p_tuparr, ([],))
+        self.assertEqual(ks.p_multi_tuparr, [([],)])
+
+        ks.p_opt_str = "hello world"
+        ks.p_opt_multi_str.append("hello")
+        ks.p_opt_multi_str.append("world")
+        self.client.save(ks)
+
+        ks3 = self.client.get(default.KitchenSink.filter(str="coll_test_2"))
+        self.assertEqual(ks3.p_opt_str, "hello world")
+        self.assertEqual(sorted(ks3.p_opt_multi_str), ["hello", "world"])
+
+        ks.p_opt_str = None
+        ks.p_opt_multi_str.clear()
+        self.client.save(ks)
+
+        # partially fetch the object
+        ks4 = self.client.get(
+            default.KitchenSink.select(
+                p_opt_str=True,
+                p_opt_multi_str=True,
+                array=True,
+            ).filter(str="coll_test_2")
+        )
+        self.assertEqual(ks4.p_opt_str, None)
+        self.assertEqual(ks4.p_opt_multi_str, [])
+        self.assertEqual(ks4.array, [])
+
+        # save the partially fetched object
+        ks4.p_opt_str = "hello again"
+        ks4.array.append("bye bye")
+        self.client.save(ks4)
+
+        ks5 = self.client.get(
+            default.KitchenSink.select(
+                p_opt_str=True,
+                p_opt_multi_str=True,
+                array=True,
+            ).filter(str="coll_test_2")
+        )
+        self.assertEqual(ks5.p_opt_str, "hello again")
+        self.assertEqual(ks5.array, ["bye bye"])
+
+    # both the typecheck and the expected returned values have errors
+    @tb.xfail
+    @tb.typecheck
+    def test_modelgen_save_collections_03(self):
+        from models import default
+
+        ks = self.client.get(default.KitchenSink.filter(str="hello world"))
+        self.assertEqual(ks.array, ["foo"])
+
+        ks.array.append("bar")
+        self.client.save(ks)
+
+        # Re-fetch and verify
+        ks2 = self.client.get(default.KitchenSink.filter(str="hello world"))
+        self.assertEqual(ks2.array, ["foo", "bar"])
+
+        ks2.array.remove("foo")
+        self.client.save(ks2)
+
+        # Re-fetch and verify
+        ks3 = self.client.get(default.KitchenSink.filter(str="hello world"))
+        self.assertEqual(ks3.array, ["bar"])
+
+    @tb.typecheck
+    def test_modelgen_save_collections_04(self):
+        from models import default
+
+        ks = self.client.get(default.KitchenSink.filter(str="hello world"))
+        self.assertEqual(sorted(ks.p_multi_arr), [["bar"], ["foo"]])
+
+        ks.p_multi_arr.remove(["foo"])
+        self.client.save(ks)
+
+        # Re-fetch and verify
+        ks2 = self.client.get(default.KitchenSink.filter(str="hello world"))
+        self.assertEqual(sorted(ks2.p_multi_arr), [["bar"]])
+
+    @tb.typecheck
+    def test_modelgen_save_collections_05(self):
+        from models import default
+
+        ks = self.client.get(default.KitchenSink.filter(str="hello world"))
+        self.assertEqual(ks.p_opt_arr, None)
+
+        ks.p_opt_arr = ["silly", "goose"]
+        self.client.save(ks)
+
+        # Re-fetch and verify
+        ks2 = self.client.get(default.KitchenSink.filter(str="hello world"))
+        self.assertEqual(ks2.p_opt_arr, ["silly", "goose"])
+
+    @tb.typecheck
+    def test_modelgen_save_collections_06(self):
+        from models import default
+
+        ks = self.client.get(
+            default.KitchenSink.select(
+                p_opt_str=True,
+            ).filter(str="hello world")
+        )
+        ks.p_opt_str = "silly goose"
+        self.client.save(ks)
+
+        # Re-fetch and verify
+        ks2 = self.client.get(default.KitchenSink.filter(str="hello world"))
+        self.assertEqual(ks2.p_opt_str, "silly goose")
+
+    @tb.xfail
+    @tb.typecheck(["import datetime as dt", "from gel import Range"])
+    def test_modelgen_save_range_01(self):
+        from models import default
+
+        r = self.client.get(default.RangeTest.filter(name="test range"))
+        self.assertEqual(r.name, "test range")
+        self.assertEqual(
+            r.int_range,
+            Range(23, 45),
+        )
+        self.assertEqual(
+            r.float_range,
+            Range(2.5, inc_lower=False),
+        )
+        self.assertEqual(
+            r.date_range,
+            Range(dt.date(2025, 1, 6), dt.date(2025, 2, 17)),
+        )
+
+        r.int_range = Range(None, 10)
+        r.float_range = Range(empty=True)
+        self.client.save(r)
+
+        r2 = self.client.get(default.RangeTest.filter(name="test range"))
+        self.assertEqual(r2.name, "test range")
+        self.assertEqual(
+            r2.int_range,
+            Range(None, 10),
+        )
+        self.assertEqual(
+            r2.float_range,
+            Range(empty=True),
+        )
+        self.assertEqual(
+            r2.date_range,
+            Range(dt.date(2025, 1, 6), dt.date(2025, 2, 17)),
+        )
+
+    @tb.xfail
+    @tb.typecheck(["import datetime as dt", "from gel import Range"])
+    def test_modelgen_save_range_02(self):
+        from models import default
+
+        r = default.RangeTest(
+            name="new range",
+            int_range=Range(11),
+            float_range=Range(),  # everything
+            date_range=Range(dt.date(2025, 3, 4), dt.date(2025, 11, 21)),
+        )
+        self.client.save(r)
+
+        r2 = self.client.get(default.RangeTest.filter(name="new range"))
+        self.assertEqual(r2.name, "new range")
+        self.assertEqual(
+            r2.int_range,
+            Range(11),
+        )
+        self.assertEqual(
+            r2.float_range,
+            Range(),
+        )
+        self.assertEqual(
+            r2.date_range,
+            Range(dt.date(2025, 3, 4), dt.date(2025, 11, 21)),
+        )
+
+    @tb.typecheck(
+        ["import datetime as dt", "from gel import MultiRange, Range"]
+    )
+    def test_modelgen_save_multirange_01(self):
+        from models import default
+
+        r = self.client.get(
+            default.MultiRangeTest.filter(name="test multirange")
+        )
+        self.assertEqual(r.name, "test multirange")
+        self.assertEqual(
+            r.int_mrange, MultiRange([Range(2, 4), Range(23, 45)])
+        )
+        self.assertEqual(
+            r.float_mrange,
+            MultiRange(
+                [
+                    Range(0, 0.5),
+                    Range(2.5, inc_lower=False),
+                ]
+            ),
+        )
+        self.assertEqual(
+            r.date_mrange,
+            MultiRange(
+                [
+                    Range(dt.date(2025, 1, 6), dt.date(2025, 2, 17)),
+                    Range(dt.date(2025, 3, 16)),
+                ]
+            ),
+        )
+
+        r.int_mrange = MultiRange()
+        r.float_mrange = MultiRange()
+        self.client.save(r)
+
+        r2 = self.client.get(
+            default.MultiRangeTest.filter(name="test multirange")
+        )
+        self.assertEqual(r2.name, "test multirange")
+        self.assertEqual(
+            r2.int_mrange,
+            MultiRange(),
+        )
+        self.assertEqual(
+            r2.float_mrange,
+            MultiRange(),
+        )
+        self.assertEqual(
+            r2.date_mrange,
+            MultiRange(
+                [
+                    Range(dt.date(2025, 1, 6), dt.date(2025, 2, 17)),
+                    Range(dt.date(2025, 3, 16)),
+                ]
+            ),
+        )
+
+    @tb.xfail
+    @tb.typecheck(
+        ["import datetime as dt", "from gel import MultiRange, Range"]
+    )
+    def test_modelgen_save_multirange_02(self):
+        from models import default
+
+        r = default.MultiRangeTest(
+            name="new multirange",
+            int_mrange=MultiRange([Range(11)]),
+            float_mrange=MultiRange(),  # everything
+            date_mrange=MultiRange(
+                [Range(dt.date(2025, 3, 4), dt.date(2025, 11, 21))]
+            ),
+        )
+        self.client.save(r)
+
+        r2 = self.client.get(
+            default.MultiRangeTest.filter(name="new multirange")
+        )
+        self.assertEqual(r2.name, "new multirange")
+        self.assertEqual(
+            r2.int_range,
+            MultiRange([Range(11)]),
+        )
+        self.assertEqual(
+            r2.float_range,
+            MultiRange(),
+        )
+        self.assertEqual(
+            r2.date_range,
+            MultiRange([Range(dt.date(2025, 3, 4), dt.date(2025, 11, 21))]),
+        )
 
     @tb.typecheck
     def test_modelgen_linkprops_1(self):
@@ -1649,3 +2193,236 @@ class TestEmptyAiModelGenerator(tb.ModelTestCase):
     def test_modelgen_empty_ai_schema_2(self):
         # This is it, we're just testing empty import.
         from models.ext import ai  # noqa: F401
+
+
+# TODO: currently the schema and the tests here are broken in a way that makes
+# it hard to integrate them with the main tests suite without breaking many
+# tests in it as well. Presumably after fixing the issues, the schema and
+# tests can just be merged with the main suite.
+class TestModelGeneratorOther(tb.ModelTestCase):
+    SCHEMA = os.path.join(
+        os.path.dirname(__file__), "dbsetup", "orm_other.gel"
+    )
+
+    SETUP = os.path.join(
+        os.path.dirname(__file__), "dbsetup", "orm_other.edgeql"
+    )
+
+    ISOLATED_TEST_BRANCHES = True
+
+    @tb.xfail
+    def test_modelgen_scalars_01(self):
+        from models import default
+
+        # Get the object with non-trivial scalars
+        s = self.client.get(default.AssortedScalars.filter(name="hello world"))
+        self.assertEqual(s.name, "hello world")
+        self.assertEqual(
+            json.loads(s.json),
+            [
+                "hello",
+                {
+                    "age": 42,
+                    "name": "John Doe",
+                    "special": None,
+                },
+                False,
+            ],
+        )
+        self.assertEqual(s.bstr, b"word\x00\x0b")
+        self.assertEqual(s.time, dt.time(20, 13, 45, 678000))
+        self.assertEqual(
+            [(t[0], json.loads(t[1])) for t in s.nested_mixed],
+            [
+                (
+                    [1, 1, 2, 3],
+                    {"next": 5, "label": "Fibonacci sequence"},
+                ),
+                (
+                    [123, 0, 0, 3],
+                    "simple JSON",
+                ),
+                (
+                    [],
+                    None,
+                ),
+            ],
+        )
+        self.assertEqual(s.positive, 123)
+
+    def _compare_scalars(self, tname, name, prop):
+        self.assertTrue(
+            self.client.query_single(f"""
+                with
+                    A := assert_single((
+                        select {tname}
+                        filter .name = 'hello world'
+                    )),
+                    B := assert_single((
+                        select {tname}
+                        filter .name = {name!r}
+                    )),
+                select A.{prop} = B.{prop}
+            """),
+            f"property {prop} value does not match",
+        )
+
+    @tb.xfail
+    def test_modelgen_scalars_02(self):
+        from models import default
+
+        # Create a new AssortedScalars object with all fields same as the
+        # existing one, except the name. This makes it easy to verify the
+        # result.
+        s = default.AssortedScalars(name="scalars test 1")
+        s.json = json.dumps(
+            [
+                "hello",
+                {
+                    "age": 42,
+                    "name": "John Doe",
+                    "special": None,
+                },
+                False,
+            ],
+        )
+        self.client.save(s)
+        self._compare_scalars("AssortedScalars", "scalars test 1", "json")
+
+        s.bstr = b"word\x00\x0b"
+        self.client.save(s)
+        self._compare_scalars("AssortedScalars", "scalars test 1", "bstr")
+
+        s.time = dt.time(20, 13, 45, 678000)
+        s.date = dt.date(2025, 1, 26)
+        s.ts = dt.datetime(2025, 1, 26, 20, 13, 45, tzinfo=dt.timezone.utc)
+        s.lts = dt.datetime(2025, 1, 26, 20, 13, 45)
+        self.client.save(s)
+        self._compare_scalars("AssortedScalars", "scalars test 1", "time")
+        self._compare_scalars("AssortedScalars", "scalars test 1", "date")
+        self._compare_scalars("AssortedScalars", "scalars test 1", "ts")
+        self._compare_scalars("AssortedScalars", "scalars test 1", "lts")
+
+        s.positive = 123
+        self.client.save(s)
+        self._compare_scalars("AssortedScalars", "scalars test 1", "positive")
+
+    @tb.xfail
+    def test_modelgen_scalars_03(self):
+        from models import default
+
+        # Test deeply nested mixed collections.
+        s = default.AssortedScalars(name="scalars test 2")
+        s.nested_mixed = [
+            (
+                [1, 1, 2, 3],
+                json.dumps({"next": 5, "label": "Fibonacci sequence"}),
+            ),
+            (
+                [123, 0, 0, 3],
+                '"simple JSON"',
+            ),
+            (
+                [],
+                "null",
+            ),
+        ]
+        self.client.save(s)
+        self._compare_scalars(
+            "AssortedScalars", "scalars test 2", "nested_mixed"
+        )
+
+    @tb.xfail
+    def test_modelgen_escape_01(self):
+        from models import default
+        # insert an object that needs a lot of escaping
+
+        a = self.client.get(default.User.filter(name="Alice"))
+        obj = default.limit(
+            alter=False,
+            like="like this",
+            commit=a,
+            configure=[default.limit.configure.link(a, create=True)],
+        )
+        self.client.save(obj)
+
+        # Fetch and verify
+        res = self.client.get(
+            default.limit.select(
+                alter=True,
+                like=True,
+                commit=True,
+                configure=True,
+            )
+        )
+        self.assertEqual(res.alter, False)
+        self.assertEqual(res.like, "like this")
+        self.assertEqual(res.commit.name, "Alice")
+        self.assertEqual(len(res.configure), 1)
+        self.assertEqual(res.configure[0].name, "Alice")
+        self.assertEqual(res.configure[0].__linkprops__.create, True)
+
+    @tb.xfail
+    def test_modelgen_escape_02(self):
+        from models import default
+        # insert and update an object that needs a lot of escaping
+
+        a = self.client.get(default.User.filter(name="Alice"))
+        obj = default.limit(
+            alter=False,
+        )
+        self.client.save(obj)
+        obj.like = "like this"
+        self.client.save(obj)
+        obj.commit = a
+        self.client.save(obj)
+        obj.configure.append(default.limit.configure.link(a, create=True))
+        self.client.save(obj)
+
+        # Fetch and verify
+        res = self.client.get(
+            default.limit.select(
+                alter=True,
+                like=True,
+                commit=True,
+                configure=True,
+            )
+        )
+        self.assertEqual(res.alter, False)
+        self.assertEqual(res.like, "like this")
+        self.assertEqual(res.commit.name, "Alice")
+        self.assertEqual(len(res.configure), 1)
+        self.assertEqual(res.configure[0].name, "Alice")
+        self.assertEqual(res.configure[0].__linkprops__.create, True)
+
+    @tb.xfail
+    def test_modelgen_enum_01(self):
+        from models import default
+
+        res = self.client.query(default.EnumTest.order_by(color=True))
+
+        self.assertEqual(len(res), 3)
+        self.assertEqual(
+            [r.color for r in res],
+            [
+                default.Color.Red,
+                default.Color.Green,
+                default.Color.Blue,
+            ],
+        )
+
+    @tb.xfail
+    def test_modelgen_enum_02(self):
+        from models import default
+
+        e = default.EnumTest(name="color test 1", color="Orange")
+        self.client.save(e)
+
+        e2 = self.client.get(default.EnumTest.filter(name="color test 1"))
+        self.assertEqual(e2.color, default.Color.Orange)
+
+        e.color = default.Color.Indigo
+        self.client.save(e)
+
+        e2 = self.client.get(default.EnumTest.filter(name="color test 1"))
+        self.assertEqual(e2.color, default.Color.Indigo)

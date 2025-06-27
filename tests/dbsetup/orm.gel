@@ -34,6 +34,8 @@ type User extending Named {
     groups := .<users[is UserGroup];
 }
 
+type CustomUser extending User;
+
 type Post {
     required body: str;
     required link author: User;
@@ -140,10 +142,6 @@ type KitchenSink {
     required multi p_multi_tuparr: tuple<array<str>>;
     p_opt_tuparr: tuple<array<str>>;
     multi p_opt_multi_tuparr: tuple<array<str>>;
-
-    date: cal::local_date;
-    ts: datetime;
-    lts: cal::local_datetime;
 }
 
 type AllOptional {
@@ -151,4 +149,34 @@ type AllOptional {
     # it in any way.
     field: str;
     pointer: AllOptional;
+}
+
+type BaseLink {
+    required val: str;
+}
+
+type ImpossibleLink0 extending BaseLink {
+    # We need the BaseLink here so that we can create an im possible loop,
+    # eventually
+    required il1: BaseLink
+}
+
+type ImpossibleLink1 extending BaseLink {
+    required il0: ImpossibleLink0
+}
+
+type RangeTest {
+    required name: str;
+
+    int_range: range<int64>;
+    float_range: range<float64>;
+    date_range: range<cal::local_date>;
+}
+
+type MultiRangeTest {
+    required name: str;
+
+    int_mrange: multirange<int64>;
+    float_mrange: multirange<float64>;
+    date_mrange: multirange<cal::local_date>;
 }

@@ -20,6 +20,7 @@ class Credentials(RequiredCredentials, total=False):
     branch: typing.Optional[str]
     tls_ca: typing.Optional[str]
     tls_security: typing.Optional[str]
+    secret_key: typing.Optional[str]
 
 
 def get_credentials_path(instance_name: str) -> pathlib.Path:
@@ -36,22 +37,25 @@ def read_credentials(path: os.PathLike) -> Credentials:
 
 
 def validate_credentials(data: dict) -> Credentials:
+    result = {}
+
     port = data.get("port")
     if port is None:
         port = 5656
     if not isinstance(port, int) or port < 1 or port > 65535:
         raise ValueError("invalid `port` value")
+    result["port"] = port
 
     user = data.get("user")
-    if user is None:
-        raise ValueError("`user` key is required")
-    if not isinstance(user, str):
-        raise ValueError("`user` must be a string")
-
-    result = {  # required keys
-        "user": user,
-        "port": port,
-    }
+    if user is not None:
+        if not isinstance(user, str):
+            raise ValueError("`user` must be a string")
+        result["user"] = user
+    else:
+        # Backwards compatibility with the old EdgeDB versions.
+        # In Gel, `egdedb` is changed to `main`.
+        # https://github.com/geldata/gel/pull/8010
+        result["user"] = "edgedb"
 
     host = data.get("host")
     if host is not None:
@@ -69,7 +73,11 @@ def validate_credentials(data: dict) -> Credentials:
     if branch is not None:
         if not isinstance(branch, str):
             raise ValueError("`branch` must be a string")
-        if database is not None and branch != database:
+        if (
+            database is not None
+            and branch != database
+            and branch != "__default__"
+        ):
             raise ValueError(f"`database` and `branch` cannot be different")
         result["branch"] = branch
 
@@ -106,6 +114,12 @@ def validate_credentials(data: dict) -> Credentials:
         if not isinstance(tls_security, str):
             raise ValueError("`tls_security` must be a string")
         result["tls_security"] = tls_security
+
+    secret_key = data.get("secret_key")
+    if secret_key is not None:
+        if not isinstance(secret_key, str):
+            raise ValueError("`secret_key` must be a string")
+        result["secret_key"] = secret_key
 
     missmatch = ValueError(
         f"tls_verify_hostname={verify} and "

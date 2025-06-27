@@ -589,6 +589,7 @@ class ContentTypeRoute(routing.APIRoute):
             super().__init__(path, endpoint, **kwargs)
             return
 
+        sig_replaced = False
         try:
             # Create routes for each media type
             extras = []
@@ -621,6 +622,7 @@ class ContentTypeRoute(routing.APIRoute):
                 endpoint.__signature__ = orig_sig.replace(  # type: ignore [attr-defined]
                     parameters=new_params
                 )
+                sig_replaced = True
                 if i == 0:
                     super().__init__(path, endpoint, **kwargs)
                     self.routes[media_type.lower()] = self
@@ -632,11 +634,12 @@ class ContentTypeRoute(routing.APIRoute):
                 self.body_field.__gel_extras__ = extras  # type: ignore [attr-defined]
 
         finally:
-            # Restore the original signature if it was set
-            if explicit_sig is None:
-                delattr(endpoint, "__signature__")
-            else:
-                endpoint.__signature__ = explicit_sig  # type: ignore [attr-defined]
+            if sig_replaced:
+                # Restore the original signature if it was set
+                if explicit_sig is None:
+                    delattr(endpoint, "__signature__")
+                else:
+                    endpoint.__signature__ = explicit_sig  # type: ignore [attr-defined]
 
     def matches(self, scope: Scope) -> tuple[Match, Scope]:
         if self.routes:
