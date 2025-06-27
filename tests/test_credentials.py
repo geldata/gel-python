@@ -1,3 +1,4 @@
+# fmt: off
 #
 # This source file is part of the EdgeDB open source project.
 #
@@ -54,8 +55,8 @@ class TestCredentials(unittest.TestCase):
         })
 
     def test_credentials_empty(self):
-        with self.assertRaisesRegex(ValueError, '`user` key is required'):
-            credentials.validate_credentials({})
+        creds = credentials.validate_credentials({})
+        self.assertEqual(creds, {"user": "edgedb", "port": 5656})
 
     def test_credentials_port(self):
         with self.assertRaisesRegex(ValueError, 'invalid `port` value'):
