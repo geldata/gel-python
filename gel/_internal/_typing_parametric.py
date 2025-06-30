@@ -7,23 +7,24 @@ from typing import (
     Any,
     ClassVar,
     Generic,
-    TypeVar,
     get_type_hints,
 )
 
 from typing_extensions import (
     Self,
+    TypeVar,
+    TypeAliasType,
 )
 
 import contextvars
-import types
 import sys
 import typing
 import weakref
-from types import GenericAlias
+from collections import defaultdict
 
 from . import _typing_eval
 from . import _typing_inspect
+from . import _utils
 
 
 __all__ = [
@@ -32,7 +33,30 @@ __all__ = [
 ]
 
 
-ParametricTypesCacheKey = tuple[Any, Any, tuple[Any, ...]]
+class _WeakTypeProxy:
+    def __init__(self, t: type[Any]) -> None:
+        self._t = weakref.ref(t)
+        self._t_id = id(t)
+        self._t_repr = repr(t)
+
+    def __hash__(self) -> int:
+        if self._t() is None:
+            raise TypeError(f"{self._t_repr} has been garbage-collected")
+        return self._t_id
+
+    def __eq__(self, other: object) -> bool:
+        if self._t() is None:
+            raise TypeError(f"{self._t_repr} has been garbage-collected")
+        if not isinstance(other, _WeakTypeProxy):
+            return NotImplemented
+        else:
+            return self._t_id == other._t_id
+
+    def __repr__(self) -> str:
+        return self._t_repr
+
+
+ParametricTypesCacheKey = tuple[_WeakTypeProxy, tuple[Any, ...]]
 ParametricTypesCache = weakref.WeakValueDictionary[
     ParametricTypesCacheKey,
     "type[ParametricType]",
@@ -43,6 +67,16 @@ _PARAMETRIC_TYPES_CACHE: contextvars.ContextVar[
 ] = contextvars.ContextVar("_GEL_PARAMETRIC_TYPES_CACHE", default=None)
 
 
+def _get_parametric_type_cache_key(
+    parent: type[ParametricType],
+    typevars: Any,
+) -> ParametricTypesCacheKey:
+    return (
+        _WeakTypeProxy(parent),
+        typevars if isinstance(typevars, tuple) else (typevars,),
+    )
+
+
 def _get_cached_parametric_type(
     parent: type[ParametricType],
     typevars: Any,
@@ -51,7 +85,8 @@ def _get_cached_parametric_type(
     if parametric_types_cache is None:
         parametric_types_cache = ParametricTypesCache()
         _PARAMETRIC_TYPES_CACHE.set(parametric_types_cache)
-    return parametric_types_cache.get(typevars)
+    cache_key = _get_parametric_type_cache_key(parent, typevars)
+    return parametric_types_cache.get(cache_key)
 
 
 def _set_cached_parametric_type(
@@ -63,28 +98,113 @@ def _set_cached_parametric_type(
     if parametric_types_cache is None:
         parametric_types_cache = ParametricTypesCache()
         _PARAMETRIC_TYPES_CACHE.set(parametric_types_cache)
-    parametric_types_cache[typevars] = type_
+    cache_key = _get_parametric_type_cache_key(parent, typevars)
+    parametric_types_cache[cache_key] = type_
 
 
-T = TypeVar("T", covariant=True)
+def _is_fully_parametrized_over(
+    cls: type[ParametricType],
+    base: type[ParametricType],
+) -> bool:
+    type_args = cls.__parametric_type_args__
+    if type_args is not None and (
+        base in type_args or base.__parametric_origin__ in type_args
+    ):
+        return True
+
+    # Special case for diamond inheritance: if the base is already a
+    # specialized parametric type (has __parametric_origin__), and it's
+    # in the direct bases of cls, then it's already fully parametrized.
+    base_origin = getattr(base, "__parametric_origin__", None)
+    return base_origin is not None and base in cls.__bases__
+
+
+def _is_fully_parametrized(cls: type[ParametricType]) -> bool:
+    # A class is fully parametrized if:
+    # 1. All its bases are either non-parametric or parametrized by cls, AND
+    # 2. It has no remaining type parameters
+    has_no_type_params = not getattr(cls, "__parameters__", None)
+    all_bases_parametrized = all(
+        (
+            not issubclass(b, ParametricType)
+            or _is_fully_parametrized_over(cls, b)
+        )
+        for b in cls.__bases__
+    )
+    return has_no_type_params and all_bases_parametrized
+
+
+_ForwardRefs = TypeAliasType(
+    "_ForwardRefs",
+    dict[
+        Any,
+        tuple[type["ParametricType"], tuple[type["ParametricType"], int], str],
+    ],
+)
+
+_TypeArgs = TypeAliasType(
+    "_TypeArgs",
+    dict[type["ParametricType"], tuple[type, ...]],
+)
+
+_MutTypeArgs = TypeAliasType(
+    "_MutTypeArgs",
+    dict[type["ParametricType"], list[type]],
+)
+
+
+def _try_resolve_forward_refs(refs: _ForwardRefs) -> None:
+    updated_type_args: dict[type[ParametricType], _MutTypeArgs] = {}
+    for ref, (cls, (base, idx), attr) in tuple(refs.items()):
+        resolved = _typing_eval.try_resolve_type(ref, owner=cls)
+        if resolved is not None:
+            setattr(cls, attr, resolved)
+            updated_cls = updated_type_args.setdefault(cls, {})
+            try:
+                updated_base = updated_cls[base]
+            except KeyError:
+                cls_type_args = cls.__parametric_type_args__
+                assert cls_type_args is not None
+                updated_base = updated_cls[base] = [*cls_type_args[base]]
+
+            updated_base[idx] = resolved
+            del refs[ref]
+
+    for cls, updates in updated_type_args.items():
+        cls_type_args = cls.__parametric_type_args__
+        assert cls_type_args is not None
+        for base, type_args in updates.items():
+            cls_type_args[base] = tuple(type_args)
 
 
 class ParametricType:
-    __parametric_type_args__: ClassVar[tuple[type, ...] | None] = None
-    __parametric_orig_args__: ClassVar[tuple[type, ...] | None] = None
-    __parametric_forward_refs__: ClassVar[dict[str, tuple[int, str]]] = {}
+    """Runtime generic type.
+
+    Unlike GenericAlias which is not a type and is ephemeral, ParametricType
+    materializes its specialization as a proper subclass of itself and stores
+    specific type arguments into designated class vars.
+    """
+
+    __parametric_origin__: ClassVar[type | None] = None
+    __parametric_type_args__: ClassVar[_TypeArgs | None] = None
+    __parametric_forward_refs__: ClassVar[_ForwardRefs] = {}
     _type_param_map: ClassVar[dict[Any, str]] = {}
     _non_type_params: ClassVar[dict[int, type]] = {}
 
     def __init_subclass__(cls) -> None:
         super().__init_subclass__()
 
-        if cls.__parametric_type_args__ is not None:
-            return
-        elif ParametricType in cls.__bases__:
+        if ParametricType in cls.__bases__:
             cls._init_parametric_base()
-        elif any(issubclass(b, ParametricType) for b in cls.__bases__):
-            cls._init_parametric_user()
+        else:
+            for b in cls.__bases__:
+                if issubclass(
+                    b, ParametricType
+                ) and not _is_fully_parametrized_over(cls, b):
+                    cls._init_parametric_user(b)
+
+        # Validate diamond inheritance compatibility
+        cls._validate_diamond_inheritance()
 
     @classmethod
     def _init_parametric_base(cls) -> None:
@@ -171,21 +291,43 @@ class ParametricType:
         cls._type_param_map = param_map
 
     @classmethod
-    def _init_parametric_user(cls) -> None:
+    def _init_parametric_user(
+        cls, parametric_base: type[ParametricType]
+    ) -> None:
         """Initialize an indirect descendant of ParametricType."""
 
         # For ParametricType grandchildren we have to deal with possible
         # TypeVar remapping and generally check for type sanity.
 
+        # Check for unspecialized parametric types in inheritance
+        # This catches cases like: class Child(Base) where Base is a parametric
+        # type but Base is not parameterized in __orig_bases__
+        orig_bases = getattr(cls, "__orig_bases__", ())
+        orig_base_origins = set()
+        for ob in orig_bases:
+            org = typing.get_origin(ob)
+            if org is not None:
+                orig_base_origins.add(org)
+
+        for b in cls.__bases__:
+            if (
+                _typing_inspect.is_valid_isinstance_arg(b)
+                and issubclass(b, ParametricType)
+                and bool(getattr(b, "__parameters__", ()))
+                and b is not ParametricType
+                and b not in orig_base_origins
+            ):
+                raise TypeError(
+                    f"{cls.__name__}: missing one or more type arguments for"
+                    f" base {b.__name__!r}"
+                )
+
         ob = getattr(cls, "__orig_bases__", ())
         generic_params: list[type] = []
 
         for b in ob:
-            if (
-                isinstance(b, type)
-                and not isinstance(b, GenericAlias)
-                and issubclass(b, ParametricType)
-                and b is not ParametricType
+            if _typing_inspect.is_valid_isinstance_arg(b) and issubclass(
+                b, parametric_base
             ):
                 raise TypeError(
                     f"{cls.__name__}: missing one or more type arguments for"
@@ -212,7 +354,7 @@ class ParametricType:
                     f" got {len(args)}"
                 )
 
-            base_map = dict(cls._type_param_map)
+            base_map = dict(b._type_param_map)
             subclass_map = {}
 
             for i, arg in enumerate(args):
@@ -244,15 +386,63 @@ class ParametricType:
             if p not in cls._type_param_map
         }
 
+    @classmethod
+    def _validate_diamond_inheritance(cls) -> None:
+        """Validate that diamond inheritance doesn't have conflicting type
+        arguments.
+
+        When a class inherits from multiple specializations of the same
+        parametric base, ensure they don't have incompatible type arguments.
+        """
+        # Collect all parametric base types in the MRO
+        # with their type arguments
+        parametric_bases: defaultdict[type, dict[tuple[Any, ...], bool]] = (
+            defaultdict(dict)
+        )
+
+        for base in cls.__mro__:
+            if (
+                issubclass(base, ParametricType)
+                and base.__parametric_origin__ is not None
+            ):
+                origin = base.__parametric_origin__
+                type_args = base.__parametric_type_args__
+
+                if type_args and (args := type_args.get(origin)) is not None:
+                    parametric_bases[origin][
+                        tuple(
+                            _WeakTypeProxy(a) if isinstance(a, type) else a
+                            for a in args
+                        )
+                    ] = True
+
+        # Check for conflicts
+        for origin, arg_sets in parametric_bases.items():
+            if len(arg_sets) <= 1:
+                continue
+
+            # If we have multiple different type argument sets, it's invalid
+            conflicting = " and ".join(
+                f"[{' '.join(str(a))}]" for a in arg_sets
+            )
+            raise TypeError(
+                f"Base classes of {cls.__name__} are mutually "
+                f"incompatible: {origin.__name__} appears with "
+                f"conflicting type arguments {conflicting}"
+            )
+
     def __new__(cls, *args: Any, **kwargs: Any) -> Self:
+        if not _is_fully_parametrized(cls):
+            raise TypeError(
+                f"{cls.__qualname__} must be parametrized to instantiate"
+            )
+
+        if cls.__parametric_forward_refs__:
+            _try_resolve_forward_refs(cls.__parametric_forward_refs__)
+
         if cls.__parametric_forward_refs__:
             raise TypeError(
                 f"{cls.__qualname__} has unresolved type parameters"
-            )
-
-        if cls.__parametric_type_args__ is None:
-            raise TypeError(
-                f"{cls.__qualname__} must be parametrized to instantiate"
             )
 
         if super().__new__ is object.__new__:
@@ -274,7 +464,7 @@ class ParametricType:
         `__init__()` is called.  That means we wouldn't be able to type-check
         in the initializer using built-in `Generic[T]`.
         """
-        if cls.__parametric_type_args__ is not None:
+        if _is_fully_parametrized(cls):
             raise TypeError(f"{cls!r} is already parametrized")
 
         result = _get_cached_parametric_type(cls, params)
@@ -283,22 +473,26 @@ class ParametricType:
 
         if not isinstance(params, tuple):
             params = (params,)
-        all_params = params
-        type_params = []
+        all_params: tuple[Any, ...] = params
+        type_args = []
         for i, param in enumerate(all_params):
             if i not in cls._non_type_params:
-                type_params.append(param)
-        params_str = ", ".join(_type_repr(a) for a in all_params)
+                type_args.append(param)
+        params_str = ", ".join(_utils.type_repr(a) for a in all_params)
         name = f"{cls.__name__}[{params_str}]"
-        bases = (cls,)
+        type_args_dict: dict[type[ParametricType], tuple[type, ...]] = {
+            **(getattr(cls, "__parametric_type_args__", {}) or {}),
+            cls: tuple(type_args),
+        }
         type_dict: dict[str, Any] = {
-            "__parametric_type_args__": tuple(type_params),
-            "__parametric_orig_args__": all_params,
+            "__parametric_origin__": cls,
+            "__parametric_type_args__": type_args_dict,
             "__module__": cls.__module__,
         }
-        forward_refs: dict[str, tuple[int, str]] = {}
         tuple_to_attr: dict[int, str] = {}
         type_var_tuple_idx: int | None = None
+        typevar_defaults: dict[int, Any] = {}
+        args_hi_idx = len(all_params) - 1
 
         if cls._type_param_map:
             gen_params = getattr(cls, "__parameters__", ())
@@ -308,101 +502,91 @@ class ParametricType:
                     tuple_to_attr[i] = attr
                     if _typing_inspect.is_type_var_tuple(gen_param):
                         type_var_tuple_idx = i
+                    elif (
+                        i > args_hi_idx
+                        and _typing_inspect.is_type_var(gen_param)
+                        and (
+                            has_default := getattr(
+                                gen_param, "has_default", None
+                            )
+                        )
+                        is not None
+                        and has_default()
+                    ):
+                        typevar_defaults[i] = gen_param.__default__
 
             expected = len(gen_params)
             actual = len(params)
-            if expected != actual and not any(
-                _typing_inspect.is_type_var_or_tuple(p) for p in gen_params
-            ):
-                raise TypeError(
-                    f"type {cls.__name__!r} expects {expected} type"
-                    f" parameter{'s' if expected != 1 else ''},"
-                    f" got {actual}"
-                )
+
+            # Skip validation if there are TypeVarTuple parameters
+            # (they accept variable args)
+            has_type_var_tuple = any(
+                _typing_inspect.is_type_var_tuple(p) for p in gen_params
+            )
+
+            if not has_type_var_tuple and expected != actual:
+                # For too many arguments, always fail
+                if actual > expected:
+                    raise TypeError(
+                        f"type {cls.__name__!r} expects {expected} type"
+                        f" parameter{'s' if expected != 1 else ''},"
+                        f" got {actual}"
+                    )
+
+                # For too few arguments, check if we have enough defaults
+                elif actual < expected:
+                    for i in range(actual, expected):
+                        if i not in typevar_defaults:
+                            raise TypeError(
+                                f"type {cls.__name__!r} expects {expected} "
+                                f"type parameter{'s' if expected != 1 else ''}"
+                                f", got {actual}"
+                            )
 
             for i, attr in tuple_to_attr.items():
                 if i == type_var_tuple_idx:
                     type_dict[attr] = all_params[i:]
                     break
+                elif i > args_hi_idx:
+                    type_dict[attr] = typevar_defaults[i]
                 else:
                     type_dict[attr] = all_params[i]
 
-        if not all(
-            _typing_inspect.is_valid_type_arg(param) for param in type_params
-        ):
-            if all(
-                _typing_inspect.is_type_var_or_tuple_unpack(param)
-                for param in type_params
-            ):
-                # All parameters are type variables: return the regular generic
-                # alias to allow proper subclassing.
-                generic = super(ParametricType, cls)
-                return generic.__class_getitem__(all_params)  # type: ignore [attr-defined, no-any-return]
-            else:
-                forward_refs = {}
-                for i, param in enumerate(type_params):
-                    if isinstance(param, str):
-                        forward_refs[param] = (i, tuple_to_attr[i])
+        forward_refs: dict[Any, tuple[int, str]] = {}
+        num_type_args = len(type_args)
+        num_type_vars = 0
 
-                if not forward_refs:
-                    raise TypeError(
-                        f"{cls!r} expects types as type parameters"
-                    )
-
-        result = type(name, bases, type_dict)
-        assert issubclass(result, ParametricType)
-        result.__parametric_forward_refs__ = forward_refs
-
-        _set_cached_parametric_type(cls, params, result)
-
-        return result
-
-    @classmethod
-    def is_fully_resolved(cls) -> bool:
-        return not cls.__parametric_forward_refs__
-
-    @classmethod
-    def try_resolve_types(
-        cls,
-        globalns: dict[str, Any] | None = None,
-    ) -> None:
-        if cls.__parametric_type_args__ is None:
-            raise TypeError(f"{cls!r} is not parametrized")
-
-        if not cls.__parametric_forward_refs__:
-            return
-
-        types = list(cls.__parametric_type_args__)
-
-        ns = {}
-        try:
-            module_dict = sys.modules[cls.__module__].__dict__
-        except AttributeError:
-            pass
-        else:
-            ns.update(module_dict)
-
-        if globalns is not None:
-            ns.update(globalns)
-
-        for ut, (idx, attr) in tuple(cls.__parametric_forward_refs__.items()):
-            t = _typing_eval.try_resolve_type(ut, globals=ns)
-            if t is None:
-                continue
-            elif isinstance(t, type) and not isinstance(t, GenericAlias):
-                types[idx] = t
-                setattr(cls, attr, t)
-                del cls.__parametric_forward_refs__[ut]
-            else:
+        for i, arg in enumerate(type_args):
+            if _typing_inspect.is_type_var_or_tuple_unpack(arg):
+                num_type_vars += 1
+            elif _typing_inspect.contains_forward_refs(arg):
+                forward_refs[arg] = (i, tuple_to_attr[i])
+            elif not _typing_inspect.is_valid_type_arg(arg):
                 raise TypeError(
-                    f"{cls!r} expects types as type parameters, got {t!r:.100}"
+                    f"{cls!r} expects types as type parameters, got {arg!r}"
                 )
 
-        cls.__parametric_type_args__ = tuple(types)
+        if num_type_vars == num_type_args:
+            # All parameters are type variables: return the regular generic
+            # alias to allow proper subclassing.
+            generic = super(ParametricType, cls)
+            return generic.__class_getitem__(all_params)  # type: ignore [attr-defined, no-any-return]
+        else:
+            result = type(name, (cls,), type_dict)
+            assert issubclass(result, ParametricType)
 
-    @classmethod
-    def is_anon_parametrized(cls) -> bool:
-        return cls.__name__.endswith("]")
+            if forward_refs:
+                result.__parametric_forward_refs__ = {
+                    **cls.__parametric_forward_refs__,
+                    **{
+                        fref: (result, (cls, idx), attr_name)
+                        for fref, (idx, attr_name) in forward_refs.items()
+                    },
+                }
+
+            _set_cached_parametric_type(cls, params, result)
+
+            return result
 
     def __reduce__(self) -> tuple[Any, ...]:
         raise NotImplementedError(
@@ -410,15 +594,8 @@ class ParametricType:
         )
 
 
-class SingleParametricType(ParametricType, Generic[T]):
-    type: ClassVar[type[T]]  # type: ignore [misc]
+_T = TypeVar("_T", covariant=True)
 
 
-def _type_repr(obj: Any) -> str:
-    if isinstance(obj, type):
-        if obj.__module__ == "builtins":
-            return obj.__qualname__
-        return f"{obj.__module__}.{obj.__qualname__}"
-    if isinstance(obj, types.FunctionType):
-        return obj.__name__
-    return repr(obj)
+class SingleParametricType(ParametricType, Generic[_T]):
+    type: ClassVar[type[_T]]  # type: ignore [misc]

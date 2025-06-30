@@ -99,6 +99,21 @@ def is_forward_ref(t: Any) -> TypeGuard[ForwardRef]:
     return isinstance(t, ForwardRef)
 
 
+def contains_forward_refs(t: Any) -> bool:
+    if isinstance(t, (ForwardRef, str)):
+        # A direct ForwardRef or a PEP563/649 postponed annotation
+        return True
+    elif isinstance(t, TypeAliasType):
+        # PEP 695 type alias: unwrap and recurse
+        return contains_forward_refs(t.__value__)
+    elif args := get_args(t):
+        # Generic type: unwrap and recurse
+        return any(contains_forward_refs(arg) for arg in args)
+    else:
+        # No forward refs.
+        return False
+
+
 def is_union_type(t: Any) -> TypeGuard[UnionType]:
     return (
         (is_generic_alias(t) and get_origin(t) is Union)  # type: ignore [comparison-overlap]

@@ -121,6 +121,7 @@ module = [
     "gel._internal._qbmodel.*",
     "gel._internal._qbmodel._abstract.*",
     "gel._internal._qbmodel._pydantic.*",
+    "tests.test_parametric",
 ]
 strict = true
 ignore_errors = false
