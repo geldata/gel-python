@@ -602,6 +602,10 @@ class BaseGeneratedModule:
             tuple[str, ModuleAspect, ModuleAspect, bool, ImportTime],
             str,
         ] = {}
+        self.__post_init__()
+
+    def __post_init__(self) -> None:
+        pass
 
     def get_mod_schema_part(
         self,
@@ -925,6 +929,9 @@ class BaseGeneratedModule:
         bound: str | None,
     ) -> str:
         return self.py_file.declare_typevar(name, bound=bound)
+
+    def disambiguate_name(self, name: str) -> str:
+        return self.py_file.disambiguate_name(name)
 
     def import_name(
         self,
@@ -1484,8 +1491,12 @@ _Callable_T = TypeVar("_Callable_T", bound=reflection.Callable)
 
 
 class GeneratedSchemaModule(BaseGeneratedModule):
+    def __post_init__(self) -> None:
+        super().__post_init__()
+        self._scalar_generics: dict[str, str] = {}
+
     def process(self, mod: IntrospectedModule) -> None:
-        self.prepare_namespace()
+        self.prepare_namespace(mod)
         self.write_scalar_types(mod["scalar_types"])
         self.write_generic_types(mod)
         self.write_object_types(mod["object_types"])
@@ -1778,13 +1789,19 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             )
             self.export(classname)
 
-    def prepare_namespace(self) -> None:
-        if self.canonical_modpath != reflection.SchemaPath("std"):
-            # Only std "defines" generic types at the moment.
-            return
-
+    def prepare_namespace(self, mod: IntrospectedModule) -> None:
         with self.aspect(ModuleAspect.VARIANTS):
-            self.py_file.update_globals(gt.name for gt in GENERIC_TYPES)
+            if self.canonical_modpath == reflection.SchemaPath("std"):
+                # Only std "defines" generic types at the moment.
+                self.py_file.update_globals(gt.name for gt in GENERIC_TYPES)
+
+            self.py_file.update_globals(
+                ident(t.schemapath.name)
+                for t in itertools.chain(
+                    mod["scalar_types"].values(),
+                    mod["object_types"].values(),
+                )
+            )
 
     def write_generic_types(
         self,
@@ -1877,21 +1894,57 @@ class GeneratedSchemaModule(BaseGeneratedModule):
     ) -> None:
         type_name = reflection.parse_name(stype.name)
         tname = type_name.name
-        pybase = self._get_pybase_for_this_scalar(
-            stype,
+
+        # Find runtime base class for this scalar type, which might
+        # or might not be the builtin Python type, because we are
+        # necessarily wrapping some of them.
+        #
+        rt_py_base_names = _qbmodel.get_py_base_for_scalar(
+            stype.name,
             require_subclassable=True,
             consider_generic=False,
         )
-        if pybase is not None:
-            real_pybase = self._get_pytype_for_this_scalar(
-                stype,
+        if rt_py_base_names:
+            rt_py_base = sorted(
+                self.import_name(*t, import_time=ImportTime.runtime)
+                for t in rt_py_base_names
+            )
+        else:
+            rt_py_base = None
+
+        typecheck_meta_parents: list[str] = []
+        descriptor_get_overload: str | None = None
+
+        if rt_py_base is not None:
+            # Raw base class would always be the builtin/stdlib
+            # unwrapped type.
+            raw_py_base_names = _qbmodel.get_py_type_for_scalar(
+                stype.name,
                 consider_generic=False,
             )
-            assert real_pybase is not None
-            assert len(real_pybase) == 1
-            pts = self.import_name(BASE_IMPL, "PyTypeScalar")
-            typecheck_parents = [f"{pts}[{real_pybase[0]}]"]
-            runtime_parents = [*pybase, *typecheck_parents]
+            assert len(raw_py_base_names) == 1
+            raw_py_base_name = raw_py_base_names[0]
+            raw_py_base = self.import_name(
+                *raw_py_base_name, import_time=ImportTime.runtime
+            )
+            py_type_scalar = self.import_name(BASE_IMPL, "PyTypeScalar")
+            raw_py_base_wrapper = f"{py_type_scalar}[{raw_py_base}]"
+            runtime_parents = [*rt_py_base, raw_py_base_wrapper]
+            ambiguity = _qbmodel.get_scalar_type_disambiguation_for_py_type(
+                raw_py_base_name
+            )
+            if ambiguity:
+                descriptor_get_overload = raw_py_base
+                typecheck_parents = [raw_py_base_wrapper]
+            else:
+                typecheck_parents = [*runtime_parents]
+                typecheck_meta_parent_names = (
+                    _qbmodel.get_py_type_typecheck_meta_bases(raw_py_base_name)
+                )
+                typecheck_meta_parents.extend(
+                    self.import_name(*tn, import_time=ImportTime.typecheck)
+                    for tn in typecheck_meta_parent_names
+                )
         else:
             typecheck_parents = []
             runtime_parents = []
@@ -1904,7 +1957,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         runtime_parents.extend(scalar_bases)
 
         if not runtime_parents:
-            typecheck_parents = [self.import_name(BASE_IMPL, "BaseScalar")]
+            typecheck_parents = [self.import_name(BASE_IMPL, "GelScalarType")]
             runtime_parents = typecheck_parents
 
         self.write()
@@ -1916,6 +1969,22 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         else:
             gel_type_meta = self.import_name(BASE_IMPL, "GelTypeMeta")
             meta_bases = [gel_type_meta]
+
+        if typecheck_meta_parents:
+            with self.type_checking():
+                if len(typecheck_meta_parents) > 1:
+                    with self._class_def(
+                        f"__{tname}_meta_base__", typecheck_meta_parents
+                    ):
+                        self.write("pass")
+                else:
+                    self.write(
+                        f"__{tname}_meta_base__ = {typecheck_meta_parents[0]}"
+                    )
+            with self.not_type_checking():
+                self.write(f"__{tname}_meta_base__ = type")
+
+            meta_bases.append(f"__{tname}_meta_base__")
 
         tmeta = f"__{tname}_meta__"
         with self._class_def(tmeta, meta_bases):
@@ -1929,6 +1998,48 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                 tname, typecheck_parents, class_kwargs={"metaclass": tmeta}
             ):
                 self.write_type_reflection(stype)
+                if descriptor_get_overload is not None:
+                    any_ = self.import_name("typing", "Any")
+                    type_ = self.import_name("builtins", "type", directly=True)
+                    self_ = self.import_name("typing_extensions", "Self")
+                    type_self = f"{type_}[{self_}]"
+
+                    with self._method_def(
+                        "__get__",
+                        [
+                            "instance: None",
+                            f"owner: {type_}[{any_}]",
+                            "/",
+                        ],
+                        f"{type_}[{self_}]",
+                        overload=True,
+                        type_ignore=("override", "unused-ignore"),
+                    ):
+                        self.write("...")
+
+                    with self._method_def(
+                        "__get__",
+                        [
+                            f"instance: {any_}",
+                            f"owner: {type_}[{any_}] | None = None",
+                            "/",
+                        ],
+                        descriptor_get_overload,
+                        overload=True,
+                    ):
+                        self.write("...")
+
+                    with self._method_def(
+                        "__get__",
+                        [
+                            f"instance: {any_}",
+                            f"owner: {type_}[{any_}] | None = None",
+                            "/",
+                        ],
+                        f"{descriptor_get_overload} | {type_self}",
+                        type_ignore=("override", "unused-ignore"),
+                    ):
+                        self.write("...")
 
         self.write()
 
@@ -3322,10 +3433,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                     priv_type = self.import_name("uuid", "UUID")
                     ptr_type = self.get_ptr_type(objtype, ptr)
                     desc = self.import_name(BASE_IMPL, "IdProperty")
-                    self.write(
-                        f"id: {desc}[{ptr_type}, {priv_type}]"
-                        f" # type: ignore [assignment]"
-                    )
+                    self.write(f"id: {desc}[{ptr_type}, {priv_type}]")
                 self.write()
 
         init_args = self._generate_init_args(objtype)

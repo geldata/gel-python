@@ -9,10 +9,10 @@ from __future__ import annotations
 from typing import (
     TYPE_CHECKING,
     Any,
-    TypeVar,
 )
 
 from typing_extensions import (
+    TypeVar,
     TypeVarTuple,
     Unpack,
 )
@@ -143,12 +143,11 @@ class PyTypeScalar(_abstract.PyTypeScalar[_PT_co]):
         source_type: Any,
         handler: pydantic.GetCoreSchemaHandler,
     ) -> pydantic_core.CoreSchema:
-        schema = _py_type_to_schema.get(cls.type)  # type: ignore [arg-type]
+        py_type = cls.__gel_py_type__
+        schema = _py_type_to_schema.get(py_type)  # type: ignore [arg-type]
         if schema is not None:
             return schema()
-        elif issubclass(cls.type, CustomType):
-            return core_schema.no_info_plain_validator_function(
-                cls.type,
-            )
+        elif issubclass(py_type, CustomType):
+            return core_schema.no_info_plain_validator_function(py_type)
         else:
             return core_schema.invalid_schema()

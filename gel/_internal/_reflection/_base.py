@@ -4,12 +4,13 @@
 
 
 from __future__ import annotations
-from typing import NamedTuple, TypeVar
+from typing import Any, NamedTuple, TypeVar
 from typing_extensions import dataclass_transform
 
 import dataclasses
 import functools
 import pathlib
+import sys
 import uuid
 
 from gel._internal import _edgeql
@@ -20,7 +21,48 @@ class QualName(NamedTuple):
     name: str
 
 
-class SchemaPath(pathlib.PurePosixPath):
+class _SchemaPathParser:
+    sep = "::"
+    altsep: str | None = None
+
+
+if sys.version_info >= (3, 13):
+
+    class _SchemaPathParserImpl(_SchemaPathParser):
+        def __init__(self) -> None:
+            self._impl = pathlib.PurePosixPath.parser  # type: ignore [attr-defined]
+
+        def join(self, *parts: str) -> str:
+            return self.sep.join(parts)
+
+        def __getattr__(self, name: str) -> Any:
+            return getattr(self._impl, name)
+
+    class _SchemaPath(pathlib.PurePosixPath):
+        parser = _SchemaPathParserImpl()
+else:
+
+    class _SchemaPathParserImpl(_SchemaPathParser):
+        def __init__(self) -> None:
+            self._impl = pathlib.PurePosixPath._flavour  # type: ignore [attr-defined]
+
+        if sys.version_info >= (3, 12):
+
+            def join(self, *parts: str) -> str:
+                return self.sep.join(parts)
+        else:
+
+            def join(self, parts: list[str]) -> str:
+                return self.sep.join(parts)
+
+        def __getattr__(self, name: str) -> Any:
+            return getattr(self._impl, name)
+
+    class _SchemaPath(pathlib.PurePosixPath):
+        _flavour = _SchemaPathParserImpl()
+
+
+class SchemaPath(_SchemaPath):
     @classmethod
     def from_schema_name(cls, name: str) -> SchemaPath:
         return SchemaPath(*name.split("::"))

@@ -123,7 +123,7 @@ class GeneratedModule:
     ) -> str:
         typevar = self._typevars[name].get(bound)
         if typevar is None:
-            typevar = self._disambiguate_name(name)
+            typevar = self.disambiguate_name(name)
             self._typevars[name][bound] = typevar
             self.add_global(typevar)
         return typevar
@@ -179,7 +179,7 @@ class GeneratedModule:
         for import_kind, import_strings in import_lines.items():
             import_maps[source][import_kind][module].update(import_strings)
 
-    def _disambiguate_name(self, name: str) -> str:
+    def disambiguate_name(self, name: str) -> str:
         if name not in self._globals:
             return name
 
@@ -231,7 +231,7 @@ class GeneratedModule:
                 parent_module += dot
 
             if parent_module:
-                imported_as = self._disambiguate_name(
+                imported_as = self.disambiguate_name(
                     suggested_module_alias or tail_module
                 )
                 if imported_as == tail_module:
@@ -240,7 +240,7 @@ class GeneratedModule:
                     imported_aliases[imported_as] = tail_module
                 imported_module = parent_module
             else:
-                imported_as = self._disambiguate_name(
+                imported_as = self.disambiguate_name(
                     suggested_module_alias or module
                 )
                 imported_aliases[imported_as] = "."
