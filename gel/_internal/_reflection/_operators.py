@@ -160,6 +160,7 @@ def fetch_operators(
             if py_magic is not None:
                 opv = dataclasses.replace(opv, py_magic=py_magic)
             binary_ops[opv.params[0].type.id].append(opv)
+            assert opv.schemapath.name, opv.schemapath
 
         elif op.operator_kind == _enums.OperatorKind.Prefix:
             py_magic = PREFIX_OPERATOR_MAP.get(op.name)

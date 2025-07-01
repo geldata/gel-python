@@ -3025,7 +3025,10 @@ class GeneratedSchemaModule(BaseGeneratedModule):
 
             class_kwargs["metaclass"] = f"__{name}_meta__"
 
-        class_r_kwargs = {"__gel_type_id__": f"{uuid}(int={objtype.uuid.int})"}
+        class_r_kwargs = {
+            "__gel_type_id__": f"{uuid}(int={objtype.uuid.int})",
+            "__gel_variant__": '"Base"',
+        }
         with self._class_def(
             name,
             [typeof_class, *vbase_types],
@@ -3685,7 +3688,11 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             else:
                 base_types.append(self.get_type(base_type))
 
-        with self._class_def(name, base_types):
+        with self._class_def(
+            name,
+            base_types,
+            class_kwargs={"__gel_variant__": '"Default"'},
+        ):
             pointers = _get_object_type_body(objtype)
             if pointers:
                 localns = frozenset(ptr.name for ptr in pointers)

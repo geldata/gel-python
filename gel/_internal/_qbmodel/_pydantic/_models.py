@@ -42,6 +42,7 @@ from gel._internal._qbmodel import _abstract
 from . import _utils as _pydantic_utils
 
 if TYPE_CHECKING:
+    import types
     import uuid
 
     from collections.abc import (
@@ -77,7 +78,13 @@ class GelModelMeta(_model_construction.ModelMetaclass, _abstract.GelModelMeta):
             )
             cls = cast(
                 "type[GelModel]",
-                super().__new__(mcls, name, bases, namespace, **kwargs),
+                super().__new__(
+                    mcls,
+                    name,
+                    bases,
+                    namespace | {"__gel_variant__": __gel_variant__},
+                    **kwargs,
+                ),
             )
 
         # Workaround for https://github.com/pydantic/pydantic/issues/11975
@@ -102,8 +109,7 @@ class GelModelMeta(_model_construction.ModelMetaclass, _abstract.GelModelMeta):
         if __gel_type_id__ is not None:
             mcls.register_class(__gel_type_id__, cls)
 
-        if __gel_variant__ is not None:
-            cls.set_variant(__gel_variant__)
+        cls.__gel_variant__ = __gel_variant__
 
         return cls
 
@@ -113,6 +119,41 @@ class GelModelMeta(_model_construction.ModelMetaclass, _abstract.GelModelMeta):
             fields = _process_pydantic_fields(cls, value)
             super().__setattr__("__pydantic_fields__", fields)
             _model_pointers_cache.pop(cls, None)
+        elif name == "__pydantic_parent_namespace__":
+            # pydantic.ModelMetaclass blindly assumes that it is never
+            # subclassed and that its __new__ is called directly from
+            # the model definition site, which is not the case here,
+            # so we need to rebuild the parent namespace weakvaluedict
+            # with locals from the correct frame.
+            #
+            # To avoid repeating the above mistake, walk the stack
+            # until we cross the __new__ boundary, i.e when we see
+            # a frame that called __new__ but is itself not a __new__.
+            defining_frame: types.FrameType | None = None
+            stack_frame = inspect.currentframe()
+            while stack_frame is not None:
+                prev_frame = stack_frame.f_back
+                if (
+                    prev_frame is not None
+                    and stack_frame.f_code.co_name == "__new__"
+                    and prev_frame.f_code.co_name != "__new__"
+                ):
+                    defining_frame = prev_frame
+                    break
+                stack_frame = prev_frame
+
+            if defining_frame is not None:
+                if (
+                    defining_frame.f_back is None
+                    or defining_frame.f_code.co_name == "<module>"
+                ):
+                    value = None
+                else:
+                    value = _model_construction.build_lenient_weakvaluedict(
+                        defining_frame.f_locals
+                    )
+
+            super().__setattr__(name, value)
         else:
             super().__setattr__(name, value)
 
@@ -230,6 +271,14 @@ def _process_pydantic_fields(
             overrides["default"] = _abstract.DEFAULT_VALUE
         elif fdef_is_desc:
             overrides["default"] = ...
+
+        if (
+            cls.__gel_variant__ is None
+            and fn not in cls.__gel_reflection__.pointers
+        ):
+            # This is an ad-hoc computed pointer in a user-defined variant
+            overrides["init"] = False
+            overrides["frozen"] = True
 
         if overrides:
             field_attrs = dict(field._attributes_set)
@@ -780,7 +829,7 @@ class ProxyModel(GelModel, Generic[_MT_co]):
             return handler(source_type)
         else:
             return core_schema.no_info_before_validator_function(
-                cls,
+                cls,  # pyright: ignore [reportArgumentType]
                 schema=handler.generate_schema(cls.__proxy_of__),
                 serialization=core_schema.wrap_serializer_function_ser_schema(
                     lambda obj, _ser, info: obj.model_dump(

@@ -129,8 +129,7 @@ def maybe_collapse_object_type_variant_union(
 ) -> type[GelObjectType] | None:
     """If *t* is a Union of GelObjectType reflections of the same object
     type, find and return the first union component that is a default
-    variant or a user-defined variant (such classes would have
-    ``__gel_variant__`` set to None."""
+    variant."""
     default_variant: type[GelObjectType] | None = None
     typename = None
     for union_arg in typing.get_args(t):
@@ -142,7 +141,7 @@ def maybe_collapse_object_type_variant_union(
         elif typename != union_arg.__gel_reflection__.name:
             # Reflections of different object types, cannot collapse.
             return None
-        if union_arg.__gel_variant__ is None and default_variant is None:
+        if union_arg.__gel_variant__ == "Default" and default_variant is None:
             default_variant = union_arg
 
     return default_variant

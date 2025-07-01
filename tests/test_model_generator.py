@@ -3162,7 +3162,6 @@ class TestModelGenerator(tb.ModelTestCase):
         for user in users_with_prefix:
             self.assertEqual(user.full_name, f"User: {user.name}")
 
-    @tb.to_be_fixed  # custom model computeds fail to type-resolve
     @tb.typecheck
     def test_modelgen_operators_integer_arithmetic(self):
         """Test integer arithmetic operators with mixed Python/Gel values"""
@@ -3251,7 +3250,6 @@ class TestModelGenerator(tb.ModelTestCase):
         for user in users_not_alice:
             self.assertNotEqual(user.name, "Alice")
 
-    @tb.to_be_fixed  # custom model computeds fail to type-resolve
     @tb.typecheck
     def test_modelgen_operators_mixed_types_with_casting(self):
         """Test operators with mixed types requiring casting"""
@@ -3298,7 +3296,6 @@ class TestModelGenerator(tb.ModelTestCase):
             self.assertTrue(user.name > "A" or user.nickname is not None)
             self.assertNotEqual(user.name, "")
 
-    @tb.to_be_fixed  # custom model computeds fail to type-resolve
     @tb.typecheck
     def test_modelgen_operators_with_python_values_in_computeds(self):
         """Test operators using Python values in computed expressions"""
@@ -3358,7 +3355,6 @@ class TestModelGenerator(tb.ModelTestCase):
         for user in users_with_char:
             self.assertTrue(search_char in user.name.lower())
 
-    @tb.to_be_fixed  # custom model computeds fail to type-resolve
     @tb.typecheck
     def test_modelgen_operators_numeric(self):
         """Test numeric operators with edge cases and mixed precision"""
@@ -3390,6 +3386,27 @@ class TestModelGenerator(tb.ModelTestCase):
                 )
                 self.assertEqual(session.num_floor_div, expected_floor_div)
                 self.assertEqual(session.num_mod, expected_mod)
+
+    @tb.typecheck
+    def test_modelgen_ad_hoc_computeds_are_frozen(self):
+        """Test that ad-hoc computeds cannot be passed to init or mutated"""
+        from models import default, std
+
+        class UserWithUpperName(default.User):
+            upper_name: std.str
+
+        with self.assertRaisesRegex(ValueError, "computed field"):
+            UserWithUpperName(name="user with upper name", upper_name="test")  # type: ignore [call-arg]
+
+        users = self.client.query(
+            UserWithUpperName.select(
+                name=True,
+                upper_name=lambda u: std.str_upper(u.name),
+            ).limit(1)
+        )
+
+        with self.assertRaisesRegex(ValueError, "is frozen"):
+            users[0].upper_name = "foo"
 
 
 class TestEmptyAiModelGenerator(tb.ModelTestCase):
