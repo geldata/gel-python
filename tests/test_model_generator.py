@@ -491,6 +491,160 @@ class TestModelGenerator(tb.ModelTestCase):
             ),
         )
 
+    @tb.typecheck(["import typing, json"])
+    def test_modelgen_pydantic_apis_03(self):
+        # Test model_dump() and model_dump_json() on ProxyModel linked
+        # via a single link.
+
+        from models import default
+        from gel._testbase import pop_ids, pop_ids_json
+
+        sl = self.client.query_required_single(
+            default.StackableLoot.select(
+                name=True,
+                owner=lambda s: s.owner.select(
+                    name=True,
+                    nickname=True,
+                ),
+            )
+            .filter(name="Gold Coin")
+            .limit(1)  # TODO: detect cardinality, name is exclusive
+        )
+
+        self.assertEqual(
+            pop_ids(sl.model_dump()),
+            {
+                "name": "Gold Coin",
+                "owner": {
+                    "name": "Billie",
+                    "nickname": None,
+                    "__linkprops__": {"bonus": True, "count": 34},
+                },
+            },
+        )
+
+        self.assertEqual(
+            pop_ids_json(sl.model_dump_json()),
+            json.dumps(
+                {
+                    "name": "Gold Coin",
+                    "owner": {
+                        "name": "Billie",
+                        "nickname": None,
+                        "__linkprops__": {"bonus": True, "count": 34},
+                    },
+                },
+            ),
+        )
+
+        self.assertEqual(
+            pop_ids(sl.model_dump(exclude_none=True)),
+            {
+                "name": "Gold Coin",
+                "owner": {
+                    "name": "Billie",
+                    "__linkprops__": {"bonus": True, "count": 34},
+                },
+            },
+        )
+
+        self.assertEqual(
+            pop_ids_json(sl.model_dump_json(exclude_none=True)),
+            json.dumps(
+                {
+                    "name": "Gold Coin",
+                    "owner": {
+                        "name": "Billie",
+                        "__linkprops__": {"bonus": True, "count": 34},
+                    },
+                },
+            ),
+        )
+
+        # Test direct model_dump() and model_dump_json() calls on
+        # a ProxyModel instance.
+        assert sl.owner is not None
+        self.assertEqual(
+            pop_ids(sl.owner.model_dump()),
+            {
+                "name": "Billie",
+                "nickname": None,
+                "__linkprops__": {"bonus": True, "count": 34},
+            },
+        )
+
+        self.assertEqual(
+            pop_ids(sl.owner.model_dump(exclude_none=True)),
+            {
+                "name": "Billie",
+                "__linkprops__": {"bonus": True, "count": 34},
+            },
+        )
+
+    @tb.typecheck(["import typing, json"])
+    def test_modelgen_pydantic_apis_04(self):
+        # Test model_dump() and model_dump_json() on ProxyModel linked
+        # via a multi link.
+
+        from models import default
+        from gel._testbase import pop_ids, pop_ids_json
+
+        sl = self.client.query_required_single(
+            default.GameSession.select(
+                num=True,
+                players=lambda s: s.players.select("*").order_by(
+                    lambda u: u.name
+                ),
+            )
+            .filter(num=123)
+            .limit(1)  # TODO: detect cardinality, name is exclusive
+        )
+
+        expected = {
+            "num": 123,
+            "players": [
+                {
+                    "nickname": None,
+                    "nickname_len": None,
+                    "name": "Alice",
+                    "name_len": 5,
+                    "__linkprops__": {"is_tall_enough": False},
+                },
+                {
+                    "nickname": None,
+                    "nickname_len": None,
+                    "name": "Billie",
+                    "name_len": 6,
+                    "__linkprops__": {"is_tall_enough": True},
+                },
+            ],
+        }
+        self.assertEqual(pop_ids(sl.model_dump()), expected)
+        self.assertEqual(
+            pop_ids_json(sl.model_dump_json()), json.dumps(expected)
+        )
+
+        expected = {
+            "num": 123,
+            "players": [
+                {
+                    "name": "Alice",
+                    "name_len": 5,
+                    "__linkprops__": {"is_tall_enough": False},
+                },
+                {
+                    "name": "Billie",
+                    "name_len": 6,
+                    "__linkprops__": {"is_tall_enough": True},
+                },
+            ],
+        }
+        self.assertEqual(pop_ids(sl.model_dump(exclude_none=True)), expected)
+        self.assertEqual(
+            pop_ids_json(sl.model_dump_json(exclude_none=True)),
+            json.dumps(expected),
+        )
+
     @tb.typecheck
     def test_modelgen_data_unpack_polymorphic(self):
         from models import default
