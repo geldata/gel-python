@@ -13,11 +13,16 @@ from typing import (
     Final,
     Generic,
     Protocol,
-    TypeVar,
     SupportsIndex,
     overload,
 )
-from typing_extensions import Self, TypeVarTuple, TypeAliasType, Unpack
+from typing_extensions import (
+    Self,
+    TypeVarTuple,
+    TypeAliasType,
+    TypeVar,
+    Unpack,
+)
 
 import builtins
 import datetime
@@ -37,32 +42,42 @@ from gel._internal._lazyprop import LazyClassProperty
 from gel._internal._polyfills._strenum import StrEnum
 from gel._internal._reflection import SchemaPath
 
-from ._base import GelType, GelTypeMeta
+from ._base import GelType, GelTypeConstraint, GelTypeMeta
 from ._functions import assert_single
 
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Sequence
+    from collections.abc import Iterable, Mapping, Sequence
 
     import enum
 
 
 _T = TypeVar("_T", bound=GelType)
+_GelPrimitiveType_T = TypeVar("_GelPrimitiveType_T", bound="GelPrimitiveType")
+
+
+class GelPrimitiveTypeConstraint(GelTypeConstraint[_GelPrimitiveType_T]):
+    pass
 
 
 class GelPrimitiveType(GelType):
     if TYPE_CHECKING:
 
         @overload
-        def __get__(self, obj: None, objtype: type[Any]) -> type[Self]: ...
+        def __get__(
+            self, instance: None, owner: type[Any], /
+        ) -> type[Self]: ...
 
         @overload
-        def __get__(self, obj: object, objtype: Any = None) -> Self: ...
+        def __get__(
+            self, instance: Any, owner: type[Any] | None = None, /
+        ) -> Self: ...
 
         def __get__(
             self,
-            obj: Any,
-            objtype: Any = None,
+            instance: Any | None,
+            owner: type[Any] | None = None,
+            /,
         ) -> type[Self] | Self: ...
 
         @classmethod
@@ -90,7 +105,7 @@ class GelPrimitiveType(GelType):
             )
 
 
-class BaseScalar(GelPrimitiveType):
+class GelScalarType(GelPrimitiveType):
     pass
 
 
@@ -119,7 +134,7 @@ else:
     AnyEnumMeta = type(StrEnum)
 
 
-class AnyEnum(BaseScalar, StrEnum, metaclass=AnyEnumMeta):
+class AnyEnum(GelScalarType, StrEnum, metaclass=AnyEnumMeta):
     pass
 
 
@@ -151,7 +166,10 @@ class Array(HomogeneousCollection[_T], list[_T], metaclass=_ArrayMeta):  # type:
     if TYPE_CHECKING:
 
         def __set__(
-            self, obj: Any, value: Array[_T] | Sequence[_T]
+            self,
+            instance: Any,
+            value: Array[_T] | Sequence[_T],
+            /,
         ) -> None: ...
 
     @LazyClassProperty[type[GelPrimitiveType.__gel_reflection__]]
@@ -199,8 +217,9 @@ class Tuple(  # type: ignore[misc]
 
         def __set__(
             self,
-            obj: Any,
+            instance: Any,
             value: Tuple[Unpack[_Ts]] | tuple[Unpack[_Ts]],
+            /,
         ) -> None: ...
 
     @LazyClassProperty[type[GelPrimitiveType.__gel_reflection__]]
@@ -234,7 +253,10 @@ class Range(
     if TYPE_CHECKING:
 
         def __set__(
-            self, obj: Any, value: Range[_T] | _range.Range[_T]
+            self,
+            instance: Any,
+            value: Range[_T] | _range.Range[_T],
+            /,
         ) -> None: ...
 
     @LazyClassProperty[type[GelPrimitiveType.__gel_reflection__]]
@@ -311,28 +333,79 @@ class DateTimeLike(Protocol):
     def __sub__(self, other: datetime.datetime) -> TimeDeltaLike: ...
 
 
-_scalar_type_to_py_type: dict[str, str | tuple[str, str]] = {
-    "std::str": "str",
-    "std::float32": "float",
-    "std::float64": "float",
-    "std::int16": "int",
-    "std::int32": "int",
-    "std::int64": "int",
-    "std::bigint": "int",
-    "std::bool": "bool",
-    "std::uuid": ("uuid", "UUID"),
-    "std::bytes": "bytes",
+_scalar_type_to_py_type: dict[str, tuple[str, str]] = {
+    #
+    # Integers
+    #
+    "std::bigint": ("builtins", "int"),
+    "std::int16": ("builtins", "int"),
+    "std::int32": ("builtins", "int"),
+    "std::int64": ("builtins", "int"),
+    #
+    # Floats
+    #
+    "std::float32": ("builtins", "float"),
+    "std::float64": ("builtins", "float"),
+    #
+    # Rest of builtins
+    #
+    "std::bool": ("builtins", "bool"),
+    "std::bytes": ("builtins", "bytes"),
+    "std::str": ("builtins", "str"),
+    #
+    # Decimal
+    #
     "std::decimal": ("decimal", "Decimal"),
+    #
+    # JSON is arbitrary data
+    #
+    "std::json": ("builtins", "str"),
+    #
+    # Dates, times, and intervals
+    #
     "std::datetime": ("datetime", "datetime"),
     "std::duration": ("datetime", "timedelta"),
-    "std::json": "str",
     "std::cal::local_date": ("datetime", "date"),
-    "std::cal::local_time": ("datetime", "time"),
     "std::cal::local_datetime": ("datetime", "datetime"),
-    "std::cal::relative_duration": ("gel", "RelativeDuration"),
+    "std::cal::local_time": ("datetime", "time"),
     "std::cal::date_duration": ("gel", "DateDuration"),
+    "std::cal::relative_duration": ("gel", "RelativeDuration"),
+    #
+    # Other types
+    #
+    "std::uuid": ("uuid", "UUID"),
     "cfg::memory": ("gel", "ConfigMemory"),
     "ext::pgvector::vector": ("array", "array"),
+}
+
+
+#
+# The inverse of the above, order of scalar names in value lists
+# indicates priority when doing overload deconfliction.
+#
+_py_type_to_scalar_type: dict[tuple[str, str], tuple[str, ...]] = {
+    ("gel", "DateDuration"): ("std::cal::date_duration",),
+    ("gel", "RelativeDuration"): ("std::cal::relative_duration",),
+    ("gel", "ConfigMemory"): ("cfg::memory",),
+    ("builtins", "bool"): ("std::bool",),
+    ("builtins", "bytes"): ("std::bytes",),
+    ("builtins", "float"): (
+        "std::float64",
+        "std::float32",
+    ),
+    ("builtins", "int"): (
+        "std::bigint",
+        "std::int64",
+        "std::int32",
+        "std::int16",
+    ),
+    ("builtins", "str"): ("std::str",),
+    ("datetime", "datetime"): ("std::datetime", "std::cal::local_datetime"),
+    ("datetime", "timedelta"): ("std::duration",),
+    ("datetime", "date"): ("std::cal::local_date",),
+    ("datetime", "time"): ("std::cal::local_time",),
+    ("decimal", "Decimal"): ("std::decimal",),
+    ("uuid", "UUID"): ("std::uuid",),
 }
 
 _generic_scalar_type_to_py_type: dict[str, list[tuple[str, str] | str]] = {
@@ -376,11 +449,8 @@ def get_py_type_for_scalar(
 ) -> tuple[tuple[str, str], ...]:
     base_type = _scalar_type_to_py_type.get(typename)
     if base_type is not None:
-        if isinstance(base_type, str):
-            if require_subclassable and base_type == "bool":
-                base_type = "int"
-            base_type = ("builtins", base_type)
-
+        if require_subclassable and base_type == ("builtins", "bool"):
+            base_type = ("builtins", "int")
         return (base_type,)
     elif consider_generic:
         return tuple(sorted(_get_py_type_for_generic_scalar(typename)))
@@ -429,6 +499,7 @@ substrate in generated models, e.g `gel.models.pydantic`."""
 
 
 _scalar_type_impl_overrides: dict[str, tuple[str, str]] = {
+    "std::json": (MODEL_SUBSTRATE_MODULE, "JSONImpl"),
     "std::uuid": (MODEL_SUBSTRATE_MODULE, "UUIDImpl"),
     "std::datetime": (MODEL_SUBSTRATE_MODULE, "DateTimeImpl"),
     "std::duration": (MODEL_SUBSTRATE_MODULE, "TimeDeltaImpl"),
@@ -457,30 +528,65 @@ def get_py_base_for_scalar(
         )
 
 
-_py_type_to_scalar_type: dict[tuple[str, str], list[str]] = {
-    ("gel", "DateDuration"): ["std::cal::date_duration"],
-    ("gel", "RelativeDuration"): ["std::cal::relative_duration"],
-    ("gel", "ConfigMemory"): ["cfg::memory"],
-    ("builtins", "bool"): ["std::bool"],
-    ("builtins", "bytes"): ["std::bytes"],
-    ("builtins", "float"): [
-        "std::float64",
-        "std::float32",
-    ],
-    ("builtins", "int"): [
-        "std::bigint",
-        "std::int64",
-        "std::int32",
-        "std::int16",
-    ],
-    ("builtins", "str"): ["std::str", "std::json"],
-    ("datetime", "datetime"): ["std::datetime"],
-    ("datetime", "timedelta"): ["std::duration"],
-    ("datetime", "date"): ["std::cal::local_date"],
-    ("datetime", "time"): ["std::cal::local_time"],
-    ("decimal", "Decimal"): ["std::decimal"],
-    ("uuid", "UUID"): ["std::uuid"],
+_ambiguous_py_types: dict[
+    tuple[str, str], dict[SchemaPath, tuple[SchemaPath, ...]]
+] = {
+    key: scalars
+    for key, scalars in {
+        key: {
+            parent: tuple(p for p in scalars if p.parent == parent)
+            for parent in {p.parent for p in scalars}
+        }
+        for key, scalars in {
+            key: tuple(SchemaPath.from_schema_name(v) for v in vals)
+            for key, vals in _py_type_to_scalar_type.items()
+        }.items()
+        if len(scalars) > 1
+    }.items()
+    if scalars
 }
+
+
+_ambiguous_py_types_by_mod: dict[
+    SchemaPath, dict[tuple[str, str], tuple[SchemaPath, ...]]
+] = {
+    parent: {
+        key: scalars[parent]
+        for key, scalars in _ambiguous_py_types.items()
+        if parent in scalars
+    }
+    for parent in {
+        p for scalars in _ambiguous_py_types.values() for p in scalars
+    }
+}
+
+
+def get_scalar_type_disambiguation_for_py_type(
+    py_type: tuple[str, str],
+) -> Mapping[SchemaPath, tuple[SchemaPath, ...]]:
+    return _ambiguous_py_types.get(py_type, {})
+
+
+def get_scalar_type_disambiguation_for_mod(
+    mod: SchemaPath,
+) -> Mapping[tuple[str, str], tuple[SchemaPath, ...]]:
+    return _ambiguous_py_types_by_mod.get(mod, {})
+
+
+_PROTOCOL_META = ("typing", "_ProtocolMeta")
+
+_py_type_typecheck_meta_bases: dict[
+    tuple[str, str], tuple[tuple[str, str], ...]
+] = {
+    ("builtins", "str"): (_PROTOCOL_META,),
+    ("builtins", "bytes"): (_PROTOCOL_META,),
+}
+
+
+def get_py_type_typecheck_meta_bases(
+    py_type: tuple[str, str],
+) -> tuple[tuple[str, str], ...]:
+    return _py_type_typecheck_meta_bases.get(py_type, ())
 
 
 @functools.cache
@@ -509,6 +615,7 @@ _py_type_to_literal: dict[type[PyConstType], type[_qb.Literal]] = {
 
 
 _PT_co = TypeVar("_PT_co", bound=PyConstType, covariant=True)
+_ST = TypeVar("_ST", bound=GelScalarType, default=GelScalarType)
 
 
 def get_literal_for_value(
@@ -527,7 +634,7 @@ def get_literal_for_scalar(
 ) -> _qb.Literal | _qb.CastOp:
     if not isinstance(v, t):
         v = t(v)
-    ltype = _py_type_to_literal.get(t.type)  # type: ignore [arg-type]
+    ltype = _py_type_to_literal.get(t.__gel_py_type__)  # type: ignore [arg-type]
     if ltype is not None:
         return ltype(val=v)  # type: ignore [call-arg]
     else:
@@ -538,15 +645,47 @@ def get_literal_for_scalar(
 
 
 class PyTypeScalar(
-    _typing_parametric.SingleParametricType[_PT_co],
-    BaseScalar,
+    _typing_parametric.ParametricType,
+    GelScalarType,
+    Generic[_PT_co],
 ):
+    __gel_py_type__: ClassVar[type[_PT_co]]  # type: ignore [misc]
+
     if TYPE_CHECKING:
 
-        def __set__(self, obj: Any, value: _PT_co) -> None: ...  # type: ignore [misc]
+        @overload  # type: ignore [override, unused-ignore]
+        def __get__(
+            self, instance: None, owner: type[Any], /
+        ) -> type[Self]: ...
+
+        @overload
+        def __get__(
+            self, instance: Any, owner: type[Any] | None = None, /
+        ) -> _PT_co: ...
+
+        def __get__(  # type: ignore [override, unused-ignore]
+            self,
+            instance: Any | None,
+            owner: type[Any] | None = None,
+            /,
+        ) -> type[Self] | _PT_co: ...
+
+        def __set__(self, instance: Any, value: _PT_co, /) -> None: ...  # type: ignore [misc]
 
     def __edgeql_literal__(self) -> _qb.Literal | _qb.CastOp:
         return get_literal_for_scalar(type(self), self)
+
+
+class PyTypeScalarConstraint(
+    _typing_parametric.ParametricType,
+    GelPrimitiveTypeConstraint[_ST],
+    Generic[_ST],
+):
+    __gel_type_constraint__: ClassVar[type[_ST]]  # type: ignore [misc]
+
+
+class JSONImpl(str):  # noqa: FURB189
+    __slots__ = ()
 
 
 UUIDFieldsTuple = TypeAliasType(
@@ -584,25 +723,67 @@ class UUIDImpl(uuid.UUID):
 
 
 class DateImpl(datetime.date):
-    def __new__(
-        cls,
-        year: datetime.date | SupportsIndex,
-        month: SupportsIndex,
-        day: SupportsIndex,
-    ) -> Self:
-        if isinstance(year, datetime.date):
-            dt = year
-            return cls(dt.year, dt.month, dt.day)
-        else:
-            return super().__new__(cls, year, month, day)
+    if TYPE_CHECKING:
+
+        @overload
+        def __new__(
+            cls,
+            year: SupportsIndex = ...,
+            month: SupportsIndex = ...,
+            day: SupportsIndex = ...,
+        ) -> Self: ...
+
+        @overload
+        def __new__(
+            cls,
+            year: datetime.date,
+        ) -> Self: ...
+
+        def __new__(
+            cls,
+            year: SupportsIndex | datetime.date = ...,
+            month: SupportsIndex = ...,
+            day: SupportsIndex = ...,
+        ) -> Self: ...
+    else:
+
+        def __new__(
+            cls,
+            year: datetime.date | SupportsIndex,
+            month: SupportsIndex,
+            day: SupportsIndex,
+        ) -> Self:
+            if isinstance(year, datetime.date):
+                dt = year
+                return cls(dt.year, dt.month, dt.day)
+            else:
+                return super().__new__(cls, year, month, day)
 
 
 class TimeImpl(datetime.time):
     if TYPE_CHECKING:
 
+        @overload
         def __new__(
             cls,
             hour: SupportsIndex = ...,
+            minute: SupportsIndex = ...,
+            second: SupportsIndex = ...,
+            microsecond: SupportsIndex = ...,
+            tzinfo: datetime.tzinfo | None = ...,
+            *,
+            fold: int = ...,
+        ) -> Self: ...
+
+        @overload
+        def __new__(
+            cls,
+            hour: datetime.time,
+        ) -> Self: ...
+
+        def __new__(
+            cls,
+            hour: SupportsIndex | datetime.time = ...,
             minute: SupportsIndex = ...,
             second: SupportsIndex = ...,
             microsecond: SupportsIndex = ...,
@@ -640,11 +821,32 @@ class TimeImpl(datetime.time):
 class DateTimeImpl(datetime.datetime):
     if TYPE_CHECKING:
 
-        def __new__(  # noqa: PLR0917
+        @overload
+        def __new__(
             cls,
             year: SupportsIndex,
             month: SupportsIndex,
             day: SupportsIndex,
+            hour: SupportsIndex = ...,
+            minute: SupportsIndex = ...,
+            second: SupportsIndex = ...,
+            microsecond: SupportsIndex = ...,
+            tzinfo: datetime.tzinfo | None = ...,
+            *,
+            fold: int = ...,
+        ) -> Self: ...
+
+        @overload
+        def __new__(
+            cls,
+            year: DateTimeLike,
+        ) -> Self: ...
+
+        def __new__(  # noqa: PLR0917
+            cls,
+            year: SupportsIndex | DateTimeLike,
+            month: SupportsIndex = ...,
+            day: SupportsIndex = ...,
             hour: SupportsIndex = ...,
             minute: SupportsIndex = ...,
             second: SupportsIndex = ...,
@@ -686,9 +888,27 @@ class DateTimeImpl(datetime.datetime):
 class TimeDeltaImpl(datetime.timedelta):
     if TYPE_CHECKING:
 
-        def __new__(  # noqa: PLR0917
+        @overload
+        def __new__(
             cls,
             days: float = ...,
+            seconds: float = ...,
+            microseconds: float = ...,
+            milliseconds: float = ...,
+            minutes: float = ...,
+            hours: float = ...,
+            weeks: float = ...,
+        ) -> Self: ...
+
+        @overload
+        def __new__(
+            cls,
+            days: datetime.timedelta,
+        ) -> Self: ...
+
+        def __new__(  # noqa: PLR0917
+            cls,
+            days: float | datetime.timedelta = ...,
             seconds: float = ...,
             microseconds: float = ...,
             milliseconds: float = ...,

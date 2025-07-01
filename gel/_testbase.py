@@ -486,6 +486,9 @@ class ConnectedTestCaseMixin:
         return cls.loop.run_until_complete(coro)
 
 
+MAX_BRANCH_NAME_LEN = 51
+
+
 class DatabaseTestCase(ClusterTestCase, ConnectedTestCaseMixin):
     SETUP = None
     TEARDOWN = None
@@ -504,7 +507,7 @@ class DatabaseTestCase(ClusterTestCase, ConnectedTestCaseMixin):
         if self.ISOLATED_TEST_BRANCHES:
             cls = type(self)
             root = cls.get_database_name()
-            testdb = self._testMethodName
+            testdb = self._testMethodName[:MAX_BRANCH_NAME_LEN]
             cls.__client__.query(f"""
                 create data branch {testdb} from {root};
             """)
@@ -933,10 +936,11 @@ def _typecheck(func, imports=None):
     dedented_body = textwrap.dedent(source_code)
 
     if imports is None:
-        add_imports = ""
+        imports = ("from models import default, std",)
     else:
-        add_imports = "\n".join(imports)
+        imports = (*imports, "import models as m")
 
+    add_imports = "\n".join(imports)
     source_code = f"""\
 import unittest
 import typing

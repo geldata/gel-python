@@ -151,6 +151,7 @@ class ModelFieldDescriptor(_qb.AbstractFieldDescriptor):
         self,
         instance: object | None,
         owner: type[Any] | None = None,
+        /,
     ) -> Any:
         if instance is not None:
             raise AttributeError(f"{self.__gel_name__!r} is not set")
@@ -176,33 +177,16 @@ def field_descriptor(
     return ModelFieldDescriptor(origin, name, annotation)
 
 
-T = TypeVar("T")
-T_co = TypeVar("T_co", covariant=True)
+T_co = TypeVar("T_co", bound=GelType, covariant=True)
 BT_co = TypeVar("BT_co", covariant=True)
 
 
 class PointerDescriptor(_qb.AbstractDescriptor, Generic[T_co, BT_co]):
-    if TYPE_CHECKING:
-
-        def __get__(self, obj: None, objtype: type[Any]) -> type[T_co]: ...
+    pass
 
 
 class OptionalPointerDescriptor(PointerDescriptor[T_co, BT_co]):
-    if TYPE_CHECKING:
-
-        @overload
-        def __get__(self, obj: None, objtype: type[Any]) -> type[T_co]: ...
-
-        @overload
-        def __get__(self, obj: object, objtype: Any = None) -> T_co | None: ...
-
-        def __get__(
-            self,
-            obj: Any,
-            objtype: Any = None,
-        ) -> type[T_co] | T_co | None: ...
-
-        def __set__(self, obj: Any, value: BT_co | None) -> None: ...
+    pass
 
 
 class AnyPropertyDescriptor(PointerDescriptor[T_co, BT_co]):
@@ -210,14 +194,66 @@ class AnyPropertyDescriptor(PointerDescriptor[T_co, BT_co]):
 
 
 class PropertyDescriptor(AnyPropertyDescriptor[T_co, BT_co]):
-    pass
+    if TYPE_CHECKING:
+
+        @overload
+        def __get__(
+            self,
+            instance: None,
+            owner: type[Any],
+            /,
+        ) -> type[T_co]: ...
+
+        @overload
+        def __get__(
+            self,
+            instance: Any,
+            objtype: type[Any] | None = None,
+            /,
+        ) -> BT_co: ...
+
+        def __get__(
+            self,
+            instance: Any,
+            owner: type[Any] | None = None,
+            /,
+        ) -> type[T_co] | BT_co: ...
+
+        def __set__(
+            self,
+            instance: Any,
+            value: T_co | BT_co,
+            /,
+        ) -> None: ...
 
 
 class OptionalPropertyDescriptor(
     OptionalPointerDescriptor[T_co, BT_co],
     AnyPropertyDescriptor[T_co, BT_co],
 ):
-    pass
+    if TYPE_CHECKING:
+
+        @overload
+        def __get__(
+            self,
+            instance: None,
+            owner: type[Any],
+            /,
+        ) -> type[T_co]: ...
+
+        @overload
+        def __get__(
+            self,
+            instance: Any,
+            owner: type[Any] | None = None,
+            /,
+        ) -> BT_co | None: ...
+
+        def __get__(
+            self,
+            instance: Any,
+            owner: type[Any] | None = None,
+        ) -> type[T_co] | BT_co | None: ...
 
 
 class LinkDescriptor(PointerDescriptor[T_co, BT_co]):
@@ -225,4 +261,34 @@ class LinkDescriptor(PointerDescriptor[T_co, BT_co]):
 
 
 class OptionalLinkDescriptor(OptionalPointerDescriptor[T_co, BT_co]):
-    pass
+    if TYPE_CHECKING:
+
+        @overload
+        def __get__(
+            self,
+            instance: None,
+            owner: type[Any],
+            /,
+        ) -> type[T_co]: ...
+
+        @overload
+        def __get__(
+            self,
+            instance: Any,
+            owner: type[Any] | None = None,
+            /,
+        ) -> T_co | None: ...
+
+        def __get__(
+            self,
+            instance: Any | None,
+            owner: type[Any] | None = None,
+            /,
+        ) -> type[T_co] | T_co | None: ...
+
+        def __set__(
+            self,
+            instance: Any,
+            value: BT_co | None,
+            /,
+        ) -> None: ...

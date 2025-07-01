@@ -23,7 +23,6 @@ import functools
 import typing
 
 import pydantic
-import pydantic.fields
 import pydantic_core
 from pydantic_core import core_schema
 
@@ -44,7 +43,7 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
 
-_T_co = TypeVar("_T_co", covariant=True)
+_T_co = TypeVar("_T_co", bound=_abstract.GelType, covariant=True)
 
 _BT_co = TypeVar("_BT_co", covariant=True)
 """Base type"""
@@ -131,22 +130,6 @@ class _ComputedMultiPointer(_abstract.PointerDescriptor[_T_co, _BT_co]):
 
 
 class Property(_abstract.PropertyDescriptor[_ST_co, _BT_co]):
-    if TYPE_CHECKING:
-
-        @overload
-        def __get__(self, obj: None, objtype: type[Any]) -> type[_ST_co]: ...
-
-        @overload
-        def __get__(self, obj: object, objtype: Any = None) -> _ST_co: ...
-
-        def __get__(
-            self,
-            obj: Any,
-            objtype: Any = None,
-        ) -> type[_ST_co] | _ST_co: ...
-
-        def __set__(self, obj: Any, value: _ST_co | _BT_co) -> None: ...
-
     @classmethod
     def __get_pydantic_core_schema__(
         cls,
@@ -162,22 +145,14 @@ class Property(_abstract.PropertyDescriptor[_ST_co, _BT_co]):
 
 class _ComputedProperty(_abstract.PropertyDescriptor[_ST_co, _BT_co]):
     if TYPE_CHECKING:
-
-        @overload
-        def __get__(self, obj: None, objtype: type[Any]) -> type[_ST_co]: ...
-
-        @overload
-        def __get__(self, obj: object, objtype: Any = None) -> _ST_co: ...
-
-        def __get__(
-            self,
-            obj: Any,
-            objtype: Any = None,
-        ) -> type[_ST_co] | _ST_co: ...
-
         # XXX -- using Final[] would probably be better, but it's not clear
         # how to wrap it in our aliases.
-        def __set__(self, obj: Any, value: Never) -> None: ...
+        def __set__(  # type: ignore [override]
+            self,
+            instance: Any,
+            value: Never,
+            /,
+        ) -> None: ...
 
     @classmethod
     def __get_pydantic_core_schema__(
@@ -274,28 +249,40 @@ OptionalComputedProperty = TypeAliasType(
 
 class _MultiProperty(
     _MultiPointer[_ST_co, _BT_co],
-    _abstract.PropertyDescriptor[_ST_co, _BT_co],
+    _abstract.AnyPropertyDescriptor[_ST_co, _BT_co],
 ):
     if TYPE_CHECKING:
 
         @overload
-        def __get__(self, obj: None, objtype: type[Any]) -> type[_ST_co]: ...
+        def __get__(
+            self,
+            instance: None,
+            owner: type[Any],
+            /,
+        ) -> type[_ST_co]: ...
 
         @overload
         def __get__(
-            self, obj: object, objtype: Any = None
+            self,
+            instance: Any,
+            owner: type[Any] | None = None,
+            /,
         ) -> _dlist.DowncastingTrackedList[_ST_co, _BT_co]: ...
 
         def __get__(
             self,
-            obj: Any,
-            objtype: Any = None,
+            instance: Any,
+            owner: type[Any] | None = None,
+            /,
         ) -> (
             type[_ST_co] | _dlist.DowncastingTrackedList[_ST_co, _BT_co] | None
         ): ...
 
         def __set__(
-            self, obj: Any, value: Sequence[_ST_co | _BT_co]
+            self,
+            instance: Any,
+            value: Sequence[_ST_co | _BT_co],
+            /,
         ) -> None: ...
 
     @classmethod
@@ -626,7 +613,7 @@ class _MultiLinkWithProps(
     def __gel_resolve_dlist__(
         cls,
         type_args: tuple[type[Any]] | tuple[type[Any], type[Any]],
-    ) -> _dlist.DistinctList[_MT_co]:
+    ) -> _dlist.DistinctList[_PT_co]:
         return ProxyDistinctList[
             type_args[0],  # type: ignore [valid-type]
             type_args[1],  # type: ignore [valid-type]
