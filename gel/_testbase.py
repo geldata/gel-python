@@ -37,6 +37,7 @@ import sys
 import tempfile
 import textwrap
 import time
+import typing
 import unittest
 import warnings
 
@@ -1077,3 +1078,27 @@ if os.environ.get("USE_UVLOOP"):
     import uvloop
 
     uvloop.install()
+
+
+def pop_ids(dct: typing.Any) -> typing.Any:
+    if isinstance(dct, list):
+        for item in dct:
+            pop_ids(item)
+        return dct
+    else:
+        assert isinstance(dct, dict)
+        dct.pop("id", None)
+        for k, v in dct.items():
+            if isinstance(v, list):
+                for item in v:
+                    pop_ids(item)
+            elif isinstance(v, dict):
+                dct[k] = pop_ids(v)
+        return dct
+
+
+def pop_ids_json(js: str) -> str:
+    dct = json.loads(js)
+    assert isinstance(dct, (dict, list))
+    pop_ids(dct)
+    return json.dumps(dct)

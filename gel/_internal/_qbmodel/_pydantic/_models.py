@@ -39,6 +39,8 @@ from gel._internal._unsetid import UNSET_UUID
 
 from gel._internal._qbmodel import _abstract
 
+from . import _utils as _pydantic_utils
+
 if TYPE_CHECKING:
     import uuid
 
@@ -724,6 +726,9 @@ class ProxyModel(GelModel, Generic[_MT_co]):
             "__proxy_of__",
             "__class__",
             "__lprops__",
+            "model_dump",
+            "model_dump_json",
+            "__pydantic_serializer__",
         }:
             # Fast path for the wrapped object itself / linkprops model
             # (this optimization is informed by profiling model
@@ -777,6 +782,15 @@ class ProxyModel(GelModel, Generic[_MT_co]):
             return core_schema.no_info_before_validator_function(
                 cls,
                 schema=handler.generate_schema(cls.__proxy_of__),
+                serialization=core_schema.wrap_serializer_function_ser_schema(
+                    lambda obj, _ser, info: obj.model_dump(
+                        **_pydantic_utils.serialization_info_to_dump_kwargs(
+                            info
+                        )
+                    ),
+                    info_arg=True,
+                    when_used="always",  # Make sure it's always used
+                ),
             )
 
     @classmethod
@@ -827,6 +841,32 @@ class ProxyModel(GelModel, Generic[_MT_co]):
     def __repr_args__(self) -> Iterable[tuple[str | None, Any]]:
         yield from self.__linkprops__.__repr_args__()
         yield from self._p__obj__.__repr_args__()
+
+    @_utils.inherit_signature(  # type: ignore [arg-type]
+        pydantic.BaseModel.model_dump,
+    )
+    def model_dump(self, /, **kwargs: Any) -> dict[str, Any]:
+        kwargs = _kwargs_exclude_id(self.id, kwargs)
+        wrapped: GelModel = ll_getattr(self, "_p__obj__")
+
+        dump = wrapped.model_dump(**kwargs)
+
+        # TODO: figure out how to pass exlude/include/etc
+        # to the wrapped model. For now we just remove them
+        # from the kwargs so that we don't exclude/include
+        # linkprop with rules aimed at the wrapped model.
+        kwargs.pop("exclude", None)
+        kwargs.pop("include", None)
+
+        dump["__linkprops__"] = self.__linkprops__.model_dump(**kwargs)
+        return dump
+
+    @_utils.inherit_signature(  # type: ignore [arg-type]
+        pydantic.BaseModel.model_dump_json,
+    )
+    def model_dump_json(self, /, **kwargs: Any) -> str:
+        kwargs = _kwargs_exclude_id(self.id, kwargs)
+        return super().model_dump_json(**kwargs)
 
 
 #
