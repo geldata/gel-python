@@ -11,21 +11,21 @@ import datetime
 
 import fastapi
 import jwt
+import uuid  # noqa: TC003  # for runtime type annotations
 from fastapi import security, params
 
+from gel import auth as core  # noqa: TC001  # for runtime type annotations
 
 from .. import _client as client_mod
 from .. import _utils as utils
 
 if TYPE_CHECKING:
     import enum
-    import uuid
     from collections.abc import Callable, Iterator
 
     import gel
-    from gel import auth as core
-    from .email_password import EmailPassword
-    from .builtin_ui import BuiltinUI
+    from ._email_password import EmailPassword
+    from ._builtin_ui import BuiltinUI
 
 
 class Installable:
@@ -63,7 +63,7 @@ class GelAuth(client_mod.Extension):
     _on_new_identity_default_response_class: utils.Config[
         type[fastapi.Response]
     ] = utils.Config(_NoopResponse)
-    on_new_identity: utils.Hook[tuple[uuid.UUID, Optional[core.TokenData]]] = (
+    on_new_identity: utils.Hook[uuid.UUID, Optional[core.TokenData]] = (
         utils.Hook("_on_new_identity")
     )
 
@@ -115,6 +115,10 @@ class GelAuth(client_mod.Extension):
     @property
     def client(self) -> gel.AsyncIOClient:
         return self._lifespan.client
+
+    @property
+    def blocking_io_client(self) -> gel.Client:
+        return self._lifespan.blocking_io_client
 
     @property
     def maybe_auth_token(self) -> params.Depends:
@@ -169,12 +173,15 @@ class GelAuth(client_mod.Extension):
         token_data: Optional[core.TokenData],
     ) -> Optional[fastapi.Response]:
         if self.on_new_identity.is_set():
-            result = (identity_id, token_data)
             if token_data is None:
-                response = await self.on_new_identity.call(request, result)
+                response = await self.on_new_identity.call(
+                    request, identity_id, token_data
+                )
             else:
                 with self.with_auth_token(token_data.auth_token, request):
-                    response = await self.on_new_identity.call(request, result)
+                    response = await self.on_new_identity.call(
+                        request, identity_id, token_data
+                    )
             if not isinstance(response, _NoopResponse):
                 return response
 
@@ -188,7 +195,7 @@ class GelAuth(client_mod.Extension):
                     "Cannot enable email_password after installation"
                 )
 
-            from .email_password import EmailPassword  # noqa: PLC0415
+            from ._email_password import EmailPassword  # noqa: PLC0415
 
             self._email_password = EmailPassword(self)
 
@@ -216,7 +223,7 @@ class GelAuth(client_mod.Extension):
             if self.installed:
                 raise ValueError("Cannot enable builtin_ui after installation")
 
-            from .builtin_ui import BuiltinUI  # noqa: PLC0415
+            from ._builtin_ui import BuiltinUI  # noqa: PLC0415
 
             self._builtin_ui = BuiltinUI(self)
 
