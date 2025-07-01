@@ -105,7 +105,27 @@ class ParametricType:
             raise TypeError(f"{cls} must be declared as Generic")
 
         mod = sys.modules[cls.__module__]
-        annos = get_type_hints(cls, mod.__dict__, include_extras=True)
+
+        # We require ParametricType users to declare ClassVars for their
+        # in the body of the class that inherits from ParametricType.
+        #
+        # get_type_hints() attempts to traverse the MRO and will error
+        # out of ancestor classes have different class parameter names.
+        # But we don't need to resolve those or care about them, we
+        # are only interested in the ClassVars declared in the current
+        # class (that's the contract of using ParametricType anyway).
+        #
+        # So we create a new throwaway class with the same name and
+        # annotations as the current class, but with an empty MRO, just
+        # to extract resolved ClassVars that we care about.
+        #
+        # Besides, this will be faster as the entire MRO doesn't
+        # need to be traversed (not that it's a big deal, but still
+        # an ever so slightly faster import).
+        top_anno_cls = type(
+            cls.__name__, (), {"__annotations__": cls.__annotations__}
+        )
+        annos = get_type_hints(top_anno_cls, mod.__dict__, include_extras=True)
         param_map = {}
 
         for attr, t in annos.items():

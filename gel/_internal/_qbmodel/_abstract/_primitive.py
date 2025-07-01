@@ -30,9 +30,12 @@ import uuid
 from gel.datatypes import datatypes as _datatypes
 from gel.datatypes import range as _range
 
+from gel._internal import _edgeql
 from gel._internal import _qb
 from gel._internal import _typing_parametric
+from gel._internal._lazyprop import LazyClassProperty
 from gel._internal._polyfills._strenum import StrEnum
+from gel._internal._reflection import SchemaPath
 
 from ._base import GelType, GelTypeMeta
 from ._functions import assert_single
@@ -44,7 +47,7 @@ if TYPE_CHECKING:
     import enum
 
 
-T = TypeVar("T")
+_T = TypeVar("_T", bound=GelType)
 
 
 class GelPrimitiveType(GelType):
@@ -121,9 +124,19 @@ class AnyEnum(BaseScalar, StrEnum, metaclass=AnyEnumMeta):
 
 
 class HomogeneousCollection(
-    _typing_parametric.ParametricType, GelPrimitiveType, Generic[T]
+    _typing_parametric.ParametricType,
+    GelPrimitiveType,
+    Generic[_T],
 ):
-    __element_type__: ClassVar[type[T]]  # type: ignore [misc]
+    __element_type__: ClassVar[type[_T]]  # type: ignore [misc]
+
+    @LazyClassProperty[type[GelPrimitiveType.__gel_reflection__]]
+    @classmethod
+    def __gel_reflection__(cls) -> type[GelPrimitiveType.__gel_reflection__]:  # pyright: ignore [reportIncompatibleVariableOverride]
+        class __gel_reflection__(GelPrimitiveType.__gel_reflection__):  # noqa: N801
+            pass
+
+        return __gel_reflection__
 
 
 if TYPE_CHECKING:
@@ -134,10 +147,25 @@ else:
     _ArrayMeta = type(list)
 
 
-class Array(HomogeneousCollection[T], list[T], metaclass=_ArrayMeta):  # type: ignore [misc]
+class Array(HomogeneousCollection[_T], list[_T], metaclass=_ArrayMeta):  # type: ignore [misc]
     if TYPE_CHECKING:
 
-        def __set__(self, obj: Any, value: Array[T] | Sequence[T]) -> None: ...
+        def __set__(
+            self, obj: Any, value: Array[_T] | Sequence[_T]
+        ) -> None: ...
+
+    @LazyClassProperty[type[GelPrimitiveType.__gel_reflection__]]
+    @classmethod
+    def __gel_reflection__(cls) -> type[GelPrimitiveType.__gel_reflection__]:  # pyright: ignore [reportIncompatibleVariableOverride]
+        tid, tname = _edgeql.get_array_type_id_and_name(
+            cls.__element_type__.__gel_reflection__.name.as_schema_name()
+        )
+
+        class __gel_reflection__(GelPrimitiveType.__gel_reflection__):  # noqa: N801
+            id = tid
+            name = SchemaPath(tname)
+
+        return __gel_reflection__
 
 
 if TYPE_CHECKING:
@@ -154,7 +182,9 @@ _Ts = TypeVarTuple("_Ts")
 class HeterogeneousCollection(
     _typing_parametric.ParametricType, Generic[Unpack[_Ts]]
 ):
-    __element_types__: ClassVar[Annotated[tuple[type[Any], ...], Unpack[_Ts]]]
+    __element_types__: ClassVar[
+        Annotated[tuple[type[GelType], ...], Unpack[_Ts]]
+    ]
 
 
 class Tuple(  # type: ignore[misc]
@@ -173,6 +203,20 @@ class Tuple(  # type: ignore[misc]
             value: Tuple[Unpack[_Ts]] | tuple[Unpack[_Ts]],
         ) -> None: ...
 
+    @LazyClassProperty[type[GelPrimitiveType.__gel_reflection__]]
+    @classmethod
+    def __gel_reflection__(cls) -> type[GelPrimitiveType.__gel_reflection__]:  # pyright: ignore [reportIncompatibleVariableOverride]
+        tid, tname = _edgeql.get_tuple_type_id_and_name(
+            el.__gel_reflection__.name.as_schema_name()
+            for el in cls.__element_types__
+        )
+
+        class __gel_reflection__(GelPrimitiveType.__gel_reflection__):  # noqa: N801
+            id = tid
+            name = SchemaPath(tname)
+
+        return __gel_reflection__
+
 
 if TYPE_CHECKING:
 
@@ -183,15 +227,28 @@ else:
 
 
 class Range(
-    HomogeneousCollection[T],
-    _range.Range[T],
+    HomogeneousCollection[_T],
+    _range.Range[_T],
     metaclass=_RangeMeta,
 ):
     if TYPE_CHECKING:
 
         def __set__(
-            self, obj: Any, value: Range[T] | _range.Range[T]
+            self, obj: Any, value: Range[_T] | _range.Range[_T]
         ) -> None: ...
+
+    @LazyClassProperty[type[GelPrimitiveType.__gel_reflection__]]
+    @classmethod
+    def __gel_reflection__(cls) -> type[GelPrimitiveType.__gel_reflection__]:  # pyright: ignore [reportIncompatibleVariableOverride]
+        tid, tname = _edgeql.get_range_type_id_and_name(
+            cls.__element_type__.__gel_reflection__.name.as_schema_name()
+        )
+
+        class __gel_reflection__(GelPrimitiveType.__gel_reflection__):  # noqa: N801
+            id = tid
+            name = SchemaPath(tname)
+
+        return __gel_reflection__
 
 
 if TYPE_CHECKING:
@@ -203,7 +260,7 @@ else:
 
 
 class MultiRange(
-    HomogeneousCollection[T],
+    HomogeneousCollection[_T],
     metaclass=_MultiRangeMeta,
 ):
     if TYPE_CHECKING:
@@ -211,7 +268,7 @@ class MultiRange(
         def __set__(
             self,
             obj: Any,
-            value: MultiRange[T] | _range.MultiRange[T],
+            value: MultiRange[_T] | _range.MultiRange[_T],
         ) -> None: ...
 
 
@@ -278,7 +335,7 @@ _scalar_type_to_py_type: dict[str, str | tuple[str, str]] = {
     "ext::pgvector::vector": ("array", "array"),
 }
 
-_abstract_scalar_type_to_py_type: dict[str, list[tuple[str, str] | str]] = {
+_generic_scalar_type_to_py_type: dict[str, list[tuple[str, str] | str]] = {
     "std::anyfloat": [("builtins", "float")],
     "std::anyint": [("builtins", "int")],
     "std::anynumeric": [("builtins", "int"), ("decimal", "Decimal")],
@@ -299,13 +356,23 @@ _protocolized_py_types: dict[tuple[str, str], str] = {
     ("datetime", "datetime"): "DateTimeLike",
 }
 
+_pseudo_types = frozenset(("anytuple", "anyobject", "anytype"))
+
+_generic_types = frozenset(_generic_scalar_type_to_py_type) | frozenset(
+    _pseudo_types
+)
+
+
+def is_generic_type(typename: str) -> bool:
+    return typename in _generic_types
+
 
 @functools.cache
 def get_py_type_for_scalar(
     typename: str,
     *,
     require_subclassable: bool = False,
-    consider_abstract: bool = True,
+    consider_generic: bool = True,
 ) -> tuple[tuple[str, str], ...]:
     base_type = _scalar_type_to_py_type.get(typename)
     if base_type is not None:
@@ -315,8 +382,8 @@ def get_py_type_for_scalar(
             base_type = ("builtins", base_type)
 
         return (base_type,)
-    elif consider_abstract:
-        return tuple(sorted(_get_py_type_for_abstract_scalar(typename)))
+    elif consider_generic:
+        return tuple(sorted(_get_py_type_for_generic_scalar(typename)))
     else:
         return ()
 
@@ -324,12 +391,12 @@ def get_py_type_for_scalar(
 def get_py_type_for_scalar_hierarchy(
     typenames: Iterable[str],
     *,
-    consider_abstract: bool = True,
+    consider_generic: bool = True,
 ) -> tuple[tuple[str, str], ...]:
     for typename in typenames:
         py_type = get_py_type_for_scalar(
             typename,
-            consider_abstract=consider_abstract,
+            consider_generic=consider_generic,
         )
         if py_type:
             return py_type
@@ -341,15 +408,15 @@ def maybe_get_protocol_for_py_type(py_type: tuple[str, str]) -> str | None:
     return _protocolized_py_types.get(py_type)
 
 
-def _get_py_type_for_abstract_scalar(typename: str) -> set[tuple[str, str]]:
-    types = _abstract_scalar_type_to_py_type.get(typename)
+def _get_py_type_for_generic_scalar(typename: str) -> set[tuple[str, str]]:
+    types = _generic_scalar_type_to_py_type.get(typename)
     if types is None:
         return set()
 
     union = set()
     for typespec in types:
         if isinstance(typespec, str):
-            union.update(_get_py_type_for_abstract_scalar(typespec))
+            union.update(_get_py_type_for_generic_scalar(typespec))
         else:
             union.add(typespec)
 
@@ -377,7 +444,7 @@ def get_py_base_for_scalar(
     typename: str,
     *,
     require_subclassable: bool = False,
-    consider_abstract: bool = True,
+    consider_generic: bool = True,
 ) -> tuple[tuple[str, str], ...]:
     override = _scalar_type_impl_overrides.get(typename)
     if override is not None:
@@ -386,7 +453,7 @@ def get_py_base_for_scalar(
         return get_py_type_for_scalar(
             typename,
             require_subclassable=require_subclassable,
-            consider_abstract=consider_abstract,
+            consider_generic=consider_generic,
         )
 
 

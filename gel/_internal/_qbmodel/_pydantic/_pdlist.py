@@ -2,22 +2,27 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright Gel Data Inc. and the contributors.
 
+from __future__ import annotations
+
 from typing import (
     TYPE_CHECKING,
     cast,
     Any,
+    ClassVar,
     Generic,
     SupportsIndex,
     TypeVar,
 )
 
-from collections.abc import Iterable
+if TYPE_CHECKING:
+    from collections.abc import Iterable
 
 from typing_extensions import (
     Self,
 )
 
 from gel._internal import _dlist
+from gel._internal import _typing_parametric as parametric
 
 from ._models import GelModel, ProxyModel
 
@@ -34,9 +39,16 @@ _PT_co = TypeVar("_PT_co", bound=ProxyModel[GelModel], covariant=True)
 ll_getattr = object.__getattribute__
 
 
-class ProxyDistinctList(_dlist.DistinctList[_PT_co], Generic[_PT_co, _BMT_co]):
+class ProxyDistinctList(
+    parametric.ParametricType,
+    _dlist.AbstractDistinctList[_PT_co],
+    Generic[_PT_co, _BMT_co],
+):
     # Mapping of object IDs to ProxyModels that wrap them.
     _wrapped_index: dict[int, _PT_co] | None = None
+
+    basetype: ClassVar[type[_BMT_co]]  # type: ignore [misc]
+    type: ClassVar[type[_PT_co]]  # type: ignore [misc]
 
     def _init_tracking(self) -> None:
         super()._init_tracking()
@@ -105,7 +117,7 @@ class ProxyDistinctList(_dlist.DistinctList[_PT_co], Generic[_PT_co, _BMT_co]):
                 obj = v
             elif tv is t:
                 # Another fast path -- `v` is already the correct proxy.
-                proxy = v  # type: ignore [assignment]
+                proxy = v
                 obj = ll_getattr(v, "_p__obj__")
             else:
                 proxy, obj = self._cast_value(v)

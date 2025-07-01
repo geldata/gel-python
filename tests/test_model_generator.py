@@ -284,7 +284,7 @@ class TestModelGenerator(tb.ModelTestCase):
     def test_modelgen_data_unpack_3(self):
         from models import default
 
-        from gel._internal._dlist import DistinctList
+        from gel._internal._qbmodel._pydantic._pdlist import ProxyDistinctList
 
         q = (
             default.GameSession.select(
@@ -312,7 +312,7 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertIsInstance(d, default.GameSession)
 
         # Test that links are unpacked into a DistinctList, not a vanilla list
-        self.assertIsInstance(d.players, DistinctList)
+        self.assertIsInstance(d.players, ProxyDistinctList)
         self.assertIsInstance(d.players[0].groups, tuple)
 
         post = default.Post(author=d.players[0], body="test")
@@ -341,6 +341,100 @@ class TestModelGenerator(tb.ModelTestCase):
 
         with self.assertRaisesRegex(AttributeError, r".body. is not set"):
             d.body
+
+    @tb.typecheck
+    def test_modelgen_pdlist_parametrized(self):
+        from models import default
+        from gel._internal._qbmodel._pydantic._pdlist import (
+            ProxyDistinctList,
+        )
+
+        sess = default.GameSession(num=1, public=False)
+        pl = sess.players
+
+        self.assertIsInstance(pl, ProxyDistinctList)
+        self.assertIs(pl.type, default.GameSession.__links__.players)
+        self.assertIs(pl.basetype, default.User)
+
+    @tb.typecheck
+    def test_modelgen_data_init_unfetched_link(self):
+        from gel._internal._dlist import AbstractDistinctList
+        import models as m
+
+        ug = self.client.query_required_single(m.UserGroup.limit(1))
+
+        # Here we test that a link that we haven't fetched is available
+        # as a trackable collection and .append() works on it.
+        #
+        # This is basic usability -- we don't want your code to break
+        # at runtime because you changed the query and `.append()` calls
+        # stopped working.
+        ug.users.append(m.User(name="test test test"))
+        self.assertIsInstance(ug.users, AbstractDistinctList)
+
+        # And now we'll test that the data will actually
+        self.client.save(ug)
+
+        ug2 = self.client.query_required_single(
+            m.UserGroup.filter(
+                lambda ug: m.std.any(ug.users.name == "test test test")
+            ).limit(1)
+        )
+
+        self.assertEqual(ug2.id, ug.id)
+
+    @tb.typecheck
+    def test_modelgen_pydantic_apis(self):
+        # regression test for https://github.com/geldata/gel-python/issues/722
+
+        import pydantic
+        from models import default
+        from gel._internal._unsetid import UNSET_UUID
+
+        class UserUpdate(pydantic.BaseModel):
+            name: str | None = None
+            other: int | None = None
+
+        def run_test(user: default.User, upd: UserUpdate) -> None:
+            orig_name = user.name
+            orig_ch_fields = set(user.__gel_get_changed_fields__())
+
+            user_dct = user.model_dump(exclude_unset=True)
+
+            if user.id is not UNSET_UUID:
+                self.assertEqual(user.id, user_dct["id"])
+                del user_dct["id"]
+
+            self.assertEqual(
+                user_dct,
+                {
+                    "name": user.name,
+                },
+            )
+
+            user_upd = user.model_copy(
+                update=upd.model_dump(exclude_unset=True)
+            )
+
+            self.assertIsNot(user_upd, user)
+            self.assertEqual(user_upd, user)
+            self.assertEqual(user_upd.id, user.id)
+
+            self.assertEqual(user.name, orig_name)
+            self.assertEqual(user_upd.name, upd.name)
+
+            self.assertEqual(
+                set(user.__gel_get_changed_fields__()), orig_ch_fields
+            )
+            self.assertEqual(user_upd.__gel_get_changed_fields__(), {"name"})
+
+        user_loaded = self.client.get(
+            default.User.select(name=True).filter(name="Alice").limit(1)
+        )
+        user_new = default.User(name="Bob")
+
+        run_test(user_loaded, UserUpdate(name="Alice A."))
+        run_test(user_new, UserUpdate(name="Bob B."))
 
     @tb.typecheck
     def test_modelgen_data_unpack_polymorphic(self):
@@ -414,10 +508,10 @@ class TestModelGenerator(tb.ModelTestCase):
 
         from models import default, std
 
-        from gel._internal._dlist import DistinctList
+        from gel._internal._qbmodel._pydantic._pdlist import ProxyDistinctList
 
         gs = default.GameSession(num=7)
-        self.assertIsInstance(gs.players, DistinctList)
+        self.assertIsInstance(gs.players, ProxyDistinctList)
 
         with self.assertRaisesRegex(
             ValueError, r"(?s)only instances of User are allowed, got .*int"
@@ -1604,6 +1698,29 @@ class TestModelGenerator(tb.ModelTestCase):
             self.client.save(p)
 
     @tb.typecheck
+    def test_modelgen_save_31(self):
+        """
+        Test that using model_copy with a sparse model updates the target model
+        """
+
+        from models import default
+        from pydantic import BaseModel
+
+        class SparseUser(BaseModel):
+            name: str | None = None
+            nickname: str | None = None
+
+        user = default.User(name="Anna", nickname="An")
+        self.client.save(user)
+
+        user_in = SparseUser(nickname="Lacey")
+        updated = user.model_copy(update=user_in.model_dump(exclude_none=True))
+        self.client.save(updated)
+
+        user2 = self.client.get(default.User.filter(name="Anna").limit(1))
+        self.assertEqual(user2.nickname, "Lacey")
+
+    @tb.typecheck
     def test_modelgen_save_collections_01(self):
         from models import default
         # insert an object with an optional single: with link props
@@ -2174,6 +2291,589 @@ class TestModelGenerator(tb.ModelTestCase):
             ntup_t.as_schema_name(),
             "tuple<a:std::str, b:tuple<c:std::int64, d:std::str>>",
         )
+
+    @tb.typecheck
+    def test_modelgen_function_overloads_01(self):
+        """Test basic function overloads with different parameter types"""
+        from models import default
+
+        # Test integer addition
+        result_int: int = self.client.query_required_single(
+            default.add_numbers(5, 3)
+        )
+        self.assertEqual(result_int, 8)
+
+        # Test float addition
+        result_float: float = self.client.query_required_single(
+            default.add_numbers(5.5, 3.2)
+        )
+        self.assertAlmostEqual(result_float, 8.7, places=5)
+
+        # Test string concatenation
+        result_str: str = self.client.query_required_single(
+            default.add_numbers("Hello", "World")
+        )
+        self.assertEqual(result_str, "HelloWorld")
+
+    @tb.typecheck
+    def test_modelgen_function_overloads_02(self):
+        """Test function overloads with optional parameters"""
+        from models import default
+
+        # Test with default prefix
+        result_1: str = self.client.query_required_single(
+            default.format_user("Alice")
+        )
+        self.assertEqual(result_1, "User: Alice")
+
+        # Test with custom prefix
+        result_2: str = self.client.query_required_single(
+            default.format_user("Bob", "Admin")
+        )
+        self.assertEqual(result_2, "Admin: Bob")
+
+        # Test three-parameter overload
+        result_3: str = self.client.query_required_single(
+            default.format_user("Charlie", "Manager", "Jr.")
+        )
+        self.assertEqual(result_3, "Manager: Charlie Jr.")
+
+    @tb.to_be_fixed  # scalar/object overloads seem to be broken
+    @tb.typecheck
+    def test_modelgen_function_overloads_03(self):
+        """Test function overloads with different return types"""
+        from models import default
+
+        # Test string input
+        result_str: str = self.client.query_required_single(
+            default.get_value("test")
+        )
+        self.assertEqual(result_str, "test")
+
+        # Test integer input
+        result_int: int = self.client.query_required_single(
+            default.get_value(42)
+        )
+        self.assertEqual(result_int, 42)
+
+        # Test User object input - should return user name
+        alice = self.client.get(default.User.filter(name="Alice"))
+        result_user: str = self.client.query_required_single(
+            default.get_value(alice)
+        )
+        self.assertEqual(result_user, "Alice")
+
+    @tb.to_be_fixed  # python value casting for arrays
+    @tb.typecheck
+    def test_modelgen_function_overloads_04(self):
+        """Test function overloads with array parameters"""
+        from models import default
+
+        # Test integer array
+        result_int: int = self.client.query_required_single(
+            default.sum_array([1, 2, 3, 4, 5])
+        )
+        self.assertEqual(result_int, 15)
+
+        # Test float array
+        result_float: float = self.client.query_required_single(
+            default.sum_array([1.5, 2.5, 3.0])
+        )
+        self.assertAlmostEqual(result_float, 7.0, places=5)
+
+    @tb.to_be_fixed  # python value casting for tuples
+    @tb.typecheck
+    def test_modelgen_function_overloads_05(self):
+        """Test function overloads with tuple parameters"""
+        from models import default
+
+        # Test tuple with str, int64
+        result_1: str = self.client.query_required_single(
+            default.process_tuple(("test", 123))
+        )
+        self.assertEqual(result_1, "test - 123")
+
+        # Test tuple with str, str
+        result_2: str = self.client.query_required_single(
+            default.process_tuple(("hello", "world"))
+        )
+        self.assertEqual(result_2, "hello | world")
+
+    @tb.typecheck
+    def test_modelgen_function_overloads_06(self):
+        """Test complex function overloads with overlapping parameters"""
+        from models import default
+
+        # Test single int parameter
+        result_int: str = self.client.query_required_single(
+            default.complex_func(42)
+        )
+        self.assertEqual(result_int, "int: 42")
+
+        # Test single float parameter
+        result_float: str = self.client.query_required_single(
+            default.complex_func(3.14)
+        )
+        self.assertEqual(result_float, "float: 3.14")
+
+        # Test single string parameter
+        result_str: str = self.client.query_required_single(
+            default.complex_func("hello")
+        )
+        self.assertEqual(result_str, "str: hello")
+
+        # Test int + string parameters
+        result_int_str: str = self.client.query_required_single(
+            default.complex_func(100, "test")
+        )
+        self.assertEqual(result_int_str, "int+str: 100 test")
+
+        # Test string + int parameters
+        result_str_int: str = self.client.query_required_single(
+            default.complex_func("value", 200)
+        )
+        self.assertEqual(result_str_int, "str+int: value 200")
+
+    @tb.typecheck
+    def test_modelgen_function_overloads_with_python_values(self):
+        """Test that function overloads work with regular Python values"""
+        from models import default
+
+        # Test with Python int (should work with int64 overload)
+        python_int = 10
+        result_py_int: int = self.client.query_required_single(
+            default.add_numbers(python_int, 5)
+        )
+        self.assertEqual(result_py_int, 15)
+
+        # Test with Python float (should work with float64 overload)
+        python_float = 2.5
+        result_py_float: float = self.client.query_required_single(
+            default.add_numbers(python_float, 1.5)
+        )
+        self.assertAlmostEqual(result_py_float, 4.0, places=5)
+
+        # Test with Python string (should work with str overload)
+        python_str = "Python"
+        result_py_str: str = self.client.query_required_single(
+            default.add_numbers(python_str, "Value")
+        )
+        self.assertEqual(result_py_str, "PythonValue")
+
+        # Test complex function with Python values
+        result_complex_int: str = self.client.query_required_single(
+            default.complex_func(python_int)
+        )
+        self.assertEqual(result_complex_int, "int: 10")
+
+        result_complex_str: str = self.client.query_required_single(
+            default.complex_func(python_str)
+        )
+        self.assertEqual(result_complex_str, "str: Python")
+
+    @tb.typecheck
+    def test_modelgen_function_simple_defaults_01(self):
+        """Test functions with simple default parameters"""
+        from models import default
+
+        # Test simple_add with default value
+        result_int: int = self.client.query_required_single(
+            default.simple_add(5)
+        )
+        self.assertEqual(result_int, 15)  # 5 + 10 (default)
+
+        # Test simple_add with custom value
+        result_int2: int = self.client.query_required_single(
+            default.simple_add(5, 20)
+        )
+        self.assertEqual(result_int2, 25)  # 5 + 20
+
+        # Test simple_concat with default
+        result_str: str = self.client.query_required_single(
+            default.simple_concat("Hello")
+        )
+        self.assertEqual(result_str, "Hello default")
+
+        # Test simple_concat with custom value
+        result_str2: str = self.client.query_required_single(
+            default.simple_concat("Hello", "World")
+        )
+        self.assertEqual(result_str2, "Hello World")
+
+    @tb.typecheck
+    def test_modelgen_function_optional_params(self):
+        """Test functions with optional parameters"""
+        from models import default
+
+        # Test with default (empty) multiplier
+        result_float: float = self.client.query_required_single(
+            default.optional_multiply(5)
+        )
+        self.assertAlmostEqual(
+            result_float, 5.0, places=5
+        )  # 5 * 1.0 (default)
+
+        # Test with custom multiplier
+        result_float2: float = self.client.query_required_single(
+            default.optional_multiply(5, multiplier=2.5)
+        )
+        self.assertAlmostEqual(result_float2, 12.5, places=5)  # 5 * 2.5
+
+    @tb.to_be_fixed  # Python auto-cast for lists is missing
+    @tb.typecheck
+    def test_modelgen_function_array_params(self):
+        """Test functions with array parameters and defaults"""
+        from models import default
+
+        # Test with default separator
+        result_join: str = self.client.query_required_single(
+            default.join_strings(["Hello", "World", "Test"])
+        )
+        self.assertEqual(result_join, "Hello World Test")
+
+        # Test with custom separator
+        result_join2: str = self.client.query_required_single(
+            default.join_strings(["A", "B", "C"], separator="-")
+        )
+        self.assertEqual(result_join2, "A-B-C")
+
+    @tb.typecheck
+    def test_modelgen_function_multiple_defaults(self):
+        """Test functions with multiple default parameters"""
+        from models import default
+
+        # Test with all defaults
+        result_fmt: str = self.client.query_required_single(
+            default.format_text("hello")
+        )
+        self.assertEqual(result_fmt, "hello")
+
+        # Test with prefix
+        result_fmt2: str = self.client.query_required_single(
+            default.format_text("hello", prefix="[INFO] ")
+        )
+        self.assertEqual(result_fmt2, "[INFO] hello")
+
+        # Test with suffix
+        result_fmt3: str = self.client.query_required_single(
+            default.format_text("hello", suffix=" [END]")
+        )
+        self.assertEqual(result_fmt3, "hello [END]")
+
+        # Test with uppercase
+        result_fmt4: str = self.client.query_required_single(
+            default.format_text("hello", uppercase=True)
+        )
+        self.assertEqual(result_fmt4, "HELLO")
+
+        # Test with all parameters
+        result_fmt5: str = self.client.query_required_single(
+            default.format_text(
+                "hello", prefix=">>> ", suffix=" <<<", uppercase=True
+            )
+        )
+        self.assertEqual(result_fmt5, ">>> HELLO <<<")
+
+    @tb.typecheck
+    def test_modelgen_function_defaults_with_python_values(self):
+        """Test that default parameter functions work with regular
+        Python values"""
+        from models import default
+
+        # Test with Python int
+        python_int = 25
+        result_py_int: int = self.client.query_required_single(
+            default.simple_add(python_int)
+        )
+        self.assertEqual(result_py_int, 35)  # 25 + 10 (default)
+
+        # Test with Python string
+        python_str = "Python"
+        result_py_str: str = self.client.query_required_single(
+            default.simple_concat(python_str, "Rocks")
+        )
+        self.assertEqual(result_py_str, "Python Rocks")
+
+        # Test with Python values and simple defaults
+        result_py_fmt: str = self.client.query_required_single(
+            default.simple_concat(python_str, " with defaults")
+        )
+        self.assertEqual(result_py_fmt, "Python  with defaults")
+
+    @tb.typecheck
+    def test_modelgen_function_variadic_01(self):
+        from models import default
+
+        # Test basic variadic function with no variadic args
+        result: str = self.client.query_required_single(
+            default.format_text_variadic("hello")
+        )
+        self.assertEqual(result, "pref-hello0-suf")
+
+    @tb.typecheck
+    def test_modelgen_function_variadic_02(self):
+        from models import default
+
+        # Test variadic function with single arg
+        result: str = self.client.query_required_single(
+            default.format_text_variadic("hello", 5)
+        )
+        self.assertEqual(result, "pref-hello5-suf")
+
+    @tb.typecheck
+    def test_modelgen_function_variadic_03(self):
+        from models import default
+
+        # Test variadic function with multiple args
+        result: str = self.client.query_required_single(
+            default.format_text_variadic("hello", 1, 2, 3, 4, 5)
+        )
+        self.assertEqual(result, "pref-hello15-suf")
+
+    @tb.typecheck
+    def test_modelgen_function_variadic_04(self):
+        from models import default
+
+        # Test variadic function with named-only parameters
+        result: str = self.client.query_required_single(
+            default.format_text_variadic("hello", 1, 2, suffix="-END")
+        )
+        self.assertEqual(result, "pref-hello3-END")
+
+    @tb.typecheck
+    def test_modelgen_function_variadic_05(self):
+        from models import default
+
+        # Test variadic function with both named-only parameters
+        result: str = self.client.query_required_single(
+            default.format_text_variadic(
+                "hello", 10, 20, prefix="START-", suffix="-DONE"
+            )
+        )
+        self.assertEqual(result, "START-hello30-DONE")
+
+    @tb.typecheck
+    def test_modelgen_function_variadic_06(self):
+        from models import default
+
+        # Test simple variadic sum function
+        result: int = self.client.query_required_single(default.sum_variadic())
+        self.assertEqual(result, 0)
+
+    @tb.typecheck
+    def test_modelgen_function_variadic_07(self):
+        from models import default
+
+        # Test variadic sum with multiple values
+        result: int = self.client.query_required_single(
+            default.sum_variadic(1, 2, 3, 4, 5)
+        )
+        self.assertEqual(result, 15)
+
+    @tb.typecheck
+    def test_modelgen_function_variadic_08(self):
+        from models import default
+
+        # Test variadic join function
+        result: str = self.client.query_required_single(
+            default.join_variadic("-", "a", "b", "c", "d")
+        )
+        self.assertEqual(result, "a-b-c-d")
+
+    @tb.typecheck
+    def test_modelgen_function_variadic_11(self):
+        from models import default
+
+        # Test process_variadic with default multiplier
+        result: str = self.client.query_required_single(
+            default.process_variadic("sum", 1, 2, 3)
+        )
+        self.assertEqual(result, "sum: 6")
+
+    @tb.typecheck
+    def test_modelgen_function_variadic_12(self):
+        from models import default
+
+        # Test process_variadic with custom multiplier
+        result: str = self.client.query_required_single(
+            default.process_variadic("sum", 1, 2, 3, multiplier=10)
+        )
+        self.assertEqual(result, "sum: 60")
+
+    @tb.typecheck
+    def test_modelgen_function_named_only_01(self):
+        from models import default
+
+        # Test named-only parameters with defaults
+        result: str = self.client.query_required_single(
+            default.format_with_options("hello")
+        )
+        self.assertEqual(result, "hello")
+
+    @tb.typecheck
+    def test_modelgen_function_named_only_02(self):
+        from models import default
+
+        # Test named-only parameters with bold
+        result: str = self.client.query_required_single(
+            default.format_with_options("hello", bold=True)
+        )
+        self.assertEqual(result, "[BOLD]hello[/BOLD]")
+
+    @tb.typecheck
+    def test_modelgen_function_named_only_03(self):
+        from models import default
+
+        # Test named-only parameters with bold and italic
+        result: str = self.client.query_required_single(
+            default.format_with_options("hello", bold=True, italic=True)
+        )
+        self.assertEqual(result, "[BOLD][ITALIC]hello[/ITALIC][/BOLD]")
+
+    @tb.typecheck
+    def test_modelgen_function_named_only_04(self):
+        from models import default
+
+        # Test named-only parameters with prefix and suffix
+        result: str = self.client.query_required_single(
+            default.format_with_options("hello", prefix=">>> ", suffix=" <<<")
+        )
+        self.assertEqual(result, ">>> hello <<<")
+
+    @tb.typecheck
+    def test_modelgen_function_named_only_05(self):
+        from models import default
+
+        # Test named-only parameters with all options
+        result: str = self.client.query_required_single(
+            default.format_with_options(
+                "hello",
+                bold=True,
+                italic=True,
+                prefix="[START]",
+                suffix="[END]",
+            )
+        )
+        self.assertEqual(
+            result, "[START][BOLD][ITALIC]hello[/ITALIC][/BOLD][END]"
+        )
+
+    @tb.typecheck
+    def test_modelgen_function_optional_variadic_01(self):
+        from models import default
+
+        # Test optional variadic with default base
+        result: int = self.client.query_required_single(default.optional_sum())
+        self.assertEqual(result, 0)
+
+    @tb.typecheck
+    def test_modelgen_function_optional_variadic_02(self):
+        from models import default
+
+        # Test optional variadic with custom base
+        result: int = self.client.query_required_single(
+            default.optional_sum(base=100)
+        )
+        self.assertEqual(result, 100)
+
+    @tb.typecheck
+    def test_modelgen_function_optional_variadic_03(self):
+        from models import default
+
+        # Test optional variadic with base and variadic args
+        result: int = self.client.query_required_single(
+            default.optional_sum(1, 2, 3, 4, base=10)
+        )
+        self.assertEqual(result, 20)
+
+    @tb.typecheck
+    def test_modelgen_function_complex_variadic_01(self):
+        from models import default
+
+        # Test complex variadic with minimal args
+        result: str = self.client.query_required_single(
+            default.complex_variadic("test")
+        )
+        self.assertEqual(result, "test (default) sum=0")
+
+    @tb.typecheck
+    def test_modelgen_function_complex_variadic_02(self):
+        from models import default
+
+        # Test complex variadic with optional param
+        result: str = self.client.query_required_single(
+            default.complex_variadic("test", "custom")
+        )
+        self.assertEqual(result, "test (custom) sum=0")
+
+    @tb.typecheck
+    def test_modelgen_function_complex_variadic_03(self):
+        from models import default
+
+        # Test complex variadic with variadic args
+        result: str = self.client.query_required_single(
+            default.complex_variadic("test", "custom", 10, 20, 30)
+        )
+        self.assertEqual(result, "test (custom) sum=60")
+
+    @tb.typecheck
+    def test_modelgen_function_complex_variadic_04(self):
+        from models import default
+
+        # Test complex variadic with named-only flag
+        result: str = self.client.query_required_single(
+            default.complex_variadic("test", "custom", 10, 20, flag=True)
+        )
+        self.assertEqual(result, "test (custom) sum=30 [FLAG]")
+
+    @tb.typecheck
+    def test_modelgen_function_complex_variadic_05(self):
+        from models import default
+
+        # Test complex variadic with multiplier
+        result: str = self.client.query_required_single(
+            default.complex_variadic("test", "custom", 10, 20, multiplier=2.5)
+        )
+        self.assertEqual(result, "test (custom) sum=75")
+
+    @tb.typecheck
+    def test_modelgen_function_complex_variadic_06(self):
+        from models import default
+
+        # Test complex variadic with all parameters
+        result: str = self.client.query_required_single(
+            default.complex_variadic(
+                "test", "custom", 10, 20, 5, flag=True, multiplier=2.0
+            )
+        )
+        self.assertEqual(result, "test (custom) sum=70 [FLAG]")
+
+    @tb.typecheck
+    def test_modelgen_function_variadic_with_python_values(self):
+        from models import default
+
+        # Test variadic functions with Python values mixed with model calls
+        python_str = "python_value"
+        python_nums = [1, 2, 3]
+
+        # Test format_text_variadic with Python string and numbers
+        result: str = self.client.query_required_single(
+            default.format_text_variadic(
+                python_str, *python_nums, prefix="PY-"
+            )
+        )
+        self.assertEqual(result, "PY-python_value6-suf")
+
+    @tb.typecheck
+    def test_modelgen_function_named_only_edge_cases(self):
+        from models import default
+
+        # Test that named-only parameters cannot be passed positionally
+        # This should work fine since we're using named parameters
+        result: str = self.client.query_required_single(
+            default.format_with_options("test", bold=False, italic=False)
+        )
+        self.assertEqual(result, "test")
 
 
 class TestEmptyAiModelGenerator(tb.ModelTestCase):

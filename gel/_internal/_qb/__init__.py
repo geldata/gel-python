@@ -53,6 +53,8 @@ from ._expressions import (
     StringLiteral,
     UpdateStmt,
     Variable,
+    empty_set,
+    empty_set_if_none,
     get_object_type_splat,
     toplevel_edgeql,
 )
@@ -81,6 +83,7 @@ from ._protocols import (
 from ._reflection import (
     GelLinkMetadata,
     GelPointerReflection,
+    GelReflectionProto,
     GelSourceMetadata,
     GelTypeMetadata,
     GelObjectTypeMetadata,
@@ -114,6 +117,7 @@ __all__ = (
     "GelLinkMetadata",
     "GelObjectTypeMetadata",
     "GelPointerReflection",
+    "GelReflectionProto",
     "GelSourceMetadata",
     "GelTypeMetadata",
     "IndexOp",
@@ -148,6 +152,8 @@ __all__ = (
     "Variable",
     "edgeql",
     "edgeql_qb_expr",
+    "empty_set",
+    "empty_set_if_none",
     "exprmethod",
     "get_object_type_splat",
     "is_expr_compatible",

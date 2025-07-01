@@ -16,9 +16,10 @@ import typing
 from collections import defaultdict
 from collections.abc import Mapping, MutableMapping
 
+from . import _namespace
 from . import _typing_eval
 from . import _typing_inspect
-from . import _utils
+from ._typecache import type_cache
 
 
 T = TypeVar("T", covariant=True)
@@ -69,7 +70,7 @@ def _coerceable(cls: type[T]) -> _Coerceable[T] | None:
         members = typing.get_args(cls)
         for arg in members:
             if isinstance(arg, type) and dataclasses.is_dataclass(arg):
-                module = _utils.module_of(arg)
+                module = _namespace.module_of(arg)
                 for field in dataclasses.fields(arg):
                     field_type = _typing_eval.resolve_type(
                         field.type, owner=module
@@ -89,11 +90,22 @@ def _coerceable(cls: type[T]) -> _Coerceable[T] | None:
         return None
 
 
+@type_cache
+def _dataclass_fields(
+    cls: type[_DataclassInstance[Any]],
+) -> tuple[tuple[dataclasses.Field[Any], type[Any]], ...]:
+    return tuple(
+        (field, _namespace.get_annotation_origin(cls, field.name))
+        for field in dataclasses.fields(cls)
+    )
+
+
 def coerce_to_dataclass(
     cls: type[T],
     obj: Any,
     *,
     cast_map: Mapping[type[Any], tuple[type[Any], ...]] | None = None,
+    replace: Mapping[str, Any] | None = None,
 ) -> T:
     """Reconstruct a dataclass from a dataclass-like object including
     all nested dataclass-like instances."""
@@ -104,7 +116,9 @@ def coerce_to_dataclass(
             f"discriminated union of dataclasses"
         )
 
-    return _coerce_to_dataclass(target, obj, cast_map=cast_map)
+    return _coerce_to_dataclass(
+        target, obj, cast_map=cast_map, replace=replace
+    )
 
 
 def _coerce_to_dataclass(
@@ -112,6 +126,7 @@ def _coerce_to_dataclass(
     obj: Any,
     *,
     cast_map: Mapping[type[Any], tuple[type[Any], ...]] | None = None,
+    replace: Mapping[str, Any] | None = None,
 ) -> T:
     getter: _FieldGetter
     if isinstance(obj, dict):
@@ -122,9 +137,9 @@ def _coerce_to_dataclass(
     if isinstance(target, _TaggedUnion):
         target = target.discriminate(obj, getter)
 
-    module = _utils.module_of(target)
     new_kwargs: dict[str, Any] = {}
-    for field in dataclasses.fields(target):
+    for field, defined_in in _dataclass_fields(target):
+        module = _namespace.module_of(defined_in)
         field_type = _typing_eval.resolve_type(field.type, owner=module)
         value_getter = getter(field.name)
         if _typing_inspect.is_optional_type(field_type):
@@ -189,5 +204,8 @@ def _coerce_to_dataclass(
             value = field_type(value)
 
         new_kwargs[field.name] = value
+
+    if replace is not None:
+        new_kwargs.update(replace)
 
     return target(**new_kwargs)  # type: ignore [return-value]

@@ -27,6 +27,10 @@ from ._descriptors import (
     field_descriptor,
 )
 
+from ._expressions import (
+    empty_set_if_none,
+)
+
 from ._objects import (
     GelLinkModel,
     GelModel,
@@ -57,6 +61,7 @@ from ._primitive import (
     get_py_type_for_scalar,
     get_py_type_for_scalar_hierarchy,
     get_py_type_scalar_match_rank,
+    is_generic_type,
     maybe_get_protocol_for_py_type,
 )
 
@@ -98,10 +103,12 @@ __all__ = (
     "TimeImpl",
     "Tuple",
     "UUIDImpl",
+    "empty_set_if_none",
     "field_descriptor",
     "get_py_base_for_scalar",
     "get_py_type_for_scalar",
     "get_py_type_for_scalar_hierarchy",
     "get_py_type_scalar_match_rank",
+    "is_generic_type",
     "maybe_get_protocol_for_py_type",
 )
