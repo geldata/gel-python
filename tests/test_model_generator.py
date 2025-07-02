@@ -174,7 +174,7 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(reveal_type(default.User.groups), "this must fail")
 
     @tb.typecheck
-    def test_modelgen_1(self):
+    def test_modelgen_01(self):
         from models import default
 
         self.assertEqual(
@@ -193,6 +193,63 @@ class TestModelGenerator(tb.ModelTestCase):
             reveal_type(q.groups),
             "builtins.tuple[models.default.UserGroup, ...]",
         )
+
+    @tb.typecheck
+    def test_modelgen_02(self):
+        from models import default
+
+        a = self.client.get(default.User.filter(name="Alice"))
+        t = default.Team(
+            name="Alice's team",
+            members=[default.Team.members.link(a, rank=1)],
+        )
+
+        self.assertTrue(a == a)
+        self.assertTrue(t.members[0] == t.members[0])
+        self.assertTrue(a == t.members[0])
+        self.assertTrue(t.members[0] == a)
+
+        self.client.save(t)
+        t2 = self.client.get(
+            default.Team.select(
+                name=True,
+                members=True,
+            ).filter(name="Alice's team"),
+        )
+
+        self.assertTrue(a == t.members[0])
+        self.assertTrue(a == t2.members[0])
+        self.assertTrue(t.members[0] == t2.members[0])
+
+    @tb.typecheck
+    def test_modelgen_03(self):
+        from models import default
+
+        a = self.client.get(default.User.filter(name="Alice"))
+        m = default.Team.members.link(a, rank=1)
+
+        with self.assertRaisesRegex(
+            TypeError, r"cannot wrap another ProxyModel"
+        ):
+            default.Team.members.link(m, rank=1)
+
+    @tb.typecheck
+    def test_modelgen_04(self):
+        from models import default
+
+        with self.assertRaisesRegex(
+            TypeError, r"without id value are unhashable"
+        ):
+            set([default.User(name="Xavier")])
+
+    @tb.typecheck
+    def test_modelgen_05(self):
+        from models import default
+
+        with self.assertRaisesRegex(
+            TypeError, r"without id value are unhashable"
+        ):
+            set([default.Team.members.link(default.User(name="Xavier"))])
 
     @tb.typecheck
     def test_modelgen_data_unpack_1a(self):
@@ -2905,6 +2962,69 @@ class TestModelGenerator(tb.ModelTestCase):
         self.client.save(new_session_without_limit)
         session = self.client.get(default.GameSession.filter(num=9001))
         self.assertEqual(session.time_limit, None)
+
+    @tb.xfail
+    @tb.typecheck
+    def test_modelgen_save_40(self):
+        from models import default
+        from pydantic import BaseModel
+
+        class MyGroup(BaseModel):
+            name: str
+            users: list[default.User]
+
+        # Get a group with some users
+        gr = self.client.get(
+            default.UserGroup.select(
+                name=True,
+                users=True,
+            ).filter(name="green")
+        )
+        self.assertEqual(gr.name, "green")
+        self.assertEqual(
+            {u.name for u in gr.users},
+            {"Alice", "Billie"},
+        )
+
+        # Construct a custom group object with other users
+        c = self.client.get(default.User.filter(name="Cameron"))
+        z = self.client.get(default.User.filter(name="Zoe"))
+        mygroup = MyGroup(
+            name="lime green",
+            users=[c, z],
+        )
+
+        # Use the custom object to update the existing group
+        updated = gr.model_copy(
+            update=mygroup.model_dump(exclude_none=True),
+            deep=True,
+        )
+        self.client.save(updated)
+
+        # Fetch and verify
+        res = self.client.query("""
+            select User.name filter "lime green" in User.groups.name
+        """)
+        self.assertEqual(set(res), {"Cameron", "Zoe"})
+
+    @tb.typecheck
+    def test_modelgen_save_41(self):
+        """Create and save a mode with random UUID"""
+        import uuid
+        from models import default
+
+        obj = default.User(
+            id=uuid.uuid4(),
+            name="Flora",
+        )
+        self.client.save(obj)
+
+        # The ID was random, so we don't expect collisions with real models.
+        # We also don't expect any model to have been created.
+        res = self.client.query("""
+            select User filter .id = <uuid>$id
+        """, id=obj.id)
+        self.assertEqual(len(res), 0)
 
     def test_modelgen_write_only_dlist_errors(self):
         # Test that reading operations on write-only dlists raise
