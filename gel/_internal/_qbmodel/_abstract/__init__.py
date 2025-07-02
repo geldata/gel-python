@@ -15,6 +15,7 @@ from ._base import (
 )
 
 from ._descriptors import (
+    AnyLinkDescriptor,
     AnyPropertyDescriptor,
     LinkDescriptor,
     ModelFieldDescriptor,
@@ -74,6 +75,7 @@ __all__ = (
     "DEFAULT_VALUE",
     "MODEL_SUBSTRATE_MODULE",
     "AnyEnum",
+    "AnyLinkDescriptor",
     "AnyNamedTuple",
     "AnyPropertyDescriptor",
     "AnyTuple",

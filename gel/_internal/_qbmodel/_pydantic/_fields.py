@@ -316,7 +316,7 @@ class _MultiProperty(
 
 class _ComputedMultiProperty(
     _ComputedMultiPointer[_ST_co, _BT_co],
-    _abstract.LinkDescriptor[_ST_co, _BT_co],
+    _abstract.AnyPropertyDescriptor[_ST_co, _BT_co],
 ):
     pass
 
@@ -530,14 +530,14 @@ OptionalComputedLinkWithProps = TypeAliasType(
 
 class _ComputedMultiLink(
     _ComputedMultiPointer[_MT_co, _BMT_co],
-    _abstract.LinkDescriptor[_MT_co, _BMT_co],
+    _abstract.AnyLinkDescriptor[_MT_co, _BMT_co],
 ):
     pass
 
 
 class _MultiLink(
     _MultiPointer[_MT_co, _BMT_co],
-    _abstract.LinkDescriptor[_MT_co, _BMT_co],
+    _abstract.AnyLinkDescriptor[_MT_co, _BMT_co],
 ):
     if TYPE_CHECKING:
 
@@ -587,7 +587,7 @@ class _MultiLink(
 
 class _MultiLinkWithProps(
     _MultiPointer[_PT_co, _BMT_co],
-    _abstract.LinkDescriptor[_PT_co, _BMT_co],
+    _abstract.AnyLinkDescriptor[_PT_co, _BMT_co],
 ):
     if TYPE_CHECKING:
 

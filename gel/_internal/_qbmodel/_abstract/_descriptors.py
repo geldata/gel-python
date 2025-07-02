@@ -269,7 +269,11 @@ class OptionalPropertyDescriptor(
         ) -> None: ...
 
 
-class LinkDescriptor(PointerDescriptor[T_co, BT_co]):
+class AnyLinkDescriptor(PointerDescriptor[T_co, BT_co]):
+    pass
+
+
+class LinkDescriptor(AnyLinkDescriptor[T_co, BT_co]):
     if TYPE_CHECKING:
 
         @overload
@@ -303,7 +307,10 @@ class LinkDescriptor(PointerDescriptor[T_co, BT_co]):
         ) -> None: ...
 
 
-class OptionalLinkDescriptor(OptionalPointerDescriptor[T_co, BT_co]):
+class OptionalLinkDescriptor(
+    OptionalPointerDescriptor[T_co, BT_co],
+    AnyLinkDescriptor[T_co, BT_co],
+):
     if TYPE_CHECKING:
 
         @overload
