@@ -311,7 +311,37 @@ class DowncastingTrackedList(
     AbstractDowncastingList[_T_co, _BT],
     AbstractTrackedList[_T_co],
 ):
-    pass
+    def __reduce__(self) -> tuple[Any, ...]:
+        cls = type(self)
+        return (
+            cls._reconstruct_from_pickle,
+            (
+                cls.__parametric_origin__,
+                cls.type,
+                cls.supertype,
+                self._items,
+                self._initial_items,
+            ),
+        )
+
+    @staticmethod
+    def _reconstruct_from_pickle(
+        origin: type[DowncastingTrackedList[_T_co, _BT]],
+        tp: type[_T_co],  # pyright: ignore [reportGeneralTypeIssues]
+        supertp: type[_BT],
+        items: list[_T_co],
+        initial_items: list[_T_co] | None,
+    ) -> DowncastingTrackedList[_T_co, _BT]:
+        cls = cast(
+            "type[DowncastingTrackedList[_T_co, _BT]]",
+            origin[tp, supertp],  # type: ignore [index]
+        )
+        lst = cls.__new__(cls)
+
+        lst._items = items
+        lst._initial_items = initial_items
+
+        return lst
 
 
 _HT_co = TypeVar("_HT_co", bound=Hashable, covariant=True)
@@ -549,11 +579,12 @@ class DistinctList(
     AbstractDistinctList[_T_co],
 ):
     def __reduce__(self) -> tuple[Any, ...]:
+        cls = type(self)
         return (
-            DistinctList._reconstruct_from_pickle,
+            cls._reconstruct_from_pickle,
             (
-                type(self).__parametric_origin__,
-                self.type,
+                cls.__parametric_origin__,
+                cls.type,
                 self._items,
                 self._initial_items,
                 self._set,

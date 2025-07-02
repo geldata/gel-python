@@ -225,12 +225,13 @@ class ProxyDistinctList(
         self._wrapped_index = None
 
     def __reduce__(self) -> tuple[Any, ...]:
+        cls = type(self)
         return (
-            ProxyDistinctList._reconstruct_from_pickle,
+            cls._reconstruct_from_pickle,
             (
-                type(self).__parametric_origin__,
-                self.type,
-                self.basetype,
+                cls.__parametric_origin__,
+                cls.type,
+                cls.basetype,
                 self._items,
                 self._wrapped_index.values()
                 if self._wrapped_index is not None
