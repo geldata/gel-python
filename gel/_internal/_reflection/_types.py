@@ -10,9 +10,11 @@ from typing import (
     Literal,
     TypeGuard,
 )
-from typing_extensions import TypeAliasType
+from typing_extensions import Self, TypeAliasType
+from collections.abc import Mapping
 
 import abc
+import dataclasses
 import functools
 import uuid
 from collections import defaultdict
@@ -25,11 +27,11 @@ from ._base import struct, sobject, SchemaObject, SchemaPath
 from ._enums import Cardinality, PointerKind, SchemaPart, TypeKind
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
     from gel import abstract
 
 
 Indirection = TypeAliasType("Indirection", tuple[str | tuple[str, int], ...])
+Schema = TypeAliasType("Schema", Mapping[str, "Type"])
 
 
 @struct
@@ -120,6 +122,30 @@ class Type(SchemaObject, abc.ABC):
         else:
             return {}
 
+    def specialize(
+        self,
+        spec: Mapping[Indirection, tuple[Type, Type]],
+        *,
+        schema: Mapping[str, Type],
+    ) -> Type:
+        if len(spec) > 1:
+            raise ValueError(
+                f"expected a single type when specializing "
+                f"a non-container type, got {len(spec)}"
+            )
+
+        path, (type_, replacement) = next(iter(spec.items()))
+        if type_ != self:
+            raise ValueError(f"expected source type to be {self}, got {type_}")
+
+        if path != ():
+            raise ValueError(
+                f"expected an empty type path when specializing "
+                f"a non-container type, got {path}"
+            )
+
+        return replacement
+
 
 @struct
 class InheritingType(Type):
@@ -145,6 +171,22 @@ class InheritingType(Type):
             isinstance(other, InheritingType)
             and any(a.id == self.id for a in other.ancestors)
         )
+
+    def descendants(self, schema: Mapping[str, Type]) -> tuple[Self, ...]:
+        cls = type(self)
+        result: tuple[Self, ...] | None = getattr(self, "_descendants", None)
+        if result is None:
+            descendants: list[Self] = []
+            for t in schema.values():
+                if isinstance(t, cls):
+                    anc = t.ancestors
+                    if anc and any(self.id == t.id for t in anc):
+                        descendants.append(t)
+
+            descendants.sort(key=lambda t: t.name)
+            result = tuple(descendants)
+
+        return result
 
 
 @struct
@@ -199,10 +241,55 @@ class CollectionType(Type):
         return SchemaPath(self.name)
 
 
+@struct
 class HomogeneousCollectionType(CollectionType):
+    element_type: Type | None = None
+
+    def get_id_and_name(self, element_type: Type) -> tuple[str, str]:
+        cls = type(self)
+        raise NotImplementedError(f"{cls.__qualname__}.get_id_and_name()")
+
+    def get_element_type(self, schema: Schema) -> Type:
+        if self.element_type is not None:
+            return self.element_type
+        else:
+            return schema[self._element_type_id]
+
     @functools.cached_property
-    def element_type_id(self) -> str:
-        raise NotImplementedError("element_type_id")
+    def _element_type_id(self) -> str:
+        raise NotImplementedError("_element_type_id")
+
+    def specialize(
+        self,
+        spec: Mapping[Indirection, tuple[Type, Type]],
+        *,
+        schema: Mapping[str, Type],
+    ) -> Type:
+        element_spec: dict[Indirection, tuple[Type, Type]] = {}
+
+        for path, mapping in spec.items():
+            if path == ():
+                # Specializing self
+                return super().specialize(spec, schema=schema)
+            elif path[0] == "__element_type__":
+                element_spec[path[1:]] = mapping
+            else:
+                raise ValueError(
+                    f"unexpected type path when specializing "
+                    f"a homogeneous container type: {path}"
+                )
+
+        element_type = self.get_element_type(schema).specialize(
+            element_spec,
+            schema=schema,
+        )
+        id_, name = self.get_id_and_name(element_type)
+        return dataclasses.replace(
+            self,
+            id=id_,
+            name=name,
+            element_type=element_type,
+        )
 
     def contained_generics(
         self,
@@ -210,7 +297,7 @@ class HomogeneousCollectionType(CollectionType):
         *,
         path: Indirection = (),
     ) -> dict[Type, set[Indirection]]:
-        element_type = schema[self.element_type_id]
+        element_type = self.get_element_type(schema)
         return element_type.contained_generics(
             schema,
             path=(*path, "__element_type__"),
@@ -225,10 +312,10 @@ class HomogeneousCollectionType(CollectionType):
         generic_bindings: dict[Type, Type],
         path: Indirection = (),
     ) -> bool:
-        return isinstance(other, type(self)) and schema[
-            self.element_type_id
-        ].assignable_from(
-            schema[other.element_type_id],
+        return isinstance(other, type(self)) and self.get_element_type(
+            schema
+        ).assignable_from(
+            other.get_element_type(schema),
             schema=schema,
             generics=generics,
             generic_bindings=generic_bindings,
@@ -236,10 +323,69 @@ class HomogeneousCollectionType(CollectionType):
         )
 
 
+@struct
 class HeterogeneousCollectionType(CollectionType):
+    element_types: tuple[Type, ...] | None = None
+
+    def get_id_and_name(
+        self, element_types: tuple[Type, ...]
+    ) -> tuple[str, str]:
+        cls = type(self)
+        raise NotImplementedError(f"{cls.__qualname__}.get_id_and_name()")
+
+    def get_element_types(self, schema: Schema) -> tuple[Type, ...]:
+        if self.element_types is not None:
+            return self.element_types
+        else:
+            return tuple(schema[el_tid] for el_tid in self._element_type_ids)
+
     @functools.cached_property
-    def element_type_ids(self) -> list[str]:
-        raise NotImplementedError("element_type_ids")
+    def _element_type_ids(self) -> list[str]:
+        raise NotImplementedError("_element_type_ids")
+
+    def specialize(
+        self,
+        spec: Mapping[Indirection, tuple[Type, Type]],
+        *,
+        schema: Mapping[str, Type],
+    ) -> Type:
+        element_specs: defaultdict[
+            int, dict[Indirection, tuple[Type, Type]]
+        ] = defaultdict(dict)
+
+        for path, mapping in spec.items():
+            match path:
+                case ():
+                    # Specializing self
+                    return super().specialize(spec, schema=schema)
+                case (("__element_types__", int(n)), *tail):
+                    element_specs[n][tuple(tail)] = mapping
+                case _:
+                    raise ValueError(
+                        f"unexpected type path when specializing "
+                        f"a heterogeneous container type: {path}"
+                    )
+
+        element_types: list[Type] = []
+        for i, element_type in enumerate(self.get_element_types(schema)):
+            if element_spec := element_specs.get(i):
+                element_types.append(
+                    element_type.specialize(
+                        element_spec,
+                        schema=schema,
+                    )
+                )
+            else:
+                element_types.append(element_type)
+
+        element_types_tup = tuple(element_types)
+        id_, name = self.get_id_and_name(element_types_tup)
+        return dataclasses.replace(
+            self,
+            id=id_,
+            name=name,
+            element_types=element_types_tup,
+        )
 
     def contained_generics(
         self,
@@ -248,8 +394,7 @@ class HeterogeneousCollectionType(CollectionType):
         path: Indirection = (),
     ) -> dict[Type, set[Indirection]]:
         el_types: defaultdict[Type, set[Indirection]] = defaultdict(set)
-        for i, el_tid in enumerate(self.element_type_ids):
-            el_type = schema[el_tid]
+        for i, el_type in enumerate(self.get_element_types(schema)):
             for t, t_paths in el_type.contained_generics(
                 schema, path=(*path, ("__element_types__", i))
             ).items():
@@ -264,8 +409,12 @@ class ArrayType(HomogeneousCollectionType):
     array_element_id: str
 
     @functools.cached_property
-    def element_type_id(self) -> str:
+    def _element_type_id(self) -> str:
         return self.array_element_id
+
+    def get_id_and_name(self, element_type: Type) -> tuple[str, str]:
+        id_, name = _edgeql.get_array_type_id_and_name(element_type.name)
+        return str(id_), name
 
 
 @struct
@@ -274,8 +423,12 @@ class RangeType(HomogeneousCollectionType):
     range_element_id: str
 
     @functools.cached_property
-    def element_type_id(self) -> str:
+    def _element_type_id(self) -> str:
         return self.range_element_id
+
+    def get_id_and_name(self, element_type: Type) -> tuple[str, str]:
+        id_, name = _edgeql.get_range_type_id_and_name(element_type.name)
+        return str(id_), name
 
 
 @struct
@@ -284,8 +437,12 @@ class MultiRangeType(HomogeneousCollectionType):
     multirange_element_id: str
 
     @functools.cached_property
-    def element_type_id(self) -> str:
+    def _element_type_id(self) -> str:
         return self.multirange_element_id
+
+    def get_id_and_name(self, element_type: Type) -> tuple[str, str]:
+        id_, name = _edgeql.get_multirange_type_id_and_name(element_type.name)
+        return str(id_), name
 
 
 @struct
@@ -299,7 +456,7 @@ class _TupleType(HeterogeneousCollectionType):
     tuple_elements: tuple[TupleElement, ...]
 
     @functools.cached_property
-    def element_type_ids(self) -> list[str]:
+    def _element_type_ids(self) -> list[str]:
         return [el.type_id for el in self.tuple_elements]
 
     def _assignable_from(
@@ -333,10 +490,31 @@ class _TupleType(HeterogeneousCollectionType):
 class TupleType(_TupleType):
     kind: Literal[TypeKind.Tuple]
 
+    def get_id_and_name(
+        self, element_types: tuple[Type, ...]
+    ) -> tuple[str, str]:
+        id_, name = _edgeql.get_tuple_type_id_and_name(
+            el.name for el in element_types
+        )
+        return str(id_), name
+
 
 @struct
 class NamedTupleType(_TupleType):
     kind: Literal[TypeKind.NamedTuple]
+
+    def get_id_and_name(
+        self, element_types: tuple[Type, ...]
+    ) -> tuple[str, str]:
+        id_, name = _edgeql.get_named_tuple_type_id_and_name(
+            {
+                el.name: el_type.name
+                for el, el_type in zip(
+                    self.tuple_elements, element_types, strict=True
+                )
+            }
+        )
+        return str(id_), name
 
 
 PrimitiveType = (

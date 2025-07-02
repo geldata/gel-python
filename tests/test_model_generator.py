@@ -3475,7 +3475,6 @@ class TestModelGenerator(tb.ModelTestCase):
         )
         self.assertTrue(all(u.name < "Z" for u in users_before_z))
 
-    @tb.to_be_fixed  # missing coalesce specialization
     @tb.typecheck
     def test_modelgen_operators_string_arithmetic(self):
         """Test string concatenation and repetition operators"""
