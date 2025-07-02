@@ -138,9 +138,15 @@ class ModelFieldDescriptor(_qb.AbstractFieldDescriptor):
                 source = _qb.edgeql_qb_expr(owner)
             else:
                 return t
-            ptr = owner.__gel_reflection__.pointers[self.__gel_name__]
+            try:
+                ptr = owner.__gel_reflection__.pointers[self.__gel_name__]
+            except KeyError:
+                # This is a user-defined ad-hoc computed pointer
+                type_ = t.__gel_reflection__.name
+            else:
+                type_ = ptr.type
             metadata = _qb.Path(
-                type_=ptr.type,
+                type_=type_,
                 source=source,
                 name=self.__gel_name__,
                 is_lprop=False,

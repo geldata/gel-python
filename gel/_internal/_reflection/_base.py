@@ -21,16 +21,23 @@ class QualName(NamedTuple):
     name: str
 
 
-class _SchemaPathParser:
-    sep = "::"
-    altsep: str | None = None
+if sys.version_info >= (3, 12):
 
+    class _SchemaPathParser:
+        sep = "::"
+        altsep: str | None = None
 
-if sys.version_info >= (3, 13):
+        if sys.version_info >= (3, 13):
 
-    class _SchemaPathParserImpl(_SchemaPathParser):
-        def __init__(self) -> None:
-            self._impl = pathlib.PurePosixPath.parser  # type: ignore [attr-defined]
+            def __init__(self) -> None:
+                self._impl = pathlib.PurePosixPath.parser  # type: ignore [attr-defined]
+        else:
+
+            def __init__(self) -> None:
+                self._impl = pathlib.PurePosixPath._flavour  # type: ignore [attr-defined]
+
+        def splitroot(self, part: str, sep: str = sep) -> tuple[str, str, str]:
+            return "", "", part
 
         def join(self, *parts: str) -> str:
             return self.sep.join(parts)
@@ -39,33 +46,29 @@ if sys.version_info >= (3, 13):
             return getattr(self._impl, name)
 
     class _SchemaPath(pathlib.PurePosixPath):
-        parser = _SchemaPathParserImpl()
+        parser = _SchemaPathParser()
+        _flavour = parser
 else:
 
-    class _SchemaPathParserImpl(_SchemaPathParser):
-        def __init__(self) -> None:
-            self._impl = pathlib.PurePosixPath._flavour  # type: ignore [attr-defined]
+    class _SchemaPathParser(pathlib._PosixFlavour):  # type: ignore [name-defined, misc]
+        sep = "::"
+        altsep: str | None = None
 
-        if sys.version_info >= (3, 12):
+        def splitroot(self, part: str, sep: str = sep) -> tuple[str, str, str]:
+            return "", "", part
 
-            def join(self, *parts: str) -> str:
-                return self.sep.join(parts)
-        else:
-
-            def join(self, parts: list[str]) -> str:
-                return self.sep.join(parts)
-
-        def __getattr__(self, name: str) -> Any:
-            return getattr(self._impl, name)
+        def join(self, parts: list[str]) -> str:
+            return self.sep.join(parts)
 
     class _SchemaPath(pathlib.PurePosixPath):
-        _flavour = _SchemaPathParserImpl()
+        _flavour = _SchemaPathParser()
 
 
 class SchemaPath(_SchemaPath):
     @classmethod
     def from_schema_name(cls, name: str) -> SchemaPath:
-        return SchemaPath(*name.split("::"))
+        parts = name.split("::")
+        return SchemaPath(*parts)
 
     def common_parts(self, other: SchemaPath) -> list[str]:
         prefix = []
