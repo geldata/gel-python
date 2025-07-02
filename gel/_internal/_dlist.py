@@ -11,6 +11,7 @@ from typing import (
     Generic,
     SupportsIndex,
     TypeVar,
+    cast,
     overload,
 )
 
@@ -547,12 +548,42 @@ class DistinctList(
     parametric.SingleParametricType[_T_co],
     AbstractDistinctList[_T_co],
 ):
-    pass
+    def __reduce__(self) -> tuple[Any, ...]:
+        return (
+            DistinctList._reconstruct_from_pickle,
+            (
+                type(self).__parametric_origin__,
+                self.type,
+                self._items,
+                self._initial_items,
+                self._set,
+                self._unhashables.values()
+                if self._unhashables is not None
+                else None,
+            ),
+        )
 
+    @staticmethod
+    def _reconstruct_from_pickle(  # noqa: PLR0917
+        origin: type[DistinctList[_T_co]],
+        tp: type[_T_co],  # pyright: ignore [reportGeneralTypeIssues]
+        items: list[_T_co],
+        initial_items: list[_T_co] | None,
+        hashables: set[_T_co] | None,
+        unhashables: list[_T_co] | None,
+    ) -> DistinctList[_T_co]:
+        cls = cast(
+            "type[DistinctList[_T_co]]",
+            origin[tp],  # type: ignore [index]
+        )
+        lst = cls.__new__(cls)
 
-class DowncastingDistinctList(
-    _DowncastingList[_T_co, _BT],
-    AbstractDowncastingList[_T_co, _BT],
-    AbstractDistinctList[_T_co],
-):
-    pass
+        lst._items = items
+        lst._initial_items = initial_items
+        lst._set = hashables
+        if unhashables is None:
+            lst._unhashables = None
+        else:
+            lst._unhashables = {id(item): item for item in unhashables}
+
+        return lst

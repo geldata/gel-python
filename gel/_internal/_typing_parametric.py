@@ -590,7 +590,8 @@ class ParametricType:
 
     def __reduce__(self) -> tuple[Any, ...]:
         raise NotImplementedError(
-            "must implement explicit __reduce__ for ParametricType subclass"
+            f"{type(self)} must implement explicit __reduce__ "
+            f"for ParametricType subclass"
         )
 
 
