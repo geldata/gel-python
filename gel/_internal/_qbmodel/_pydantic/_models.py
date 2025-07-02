@@ -68,6 +68,7 @@ class GelModelMeta(_model_construction.ModelMetaclass, _abstract.GelModelMeta):
         *,
         __gel_type_id__: uuid.UUID | None = None,
         __gel_variant__: str | None = None,
+        __gel_root_class__: bool = False,
         **kwargs: Any,
     ) -> GelModelMeta:
         with warnings.catch_warnings():
@@ -86,6 +87,19 @@ class GelModelMeta(_model_construction.ModelMetaclass, _abstract.GelModelMeta):
                     **kwargs,
                 ),
             )
+
+        model_config = getattr(cls, "model_config", None)
+        def_model_config = model_config == DEFAULT_MODEL_CONFIG
+        if __gel_root_class__ and not def_model_config:
+            # We have optimizations in __gel_model_construct__ that
+            # assume model_config is DEFAULT_MODEL_CONFIG.
+            # To prevent accidental breakage (by ourselves),
+            # we raise an error if model_config is set to something else.
+            raise TypeError(
+                f"class {name}(__gel_root_class__=True) has a non-default"
+                f"model config"
+            )
+        cls.__gel_default_model_config__ = def_model_config
 
         # Workaround for https://github.com/pydantic/pydantic/issues/11975
         for base in reversed(cls.__mro__[1:]):
@@ -311,16 +325,20 @@ ll_getattr = object.__getattribute__
 ll_type_getattr = type.__getattribute__
 
 
+DEFAULT_MODEL_CONFIG = pydantic.ConfigDict(
+    validate_assignment=True,
+    defer_build=True,
+    extra="forbid",
+)
+
+
 class GelSourceModel(
     pydantic.BaseModel,
     _abstract.GelSourceModel,
     metaclass=GelModelMeta,
+    __gel_root_class__=True,
 ):
-    model_config = pydantic.ConfigDict(
-        validate_assignment=True,
-        defer_build=True,
-        extra="forbid",
-    )
+    model_config = DEFAULT_MODEL_CONFIG
 
     # We use slots because PyDantic overrides `__dict__`
     # making state management for "special" properties like
@@ -328,10 +346,31 @@ class GelSourceModel(
     __slots__ = ("__gel_changed_fields__",)
 
     if TYPE_CHECKING:
+        # Set of fields that have been changed since the last commit;
+        # used by `client.save()`.
         __gel_changed_fields__: set[str] | None
+
+        # Whether the model uses DEFAULT_MODEL_CONFIG or not.
+        __gel_default_model_config__: bool
 
     @classmethod
     def __gel_model_construct__(cls, __dict__: dict[str, Any] | None) -> Self:
+        def_model_config = ll_type_getattr(
+            cls,
+            "__gel_default_model_config__",
+        )
+        if not def_model_config:
+            # __gel_model_construct__ is much faster than model_construct,
+            # but its because it's fine-tuned for *our* model_config and
+            # for our specific use case. If a user subclasses one of
+            # the models and, say, allows extra fields, then this
+            # optimization will break pydantic, so in cases like this
+            # we fall back to model_construct.
+            if __dict__ is not None:
+                return cls.model_construct(**__dict__)
+            else:
+                return cls.model_construct()
+
         self = cls.__new__(cls)
         if __dict__ is not None:
             ll_setattr(self, "__dict__", __dict__)
@@ -470,6 +509,7 @@ def _kwargs_exclude_id(
 class GelModel(
     GelSourceModel,
     _abstract.GelModel,
+    __gel_root_class__=True,
 ):
     if TYPE_CHECKING:
         id: uuid.UUID
@@ -702,17 +742,22 @@ class LinkPropsDescriptor(Generic[_T_co]):
             return obj.__linkprops__  # type: ignore [no-any-return]
 
 
-class GelLinkModel(GelSourceModel):
-    model_config = pydantic.ConfigDict(
-        validate_assignment=True,
-        defer_build=True,
-    )
+class GelLinkModel(
+    GelSourceModel,
+    __gel_root_class__=True,
+):
+    # Base class for __lprops__ classes.
+    __slots__ = ()
 
 
 _MT_co = TypeVar("_MT_co", bound=GelModel, covariant=True)
 
 
-class ProxyModel(GelModel, Generic[_MT_co]):
+class ProxyModel(
+    GelModel,
+    Generic[_MT_co],
+    __gel_root_class__=True,
+):
     __slots__ = ("__linkprops__", "_p__obj__")
 
     __gel_proxied_dunders__: ClassVar[frozenset[str]] = frozenset(
