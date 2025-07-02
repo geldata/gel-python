@@ -17,6 +17,7 @@ from typing_extensions import (
 )
 
 import contextvars
+import copyreg
 import sys
 import typing
 import weakref
@@ -177,6 +178,13 @@ def _try_resolve_forward_refs(refs: _ForwardRefs) -> None:
             cls_type_args[base] = tuple(type_args)
 
 
+def _is_root_parametric_type(tp: type) -> bool:
+    return (tp is ParametricType) or (
+        tp.__module__ == ParametricType.__module__
+        and tp.__name__ == "PickleableClassParametricType"
+    )
+
+
 class ParametricType:
     """Runtime generic type.
 
@@ -188,13 +196,20 @@ class ParametricType:
     __parametric_origin__: ClassVar[type | None] = None
     __parametric_type_args__: ClassVar[_TypeArgs | None] = None
     __parametric_forward_refs__: ClassVar[_ForwardRefs] = {}
+
     _type_param_map: ClassVar[dict[Any, str]] = {}
     _non_type_params: ClassVar[dict[int, type]] = {}
 
     def __init_subclass__(cls) -> None:
         super().__init_subclass__()
 
-        if ParametricType in cls.__bases__:
+        if _is_root_parametric_type(cls):
+            return
+
+        if (
+            ParametricType in cls.__bases__
+            or PickleableClassParametricType in cls.__bases__
+        ):
             cls._init_parametric_base()
         else:
             for b in cls.__bases__:
@@ -314,7 +329,7 @@ class ParametricType:
                 _typing_inspect.is_valid_isinstance_arg(b)
                 and issubclass(b, ParametricType)
                 and bool(getattr(b, "__parameters__", ()))
-                and b is not ParametricType
+                and not _is_root_parametric_type(b)
                 and b not in orig_base_origins
             ):
                 raise TypeError(
@@ -326,6 +341,9 @@ class ParametricType:
         generic_params: list[type] = []
 
         for b in ob:
+            if _is_root_parametric_type(b):
+                continue
+
             if _typing_inspect.is_valid_isinstance_arg(b) and issubclass(
                 b, parametric_base
             ):
@@ -572,6 +590,7 @@ class ParametricType:
             generic = super(ParametricType, cls)
             return generic.__class_getitem__(all_params)  # type: ignore [attr-defined, no-any-return]
         else:
+            type_dict["__parametric_pickle_special__"] = True
             result = type(name, (cls,), type_dict)
             assert issubclass(result, ParametricType)
 
@@ -593,6 +612,122 @@ class ParametricType:
             f"{type(self)} must implement explicit __reduce__ "
             f"for ParametricType subclass"
         )
+
+
+class PickleableClassParametricTypeMeta(type):
+    pass
+
+
+class PickleableClassParametricType(
+    ParametricType,
+    metaclass=PickleableClassParametricTypeMeta,
+):
+    # This is quite complicated. By design, pickle implementation
+    # treats classes as second class citizens. E.g. if a class has
+    # a metaclass with `__reduce__` it will be ignored. The high-level
+    # pickle algorithm is as follows:
+    #
+    # Pickler.save(obj):
+    #
+    # * Get the type of the object:       | t = type(obj)
+    #
+    # * Check if there's a built-in
+    #   native dispatch method for it;
+    #   if yes - we're done.              | return pickler.dispatch[t](obj)
+    #
+    # * Check copyreg.dispatch_table
+    #   for a custom type-level reducer,
+    #   if yes - get the reducer.         | rv = dispatch_table[t](obj)
+    #
+    # * If no - first, pickle the type:   | pickler.save_global(t)
+    #
+    #                                       ^^^ this is the problem!
+    #
+    # If `t` is a transient class, i.e. it's not declared in a module,
+    # AND can be *reached* by importing `t.__module__`
+    # AND resolving `t.__qualname__` path on that module,
+    # pickle will just fail.
+    #
+    # Why does this matter, btw? Well, our parametric types are
+    # classes and their dynamic subclasses are also classes, so
+    # `Array` is a class and `Array[int]` is a class too.
+    #
+    # When we pickle values of `Array[int]` we have to somehow capture
+    # its type (and its type can be not as simple as `int`, but be
+    # a complex mix of parametrics) and then it will have to be pickled.
+    #
+    # There are a few possible solutions here:
+    #
+    # 1. Invent a custom serialization protocol for parametric types,
+    #    where we would traverse the class and its mro and construct
+    #    some data structure that we can use during unpickle to
+    #    reconstruct the type.
+    #
+    #    I think this is slow and also would require a lot of code.
+    #
+    # 2. Maybe some creative hacks are possible with patching the
+    #    module namespace (where those add-hoc classes are defined)
+    #    to make them resolvable for pickle.
+    #
+    #    I think this is very ugly and fragile.
+    #
+    # 3. What we do here:
+    #
+    #    * We define `PickleableClassParametricType` class that you
+    #      must use if you want your parametric *ad-hoc* types to be
+    #      pickleable.
+    #
+    #    * It has a metaclass. Which is a bummer, but the metaclass
+    #      allows us to use `copyreg`!
+    #      (`copyreg` approach doesn't work when the metaclass is
+    #      `type`, so it has to be a custom metaclass.)
+    #
+    #    * Then we register all subclasses classes (instances of
+    #      that metaclass) with copyreg, pointing pickle to use
+    #      the _pickle_parametric_class function.
+
+    def __init_subclass__(cls) -> None:
+        super().__init_subclass__()
+
+        if isinstance(cls, PickleableClassParametricTypeMeta):
+            # Register a custom reducer for every *metaclass*
+            # of pickleable parametrics -- it's just a few
+            # for our project.
+            copyreg.pickle(
+                type(cls),
+                _pickle_parametric_class,  # pyright: ignore [reportArgumentType]
+            )
+
+
+def _unpickle_parametric_class(
+    cls: type[ParametricType],
+    args: tuple[type, ...] | None,
+) -> type[ParametricType]:
+    return cls.__class_getitem__(args)
+
+
+def _pickle_parametric_class(cls: type[ParametricType]) -> Any:
+    if "__parametric_pickle_special__" in cls.__dict__:
+        # This marker is set in `ParametricType.__class_getitem__`.
+        # Basically it means that `cls` is a dynamic subclass like
+        # `Array[int]`. This check *would not* pass if `cls` is
+        # a subclass of such dynamic class, e.g. `MyInt(Array[int])`.
+        assert cls.__parametric_type_args__ is not None
+        return _unpickle_parametric_class, (
+            cls.__parametric_origin__,
+            cls.__parametric_type_args__[cls.__bases__[0]],
+        )
+    else:
+        # A subclass of parametric type, like `MyInt(Array[int])`.
+        #
+        # Here's another pickle algorithm trivia item: if a reducer
+        # returns a string, it will be treated as a global name that
+        # will be resolved within the `__module__`.
+        #
+        # We use this trick not not infinitely recurse in calling
+        # `_pickle_parametric_class` and basically tell pickle to
+        # serialize the type using its standard path for types.
+        return cls.__qualname__
 
 
 _T = TypeVar("_T", covariant=True)
