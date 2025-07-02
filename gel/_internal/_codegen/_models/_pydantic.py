@@ -502,6 +502,28 @@ GENERIC_TYPES = frozenset(
     }
 )
 
+# Deprecated Pydantic attributes, allow shadowing
+SHADOWED_PYDANTIC_ATTRIBUTES = frozenset(
+    {
+        "dict",
+        "json",
+        "parse_obj",
+        "parse_row",
+        "parse_file",
+        "from_orm",
+        "construct",
+        "copy",
+        "schema",
+        "schema_json",
+        "validate",
+        "update_forward_refs",
+        "_iter",
+        "_copy_and_set_values",
+        "_get_value",
+        "_calculate_keys",
+    }
+)
+
 
 def _filter_pointers(
     pointers: Iterable[tuple[reflection.Pointer, reflection.ObjectType]],
@@ -1961,41 +1983,50 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             runtime_parents = typecheck_parents
 
         self.write()
-        if scalar_bases:
-            meta_bases = _map_name(
-                lambda n: f"__{n}_meta__",
-                scalar_bases,
-            )
+
+        class_kwargs = {}
+        write_meta = self._schema_part is SchemaPart.STD
+
+        if write_meta:
+            if scalar_bases:
+                meta_bases = _map_name(
+                    lambda n: f"__{n}_meta__",
+                    scalar_bases,
+                )
+            else:
+                gel_type_meta = self.import_name(BASE_IMPL, "GelTypeMeta")
+                meta_bases = [gel_type_meta]
+
+            if typecheck_meta_parents:
+                with self.type_checking():
+                    if len(typecheck_meta_parents) > 1:
+                        with self._class_def(
+                            f"__{tname}_meta_base__", typecheck_meta_parents
+                        ):
+                            self.write("pass")
+                    else:
+                        self.write(
+                            f"__{tname}_meta_base__ = "
+                            f"{typecheck_meta_parents[0]}"
+                        )
+                with self.not_type_checking():
+                    self.write(f"__{tname}_meta_base__ = type")
+
+                meta_bases.append(f"__{tname}_meta_base__")
+
+            tmeta = f"__{tname}_meta__"
+            with self._class_def(tmeta, meta_bases):
+                un_ops = self._write_prefix_operator_methods(stype)
+                bin_ops = self._write_infix_operator_methods(stype)
+                if not un_ops and not bin_ops:
+                    self.write("pass")
+            class_kwargs["metaclass"] = tmeta
         else:
-            gel_type_meta = self.import_name(BASE_IMPL, "GelTypeMeta")
-            meta_bases = [gel_type_meta]
-
-        if typecheck_meta_parents:
-            with self.type_checking():
-                if len(typecheck_meta_parents) > 1:
-                    with self._class_def(
-                        f"__{tname}_meta_base__", typecheck_meta_parents
-                    ):
-                        self.write("pass")
-                else:
-                    self.write(
-                        f"__{tname}_meta_base__ = {typecheck_meta_parents[0]}"
-                    )
-            with self.not_type_checking():
-                self.write(f"__{tname}_meta_base__ = type")
-
-            meta_bases.append(f"__{tname}_meta_base__")
-
-        tmeta = f"__{tname}_meta__"
-        with self._class_def(tmeta, meta_bases):
-            un_ops = self._write_prefix_operator_methods(stype)
-            bin_ops = self._write_infix_operator_methods(stype)
-            if not un_ops and not bin_ops:
-                self.write("pass")
+            tmeta = None
 
         with self.type_checking():
             with self._class_def(
-                tname, typecheck_parents, class_kwargs={"metaclass": tmeta}
+                tname, typecheck_parents, class_kwargs=class_kwargs
             ):
                 self.write_type_reflection(stype)
                 if descriptor_get_overload is not None:
@@ -2048,8 +2079,11 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                 "typing", "ClassVar", import_time=ImportTime.typecheck
             )
             with self._class_def(tname, runtime_parents):
-                self.write(f"__gel_type_class__: {classvar}[type] = {tmeta}")
-                self.write()
+                if tmeta:
+                    self.write(
+                        f"__gel_type_class__: {classvar}[type] = {tmeta}"
+                    )
+                    self.write()
                 self.write_type_reflection(stype)
 
         self.write_section_break()
@@ -3086,7 +3120,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                                 aspect=ModuleAspect.MAIN,
                                 localns=localns,
                             )
-                            self.write(f"{ptr.name}: {ptr_type}")
+                            self._write_model_attribute(ptr.name, ptr_type)
                         self.write()
                     else:
                         self.write("pass")
@@ -3125,7 +3159,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                                 cardinality=ptr.card.as_optional(),
                                 variants=frozenset({None, "Partial"}),
                             )
-                            self.write(f"{ptr.name}: {ptr_type}")
+                            self._write_model_attribute(ptr.name, ptr_type)
                         self.write()
                     else:
                         self.write("pass")
@@ -3282,9 +3316,6 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                 if reflection.is_non_enum_scalar_type(target_t):
                     broad_ptr_t = self._get_pytype_for_scalar(target_t)
                     union.extend(broad_ptr_t)
-                    order_args.append(
-                        f"{ptr.name}: {order_kwarg_t} = {unspec}"
-                    )
                 union.extend((f"type[{narrow_ptr_t}]", unspec_t))
                 select_union.extend((f"type[{narrow_ptr_t}]", unspec_t))
                 ptr_t = f"{' | '.join(union)} = {unspec}"
@@ -3293,6 +3324,10 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                 filter_args.append(f"{ptr.name}: {ptr_t}")
                 select_ptr_t = f"{' | '.join(select_union)} = {unspec}"
                 select_args.append(f"{ptr.name}: {select_ptr_t}")
+                if reflection.is_scalar_type(target_t):
+                    order_args.append(
+                        f"{ptr.name}: {order_kwarg_t} = {unspec}"
+                    )
 
         select_args.append(
             f"**computed: {expr_closure} | {expr_proto} | {py_const}"
@@ -3637,8 +3672,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                         pytype,
                         reflection.Cardinality(lprop.card),
                     )
-                    lprop_line = f"{lprop.name}: {py_anno}"
-                    self.write(lprop_line)
+                    self._write_model_attribute(lprop.name, py_anno)
                     lprop_line = f"{lprop.name}: {pytype} | None = None"
                     lprops.append(lprop_line)
 
@@ -3703,10 +3737,16 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                         aspect=ModuleAspect.MAIN,
                         localns=localns,
                     )
-                    self.write(f"{ptr.name}: {ptr_type}")
+                    self._write_model_attribute(ptr.name, ptr_type)
             else:
                 self.write("pass")
                 self.write()
+
+    def _write_model_attribute(self, name: str, anno: str) -> None:
+        decl = f"{name}: {anno}"
+        if name in SHADOWED_PYDANTIC_ATTRIBUTES:
+            decl += "  # type: ignore [assignment, override, unused-ignore]"
+        self.write(decl)
 
     def write_functions(
         self,

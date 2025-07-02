@@ -261,9 +261,46 @@ class OptionalPropertyDescriptor(
             owner: type[Any] | None = None,
         ) -> type[T_co] | BT_co | None: ...
 
+        def __set__(
+            self,
+            instance: Any,
+            value: T_co | BT_co | None,
+            /,
+        ) -> None: ...
+
 
 class LinkDescriptor(PointerDescriptor[T_co, BT_co]):
-    pass
+    if TYPE_CHECKING:
+
+        @overload
+        def __get__(
+            self,
+            instance: None,
+            owner: type[Any],
+            /,
+        ) -> type[T_co]: ...
+
+        @overload
+        def __get__(
+            self,
+            instance: Any,
+            owner: type[Any] | None = None,
+            /,
+        ) -> T_co: ...
+
+        def __get__(
+            self,
+            instance: Any | None,
+            owner: type[Any] | None = None,
+            /,
+        ) -> type[T_co] | T_co: ...
+
+        def __set__(
+            self,
+            instance: Any,
+            value: BT_co,  # type: ignore [misc]
+            /,
+        ) -> None: ...
 
 
 class OptionalLinkDescriptor(OptionalPointerDescriptor[T_co, BT_co]):

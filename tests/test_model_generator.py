@@ -152,6 +152,23 @@ class TestModelGenerator(tb.ModelTestCase):
                     f"{p.type!r} != {e.type!r}",
                 )
 
+    def assert_scalars_equal(self, tname, name, prop):
+        self.assertTrue(
+            self.client.query_single(f"""
+                with
+                    A := assert_single((
+                        select {tname}
+                        filter .name = 'hello world'
+                    )),
+                    B := assert_single((
+                        select {tname}
+                        filter .name = {name!r}
+                    )),
+                select A.{prop} = B.{prop}
+            """),
+            f"property {prop} value does not match",
+        )
+
     @tb.must_fail
     @tb.typecheck
     def test_modelgen__smoke_test(self):
@@ -1010,6 +1027,21 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(m.nickname, "Hannibal")
         self.assertEqual(m.__linkprops__.role, "everything")
         self.assertEqual(m.__linkprops__.rank, 1)
+
+        # Update link property
+        m.__linkprops__.rank = 2
+        self.client.save(res)
+
+        # Re-Fetch and verify
+        res = self.client.get(
+            default.Raid.select(
+                name=True,
+                members=lambda r: r.members.select(name=True, nickname=True),
+            ).filter(name="Solo")
+        )
+        self.assertEqual(len(res.members), 1)
+        m = res.members[0]
+        self.assertEqual(m.__linkprops__.rank, 2)
 
     @tb.typecheck
     def test_modelgen_save_05(self):
@@ -1928,6 +1960,149 @@ class TestModelGenerator(tb.ModelTestCase):
 
         user2 = self.client.get(default.User.filter(name="Anna").limit(1))
         self.assertEqual(user2.nickname, "Lacey")
+
+    @tb.typecheck
+    def test_modelgen_scalars_01(self):
+        import json
+        import datetime as dt
+        from models import default
+
+        # Get the object with non-trivial scalars
+        s = self.client.get(default.AssortedScalars.filter(name="hello world"))
+        self.assertEqual(s.name, "hello world")
+        assert s.json is not None
+        self.assertEqual(
+            json.loads(s.json),
+            [
+                "hello",
+                {
+                    "age": 42,
+                    "name": "John Doe",
+                    "special": None,
+                },
+                False,
+            ],
+        )
+        self.assertEqual(s.bstr, b"word\x00\x0b")
+        self.assertEqual(s.time, dt.time(20, 13, 45, 678000))
+        assert s.nested_mixed is not None
+        self.assertEqual(
+            [(t[0], json.loads(t[1])) for t in s.nested_mixed],
+            [
+                (
+                    [1, 1, 2, 3],
+                    {"next": 5, "label": "Fibonacci sequence"},
+                ),
+                (
+                    [123, 0, 0, 3],
+                    "simple JSON",
+                ),
+                (
+                    [],
+                    None,
+                ),
+            ],
+        )
+        self.assertEqual(s.positive, 123)
+
+    def test_modelgen_scalars_02(self):
+        import json
+        import datetime as dt
+        from models import default
+
+        # Create a new AssortedScalars object with all fields same as the
+        # existing one, except the name. This makes it easy to verify the
+        # result.
+        s = default.AssortedScalars(name="scalars test 1")
+        s.json = json.dumps(
+            [
+                "hello",
+                {
+                    "age": 42,
+                    "name": "John Doe",
+                    "special": None,
+                },
+                False,
+            ],
+        )
+        self.client.save(s)
+        self.assert_scalars_equal("AssortedScalars", "scalars test 1", "json")
+
+        s.bstr = b"word\x00\x0b"
+        self.client.save(s)
+        self.assert_scalars_equal("AssortedScalars", "scalars test 1", "bstr")
+
+        s.time = dt.time(20, 13, 45, 678000)
+        s.date = dt.date(2025, 1, 26)
+        s.ts = dt.datetime(2025, 1, 26, 20, 13, 45, tzinfo=dt.timezone.utc)
+        s.lts = dt.datetime(2025, 1, 26, 20, 13, 45)
+        self.client.save(s)
+        self.assert_scalars_equal("AssortedScalars", "scalars test 1", "time")
+        self.assert_scalars_equal("AssortedScalars", "scalars test 1", "date")
+        self.assert_scalars_equal("AssortedScalars", "scalars test 1", "ts")
+        self.assert_scalars_equal("AssortedScalars", "scalars test 1", "lts")
+
+        s.positive = 123
+        self.client.save(s)
+        self.assert_scalars_equal(
+            "AssortedScalars", "scalars test 1", "positive"
+        )
+
+    def test_modelgen_scalars_03(self):
+        from models import default
+
+        # Test deeply nested mixed collections.
+        s = default.AssortedScalars(name="scalars test 2")
+        s.nested_mixed = [
+            (
+                [1, 1, 2, 3],
+                json.dumps({"next": 5, "label": "Fibonacci sequence"}),
+            ),
+            (
+                [123, 0, 0, 3],
+                '"simple JSON"',
+            ),
+            (
+                [],
+                "null",
+            ),
+        ]
+        self.client.save(s)
+        self.assert_scalars_equal(
+            "AssortedScalars", "scalars test 2", "nested_mixed"
+        )
+
+    @tb.typecheck
+    def test_modelgen_enum_01(self):
+        from models import default
+
+        res = self.client.query(default.EnumTest.order_by(color=True))
+
+        self.assertEqual(len(res), 3)
+        self.assertEqual(
+            [r.color for r in res],
+            [
+                default.Color.Red,
+                default.Color.Green,
+                default.Color.Blue,
+            ],
+        )
+
+    @tb.typecheck
+    def test_modelgen_enum_02(self):
+        from models import default
+
+        e = default.EnumTest(name="color test 1", color="Orange")
+        self.client.save(e)
+
+        e2 = self.client.get(default.EnumTest.filter(name="color test 1"))
+        self.assertEqual(e2.color, default.Color.Orange)
+
+        e.color = default.Color.Indigo
+        self.client.save(e)
+
+        e2 = self.client.get(default.EnumTest.filter(name="color test 1"))
+        self.assertEqual(e2.color, default.Color.Indigo)
 
     @tb.typecheck
     def test_modelgen_save_collections_01(self):
@@ -3444,128 +3619,6 @@ class TestModelGeneratorOther(tb.ModelTestCase):
     ISOLATED_TEST_BRANCHES = True
 
     @tb.xfail
-    def test_modelgen_scalars_01(self):
-        from models import default
-
-        # Get the object with non-trivial scalars
-        s = self.client.get(default.AssortedScalars.filter(name="hello world"))
-        self.assertEqual(s.name, "hello world")
-        self.assertEqual(
-            json.loads(s.json),
-            [
-                "hello",
-                {
-                    "age": 42,
-                    "name": "John Doe",
-                    "special": None,
-                },
-                False,
-            ],
-        )
-        self.assertEqual(s.bstr, b"word\x00\x0b")
-        self.assertEqual(s.time, dt.time(20, 13, 45, 678000))
-        self.assertEqual(
-            [(t[0], json.loads(t[1])) for t in s.nested_mixed],
-            [
-                (
-                    [1, 1, 2, 3],
-                    {"next": 5, "label": "Fibonacci sequence"},
-                ),
-                (
-                    [123, 0, 0, 3],
-                    "simple JSON",
-                ),
-                (
-                    [],
-                    None,
-                ),
-            ],
-        )
-        self.assertEqual(s.positive, 123)
-
-    def _compare_scalars(self, tname, name, prop):
-        self.assertTrue(
-            self.client.query_single(f"""
-                with
-                    A := assert_single((
-                        select {tname}
-                        filter .name = 'hello world'
-                    )),
-                    B := assert_single((
-                        select {tname}
-                        filter .name = {name!r}
-                    )),
-                select A.{prop} = B.{prop}
-            """),
-            f"property {prop} value does not match",
-        )
-
-    @tb.xfail
-    def test_modelgen_scalars_02(self):
-        from models import default
-
-        # Create a new AssortedScalars object with all fields same as the
-        # existing one, except the name. This makes it easy to verify the
-        # result.
-        s = default.AssortedScalars(name="scalars test 1")
-        s.json = json.dumps(
-            [
-                "hello",
-                {
-                    "age": 42,
-                    "name": "John Doe",
-                    "special": None,
-                },
-                False,
-            ],
-        )
-        self.client.save(s)
-        self._compare_scalars("AssortedScalars", "scalars test 1", "json")
-
-        s.bstr = b"word\x00\x0b"
-        self.client.save(s)
-        self._compare_scalars("AssortedScalars", "scalars test 1", "bstr")
-
-        s.time = dt.time(20, 13, 45, 678000)
-        s.date = dt.date(2025, 1, 26)
-        s.ts = dt.datetime(2025, 1, 26, 20, 13, 45, tzinfo=dt.timezone.utc)
-        s.lts = dt.datetime(2025, 1, 26, 20, 13, 45)
-        self.client.save(s)
-        self._compare_scalars("AssortedScalars", "scalars test 1", "time")
-        self._compare_scalars("AssortedScalars", "scalars test 1", "date")
-        self._compare_scalars("AssortedScalars", "scalars test 1", "ts")
-        self._compare_scalars("AssortedScalars", "scalars test 1", "lts")
-
-        s.positive = 123
-        self.client.save(s)
-        self._compare_scalars("AssortedScalars", "scalars test 1", "positive")
-
-    @tb.xfail
-    def test_modelgen_scalars_03(self):
-        from models import default
-
-        # Test deeply nested mixed collections.
-        s = default.AssortedScalars(name="scalars test 2")
-        s.nested_mixed = [
-            (
-                [1, 1, 2, 3],
-                json.dumps({"next": 5, "label": "Fibonacci sequence"}),
-            ),
-            (
-                [123, 0, 0, 3],
-                '"simple JSON"',
-            ),
-            (
-                [],
-                "null",
-            ),
-        ]
-        self.client.save(s)
-        self._compare_scalars(
-            "AssortedScalars", "scalars test 2", "nested_mixed"
-        )
-
-    @tb.xfail
     def test_modelgen_escape_01(self):
         from models import default
         # insert an object that needs a lot of escaping
@@ -3627,35 +3680,3 @@ class TestModelGeneratorOther(tb.ModelTestCase):
         self.assertEqual(len(res.configure), 1)
         self.assertEqual(res.configure[0].name, "Alice")
         self.assertEqual(res.configure[0].__linkprops__.create, True)
-
-    @tb.xfail
-    def test_modelgen_enum_01(self):
-        from models import default
-
-        res = self.client.query(default.EnumTest.order_by(color=True))
-
-        self.assertEqual(len(res), 3)
-        self.assertEqual(
-            [r.color for r in res],
-            [
-                default.Color.Red,
-                default.Color.Green,
-                default.Color.Blue,
-            ],
-        )
-
-    @tb.xfail
-    def test_modelgen_enum_02(self):
-        from models import default
-
-        e = default.EnumTest(name="color test 1", color="Orange")
-        self.client.save(e)
-
-        e2 = self.client.get(default.EnumTest.filter(name="color test 1"))
-        self.assertEqual(e2.color, default.Color.Orange)
-
-        e.color = default.Color.Indigo
-        self.client.save(e)
-
-        e2 = self.client.get(default.EnumTest.filter(name="color test 1"))
-        self.assertEqual(e2.color, default.Color.Indigo)
