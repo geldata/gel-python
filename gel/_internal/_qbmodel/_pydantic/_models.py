@@ -834,7 +834,7 @@ class ProxyModel(
             return handler(source_type)
         else:
             return core_schema.no_info_before_validator_function(
-                cls,
+                cls,  # pyright: ignore [reportArgumentType]
                 schema=handler.generate_schema(cls.__proxy_of__),
                 serialization=core_schema.wrap_serializer_function_ser_schema(
                     lambda obj, _ser, info: obj.model_dump(

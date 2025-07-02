@@ -228,6 +228,7 @@ class ProxyDistinctList(
         return (
             ProxyDistinctList._reconstruct_from_pickle,
             (
+                type(self).__parametric_origin__,
                 self.type,
                 self.basetype,
                 self._items,
@@ -244,6 +245,7 @@ class ProxyDistinctList(
 
     @staticmethod
     def _reconstruct_from_pickle(  # noqa: PLR0917
+        origin: type[ProxyDistinctList[_PT_co, _BMT_co]],  # type: ignore [valid-type]
         tp: type[_PT_co],  # type: ignore [valid-type]
         basetp: type[_BMT_co],  # type: ignore [valid-type]
         items: list[_PT_co],
@@ -252,8 +254,10 @@ class ProxyDistinctList(
         hashables: set[_PT_co] | None,
         unhashables: list[_PT_co] | None,
     ) -> ProxyDistinctList[_PT_co, _BMT_co]:
-        cls = ProxyDistinctList[tp, basetp]  # type: ignore [valid-type]
-
+        cls = cast(
+            "type[ProxyDistinctList[_PT_co, _BMT_co]]",
+            origin[tp, basetp],  # type: ignore [index]
+        )
         lst = cls.__new__(cls)
 
         lst._items = items

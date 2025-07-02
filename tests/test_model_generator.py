@@ -668,7 +668,7 @@ class TestModelGenerator(tb.ModelTestCase):
 
         sl.num += 1
         pl = sl.players[0]
-        pl.name = "Alice the 2nd"
+        pl.name += "Alice the 2nd"
         pl.__linkprops__.is_tall_enough = not pl.__linkprops__.is_tall_enough
 
         sl2 = repickle(sl)
@@ -735,6 +735,57 @@ class TestModelGenerator(tb.ModelTestCase):
         )
 
         self.assertIsInstance(sl2.owner, type(sl.owner))
+
+    @tb.typecheck
+    def test_modelgen_pydantic_apis_07(self):
+        # Test pickling a nested model that has a multi link.
+
+        from models import default
+        from gel._testbase import repickle
+
+        sl = self.client.query_required_single(
+            default.UserGroup.select(
+                name=True,
+                users=lambda s: s.users.select("*")
+                .order_by(lambda u: u.name)
+                .limit(2),
+            )
+            .filter(name="red")
+            .limit(1)
+        )
+
+        sl2 = repickle(sl)
+        self.assertEqual(sl.model_dump(), sl2.model_dump())
+
+        sl.name += "aaa"
+        pl = sl.users[0]
+        pl.name += "Alice the 2nd"
+
+        sl2 = repickle(sl)
+        self.assertEqual(sl.model_dump(), sl2.model_dump())
+
+        self.assertEqual(
+            sl.__gel_get_changed_fields__(),
+            sl2.__gel_get_changed_fields__(),
+        )
+        self.assertEqual(
+            sl.users[0],
+            sl2.users[0],
+        )
+        self.assertEqual(
+            sl.users[1],
+            sl2.users[1],
+        )
+        self.assertEqual(
+            sl.users[0].__gel_get_changed_fields__(),
+            sl2.users[0].__gel_get_changed_fields__(),
+        )
+        self.assertEqual(
+            sl.users[1].__gel_get_changed_fields__(),
+            sl2.users[1].__gel_get_changed_fields__(),
+        )
+
+        self.assertIsInstance(sl2.users, type(sl.users))
 
     @tb.typecheck
     def test_modelgen_data_unpack_polymorphic(self):
