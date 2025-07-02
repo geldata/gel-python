@@ -37,10 +37,12 @@ dependencies = [
 test = [
     'mypy>=1.16.0',
     'pytest>=3.6.0',
-    'ruff~=0.11.0',
+    'pyright>=1.1.100',
+    'ruff>=0.12.0',
     'uvloop>=0.15.1; platform_system != "Windows"',
     'fastapi',
     'pyjwt',
+    'httpx',
 ]
 sqltest = [
     'SQLAlchemy>=2.0.0',
@@ -108,7 +110,6 @@ local_partial_types = true
 
 [[tool.mypy.overrides]]
 module = [
-    "gel.integration.*",
     "gel.models.*",
     "gel.fastapi.*",
     "gel._internal.*",
@@ -125,6 +126,20 @@ module = [
 ]
 strict = true
 ignore_errors = false
+
+# ========================
+#         PYRIGHT
+# ========================
+
+[tool.pyright]
+include = [
+    "gel/models/**",
+    "gel/fastapi/**",
+    "gel/_internal/**",
+]
+pythonVersion = "3.10"
+typeCheckingMode = "standard"
+reportPrivateUsage = false
 
 # ========================
 #          BLACK
