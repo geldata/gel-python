@@ -1323,6 +1323,7 @@ class BaseGeneratedModule:
                 f"class {class_name}({{list}}):",
                 args,
                 first_line_comment=first_line_comment,
+                trailing_separator=False,
             )
         else:
             line = f"class {class_name}:"
