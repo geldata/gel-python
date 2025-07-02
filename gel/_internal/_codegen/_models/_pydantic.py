@@ -69,7 +69,12 @@ COMMENT = """\
 # Automatically generated from Gel schema.
 #
 # Do not edit directly as re-generating this file will overwrite any changes.
-#\
+#
+
+# fmt: off
+# ruff: noqa
+# flake8: noqa
+# pylint: skip-file\
 """
 
 logger = logging.getLogger(__name__)
