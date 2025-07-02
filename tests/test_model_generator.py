@@ -805,6 +805,28 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertIsInstance(sl2.users, type(sl.users))
 
     @tb.typecheck
+    def test_modelgen_pydantic_apis_08(self):
+        # Test pickling a model that has a multi prop.
+
+        from models import default
+        from gel._testbase import repickle
+
+        sl = self.client.query_required_single(
+            default.KitchenSink.select(
+                str=True,
+                p_multi_str=True,
+                array=True,
+                # p_multi_arr=True, XXX FIX
+            ).limit(1)
+        )
+
+        sl2 = repickle(sl)
+        self.assertEqual(sl.model_dump(), sl2.model_dump())
+
+        self.assertIsInstance(sl2.array, type(sl.array))
+        self.assertIsInstance(sl2.p_multi_str, type(sl.p_multi_str))
+
+    @tb.typecheck
     def test_modelgen_data_unpack_polymorphic(self):
         from models import default
 
