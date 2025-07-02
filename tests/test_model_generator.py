@@ -816,15 +816,28 @@ class TestModelGenerator(tb.ModelTestCase):
                 str=True,
                 p_multi_str=True,
                 array=True,
-                # p_multi_arr=True, XXX FIX
+                p_multi_arr=True,
+                p_tuparr=True,
             ).limit(1)
         )
 
         sl2 = repickle(sl)
         self.assertEqual(sl.model_dump(), sl2.model_dump())
 
-        self.assertIsInstance(sl2.array, type(sl.array))
-        self.assertIsInstance(sl2.p_multi_str, type(sl.p_multi_str))
+        for attr in {
+            "str",
+            "p_multi_str",
+            "array",
+            "p_multi_arr",
+            "p_tuparr",
+        }:
+            v_before = getattr(sl, attr)
+            v_after = getattr(sl2, attr)
+
+            self.assertIsInstance(v_after, type(v_before), attr)
+            self.assertEqual(
+                type(v_before).__name__, type(v_after).__name__, attr
+            )
 
     @tb.typecheck
     def test_modelgen_data_unpack_polymorphic(self):

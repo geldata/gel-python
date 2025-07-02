@@ -1111,4 +1111,8 @@ T = typing.TypeVar("T")
 def repickle(obj: T) -> T:
     # Use pure Python implementations (_dumps & _loads)
     # for better debugging when shtf.
-    return pickle._loads(pickle._dumps(obj))
+    pickle._loads(pickle._dumps(obj))
+
+    # And test that native implementation works as well
+    # (kind of redundant, but just in case).
+    return pickle.loads(pickle.dumps(obj))

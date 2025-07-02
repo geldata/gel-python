@@ -9,6 +9,7 @@ from typing import (
     TYPE_CHECKING,
     Annotated,
     Any,
+    cast,
     ClassVar,
     Final,
     Generic,
@@ -138,10 +139,27 @@ class AnyEnum(GelScalarType, StrEnum, metaclass=AnyEnumMeta):
     pass
 
 
+if TYPE_CHECKING:
+
+    class HomogeneousCollectionMeta(
+        _typing_parametric.PickleableClassParametricTypeMeta,
+        GelTypeMeta,
+    ):
+        pass
+else:
+
+    class HomogeneousCollectionMeta(
+        _typing_parametric.PickleableClassParametricTypeMeta,
+        type(GelPrimitiveType),
+    ):
+        pass
+
+
 class HomogeneousCollection(
-    _typing_parametric.ParametricType,
+    _typing_parametric.PickleableClassParametricType,
     GelPrimitiveType,
     Generic[_T],
+    metaclass=HomogeneousCollectionMeta,
 ):
     __element_type__: ClassVar[type[_T]]  # type: ignore [misc]
 
@@ -156,13 +174,21 @@ class HomogeneousCollection(
 
 if TYPE_CHECKING:
 
-    class _ArrayMeta(GelTypeMeta, typing._ProtocolMeta):
+    class _ArrayMeta(
+        HomogeneousCollectionMeta,
+        GelTypeMeta,
+        typing._ProtocolMeta,
+    ):
         pass
 else:
-    _ArrayMeta = type(list)
+    _ArrayMeta = type(HomogeneousCollection)
 
 
-class Array(HomogeneousCollection[_T], list[_T], metaclass=_ArrayMeta):  # type: ignore [misc]
+class Array(  # type: ignore [misc]
+    HomogeneousCollection[_T],
+    list[_T],
+    metaclass=_ArrayMeta,
+):
     if TYPE_CHECKING:
 
         def __set__(
@@ -185,24 +211,55 @@ class Array(HomogeneousCollection[_T], list[_T], metaclass=_ArrayMeta):  # type:
 
         return __gel_reflection__
 
+    def __reduce__(self) -> tuple[Any, ...]:
+        cls = type(self)
+        return (
+            cls._reconstruct_from_pickle,
+            (
+                cls.__parametric_origin__,
+                cls.__element_type__,
+                list(self),
+            ),
+        )
 
-if TYPE_CHECKING:
-
-    class _TupleMeta(GelTypeMeta, typing._ProtocolMeta):
-        pass
-else:
-    _TupleMeta = type(AnyTuple)
+    @staticmethod
+    def _reconstruct_from_pickle(
+        origin: type[Array[_T]],
+        tp: type[_T],  # pyright: ignore [reportGeneralTypeIssues]
+        items: list[_T],
+    ) -> Array[_T]:
+        cls = cast(
+            "type[Array[_T]]",
+            origin[tp],  # type: ignore [index]
+        )
+        return cls(items)
 
 
 _Ts = TypeVarTuple("_Ts")
 
 
 class HeterogeneousCollection(
-    _typing_parametric.ParametricType, Generic[Unpack[_Ts]]
+    _typing_parametric.PickleableClassParametricType,
+    Generic[Unpack[_Ts]],
 ):
     __element_types__: ClassVar[
-        Annotated[tuple[type[GelType], ...], Unpack[_Ts]]
+        Annotated[
+            tuple[type[GelType], ...],
+            Unpack[_Ts],  # pyright: ignore [reportGeneralTypeIssues]
+        ]
     ]
+
+
+if TYPE_CHECKING:
+
+    class _TupleMeta(
+        _typing_parametric.PickleableClassParametricTypeMeta,
+        GelTypeMeta,
+        typing._ProtocolMeta,
+    ):
+        pass
+else:
+    _TupleMeta = type(HeterogeneousCollection)
 
 
 class Tuple(  # type: ignore[misc]
@@ -239,10 +296,10 @@ class Tuple(  # type: ignore[misc]
 
 if TYPE_CHECKING:
 
-    class _RangeMeta(GelTypeMeta):
+    class _RangeMeta(HomogeneousCollectionMeta, GelTypeMeta):
         pass
 else:
-    _RangeMeta = type
+    _RangeMeta = type(HomogeneousCollection)
 
 
 class Range(
@@ -275,10 +332,10 @@ class Range(
 
 if TYPE_CHECKING:
 
-    class _MultiRangeMeta(GelTypeMeta):
+    class _MultiRangeMeta(HomogeneousCollectionMeta, GelTypeMeta):
         pass
 else:
-    _MultiRangeMeta = type
+    _MultiRangeMeta = type(HomogeneousCollection)
 
 
 class MultiRange(
