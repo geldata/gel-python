@@ -112,3 +112,34 @@ class TestFlake8(unittest.TestCase):
                 raise AssertionError(
                     f"mypy validation failed:\n{output}"
                 ) from None
+
+    def test_cqa_pyright(self):
+        project_root = find_project_root()
+        config_path = project_root / "pyproject.toml"
+        if not os.path.exists(config_path):
+            raise RuntimeError("could not locate pyproject.toml file")
+
+        try:
+            import pyright  # NoQA
+        except ImportError:
+            raise unittest.SkipTest("pyright module is missing")
+
+        try:
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "pyright",
+                ],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                cwd=project_root,
+            )
+        except subprocess.CalledProcessError as ex:
+            output = ex.stdout.decode()
+            if ex.stderr:
+                output += "\n\n" + ex.stderr.decode()
+            raise AssertionError(
+                f"pyright validation failed:\n{output}"
+            ) from None

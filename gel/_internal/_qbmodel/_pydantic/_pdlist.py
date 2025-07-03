@@ -107,6 +107,7 @@ class ProxyDistinctList(
         # of slow iterative appends.
         empty_items = len(self._wrapped_index) == len(self._items) == 0
 
+        proxy: _PT_co
         for v in values:
             tv = type(v)
             if tv is proxy_of:
@@ -117,7 +118,7 @@ class ProxyDistinctList(
                 obj = v
             elif tv is t:
                 # Another fast path -- `v` is already the correct proxy.
-                proxy = v
+                proxy = v  # type: ignore [assignment]  # typecheckers unable to cope
                 obj = ll_getattr(v, "_p__obj__")
             else:
                 proxy, obj = self._cast_value(v)
@@ -152,16 +153,15 @@ class ProxyDistinctList(
         cls = type(self)
         t = cls.type
 
-        assert issubclass(t, ProxyModel)
-
+        bt: type[_BMT_co] = t.__proxy_of__  # pyright: ignore [reportAssignmentType]
         tp_value = type(value)
 
-        if tp_value is t.__proxy_of__:
+        if tp_value is bt:
             # Fast path before we make all expensive isinstance calls.
             return (
                 t.__gel_proxy_construct__(value, {}),
                 value,
-            )  # type: ignore [return-value]
+            )
 
         if tp_value is t:
             # It's a correct proxy for this link... return as is.
@@ -170,15 +170,13 @@ class ProxyDistinctList(
                 ll_getattr(value, "_p__obj__"),
             )
 
-        if not isinstance(value, ProxyModel) and isinstance(
-            value, t.__proxy_of__
-        ):
+        if not isinstance(value, ProxyModel) and isinstance(value, bt):
             # It's not a proxy, but the object is of the correct type --
             # re-wrap it in a correct proxy.
             return (
                 t.__gel_proxy_construct__(value, {}),
                 value,
-            )  # type: ignore [return-value]
+            )
 
         raise ValueError(
             f"{cls!r} accepts only values of type {t.__name__} "
@@ -216,7 +214,7 @@ class ProxyDistinctList(
         assert self._wrapped_index is not None
 
         if isinstance(item, ProxyModel):
-            item = item._p__obj__
+            item = item._p__obj__  # pyright: ignore [reportAssignmentType]
 
         return self._wrapped_index.get(id(item), None)
 

@@ -4,27 +4,28 @@
 
 from __future__ import annotations
 from typing import (
+    TYPE_CHECKING,
     Any,
     Annotated,
-    cast,
     Generic,
     Optional,
     ParamSpec,
-    TYPE_CHECKING,
     TypeVar,
+    cast,
 )
-
-from starlette import concurrency
 from typing_extensions import Self
 
 import asyncio
 import importlib.util
 import inspect
 import logging
+import sys
 
 import fastapi
-import gel
 from fastapi import params
+from starlette import concurrency
+
+import gel
 
 from . import _cli
 from . import _utils as utils
@@ -84,7 +85,10 @@ class ExtensionShell(Generic[Extension_T]):
                 raise ValueError(
                     f'Cannot enable "{self._cls}" after installation'
                 )
-            cls = getattr(importlib.import_module(self._package), self._cls)
+            cls = cast(
+                "type[Extension_T]",
+                getattr(importlib.import_module(self._package), self._cls),
+            )
             self.extension = cls(lifespan)
         if enable:
             self._disabled = False
@@ -205,7 +209,7 @@ class GelLifespan:
             if shell.extension is not None:
                 await shell.extension.on_shutdown(self._app)
         timeout = self.shutdown_timeout.value
-        if hasattr(asyncio, "timeout"):
+        if sys.version_info >= (3, 11):
             async with asyncio.timeout(timeout):
                 await self._client.aclose()
         else:
