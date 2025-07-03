@@ -2116,9 +2116,7 @@ class TestModelGenerator(tb.ModelTestCase):
 
     @tb.typecheck
     def test_modelgen_save_31(self):
-        """
-        Test that using model_copy with a sparse model updates the target model
-        """
+        # Test that using model_copy with a sparse model updates the target model
 
         from models import default
         from pydantic import BaseModel
@@ -2136,6 +2134,26 @@ class TestModelGenerator(tb.ModelTestCase):
 
         user2 = self.client.get(default.User.filter(name="Anna").limit(1))
         self.assertEqual(user2.nickname, "Lacey")
+
+    @tb.typecheck
+    def test_modelgen_save_32(self):
+        # Test updating an existing model
+
+        import models.std as std
+        from models import default
+        from pydantic import BaseModel
+
+        u = self.client.get(default.User.filter(name="Alice").limit(1))
+
+        new_u = default.User(u.id, name="Victoria")
+        self.client.save(new_u)
+        self.client.save(u)
+
+        c = self.client.get(std.count(default.User.filter(name="Alice")))
+        self.assertEqual(c, 0)
+
+        u2 = self.client.get(default.User.filter(name="Victoria").limit(1))
+        self.assertEqual(u2.id, u.id)
 
     @tb.typecheck
     def test_modelgen_scalars_01(self):

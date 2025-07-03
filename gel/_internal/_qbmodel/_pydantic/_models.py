@@ -511,8 +511,19 @@ class GelModel(
     _abstract.GelModel,
     __gel_root_class__=True,
 ):
+    __slots__ = ("__gel_overwrite_data__",)
+
     if TYPE_CHECKING:
         id: uuid.UUID
+
+        # If a model is created with an existing `id`, we set this to `True`.
+        # This is used in `save()` to determine if *multi links* should be
+        # updated with `+=` operation or just replaced with the new value.
+        # It gets cleared when the model is saved in `__gel_commit__()`.
+        __gel_overwrite_data__: bool
+
+        # Computed fields can't be passed to the constructor and we
+        # need to enforce that. Set by `__gel_gen_computed_fields__()`.
         __gel_computed_fields__: ClassVar[frozenset[str] | None]
 
     @classmethod
@@ -528,33 +539,23 @@ class GelModel(
         cls.__gel_computed_fields__ = comp_fields
         return comp_fields
 
-    def __init__(
-        self,
-        /,
-        *,
-        id: uuid.UUID = UNSET_UUID,  # noqa: A002
-        **kwargs: Any,
-    ) -> None:
-        cls = type(self)
-
-        try:
-            comp_fields = type.__getattribute__(cls, "__gel_computed_fields__")
-        except AttributeError:
-            comp_fields = cls.__gel_gen_computed_fields__()
-
-        if id is not UNSET_UUID:
-            raise ValueError(
-                "models do not support setting `id` on construction; "
-                "`id` is set automatically by the `client.save()` method"
-            )
-
+    @classmethod
+    def __gel_ensure_no_computed_args__(
+        cls,
+        kwargs: dict[str, Any],
+    ) -> frozenset[str] | None:
         # Prohibit passing computed fields to the constructor.
         # Unfortunately `init=False` doesn't work with BaseModel
         # pydantic classes (the docs states it only works in
         # dataclasses mode).
-        #
-        # We can potentially optimize this by caching a frozenset
-        # of field names that are computed.
+
+        comp_fields: frozenset[str] | None
+
+        try:
+            comp_fields = ll_type_getattr(cls, "__gel_computed_fields__")
+        except AttributeError:
+            comp_fields = cls.__gel_gen_computed_fields__()
+
         if comp_fields is not None and (
             comp_args := comp_fields & kwargs.keys()
         ):
@@ -564,6 +565,61 @@ class GelModel(
                 f"argument, it is a computed field "
                 f"(the database computes it for you)"
             )
+
+        return comp_fields
+
+    def __new__(
+        cls,
+        /,
+        id: uuid.UUID = UNSET_UUID,  # noqa: A002
+        **kwargs: Any,
+    ) -> Self:
+        if id is UNSET_UUID:
+            # No 'id' argument: new object, just follow the normal
+            # __new__ / __init__ machinery.
+            new = super().__new__
+            if new is object.__new__:
+                return new(cls)
+            else:
+                return new(cls, **kwargs)
+
+        # We allow creating a model with an id. In that case, we assume
+        # that the model is bound to an existing object in the database.
+        # We will create the object in `__new__`, set fields, including
+        # the `id` and return. The `__init__` will see that the `id` is
+        # set and skip the initialization.
+        #
+        # All set fields are considered "dirty" and will be saved to the
+        # database when `client.save()` is called.
+
+        cls.__gel_ensure_no_computed_args__(kwargs)
+        self = cls.__gel_model_construct__(None)
+        for arg, value in kwargs.items():
+            setattr(self, arg, value)
+
+        self.__dict__["id"] = id
+        ll_setattr(self, "__gel_overwrite_data__", True)  # noqa: FBT003
+
+        return self
+
+    def __init__(
+        self,
+        /,
+        id: uuid.UUID = UNSET_UUID,  # noqa: A002
+        **kwargs: Any,
+    ) -> None:
+        if id is not UNSET_UUID:
+            if self.__dict__.get("id") is None:
+                raise ValueError(
+                    "models do not support setting `id` on construction; "
+                    "`id` is set automatically by the `client.save()` method"
+                )
+            else:
+                # The object was created and initialized by __new__,
+                # nothing to do in `__init__`.
+                return
+
+        comp_fields = self.__gel_ensure_no_computed_args__(kwargs)
 
         super().__init__(**kwargs)
 
@@ -633,6 +689,7 @@ class GelModel(
                 )
             object.__setattr__(self, "id", new_id)
 
+        ll_setattr(self, "__gel_overwrite_data__", False)  # noqa: FBT003
         super().__gel_commit__()
 
     def __eq__(self, other: object) -> bool:
@@ -773,10 +830,23 @@ class ProxyModel(
         __linkprops__: GelLinkModel
         __lprops__: ClassVar[type[GelLinkModel]]
 
-    def __init__(self, /, **kwargs: Any) -> None:
+    def __new__(cls, *args: Any, **kwargs: Any) -> Self:
+        # Bypass GelModel's __new__ implementation.
+        new = super(GelModel, cls).__new__
+        if new is object.__new__:
+            return new(cls)
+        else:
+            return new(cls, *args, **kwargs)
+
+    def __init__(
+        self,
+        /,
+        id: uuid.UUID = UNSET_UUID,  # noqa: A002
+        **kwargs: Any,
+    ) -> None:
         # We want ProxyModel to be a trasparent wrapper, so we
         # forward the constructor arguments to the wrapped object.
-        wrapped = self.__proxy_of__(**kwargs)
+        wrapped = self.__proxy_of__(id, **kwargs)
         ll_setattr(self, "_p__obj__", wrapped)
         ll_setattr(
             self, "__linkprops__", self.__lprops__.__gel_model_construct__({})
