@@ -79,6 +79,28 @@ COMMENT = """\
 # pylint: skip-file\
 """
 
+
+def get_init_new_docstring(name: str) -> str:
+    return f"""\
+\"\"\"Create a new {name} object from keyword arguments.
+
+Call `db.save()` on the returned object to persist it in the database.
+\"\"\"\
+"""
+
+
+def get_init_for_update_docsting(name: str) -> str:
+    return f"""\
+\"\"\"Update an existing {name} object with the matching `id`.
+
+All keyword arguments except `id` are optional. When provided, they
+will update the corresponding fields of the existing object.
+
+Call `db.save()` on the returned object to persist changes in the database.
+\"\"\"\
+"""
+
+
 logger = logging.getLogger(__name__)
 
 
@@ -538,7 +560,6 @@ def _filter_pointers(
         Callable[[reflection.Pointer, reflection.ObjectType], bool]
     ] = (),
     *,
-    owned_only: bool = True,
     exclude_id: bool = True,
     exclude_type: bool = True,
 ) -> list[tuple[reflection.Pointer, reflection.ObjectType]]:
@@ -3588,29 +3609,67 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                 self.write("...")
                 self.write()
 
-    def _generate_init_args(self, objtype: reflection.ObjectType) -> list[str]:
+    def _generate_init_args(
+        self,
+        objtype: reflection.ObjectType,
+        *,
+        for_init_update: bool = False,
+    ) -> list[str]:
+        is_schema_type = objtype.name.startswith("schema::")
+
         init_pointers = _filter_pointers(
             self._get_pointer_origins(objtype),
-            filters=[
-                lambda ptr, _: (
-                    (ptr.name != "id" and not ptr.is_computed)
-                    or objtype.name.startswith("schema::")
-                ),
-            ],
             exclude_id=False,
         )
-        init_args: list[str] = []
-        if init_pointers:
-            init_args.extend(["/", "*"])
-            for ptr, org_objtype in init_pointers:
-                ptr_t = self.get_ptr_type(
-                    org_objtype,
-                    ptr,
-                    style="arg",
-                    prefer_broad_target_type=True,
-                    consider_default=True,
-                )
-                init_args.append(f"{ptr.name}: {ptr_t}")
+
+        id_ptr: reflection.Pointer | None = None
+        id_objtype: reflection.ObjectType | None = None
+
+        if not init_pointers:
+            return []
+
+        init_args: list[str] = ["/"]
+        init_args_appended_star = False
+
+        if for_init_update or is_schema_type:
+            for ptr, arg_objtype in init_pointers:
+                if ptr.name == "id":
+                    id_ptr = ptr
+                    id_objtype = arg_objtype
+                    break
+
+            assert id_ptr is not None
+            assert id_objtype is not None
+
+            ptr_t = self.get_ptr_type(
+                id_objtype,
+                id_ptr,
+                style="arg_no_default",
+                prefer_broad_target_type=True,
+                consider_default=True,
+            )
+            init_args.append(f"id: {ptr_t}")
+
+        for ptr, arg_objtype in init_pointers:
+            if ptr.name == "id":
+                continue
+
+            if ptr.is_computed and not is_schema_type:
+                continue
+
+            if not init_args_appended_star:
+                init_args.append("*")
+                init_args_appended_star = True
+
+            ptr_t = self.get_ptr_type(
+                arg_objtype,
+                ptr,
+                style="arg" if not for_init_update else "unspec_arg",
+                prefer_broad_target_type=True,
+                consider_default=not for_init_update,
+            )
+
+            init_args.append(f"{ptr.name}: {ptr_t}")
 
         return init_args
 
@@ -3645,22 +3704,54 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                     self.write(f"id: {desc}[{ptr_type}, {priv_type}]")
                 self.write()
 
-        init_args = self._generate_init_args(objtype)
-
         with self.type_checking():
-            with self._method_def("__init__", init_args):
-                self.write(
-                    f'"""Create a new {objtype.name} instance '
-                    "from keyword arguments."
-                )
-                self.write()
-                self.write(
-                    "Call db.save() on the returned object to persist it "
-                    "in the database."
-                )
-                self.write('"""')
+            render_id_variant = False
+
+            if (
+                objtype.name != "std::FreeObject"
+                and not objtype.name.startswith("schema::")
+                # and not objtype.name.startswith("std::")
+            ):
+                render_id_variant = True
+
+            # Render ID-less variant first so that it's the first
+            # overload suggested by tools (common case - new object.)
+            init_args = self._generate_init_args(objtype)
+            with self._method_def(
+                "__init__",
+                init_args,
+                overload=render_id_variant,
+                type_ignore=("misc", "override", "unused-ignore")
+                if render_id_variant
+                else (),
+            ):
+                self.write(get_init_new_docstring(objtype.name))
                 self.write("...")
                 self.write()
+
+            if render_id_variant:
+                init_with_id_args = self._generate_init_args(
+                    objtype, for_init_update=True
+                )
+                with self._method_def(
+                    "__init__",
+                    init_with_id_args,
+                    overload=True,
+                    type_ignore=("misc", "override", "unused-ignore"),
+                ):
+                    self.write(get_init_for_update_docsting(objtype.name))
+                    self.write("...")
+                    self.write()
+
+                any_ = self.import_name("typing", "Any")
+
+                with self._method_def(
+                    "__init__",
+                    [f"*args: {any_}", f"**kwargs: {any_}"],
+                    type_ignore=("misc", "override", "unused-ignore"),
+                ):
+                    self.write("...")
+                    self.write()
 
         if objtype.name == "schema::ObjectType":
             any_ = self.import_name("typing", "Any")
@@ -4806,7 +4897,9 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         objtype: reflection.ObjectType,
         prop: reflection.Pointer,
         *,
-        style: Literal["annotation", "typeddict", "arg"] = "annotation",
+        style: Literal[
+            "annotation", "typeddict", "arg", "unspec_arg", "arg_no_default"
+        ] = "annotation",
         prefer_broad_target_type: bool = False,
         consider_default: bool = False,
         aspect: ModuleAspect | None = None,
@@ -4825,6 +4918,10 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             import_time=ImportTime.late_runtime,
             localns=localns,
         )
+
+        if style == "unspec_arg":
+            unspec_t = self.import_name(BASE_IMPL, "UnspecifiedType")
+            unspec = self.import_name(BASE_IMPL, "Unspecified")
 
         if reflection.is_primitive_type(target_type):
             bare_ptr_type = self._get_pytype_for_primitive_type(
@@ -4902,7 +4999,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                 if cardinality.is_optional():
                     nreq = self.import_name("typing_extensions", "NotRequired")
                     result = f"{nreq}[{result}]"
-            case "arg":
+            case "arg" | "unspec_arg" | "arg_no_default":
                 if cardinality.is_multi():
                     iterable = self.import_name("collections.abc", "Iterable")
                     type_ = f"{iterable}[{ptr_type}]"
@@ -4914,14 +5011,19 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                     type_ = ptr_type
                     default = None
 
-                if consider_default and prop.has_default:
-                    defv_t = self.import_name(BASE_IMPL, "DefaultValue")
-                    type_ = f"{type_} | {defv_t}"
-                    default = self.import_name(BASE_IMPL, "DEFAULT_VALUE")
+                if style == "unspec_arg":
+                    result = f"{type_} | {unspec_t} = {unspec}"
+                elif style == "arg_no_default":
+                    result = f"{type_}"
+                else:
+                    if consider_default and prop.has_default:
+                        defv_t = self.import_name(BASE_IMPL, "DefaultValue")
+                        type_ = f"{type_} | {defv_t}"
+                        default = self.import_name(BASE_IMPL, "DEFAULT_VALUE")
 
-                result = type_
-                if default is not None:
-                    result = f"{type_} = {default}"
+                    result = type_
+                    if default is not None:
+                        result = f"{type_} = {default}"
             case _:
                 raise AssertionError(
                     f"unexpected type rendering style: {style!r}"

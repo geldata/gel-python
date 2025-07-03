@@ -937,10 +937,9 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertIsNotNone(gp.__linkprops__)
 
         # Check that `groups` is not an allowed keyword-arg for `User.__init__`
-        self.assertEqual(
+        self.assertNotIn(
+            "groups",
             reveal_type(default.User),
-            "def (*, name: builtins.str, nickname: "
-            "Union[builtins.str, None] =) -> models.default.User",
         )
 
         # This also tests that "required computeds" are not "required" as
@@ -3747,7 +3746,7 @@ class TestModelGenerator(tb.ModelTestCase):
             upper_name: std.str
 
         with self.assertRaisesRegex(ValueError, "computed field"):
-            UserWithUpperName(name="user with upper name", upper_name="test")  # type: ignore [call-arg]
+            UserWithUpperName(name="user with upper name", upper_name="test")  # type: ignore [call-overload]
 
         users = self.client.query(
             UserWithUpperName.select(
