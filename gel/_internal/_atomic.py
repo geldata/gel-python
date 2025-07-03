@@ -25,13 +25,14 @@ def atomic_write(
     dirpath = path.parent
     filename = path.name
 
+    open_flags: int
     if (
-        hasattr(os, "O_DIRECTORY")
+        (open_flags := getattr(os, "O_DIRECTORY", 0))
         and os.replace in os.supports_dir_fd
         and os.remove in os.supports_dir_fd
     ):
         try:
-            dir_fd = os.open(dirpath, os.O_DIRECTORY)
+            dir_fd = os.open(dirpath, open_flags)
         except OSError:
             dir_fd = None
     else:
