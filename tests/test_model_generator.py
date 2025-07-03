@@ -3777,6 +3777,15 @@ class TestModelGenerator(tb.ModelTestCase):
         with self.assertRaisesRegex(ValueError, "is frozen"):
             users[0].upper_name = "foo"
 
+    @tb.typecheck
+    def test_modelgen_result_inference(self):
+        import models.std as std
+        from models import default
+
+        c = self.client.get(std.count(default.User.filter(name="Alice")))
+        self.assertEqual(reveal_type(c), "builtins.int")
+        self.assertEqual(c, 1)
+
 
 class TestEmptyAiModelGenerator(tb.ModelTestCase):
     DEFAULT_MODULE = "default"
