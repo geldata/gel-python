@@ -11,6 +11,7 @@ import logging
 import pydantic
 import fastapi
 from fastapi import responses
+from starlette import concurrency
 
 from gel.auth import email_password as core
 
@@ -45,32 +46,36 @@ class ResetPasswordBody(pydantic.BaseModel):
 
 
 class EmailPassword(Installable):
-    redirect_to: utils.Config[Optional[str]] = utils.Config("/")
-    redirect_to_page_name: utils.Config[Optional[str]] = utils.Config(None)
     error_page_name = utils.Config("error_page")
     sign_in_page_name = utils.Config("sign_in_page")
     reset_password_page_name = utils.Config("reset_password_page")
 
     _auth: GelAuth
     _core: core.AsyncEmailPassword
+    _blocking_io_core: core.EmailPassword
 
     # Sign-up
+    install_sign_up = utils.Config(True)  # noqa: FBT003
+    sign_up_body: utils.ConfigDecorator[type[SignUpBody]] = (
+        utils.ConfigDecorator(SignUpBody)
+    )
     sign_up_path = utils.Config("/register")
     sign_up_name = utils.Config("gel.auth.email_password.sign_up")
     sign_up_summary = utils.Config("Sign up with email and password")
     sign_up_default_response_class = utils.Config(responses.RedirectResponse)
     sign_up_default_status_code = utils.Config(http.HTTPStatus.SEE_OTHER)
-    on_sign_up_complete: utils.Hook[core.SignUpCompleteResponse] = utils.Hook(
-        "sign_up"
-    )
-    on_sign_up_verification_required: utils.Hook[
-        core.SignUpVerificationRequiredResponse
+    on_sign_up_complete: utils.Hook[
+        SignUpBody, core.SignUpCompleteResponse
     ] = utils.Hook("sign_up")
-    on_sign_up_failed: utils.Hook[core.SignUpFailedResponse] = utils.Hook(
-        "sign_up"
+    on_sign_up_verification_required: utils.Hook[
+        SignUpBody, core.SignUpVerificationRequiredResponse
+    ] = utils.Hook("sign_up")
+    on_sign_up_failed: utils.Hook[SignUpBody, core.SignUpFailedResponse] = (
+        utils.Hook("sign_up")
     )
 
     # Sign-in
+    install_sign_in = utils.Config(True)  # noqa: FBT003
     sign_in_path = utils.Config("/authenticate")
     sign_in_name = utils.Config("gel.auth.email_password.sign_in")
     sign_in_summary = utils.Config("Sign in with email and password")
@@ -87,6 +92,7 @@ class EmailPassword(Installable):
     )
 
     # Email verification
+    install_email_verification = utils.Config(True)  # noqa: FBT003
     email_verification_path = utils.Config("/verify")
     email_verification_name = utils.Config(
         "gel.auth.email_password.email_verification"
@@ -109,6 +115,7 @@ class EmailPassword(Installable):
     ] = utils.Hook("email_verification")
 
     # Send password reset
+    install_send_password_reset = utils.Config(True)  # noqa: FBT003
     send_password_reset_email_path = utils.Config("/send-password-reset")
     send_password_reset_email_name = utils.Config(
         "gel.auth.email_password.send_password_reset"
@@ -130,6 +137,7 @@ class EmailPassword(Installable):
     ] = utils.Hook("send_password_reset_email")
 
     # Reset password
+    install_reset_password = utils.Config(True)  # noqa: FBT003
     reset_password_path = utils.Config("/reset-password")
     reset_password_name = utils.Config(
         "gel.auth.email_password.reset_password"
@@ -171,8 +179,8 @@ class EmailPassword(Installable):
             self, f"{key}_default_response_class"
         ).value
         response_code = getattr(self, f"{key}_default_status_code").value
-        redirect_to = self.redirect_to.value
-        redirect_to_page_name = self.redirect_to_page_name.value
+        redirect_to = self._auth.redirect_to.value
+        redirect_to_page_name = self._auth.redirect_to_page_name.value
         if redirect_to_page_name is not None:
             return response_class(
                 url=request.url_for(redirect_to_page_name),
@@ -218,6 +226,7 @@ class EmailPassword(Installable):
     async def handle_sign_up_complete(
         self,
         request: fastapi.Request,
+        body: SignUpBody,
         result: core.SignUpCompleteResponse,
     ) -> fastapi.Response:
         response = await self._auth.handle_new_identity(
@@ -225,7 +234,12 @@ class EmailPassword(Installable):
         )
         if response is None:
             if self.on_sign_up_complete.is_set():
-                response = await self.on_sign_up_complete.call(request, result)
+                with self._auth.with_auth_token(
+                    result.token_data.auth_token, request
+                ):
+                    response = await self.on_sign_up_complete.call(
+                        request, body, result
+                    )
             else:
                 response = self._redirect_success(
                     request, "sign_up", method="on_sign_up_complete"
@@ -236,6 +250,7 @@ class EmailPassword(Installable):
     async def handle_sign_up_verification_required(
         self,
         request: fastapi.Request,
+        body: SignUpBody,
         result: core.SignUpVerificationRequiredResponse,
     ) -> fastapi.Response:
         if result.identity_id:
@@ -247,7 +262,7 @@ class EmailPassword(Installable):
         if response is None:
             if self.on_sign_up_verification_required.is_set():
                 response = await self.on_sign_up_verification_required.call(
-                    request, result
+                    request, body, result
                 )
             else:
                 response = self._redirect_sign_in(
@@ -259,6 +274,7 @@ class EmailPassword(Installable):
     async def handle_sign_up_failed(
         self,
         request: fastapi.Request,
+        body: SignUpBody,
         result: core.SignUpFailedResponse,
     ) -> fastapi.Response:
         logger.info(
@@ -267,7 +283,7 @@ class EmailPassword(Installable):
         logger.debug("%r", result)
 
         if self.on_sign_up_failed.is_set():
-            response = await self.on_sign_up_failed.call(request, result)
+            response = await self.on_sign_up_failed.call(request, body, result)
         else:
             response = self._redirect_error(
                 request, "sign_up", error=result.message
@@ -275,12 +291,7 @@ class EmailPassword(Installable):
         self._auth.set_verifier_cookie(result.verifier, response)
         return response
 
-    def install_sign_up(self, router: fastapi.APIRouter) -> None:
-        @router.post(
-            self.sign_up_path.value,
-            name=self.sign_up_name.value,
-            summary=self.sign_up_summary.value,
-        )
+    def __install_sign_up(self, router: fastapi.APIRouter) -> None:
         async def sign_up(
             sign_up_body: Annotated[
                 SignUpBody, utils.OneOf(fastapi.Form(), fastapi.Body())
@@ -296,15 +307,27 @@ class EmailPassword(Installable):
             )
             match result:
                 case core.SignUpCompleteResponse():
-                    return await self.handle_sign_up_complete(request, result)
+                    return await self.handle_sign_up_complete(
+                        request, sign_up_body, result
+                    )
                 case core.SignUpVerificationRequiredResponse():
                     return await self.handle_sign_up_verification_required(
-                        request, result
+                        request, sign_up_body, result
                     )
                 case core.SignUpFailedResponse():
-                    return await self.handle_sign_up_failed(request, result)
+                    return await self.handle_sign_up_failed(
+                        request, sign_up_body, result
+                    )
                 case _:
                     raise AssertionError("Invalid sign up response")
+
+        sign_up.__globals__["SignUpBody"] = self.sign_up_body.value
+
+        router.post(
+            self.sign_up_path.value,
+            name=self.sign_up_name.value,
+            summary=self.sign_up_summary.value,
+        )(sign_up)
 
     async def handle_sign_in_complete(
         self,
@@ -312,7 +335,10 @@ class EmailPassword(Installable):
         result: core.SignInCompleteResponse,
     ) -> fastapi.Response:
         if self.on_sign_in_complete.is_set():
-            response = await self.on_sign_in_complete.call(request, result)
+            with self._auth.with_auth_token(
+                result.token_data.auth_token, request
+            ):
+                response = await self.on_sign_in_complete.call(request, result)
         else:
             response = self._redirect_success(
                 request, "sign_in", method="on_sign_in_complete"
@@ -355,7 +381,7 @@ class EmailPassword(Installable):
         self._auth.set_verifier_cookie(result.verifier, response)
         return response
 
-    def install_sign_in(self, router: fastapi.APIRouter) -> None:
+    def __install_sign_in(self, router: fastapi.APIRouter) -> None:
         @router.post(
             self.sign_in_path.value,
             name=self.sign_in_name.value,
@@ -388,15 +414,20 @@ class EmailPassword(Installable):
         result: core.EmailVerificationCompleteResponse,
     ) -> fastapi.Response:
         if self.on_email_verification_complete.is_set():
-            return await self.on_email_verification_complete.call(
-                request, result
-            )
+            with self._auth.with_auth_token(
+                result.token_data.auth_token, request
+            ):
+                response = await self.on_email_verification_complete.call(
+                    request, result
+                )
         else:
-            return self._redirect_success(
+            response = self._redirect_success(
                 request,
                 "email_verification",
                 method="on_email_verification_complete",
             )
+        self._auth.set_auth_cookie(result.token_data.auth_token, response)
+        return response
 
     async def handle_email_verification_missing_proof(
         self,
@@ -433,7 +464,7 @@ class EmailPassword(Installable):
                 request, "email_verification", error=result.message
             )
 
-    def install_email_verification(self, router: fastapi.APIRouter) -> None:
+    def __install_email_verification(self, router: fastapi.APIRouter) -> None:
         @router.get(
             self.email_verification_path.value,
             name=self.email_verification_name.value,
@@ -506,7 +537,7 @@ class EmailPassword(Installable):
         self._auth.set_verifier_cookie(result.verifier, response)
         return response
 
-    def install_send_password_reset(self, router: fastapi.APIRouter) -> None:
+    def __install_send_password_reset(self, router: fastapi.APIRouter) -> None:
         @router.post(
             self.send_password_reset_email_path.value,
             name=self.send_password_reset_email_name.value,
@@ -547,11 +578,18 @@ class EmailPassword(Installable):
         result: core.PasswordResetCompleteResponse,
     ) -> fastapi.Response:
         if self.on_reset_password_complete.is_set():
-            return await self.on_reset_password_complete.call(request, result)
+            with self._auth.with_auth_token(
+                result.token_data.auth_token, request
+            ):
+                response = await self.on_reset_password_complete.call(
+                    request, result
+                )
         else:
-            return self._redirect_success(
+            response = self._redirect_success(
                 request, "reset_password", method="on_reset_password_complete"
             )
+        self._auth.set_auth_cookie(result.token_data.auth_token, response)
+        return response
 
     async def handle_reset_password_missing_proof(
         self,
@@ -586,7 +624,7 @@ class EmailPassword(Installable):
                 request, "reset_password", error=result.message
             )
 
-    def install_reset_password(self, router: fastapi.APIRouter) -> None:
+    def __install_reset_password(self, router: fastapi.APIRouter) -> None:
         @router.post(
             self.reset_password_path.value,
             name=self.reset_password_name.value,
@@ -622,11 +660,27 @@ class EmailPassword(Installable):
                 case _:
                     raise AssertionError("Invalid reset password response")
 
+    @property
+    def blocking_io_core(self) -> core.EmailPassword:
+        return self._blocking_io_core
+
+    @property
+    def core(self) -> core.AsyncEmailPassword:
+        return self._core
+
     async def install(self, router: fastapi.APIRouter) -> None:
         self._core = await core.make_async(self._auth.client)
-        self.install_sign_up(router)
-        self.install_sign_in(router)
-        self.install_email_verification(router)
-        self.install_send_password_reset(router)
-        self.install_reset_password(router)
+        self._blocking_io_core = await concurrency.run_in_threadpool(
+            core.make, self._auth.blocking_io_client
+        )
+        if self.install_sign_up.value:
+            self.__install_sign_up(router)
+        if self.install_sign_in.value:
+            self.__install_sign_in(router)
+        if self.install_email_verification.value:
+            self.__install_email_verification(router)
+        if self.install_send_password_reset.value:
+            self.__install_send_password_reset(router)
+        if self.install_reset_password.value:
+            self.__install_reset_password(router)
         await super().install(router)
