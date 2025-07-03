@@ -99,6 +99,52 @@ Call `db.save()` on the returned object to persist changes in the database.
 """
 
 
+def get_single_link_for_proxy_docsting(
+    *,
+    source_type: str,
+    link_name: str,
+    target_type: str,
+) -> str:
+    return f"""\
+\"\"\"Wrap {target_type} to add link properties of {source_type}.{link_name}.
+
+This is useful to add link properties when setting the link, e.g.:
+
+    obj = {source_type.replace("::", ".")}(...)
+
+    obj.{link_name} = {source_type.replace("::", ".")}.link(
+        {target_type.replace("::", ".")}(...),
+        link_prop=value,
+        ...
+    )
+\"\"\"\
+"""
+
+
+def get_multi_link_for_proxy_docsting(
+    *,
+    source_type: str,
+    link_name: str,
+    target_type: str,
+) -> str:
+    return f"""\
+\"\"\"Wrap {target_type} to add link properties of {source_type}.{link_name}.
+
+This is useful to add link properties when setting the link, e.g.:
+
+    obj = {source_type.replace("::", ".")}(...)
+
+    obj.{link_name}.append(
+        {source_type.replace("::", ".")}.link(
+            {target_type.replace("::", ".")}(...),
+            link_prop=value,
+            ...
+        )
+    )
+\"\"\"\
+"""
+
+
 logger = logging.getLogger(__name__)
 
 
@@ -3779,20 +3825,31 @@ class GeneratedSchemaModule(BaseGeneratedModule):
 
             self.write("__linkprops__: __lprops__")
             self.write()
-            if is_forward_decl:
-                init_args = self._generate_init_args(target_type)
-                with self._method_def("__init__", init_args):
-                    self.write("...")
 
-            self.write()
             if is_forward_decl:
                 args = [f"obj: {target}", "/", "*", *lprops]
                 with self._classmethod_def(
                     "link",
                     args,
                     self_t,
-                    line_comment="type: ignore[override]",
+                    line_comment="type: ignore [override]",
                 ):
+                    if ptr.card.is_multi():
+                        self.write(
+                            get_multi_link_for_proxy_docsting(
+                                source_type=objtype.name,
+                                link_name=pname,
+                                target_type=target_type.name,
+                            )
+                        )
+                    else:
+                        self.write(
+                            get_single_link_for_proxy_docsting(
+                                source_type=objtype.name,
+                                link_name=pname,
+                                target_type=target_type.name,
+                            )
+                        )
                     self.write("...")
 
             self.write()
