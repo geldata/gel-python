@@ -152,6 +152,23 @@ class TestModelGenerator(tb.ModelTestCase):
                     f"{p.type!r} != {e.type!r}",
                 )
 
+    def assert_scalars_equal(self, tname, name, prop):
+        self.assertTrue(
+            self.client.query_single(f"""
+                with
+                    A := assert_single((
+                        select {tname}
+                        filter .name = 'hello world'
+                    )),
+                    B := assert_single((
+                        select {tname}
+                        filter .name = {name!r}
+                    )),
+                select A.{prop} = B.{prop}
+            """),
+            f"property {prop} value does not match",
+        )
+
     @tb.must_fail
     @tb.typecheck
     def test_modelgen__smoke_test(self):
@@ -226,7 +243,7 @@ class TestModelGenerator(tb.ModelTestCase):
 
         self.assertEqual(reveal_type(d), "models.default.Post")
 
-        self.assertEqual(reveal_type(d.id), "models.__variants__.std.uuid")
+        self.assertEqual(reveal_type(d.id), "uuid.UUID")
 
         self.assertIsInstance(d, default.Post)
         self.assertEqual(d.body, "Hello")
@@ -384,7 +401,7 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(ug2.id, ug.id)
 
     @tb.typecheck
-    def test_modelgen_pydantic_apis(self):
+    def test_modelgen_pydantic_apis_01(self):
         # regression test for https://github.com/geldata/gel-python/issues/722
 
         import pydantic
@@ -435,6 +452,215 @@ class TestModelGenerator(tb.ModelTestCase):
 
         run_test(user_loaded, UserUpdate(name="Alice A."))
         run_test(user_new, UserUpdate(name="Bob B."))
+
+    @tb.typecheck(["import json"])
+    def test_modelgen_pydantic_apis_02(self):
+        from models import default
+
+        user_loaded = self.client.get(
+            default.User.select(name=True).filter(name="Alice").limit(1)
+        )
+        user_new = default.User(name="Bob")
+
+        self.assertEqual(
+            user_loaded.model_dump(),
+            {"id": user_loaded.id, "name": "Alice"},
+        )
+
+        self.assertEqual(
+            user_new.model_dump(exclude_unset=True),
+            {"name": "Bob"},
+        )
+
+        self.assertEqual(
+            user_new.model_dump(exclude_unset=True, include={"id", "name"}),
+            {"name": "Bob"},
+        )
+
+        self.assertEqual(
+            user_new.model_dump(),
+            {"name": "Bob", "nickname": None},
+        )
+
+        self.assertEqual(
+            user_new.model_dump(exclude={"nickname"}),
+            {"name": "Bob"},
+        )
+
+        self.assertEqual(
+            user_new.model_dump(exclude={"nickname": True}),
+            {"name": "Bob"},
+        )
+
+        self.assertEqual(
+            user_loaded.model_dump_json(),
+            json.dumps(
+                {"id": str(user_loaded.id), "name": "Alice"},
+                separators=(",", ":"),
+            ),
+        )
+
+        self.assertEqual(
+            user_new.model_dump_json(exclude_unset=True),
+            json.dumps(
+                {"name": "Bob"},
+                separators=(",", ":"),
+            ),
+        )
+
+    @tb.typecheck(["import typing, json"])
+    def test_modelgen_pydantic_apis_03(self):
+        # Test model_dump() and model_dump_json() on ProxyModel linked
+        # via a single link.
+
+        from models import default
+        from gel._testbase import pop_ids, pop_ids_json
+
+        sl = self.client.query_required_single(
+            default.StackableLoot.select(
+                name=True,
+                owner=lambda s: s.owner.select(
+                    name=True,
+                    nickname=True,
+                ),
+            )
+            .filter(name="Gold Coin")
+            .limit(1)  # TODO: detect cardinality, name is exclusive
+        )
+
+        self.assertEqual(
+            pop_ids(sl.model_dump()),
+            {
+                "name": "Gold Coin",
+                "owner": {
+                    "name": "Billie",
+                    "nickname": None,
+                    "__linkprops__": {"bonus": True, "count": 34},
+                },
+            },
+        )
+
+        self.assertEqual(
+            pop_ids_json(sl.model_dump_json()),
+            json.dumps(
+                {
+                    "name": "Gold Coin",
+                    "owner": {
+                        "name": "Billie",
+                        "nickname": None,
+                        "__linkprops__": {"bonus": True, "count": 34},
+                    },
+                },
+            ),
+        )
+
+        self.assertEqual(
+            pop_ids(sl.model_dump(exclude_none=True)),
+            {
+                "name": "Gold Coin",
+                "owner": {
+                    "name": "Billie",
+                    "__linkprops__": {"bonus": True, "count": 34},
+                },
+            },
+        )
+
+        self.assertEqual(
+            pop_ids_json(sl.model_dump_json(exclude_none=True)),
+            json.dumps(
+                {
+                    "name": "Gold Coin",
+                    "owner": {
+                        "name": "Billie",
+                        "__linkprops__": {"bonus": True, "count": 34},
+                    },
+                },
+            ),
+        )
+
+        # Test direct model_dump() and model_dump_json() calls on
+        # a ProxyModel instance.
+        assert sl.owner is not None
+        self.assertEqual(
+            pop_ids(sl.owner.model_dump()),
+            {
+                "name": "Billie",
+                "nickname": None,
+                "__linkprops__": {"bonus": True, "count": 34},
+            },
+        )
+
+        self.assertEqual(
+            pop_ids(sl.owner.model_dump(exclude_none=True)),
+            {
+                "name": "Billie",
+                "__linkprops__": {"bonus": True, "count": 34},
+            },
+        )
+
+    @tb.typecheck(["import typing, json"])
+    def test_modelgen_pydantic_apis_04(self):
+        # Test model_dump() and model_dump_json() on ProxyModel linked
+        # via a multi link.
+
+        from models import default
+        from gel._testbase import pop_ids, pop_ids_json
+
+        sl = self.client.query_required_single(
+            default.GameSession.select(
+                num=True,
+                players=lambda s: s.players.select("*").order_by(
+                    lambda u: u.name
+                ),
+            )
+            .filter(num=123)
+            .limit(1)  # TODO: detect cardinality, name is exclusive
+        )
+
+        expected = {
+            "num": 123,
+            "players": [
+                {
+                    "nickname": None,
+                    "nickname_len": None,
+                    "name": "Alice",
+                    "name_len": 5,
+                    "__linkprops__": {"is_tall_enough": False},
+                },
+                {
+                    "nickname": None,
+                    "nickname_len": None,
+                    "name": "Billie",
+                    "name_len": 6,
+                    "__linkprops__": {"is_tall_enough": True},
+                },
+            ],
+        }
+        self.assertEqual(pop_ids(sl.model_dump()), expected)
+        self.assertEqual(
+            pop_ids_json(sl.model_dump_json()), json.dumps(expected)
+        )
+
+        expected = {
+            "num": 123,
+            "players": [
+                {
+                    "name": "Alice",
+                    "name_len": 5,
+                    "__linkprops__": {"is_tall_enough": False},
+                },
+                {
+                    "name": "Billie",
+                    "name_len": 6,
+                    "__linkprops__": {"is_tall_enough": True},
+                },
+            ],
+        }
+        self.assertEqual(pop_ids(sl.model_dump(exclude_none=True)), expected)
+        self.assertEqual(
+            pop_ids_json(sl.model_dump_json(exclude_none=True)),
+            json.dumps(expected),
+        )
 
     @tb.typecheck
     def test_modelgen_data_unpack_polymorphic(self):
@@ -564,27 +790,27 @@ class TestModelGenerator(tb.ModelTestCase):
 
         self.assertEqual(
             reveal_type(u.id),
-            "models.__variants__.std.uuid",
+            "uuid.UUID",
         )
 
         self.assertEqual(
             reveal_type(u.name),
-            "models.__variants__.std.str",
+            "builtins.str",
         )
 
         self.assertEqual(
             reveal_type(u.nickname),
-            "Union[models.__variants__.std.str, None]",
+            "Union[builtins.str, None]",
         )
 
         self.assertEqual(
             reveal_type(u.name_len),
-            "models.__variants__.std.int64",
+            "builtins.int",
         )
 
         self.assertEqual(
             reveal_type(u.nickname_len),
-            "Union[models.__variants__.std.int64, None]",
+            "Union[builtins.int, None]",
         )
 
         # Let's test computed link as an arg
@@ -801,6 +1027,21 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(m.nickname, "Hannibal")
         self.assertEqual(m.__linkprops__.role, "everything")
         self.assertEqual(m.__linkprops__.rank, 1)
+
+        # Update link property
+        m.__linkprops__.rank = 2
+        self.client.save(res)
+
+        # Re-Fetch and verify
+        res = self.client.get(
+            default.Raid.select(
+                name=True,
+                members=lambda r: r.members.select(name=True, nickname=True),
+            ).filter(name="Solo")
+        )
+        self.assertEqual(len(res.members), 1)
+        m = res.members[0]
+        self.assertEqual(m.__linkprops__.rank, 2)
 
     @tb.typecheck
     def test_modelgen_save_05(self):
@@ -1719,6 +1960,149 @@ class TestModelGenerator(tb.ModelTestCase):
 
         user2 = self.client.get(default.User.filter(name="Anna").limit(1))
         self.assertEqual(user2.nickname, "Lacey")
+
+    @tb.typecheck
+    def test_modelgen_scalars_01(self):
+        import json
+        import datetime as dt
+        from models import default
+
+        # Get the object with non-trivial scalars
+        s = self.client.get(default.AssortedScalars.filter(name="hello world"))
+        self.assertEqual(s.name, "hello world")
+        assert s.json is not None
+        self.assertEqual(
+            json.loads(s.json),
+            [
+                "hello",
+                {
+                    "age": 42,
+                    "name": "John Doe",
+                    "special": None,
+                },
+                False,
+            ],
+        )
+        self.assertEqual(s.bstr, b"word\x00\x0b")
+        self.assertEqual(s.time, dt.time(20, 13, 45, 678000))
+        assert s.nested_mixed is not None
+        self.assertEqual(
+            [(t[0], json.loads(t[1])) for t in s.nested_mixed],
+            [
+                (
+                    [1, 1, 2, 3],
+                    {"next": 5, "label": "Fibonacci sequence"},
+                ),
+                (
+                    [123, 0, 0, 3],
+                    "simple JSON",
+                ),
+                (
+                    [],
+                    None,
+                ),
+            ],
+        )
+        self.assertEqual(s.positive, 123)
+
+    def test_modelgen_scalars_02(self):
+        import json
+        import datetime as dt
+        from models import default
+
+        # Create a new AssortedScalars object with all fields same as the
+        # existing one, except the name. This makes it easy to verify the
+        # result.
+        s = default.AssortedScalars(name="scalars test 1")
+        s.json = json.dumps(
+            [
+                "hello",
+                {
+                    "age": 42,
+                    "name": "John Doe",
+                    "special": None,
+                },
+                False,
+            ],
+        )
+        self.client.save(s)
+        self.assert_scalars_equal("AssortedScalars", "scalars test 1", "json")
+
+        s.bstr = b"word\x00\x0b"
+        self.client.save(s)
+        self.assert_scalars_equal("AssortedScalars", "scalars test 1", "bstr")
+
+        s.time = dt.time(20, 13, 45, 678000)
+        s.date = dt.date(2025, 1, 26)
+        s.ts = dt.datetime(2025, 1, 26, 20, 13, 45, tzinfo=dt.timezone.utc)
+        s.lts = dt.datetime(2025, 1, 26, 20, 13, 45)
+        self.client.save(s)
+        self.assert_scalars_equal("AssortedScalars", "scalars test 1", "time")
+        self.assert_scalars_equal("AssortedScalars", "scalars test 1", "date")
+        self.assert_scalars_equal("AssortedScalars", "scalars test 1", "ts")
+        self.assert_scalars_equal("AssortedScalars", "scalars test 1", "lts")
+
+        s.positive = 123
+        self.client.save(s)
+        self.assert_scalars_equal(
+            "AssortedScalars", "scalars test 1", "positive"
+        )
+
+    def test_modelgen_scalars_03(self):
+        from models import default
+
+        # Test deeply nested mixed collections.
+        s = default.AssortedScalars(name="scalars test 2")
+        s.nested_mixed = [
+            (
+                [1, 1, 2, 3],
+                json.dumps({"next": 5, "label": "Fibonacci sequence"}),
+            ),
+            (
+                [123, 0, 0, 3],
+                '"simple JSON"',
+            ),
+            (
+                [],
+                "null",
+            ),
+        ]
+        self.client.save(s)
+        self.assert_scalars_equal(
+            "AssortedScalars", "scalars test 2", "nested_mixed"
+        )
+
+    @tb.typecheck
+    def test_modelgen_enum_01(self):
+        from models import default
+
+        res = self.client.query(default.EnumTest.order_by(color=True))
+
+        self.assertEqual(len(res), 3)
+        self.assertEqual(
+            [r.color for r in res],
+            [
+                default.Color.Red,
+                default.Color.Green,
+                default.Color.Blue,
+            ],
+        )
+
+    @tb.typecheck
+    def test_modelgen_enum_02(self):
+        from models import default
+
+        e = default.EnumTest(name="color test 1", color="Orange")
+        self.client.save(e)
+
+        e2 = self.client.get(default.EnumTest.filter(name="color test 1"))
+        self.assertEqual(e2.color, default.Color.Orange)
+
+        e.color = default.Color.Indigo
+        self.client.save(e)
+
+        e2 = self.client.get(default.EnumTest.filter(name="color test 1"))
+        self.assertEqual(e2.color, default.Color.Indigo)
 
     @tb.typecheck
     def test_modelgen_save_collections_01(self):
@@ -2875,6 +3259,330 @@ class TestModelGenerator(tb.ModelTestCase):
         )
         self.assertEqual(result, "test")
 
+    @tb.typecheck
+    def test_modelgen_operators_string_comparison(self):
+        """Test string comparison operators with mixed Python/Gel values"""
+        from models import default
+
+        # Test equality operators
+        alice = self.client.query_required_single(
+            default.User.filter(lambda u: u.name == "Alice").limit(1)
+        )
+        self.assertEqual(alice.name, "Alice")
+
+        # Test with Python string
+        python_name = "Alice"
+        alice2 = self.client.query_required_single(
+            default.User.filter(lambda u: u.name == python_name).limit(1)
+        )
+        self.assertEqual(alice2.name, "Alice")
+
+        # Test inequality
+        not_alice = self.client.query(
+            default.User.filter(lambda u: u.name != "Alice").limit(5)
+        )
+        self.assertTrue(all(u.name != "Alice" for u in not_alice))
+
+        # Test ordering comparisons
+        users_after_a = self.client.query(
+            default.User.filter(lambda u: u.name > "A")
+            .order_by(lambda u: u.name)
+            .limit(5)
+        )
+        self.assertTrue(all(u.name > "A" for u in users_after_a))
+
+        users_before_z = self.client.query(
+            default.User.filter(lambda u: u.name < "Z")
+            .order_by(lambda u: u.name)
+            .limit(5)
+        )
+        self.assertTrue(all(u.name < "Z" for u in users_before_z))
+
+    @tb.to_be_fixed  # missing coalesce specialization
+    @tb.typecheck
+    def test_modelgen_operators_string_arithmetic(self):
+        """Test string concatenation and repetition operators"""
+        from models import default, std
+
+        # Test string concatenation in computed field
+        class UserWithFullName(default.User):
+            full_name: std.str
+
+        users_with_full = self.client.query(
+            UserWithFullName.select(
+                name=True,
+                nickname=True,
+                full_name=lambda u: u.name
+                + " ("
+                + std.coalesce(u.nickname, "no nickname")
+                + ")",
+            ).limit(5)
+        )
+
+        for user in users_with_full:
+            expected = (
+                f"{user.name} "
+                f"({user.nickname if user.nickname else 'no nickname'})"
+            )
+            self.assertEqual(user.full_name, expected)
+
+        # Test with Python string values
+        prefix = "User: "
+        users_with_prefix = self.client.query(
+            UserWithFullName.select(
+                name=True, full_name=lambda u: prefix + u.name
+            ).limit(5)
+        )
+
+        for user in users_with_prefix:
+            self.assertEqual(user.full_name, f"User: {user.name}")
+
+    @tb.typecheck
+    def test_modelgen_operators_integer_arithmetic(self):
+        """Test integer arithmetic operators with mixed Python/Gel values"""
+        from models import default, std
+
+        # Test basic arithmetic operations
+        class UserWithMath(default.User):
+            name_len_plus_one: std.int64
+            name_len_times_two: std.int64
+            name_len_minus_py: std.int64
+
+        python_value = 3
+        users_with_math = self.client.query(
+            UserWithMath.select(
+                name=True,
+                name_len_plus_one=lambda u: u.name_len + 1,
+                name_len_times_two=lambda u: u.name_len * 2,
+                name_len_minus_py=lambda u: u.name_len - python_value,
+            ).limit(5)
+        )
+
+        for user in users_with_math:
+            name_len = len(user.name)
+            self.assertEqual(user.name_len_plus_one, name_len + 1)
+            self.assertEqual(user.name_len_times_two, name_len * 2)
+            self.assertEqual(user.name_len_minus_py, name_len - python_value)
+
+    @tb.typecheck
+    def test_modelgen_operators_integer_comparison(self):
+        """Test integer comparison operators"""
+        from models import default
+
+        # Filter by computed length comparisons
+        long_name_users = self.client.query(
+            default.User.filter(lambda u: u.name_len > 4).limit(5)
+        )
+        self.assertTrue(all(len(u.name) > 4 for u in long_name_users))
+
+        # Test with Python integer
+        min_length = 3
+        users_min_len = self.client.query(
+            default.User.filter(lambda u: u.name_len >= min_length).limit(5)
+        )
+        self.assertTrue(all(len(u.name) >= min_length for u in users_min_len))
+
+        # Test equality with computed field
+        exact_len_users = self.client.query(
+            default.User.filter(lambda u: u.name_len == 5).limit(5)
+        )
+        self.assertTrue(all(len(u.name) == 5 for u in exact_len_users))
+
+    @tb.to_be_fixed  # comparisons with None are broken
+    @tb.typecheck
+    def test_modelgen_operators_boolean_logical(self):
+        """Test boolean logical operators and functions"""
+        from models import default, std
+
+        # Test std.and_ function
+        users_std_and = self.client.query(
+            default.User.filter(
+                lambda u: std.and_(u.name_len > 3, u.nickname != None)  # noqa: E711
+            ).limit(5)
+        )
+        for user in users_std_and:
+            self.assertTrue(len(user.name) > 3)
+            self.assertIsNotNone(user.nickname)
+
+        # Test std.or_ function
+        users_std_or = self.client.query(
+            default.User.filter(
+                lambda u: std.or_(u.name_len > 10, u.nickname != None)  # noqa: E711
+            ).limit(5)
+        )
+        for user in users_std_or:
+            self.assertTrue(len(user.name) > 10 or user.nickname is not None)
+
+    @tb.typecheck
+    def test_modelgen_operators_boolean_not(self):
+        """Test boolean not operator and std.not_ function"""
+        from models import default, std
+
+        # Test negation of comparison
+        users_not_alice = self.client.query(
+            default.User.filter(lambda u: std.not_(u.name == "Alice")).limit(5)
+        )
+        for user in users_not_alice:
+            self.assertNotEqual(user.name, "Alice")
+
+    @tb.typecheck
+    def test_modelgen_operators_mixed_types_with_casting(self):
+        """Test operators with mixed types requiring casting"""
+        from models import default, std
+
+        class GameSessionWithMath(default.GameSession):
+            num_as_str: std.str
+            is_even: std.bool
+
+        python_divisor = 2
+        sessions_with_math = self.client.query(
+            GameSessionWithMath.select(
+                num=True,
+                num_as_str=lambda s: std.to_str(s.num),
+                is_even=lambda s: (s.num % python_divisor) == 0,
+            ).limit(5)
+        )
+
+        for session in sessions_with_math:
+            self.assertEqual(session.num_as_str, str(session.num))
+            self.assertEqual(
+                session.is_even, (session.num % python_divisor) == 0
+            )
+
+    @tb.to_be_fixed  # comparisons with None are broken
+    @tb.typecheck
+    def test_modelgen_operators_complex_expressions(self):
+        """Test complex operator expressions combining multiple types"""
+        from models import default, std
+
+        # Complex filter combining multiple operator types
+        complex_users = self.client.query(
+            default.User.filter(
+                lambda u: std.and_(
+                    u.name_len >= 3,
+                    std.or_(u.name > "A", u.nickname != None),  # noqa: E711
+                    std.not_(u.name == ""),
+                )
+            ).limit(5)
+        )
+
+        for user in complex_users:
+            self.assertTrue(len(user.name) >= 3)
+            self.assertTrue(user.name > "A" or user.nickname is not None)
+            self.assertNotEqual(user.name, "")
+
+    @tb.typecheck
+    def test_modelgen_operators_with_python_values_in_computeds(self):
+        """Test operators using Python values in computed expressions"""
+        from models import default, std
+
+        class UserWithPythonOps(default.User):
+            name_plus_suffix: std.str
+            len_times_multiplier: std.int64
+            meets_criteria: std.bool
+
+        # Python values to use in operations
+        suffix = "_user"
+        multiplier = 3
+        min_threshold = 2
+
+        users_with_py_ops = self.client.query(
+            UserWithPythonOps.select(
+                name=True,
+                name_len=True,
+                name_plus_suffix=lambda u: u.name + suffix,
+                len_times_multiplier=lambda u: u.name_len * multiplier,
+                meets_criteria=lambda u: std.and_(
+                    u.name_len > min_threshold, u.name != ""
+                ),
+            ).limit(5)
+        )
+
+        for user in users_with_py_ops:
+            self.assertEqual(user.name_plus_suffix, user.name + suffix)
+            self.assertEqual(
+                user.len_times_multiplier, len(user.name) * multiplier
+            )
+            expected_criteria = (
+                len(user.name) > min_threshold and user.name != ""
+            )
+            self.assertEqual(user.meets_criteria, expected_criteria)
+
+    @tb.typecheck
+    def test_modelgen_operators_string_contains_and_patterns(self):
+        """Test string containment and pattern matching operators"""
+        from models import default, std
+
+        # Test string contains-like operations
+        users_with_a = self.client.query(
+            default.User.filter(lambda u: std.contains(u.name, "a")).limit(5)
+        )
+        for user in users_with_a:
+            self.assertTrue("a" in user.name.lower())
+
+        # Test with Python string variable
+        search_char = "e"
+        users_with_char = self.client.query(
+            default.User.filter(
+                lambda u: std.contains(std.str_lower(u.name), search_char)
+            ).limit(5)
+        )
+        for user in users_with_char:
+            self.assertTrue(search_char in user.name.lower())
+
+    @tb.typecheck
+    def test_modelgen_operators_numeric(self):
+        """Test numeric operators with edge cases and mixed precision"""
+        from models import default, std
+
+        class GameSessionNumeric(default.GameSession):
+            num_div_result: std.float64
+            num_floor_div: std.int64
+            num_mod: std.int64
+
+        python_divisor = 3
+        sessions = self.client.query(
+            GameSessionNumeric.select(
+                num=True,
+                num_div_result=lambda s: s.num / python_divisor,
+                num_floor_div=lambda s: s.num // python_divisor,
+                num_mod=lambda s: s.num % python_divisor,
+            ).limit(10)
+        )
+
+        for session in sessions:
+            if session.num is not None:
+                expected_div = float(session.num) / python_divisor
+                expected_floor_div = session.num // python_divisor
+                expected_mod = session.num % python_divisor
+
+                self.assertAlmostEqual(
+                    session.num_div_result, expected_div, places=5
+                )
+                self.assertEqual(session.num_floor_div, expected_floor_div)
+                self.assertEqual(session.num_mod, expected_mod)
+
+    @tb.typecheck
+    def test_modelgen_ad_hoc_computeds_are_frozen(self):
+        """Test that ad-hoc computeds cannot be passed to init or mutated"""
+        from models import default, std
+
+        class UserWithUpperName(default.User):
+            upper_name: std.str
+
+        with self.assertRaisesRegex(ValueError, "computed field"):
+            UserWithUpperName(name="user with upper name", upper_name="test")  # type: ignore [call-arg]
+
+        users = self.client.query(
+            UserWithUpperName.select(
+                name=True,
+                upper_name=lambda u: std.str_upper(u.name),
+            ).limit(1)
+        )
+
+        with self.assertRaisesRegex(ValueError, "is frozen"):
+            users[0].upper_name = "foo"
+
 
 class TestEmptyAiModelGenerator(tb.ModelTestCase):
     DEFAULT_MODULE = "default"
@@ -2909,128 +3617,6 @@ class TestModelGeneratorOther(tb.ModelTestCase):
     )
 
     ISOLATED_TEST_BRANCHES = True
-
-    @tb.xfail
-    def test_modelgen_scalars_01(self):
-        from models import default
-
-        # Get the object with non-trivial scalars
-        s = self.client.get(default.AssortedScalars.filter(name="hello world"))
-        self.assertEqual(s.name, "hello world")
-        self.assertEqual(
-            json.loads(s.json),
-            [
-                "hello",
-                {
-                    "age": 42,
-                    "name": "John Doe",
-                    "special": None,
-                },
-                False,
-            ],
-        )
-        self.assertEqual(s.bstr, b"word\x00\x0b")
-        self.assertEqual(s.time, dt.time(20, 13, 45, 678000))
-        self.assertEqual(
-            [(t[0], json.loads(t[1])) for t in s.nested_mixed],
-            [
-                (
-                    [1, 1, 2, 3],
-                    {"next": 5, "label": "Fibonacci sequence"},
-                ),
-                (
-                    [123, 0, 0, 3],
-                    "simple JSON",
-                ),
-                (
-                    [],
-                    None,
-                ),
-            ],
-        )
-        self.assertEqual(s.positive, 123)
-
-    def _compare_scalars(self, tname, name, prop):
-        self.assertTrue(
-            self.client.query_single(f"""
-                with
-                    A := assert_single((
-                        select {tname}
-                        filter .name = 'hello world'
-                    )),
-                    B := assert_single((
-                        select {tname}
-                        filter .name = {name!r}
-                    )),
-                select A.{prop} = B.{prop}
-            """),
-            f"property {prop} value does not match",
-        )
-
-    @tb.xfail
-    def test_modelgen_scalars_02(self):
-        from models import default
-
-        # Create a new AssortedScalars object with all fields same as the
-        # existing one, except the name. This makes it easy to verify the
-        # result.
-        s = default.AssortedScalars(name="scalars test 1")
-        s.json = json.dumps(
-            [
-                "hello",
-                {
-                    "age": 42,
-                    "name": "John Doe",
-                    "special": None,
-                },
-                False,
-            ],
-        )
-        self.client.save(s)
-        self._compare_scalars("AssortedScalars", "scalars test 1", "json")
-
-        s.bstr = b"word\x00\x0b"
-        self.client.save(s)
-        self._compare_scalars("AssortedScalars", "scalars test 1", "bstr")
-
-        s.time = dt.time(20, 13, 45, 678000)
-        s.date = dt.date(2025, 1, 26)
-        s.ts = dt.datetime(2025, 1, 26, 20, 13, 45, tzinfo=dt.timezone.utc)
-        s.lts = dt.datetime(2025, 1, 26, 20, 13, 45)
-        self.client.save(s)
-        self._compare_scalars("AssortedScalars", "scalars test 1", "time")
-        self._compare_scalars("AssortedScalars", "scalars test 1", "date")
-        self._compare_scalars("AssortedScalars", "scalars test 1", "ts")
-        self._compare_scalars("AssortedScalars", "scalars test 1", "lts")
-
-        s.positive = 123
-        self.client.save(s)
-        self._compare_scalars("AssortedScalars", "scalars test 1", "positive")
-
-    @tb.xfail
-    def test_modelgen_scalars_03(self):
-        from models import default
-
-        # Test deeply nested mixed collections.
-        s = default.AssortedScalars(name="scalars test 2")
-        s.nested_mixed = [
-            (
-                [1, 1, 2, 3],
-                json.dumps({"next": 5, "label": "Fibonacci sequence"}),
-            ),
-            (
-                [123, 0, 0, 3],
-                '"simple JSON"',
-            ),
-            (
-                [],
-                "null",
-            ),
-        ]
-        self.client.save(s)
-        self._compare_scalars(
-            "AssortedScalars", "scalars test 2", "nested_mixed"
-        )
 
     @tb.xfail
     def test_modelgen_escape_01(self):
@@ -3094,35 +3680,3 @@ class TestModelGeneratorOther(tb.ModelTestCase):
         self.assertEqual(len(res.configure), 1)
         self.assertEqual(res.configure[0].name, "Alice")
         self.assertEqual(res.configure[0].__linkprops__.create, True)
-
-    @tb.xfail
-    def test_modelgen_enum_01(self):
-        from models import default
-
-        res = self.client.query(default.EnumTest.order_by(color=True))
-
-        self.assertEqual(len(res), 3)
-        self.assertEqual(
-            [r.color for r in res],
-            [
-                default.Color.Red,
-                default.Color.Green,
-                default.Color.Blue,
-            ],
-        )
-
-    @tb.xfail
-    def test_modelgen_enum_02(self):
-        from models import default
-
-        e = default.EnumTest(name="color test 1", color="Orange")
-        self.client.save(e)
-
-        e2 = self.client.get(default.EnumTest.filter(name="color test 1"))
-        self.assertEqual(e2.color, default.Color.Orange)
-
-        e.color = default.Color.Indigo
-        self.client.save(e)
-
-        e2 = self.client.get(default.EnumTest.filter(name="color test 1"))
-        self.assertEqual(e2.color, default.Color.Indigo)

@@ -37,6 +37,7 @@ import sys
 import tempfile
 import textwrap
 import time
+import typing
 import unittest
 import warnings
 
@@ -486,6 +487,9 @@ class ConnectedTestCaseMixin:
         return cls.loop.run_until_complete(coro)
 
 
+MAX_BRANCH_NAME_LEN = 51
+
+
 class DatabaseTestCase(ClusterTestCase, ConnectedTestCaseMixin):
     SETUP = None
     TEARDOWN = None
@@ -504,7 +508,7 @@ class DatabaseTestCase(ClusterTestCase, ConnectedTestCaseMixin):
         if self.ISOLATED_TEST_BRANCHES:
             cls = type(self)
             root = cls.get_database_name()
-            testdb = self._testMethodName
+            testdb = self._testMethodName[:MAX_BRANCH_NAME_LEN]
             cls.__client__.query(f"""
                 create data branch {testdb} from {root};
             """)
@@ -933,10 +937,11 @@ def _typecheck(func, imports=None):
     dedented_body = textwrap.dedent(source_code)
 
     if imports is None:
-        add_imports = ""
+        imports = ("from models import default, std",)
     else:
-        add_imports = "\n".join(imports)
+        imports = (*imports, "import models as m")
 
+    add_imports = "\n".join(imports)
     source_code = f"""\
 import unittest
 import typing
@@ -1073,3 +1078,27 @@ if os.environ.get("USE_UVLOOP"):
     import uvloop
 
     uvloop.install()
+
+
+def pop_ids(dct: typing.Any) -> typing.Any:
+    if isinstance(dct, list):
+        for item in dct:
+            pop_ids(item)
+        return dct
+    else:
+        assert isinstance(dct, dict)
+        dct.pop("id", None)
+        for k, v in dct.items():
+            if isinstance(v, list):
+                for item in v:
+                    pop_ids(item)
+            elif isinstance(v, dict):
+                dct[k] = pop_ids(v)
+        return dct
+
+
+def pop_ids_json(js: str) -> str:
+    dct = json.loads(js)
+    assert isinstance(dct, (dict, list))
+    pop_ids(dct)
+    return json.dumps(dct)

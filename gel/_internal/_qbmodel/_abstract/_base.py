@@ -7,12 +7,12 @@ from typing import (
     TYPE_CHECKING,
     Any,
     ClassVar,
+    Generic,
     Final,
     TypeGuard,
     TypeVar,
     final,
 )
-from typing_extensions import TypeVarTuple
 
 import dataclasses
 import typing
@@ -28,8 +28,6 @@ if TYPE_CHECKING:
 
 T = TypeVar("T")
 T_co = TypeVar("T_co", covariant=True)
-GelType_T = TypeVar("GelType_T", bound="GelType")
-GelType_Tup = TypeVarTuple("GelType_Tup")
 
 
 if TYPE_CHECKING:
@@ -74,6 +72,13 @@ else:
                 raise NotImplementedError(f"{type(self).__name__}.__edgeql__")
             else:
                 return type(self), _qb.toplevel_edgeql(self)
+
+
+_GelType_T = TypeVar("_GelType_T", bound=GelType)
+
+
+class GelTypeConstraint(Generic[_GelType_T]):
+    pass
 
 
 def is_gel_type(t: Any) -> TypeGuard[type[GelType]]:
@@ -124,8 +129,7 @@ def maybe_collapse_object_type_variant_union(
 ) -> type[GelObjectType] | None:
     """If *t* is a Union of GelObjectType reflections of the same object
     type, find and return the first union component that is a default
-    variant or a user-defined variant (such classes would have
-    ``__gel_variant__`` set to None."""
+    variant."""
     default_variant: type[GelObjectType] | None = None
     typename = None
     for union_arg in typing.get_args(t):
@@ -137,7 +141,7 @@ def maybe_collapse_object_type_variant_union(
         elif typename != union_arg.__gel_reflection__.name:
             # Reflections of different object types, cannot collapse.
             return None
-        if union_arg.__gel_variant__ is None and default_variant is None:
+        if union_arg.__gel_variant__ == "Default" and default_variant is None:
             default_variant = union_arg
 
     return default_variant

@@ -22,7 +22,6 @@ from typing_extensions import (
 
 import inspect
 import typing
-import uuid
 import warnings
 import weakref
 
@@ -35,12 +34,23 @@ from pydantic._internal import _model_construction  # noqa: PLC2701
 
 from gel._internal import _qb
 from gel._internal import _typing_inspect
+from gel._internal import _utils
 from gel._internal._unsetid import UNSET_UUID
 
 from gel._internal._qbmodel import _abstract
 
+from . import _utils as _pydantic_utils
+
 if TYPE_CHECKING:
-    from collections.abc import Iterator, Iterable, Mapping, Set as AbstractSet
+    import types
+    import uuid
+
+    from collections.abc import (
+        Iterator,
+        Iterable,
+        Mapping,
+        Set as AbstractSet,
+    )
     from gel._internal._qbmodel._abstract import GelType
 
 
@@ -68,7 +78,13 @@ class GelModelMeta(_model_construction.ModelMetaclass, _abstract.GelModelMeta):
             )
             cls = cast(
                 "type[GelModel]",
-                super().__new__(mcls, name, bases, namespace, **kwargs),
+                super().__new__(
+                    mcls,
+                    name,
+                    bases,
+                    namespace | {"__gel_variant__": __gel_variant__},
+                    **kwargs,
+                ),
             )
 
         # Workaround for https://github.com/pydantic/pydantic/issues/11975
@@ -93,8 +109,7 @@ class GelModelMeta(_model_construction.ModelMetaclass, _abstract.GelModelMeta):
         if __gel_type_id__ is not None:
             mcls.register_class(__gel_type_id__, cls)
 
-        if __gel_variant__ is not None:
-            cls.set_variant(__gel_variant__)
+        cls.__gel_variant__ = __gel_variant__
 
         return cls
 
@@ -104,6 +119,41 @@ class GelModelMeta(_model_construction.ModelMetaclass, _abstract.GelModelMeta):
             fields = _process_pydantic_fields(cls, value)
             super().__setattr__("__pydantic_fields__", fields)
             _model_pointers_cache.pop(cls, None)
+        elif name == "__pydantic_parent_namespace__":
+            # pydantic.ModelMetaclass blindly assumes that it is never
+            # subclassed and that its __new__ is called directly from
+            # the model definition site, which is not the case here,
+            # so we need to rebuild the parent namespace weakvaluedict
+            # with locals from the correct frame.
+            #
+            # To avoid repeating the above mistake, walk the stack
+            # until we cross the __new__ boundary, i.e when we see
+            # a frame that called __new__ but is itself not a __new__.
+            defining_frame: types.FrameType | None = None
+            stack_frame = inspect.currentframe()
+            while stack_frame is not None:
+                prev_frame = stack_frame.f_back
+                if (
+                    prev_frame is not None
+                    and stack_frame.f_code.co_name == "__new__"
+                    and prev_frame.f_code.co_name != "__new__"
+                ):
+                    defining_frame = prev_frame
+                    break
+                stack_frame = prev_frame
+
+            if defining_frame is not None:
+                if (
+                    defining_frame.f_back is None
+                    or defining_frame.f_code.co_name == "<module>"
+                ):
+                    value = None
+                else:
+                    value = _model_construction.build_lenient_weakvaluedict(
+                        defining_frame.f_locals
+                    )
+
+            super().__setattr__(name, value)
         else:
             super().__setattr__(name, value)
 
@@ -222,6 +272,14 @@ def _process_pydantic_fields(
         elif fdef_is_desc:
             overrides["default"] = ...
 
+        if (
+            cls.__gel_variant__ is None
+            and fn not in cls.__gel_reflection__.pointers
+        ):
+            # This is an ad-hoc computed pointer in a user-defined variant
+            overrides["init"] = False
+            overrides["frozen"] = True
+
         if overrides:
             field_attrs = dict(field._attributes_set)
             for override in overrides:
@@ -259,7 +317,6 @@ class GelSourceModel(
     metaclass=GelModelMeta,
 ):
     model_config = pydantic.ConfigDict(
-        json_encoders={uuid.UUID: str},
         validate_assignment=True,
         defer_build=True,
         extra="forbid",
@@ -381,6 +438,24 @@ class GelSourceModel(
         raise NotImplementedError(
             'Gel models do not support the "del" operation'
         )
+
+
+def _kwargs_exclude_id(
+    id_: uuid.UUID, kwargs: dict[str, Any], /
+) -> dict[str, Any]:
+    if id_ is UNSET_UUID:
+        try:
+            exclude = kwargs["exclude"]
+        except KeyError:
+            kwargs["exclude"] = {"id"}
+        else:
+            if isinstance(exclude, set):
+                exclude.add("id")
+            else:
+                assert isinstance(exclude, dict)
+                exclude["id"] = True
+
+    return kwargs
 
 
 class GelModel(
@@ -571,6 +646,30 @@ class GelModel(
         cls = type(self)
         return f"{cls.__module__}.{cls.__qualname__} <{id(self)}>"
 
+    @_utils.inherit_signature(  # type: ignore [arg-type]
+        pydantic.BaseModel.model_dump,
+    )
+    def model_dump(self, /, **kwargs: Any) -> dict[str, Any]:
+        # We omit "id" from *unsaved* new objects when serialized.
+        # While this isn't ideal (the field is "required") it's our best
+        # defense against passing an unsaved object through an API boundary.
+        # Out of all options:
+        #   - return string "unset"
+        #   - return invalid UUID or UUID with all-zero bytes
+        #   - return "null"
+        #   - not include "id" at all
+        # the latter seems like the least bad option and easier to deal
+        # with for the reciever when they validate the data.
+        kwargs = _kwargs_exclude_id(self.id, kwargs)
+        return super().model_dump(**kwargs)
+
+    @_utils.inherit_signature(  # type: ignore [arg-type]
+        pydantic.BaseModel.model_dump_json,
+    )
+    def model_dump_json(self, /, **kwargs: Any) -> str:
+        kwargs = _kwargs_exclude_id(self.id, kwargs)
+        return super().model_dump_json(**kwargs)
+
 
 _T_co = TypeVar("_T_co", covariant=True)
 
@@ -676,6 +775,9 @@ class ProxyModel(GelModel, Generic[_MT_co]):
             "__proxy_of__",
             "__class__",
             "__lprops__",
+            "model_dump",
+            "model_dump_json",
+            "__pydantic_serializer__",
         }:
             # Fast path for the wrapped object itself / linkprops model
             # (this optimization is informed by profiling model
@@ -727,8 +829,17 @@ class ProxyModel(GelModel, Generic[_MT_co]):
             return handler(source_type)
         else:
             return core_schema.no_info_before_validator_function(
-                cls,
+                cls,  # pyright: ignore [reportArgumentType]
                 schema=handler.generate_schema(cls.__proxy_of__),
+                serialization=core_schema.wrap_serializer_function_ser_schema(
+                    lambda obj, _ser, info: obj.model_dump(
+                        **_pydantic_utils.serialization_info_to_dump_kwargs(
+                            info
+                        )
+                    ),
+                    info_arg=True,
+                    when_used="always",  # Make sure it's always used
+                ),
             )
 
     @classmethod
@@ -779,6 +890,32 @@ class ProxyModel(GelModel, Generic[_MT_co]):
     def __repr_args__(self) -> Iterable[tuple[str | None, Any]]:
         yield from self.__linkprops__.__repr_args__()
         yield from self._p__obj__.__repr_args__()
+
+    @_utils.inherit_signature(  # type: ignore [arg-type]
+        pydantic.BaseModel.model_dump,
+    )
+    def model_dump(self, /, **kwargs: Any) -> dict[str, Any]:
+        kwargs = _kwargs_exclude_id(self.id, kwargs)
+        wrapped: GelModel = ll_getattr(self, "_p__obj__")
+
+        dump = wrapped.model_dump(**kwargs)
+
+        # TODO: figure out how to pass exlude/include/etc
+        # to the wrapped model. For now we just remove them
+        # from the kwargs so that we don't exclude/include
+        # linkprop with rules aimed at the wrapped model.
+        kwargs.pop("exclude", None)
+        kwargs.pop("include", None)
+
+        dump["__linkprops__"] = self.__linkprops__.model_dump(**kwargs)
+        return dump
+
+    @_utils.inherit_signature(  # type: ignore [arg-type]
+        pydantic.BaseModel.model_dump_json,
+    )
+    def model_dump_json(self, /, **kwargs: Any) -> str:
+        kwargs = _kwargs_exclude_id(self.id, kwargs)
+        return super().model_dump_json(**kwargs)
 
 
 #
