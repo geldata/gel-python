@@ -2116,7 +2116,8 @@ class TestModelGenerator(tb.ModelTestCase):
 
     @tb.typecheck
     def test_modelgen_save_31(self):
-        # Test that using model_copy with a sparse model updates the target model
+        # Test that using model_copy with a sparse model updates
+        # the target model
 
         from models import default
         from pydantic import BaseModel
@@ -2141,7 +2142,6 @@ class TestModelGenerator(tb.ModelTestCase):
 
         import models.std as std
         from models import default
-        from pydantic import BaseModel
 
         u = self.client.get(default.User.filter(name="Alice").limit(1))
 
@@ -2154,6 +2154,48 @@ class TestModelGenerator(tb.ModelTestCase):
 
         u2 = self.client.get(default.User.filter(name="Victoria").limit(1))
         self.assertEqual(u2.id, u.id)
+
+    @tb.typecheck
+    def test_modelgen_save_33(self):
+        # Test updating linked lists - they must not be ever overridden
+        # (the state tracking must not be interrupted)
+
+        from models import default
+
+        u = default.User(name="Wat")
+        self.assertEqual(u.__gel_get_changed_fields__(), {"name"})
+
+        g = default.GameSession(num=909, public=False)
+        self.assertEqual(g.__gel_get_changed_fields__(), {"num", "public"})
+        self.assertEqual(g.__pydantic_fields_set__, {"num", "public"})
+
+        players = g.players
+        self.assertEqual(g.players, [])
+
+        g.players = [u]
+        self.assertEqual(g.players, [u])
+        self.assertIs(g.players, players)
+        self.assertEqual(
+            g.__gel_get_changed_fields__(), {"num", "public", "players"}
+        )
+        self.assertEqual(
+            g.__pydantic_fields_set__, {"num", "public", "players"}
+        )
+
+        g.players = []
+        self.assertEqual(g.players, [])
+        self.assertIs(g.players, players)
+        self.assertEqual(
+            g.__gel_get_changed_fields__(), {"num", "public", "players"}
+        )
+        self.assertEqual(
+            g.__pydantic_fields_set__, {"num", "public", "players"}
+        )
+
+        with self.assertRaisesRegex(
+            TypeError, "cannot assign.*list is expected"
+        ):
+            g.players = None  # type: ignore [assignment]
 
     @tb.typecheck
     def test_modelgen_scalars_01(self):

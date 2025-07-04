@@ -33,6 +33,7 @@ from pydantic_core import core_schema
 from pydantic._internal import _model_construction  # noqa: PLC2701
 
 from gel._internal import _qb
+from gel._internal import _dlist
 from gel._internal import _typing_inspect
 from gel._internal import _utils
 from gel._internal._unsetid import UNSET_UUID
@@ -458,7 +459,13 @@ class GelSourceModel(
         ll_setattr(self, "__gel_changed_fields__", None)
 
     def __setattr__(self, name: str, value: Any) -> None:
-        if name not in self.__pydantic_fields__:
+        # Implement state tracking and multi-link/multi-prop custom handling
+
+        cls = type(self)
+        ptr = cls.__gel_reflection__.pointers.get(name, None)
+        if ptr is None:
+            # Not a field defined by the database reflection, defer
+            # to Pydantic's __setattr__.
             super().__setattr__(name, value)
             return
 
@@ -466,15 +473,36 @@ class GelSourceModel(
         if value == current_value:
             return
 
-        super().__setattr__(name, value)
+        try:
+            if not ptr.cardinality.is_multi():
+                super().__setattr__(name, value)
+                return
 
-        dirty: set[str] | None = object.__getattribute__(
-            self, "__gel_changed_fields__"
-        )
-        if dirty is None:
-            dirty = set()
-            object.__setattr__(self, "__gel_changed_fields__", dirty)
-        dirty.add(name)
+            # *multi links* and *multi props* are implemented with a special
+            # collection type that tracks changes. We need to make sure
+            # that the user can't override the collection with assignments and
+            # mess up the state tracking.
+
+            if not isinstance(value, list):
+                raise TypeError(
+                    f"cannot assign values of type {type(value).__name__!r} to "
+                    f"{type(self).__name__}.{name}; a list is expected"
+                )
+
+            assert isinstance(current_value, _dlist.AbstractTrackedList)
+            current_value.clear()
+            if value:
+                current_value.extend(value)
+
+            # Ensure compatibility with pydantic's __setattr__
+            self.__pydantic_fields_set__.add(name)
+
+        finally:
+            dirty: set[str] | None = ll_getattr(self, "__gel_changed_fields__")
+            if dirty is None:
+                dirty = set()
+                object.__setattr__(self, "__gel_changed_fields__", dirty)
+            dirty.add(name)
 
     def __delattr__(self, name: str) -> None:
         # The semantics of 'del' isn't straightforward. Probably we should
