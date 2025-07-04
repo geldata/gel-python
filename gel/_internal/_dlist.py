@@ -13,6 +13,7 @@ from typing import (
     TypeVar,
     cast,
     overload,
+    final,
 )
 
 from typing_extensions import (
@@ -31,9 +32,22 @@ import functools
 
 from gel._internal import _typing_inspect
 from gel._internal import _typing_parametric as parametric
+from gel._internal._polyfills._strenum import StrEnum
 
 
 _T_co = TypeVar("_T_co", covariant=True)
+
+
+class DefaultList(list[Any]):  # noqa: FURB189
+    # A special marker list that can only come from Pydantic initializing
+    # the multi-link/multi-prop field with a default value.
+    pass
+
+
+@final
+class Mode(StrEnum):
+    Write = "Write"
+    ReadWrite = "ReadWrite"
 
 
 @functools.total_ordering
@@ -53,11 +67,16 @@ class AbstractTrackedList(
     # Initial snapshot for change tracking
     _initial_items: list[_T_co] | None
 
+    _mode: Mode
+
+    __gel_overwrite_data__: bool = False
+
     def __init__(
         self,
         iterable: Iterable[_T_co] = (),
         *,
         __wrap_list__: bool = False,
+        __mode__: Mode,
     ) -> None:
         self._initial_items = None
 
@@ -72,12 +91,26 @@ class AbstractTrackedList(
                 )
 
             self._items = iterable
+
+            # This collection was loaded from the database, we don't
+            # want to override its link/prop on save with new data,
+            # we want to track changes instead.
+            self.__gel_overwrite_data__ = False
+            assert __mode__ is Mode.ReadWrite
+            self._mode = Mode.ReadWrite
         else:
             self._initial_items = []
             self._items = []
             # 'extend' is optimized in ProxyDistinctList
             # for use in __init__
             self.extend(iterable)
+
+            # This is a new collection set to link/prop explicitly,
+            # we want to override the link/prop with this new data
+            # on save.
+            self.__gel_overwrite_data__ = True
+
+            self._mode = __mode__
 
     def _ensure_snapshot(self) -> None:
         if self._initial_items is None:
@@ -99,6 +132,13 @@ class AbstractTrackedList(
 
     def __gel_commit__(self) -> None:
         self._initial_items = None
+
+        # Flip "override mode" to False; it can be set back to True
+        # if the user assigns a new list to the field, e.g.
+        # `model.multilink = [ ... ]`. Setting it back to False means
+        # that now we'll be tracking changes and generating update
+        # queries for the collection (not replacement queries.)
+        self.__gel_overwrite_data__ = False
 
     def _check_value(self, value: Any) -> _T_co:
         """Ensure `value` is of type T and return it."""
@@ -125,11 +165,11 @@ class AbstractTrackedList(
         def __getitem__(self, index: SupportsIndex) -> _T_co: ...
 
         @overload
-        def __getitem__(self, index: slice) -> Self: ...
+        def __getitem__(self, index: slice) -> list[_T_co]: ...
 
-    def __getitem__(self, index: SupportsIndex | slice) -> _T_co | Self:
+    def __getitem__(self, index: SupportsIndex | slice) -> _T_co | list[_T_co]:
         if isinstance(index, slice):
-            return type(self)(self._items[index])
+            return list(self._items[index])
         else:
             return self._items[index]
 
@@ -223,10 +263,10 @@ class AbstractTrackedList(
     def __repr__(self) -> str:
         return repr(self._items)
 
-    def __add__(self, other: Iterable[_T_co]) -> Self:
-        new = type(self)(self._items)
+    def __add__(self, other: Iterable[_T_co]) -> list[_T_co]:
+        new = type(self)(self._items, __mode__=Mode.ReadWrite)
         new.extend(other)
-        return new
+        return list(new)
 
     def __iadd__(self, other: Iterable[_T_co]) -> Self:
         self.extend(other)
@@ -290,7 +330,7 @@ class AbstractDowncastingList(Generic[_T_co, _BT]):
             stop: SupportsIndex | None = None,
         ) -> int: ...
         def count(self, value: _T_co | _BT) -> int: ...
-        def __add__(self, other: Iterable[_T_co | _BT]) -> Self: ...
+        def __add__(self, other: Iterable[_T_co | _BT]) -> list[_T_co]: ...
         def __iadd__(self, other: Iterable[_T_co | _BT]) -> Self: ...
 
 
@@ -363,11 +403,19 @@ class AbstractDistinctList(AbstractTrackedList[_HT_co]):
     _unhashables: dict[int, _HT_co] | None
 
     def __init__(
-        self, iterable: Iterable[_HT_co] = (), *, __wrap_list__: bool = False
+        self,
+        iterable: Iterable[_HT_co] = (),
+        *,
+        __wrap_list__: bool = False,
+        __mode__: Mode,
     ) -> None:
         self._set = None
         self._unhashables = None
-        super().__init__(iterable, __wrap_list__=__wrap_list__)
+        super().__init__(
+            iterable,
+            __wrap_list__=__wrap_list__,
+            __mode__=__mode__,
+        )
 
     def _ensure_snapshot(self) -> None:
         # "_ensure_snapshot" is called right before any mutation:
@@ -618,3 +666,25 @@ class DistinctList(
             lst._unhashables = {id(item): item for item in unhashables}
 
         return lst
+
+
+_ADL_co = TypeVar("_ADL_co", bound=AbstractTrackedList[Any], covariant=True)
+
+
+def convert_to_dlist(
+    value: Any,
+    tp: type[_ADL_co],
+) -> _ADL_co:
+    if type(value) is list:
+        # Optimization for the most common scenario - user passes
+        # a list of objects to the constructor.
+        return tp(value, __mode__=Mode.ReadWrite)
+    elif isinstance(value, DefaultList):
+        assert not value
+        # GelModel will adjust __mode__ to Write for
+        # unfetched multi-link/multi-prop fields.
+        return tp(__mode__=Mode.ReadWrite)
+    elif isinstance(value, (list, AbstractTrackedList)):
+        return tp(value, __mode__=Mode.ReadWrite)
+    else:
+        raise TypeError(f"could not convert {type(value)} to {tp.__name__}")

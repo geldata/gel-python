@@ -2146,8 +2146,11 @@ class TestModelGenerator(tb.ModelTestCase):
         u = self.client.get(default.User.filter(name="Alice").limit(1))
 
         new_u = default.User(u.id, name="Victoria")
+        self.assertFalse(getattr(u, "__gel_overwrite_data__", False))
+        self.assertTrue(getattr(new_u, "__gel_overwrite_data__", False))
         self.client.save(new_u)
         self.client.save(u)
+        self.assertFalse(getattr(u, "__gel_overwrite_data__", False))
 
         c = self.client.get(std.count(default.User.filter(name="Alice")))
         self.assertEqual(c, 0)
@@ -2157,23 +2160,36 @@ class TestModelGenerator(tb.ModelTestCase):
 
     @tb.typecheck
     def test_modelgen_save_33(self):
-        # Test updating linked lists - they must not be ever overridden
-        # (the state tracking must not be interrupted)
+        # Test linked lists:
+        # - they must not be ever overridden (the state tracking must not
+        #   be interrupted)
+        # - the correctness of __gel_overwrite_data__ flag on models
+        #   and collections (test for explicit assignments, fetched data,
+        #   new data, default values)
 
         from models import default
 
         u = default.User(name="Wat")
         self.assertEqual(u.__gel_get_changed_fields__(), {"name"})
+        self.assertFalse(getattr(u, "__gel_overwrite_data__", False))
+
+        #########
 
         g = default.GameSession(num=909, public=False)
         self.assertEqual(g.__gel_get_changed_fields__(), {"num", "public"})
         self.assertEqual(g.__pydantic_fields_set__, {"num", "public"})
 
+        #########
+
         players = g.players
         self.assertEqual(g.players, [])
+        self.assertFalse(g.players.__gel_overwrite_data__)
+
+        #########
 
         g.players = [u]
         self.assertEqual(g.players, [u])
+        self.assertTrue(g.players.__gel_overwrite_data__)
         self.assertIs(g.players, players)
         self.assertEqual(
             g.__gel_get_changed_fields__(), {"num", "public", "players"}
@@ -2181,21 +2197,41 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(
             g.__pydantic_fields_set__, {"num", "public", "players"}
         )
+
+        self.client.save(g)
+        self.assertFalse(g.players.__gel_overwrite_data__)
+        self.assertEqual(g.__gel_get_changed_fields__(), set())
+
+        #########
 
         g.players = []
         self.assertEqual(g.players, [])
         self.assertIs(g.players, players)
-        self.assertEqual(
-            g.__gel_get_changed_fields__(), {"num", "public", "players"}
-        )
+        self.assertTrue(g.players.__gel_overwrite_data__)
+        self.assertEqual(g.__gel_get_changed_fields__(), {"players"})
         self.assertEqual(
             g.__pydantic_fields_set__, {"num", "public", "players"}
         )
+
+        #########
 
         with self.assertRaisesRegex(
             TypeError, "cannot assign.*list is expected"
         ):
             g.players = None  # type: ignore [assignment]
+
+        #########
+
+        g = default.GameSession(num=909, public=False, players=[])
+        self.assertFalse(getattr(g, "__gel_overwrite_data__", False))
+        self.assertEqual(g.players, [])
+        self.assertTrue(g.players.__gel_overwrite_data__)
+        self.assertEqual(
+            g.__gel_get_changed_fields__(), {"num", "public", "players"}
+        )
+        self.assertEqual(
+            g.__pydantic_fields_set__, {"num", "public", "players"}
+        )
 
     @tb.typecheck
     def test_modelgen_scalars_01(self):

@@ -372,7 +372,7 @@ class GelSourceModel(
             else:
                 return cls.model_construct()
 
-        self = cls.__new__(cls)
+        self = object.__new__(cls)
         if __dict__ is not None:
             ll_setattr(self, "__dict__", __dict__)
             ll_setattr(self, "__pydantic_fields_set__", set(__dict__.keys()))
@@ -496,6 +496,8 @@ class GelSourceModel(
 
             # Ensure compatibility with pydantic's __setattr__
             self.__pydantic_fields_set__.add(name)
+
+            current_value.__gel_overwrite_data__ = True
 
         finally:
             dirty: set[str] | None = ll_getattr(self, "__gel_changed_fields__")
@@ -621,6 +623,12 @@ class GelModel(
         # database when `client.save()` is called.
 
         cls.__gel_ensure_no_computed_args__(kwargs)
+
+        # Using __gel_model_construct__ here makes objects created with
+        # an `id` to behave just like objects fetched from the db.
+        # E.g. if a multi-pointer wasn't specified it wouldn't be set
+        # (just like it wouldn't be set if it wasn't fetched). This makes
+        # Write/ReadWrite modes work the same way for both cases.
         self = cls.__gel_model_construct__(None)
         for arg, value in kwargs.items():
             setattr(self, arg, value)
@@ -685,7 +693,7 @@ class GelModel(
         # without the link specified, in which case the codec wouldn't
         # construct the list; we can do that lazily.
 
-        if field.default_factory is list:
+        if field.default_factory is _dlist.DefaultList:
             # A multi link?
             ptrs = cls.__gel_reflection__.pointers
             ptr = ptrs.get(name)
@@ -701,7 +709,9 @@ class GelModel(
                 )
                 # Fetch the validated/coerced value (`list` will be converted
                 # to a variant of TrackedList.)
-                return getattr(self, name)
+                lst: _dlist.AbstractTrackedList[Any] = getattr(self, name)
+                lst._mode = _dlist.Mode.Write
+                return lst
 
         # Delegate to the descriptor.
         return object.__getattribute__(self, name)
@@ -859,12 +869,7 @@ class ProxyModel(
         __lprops__: ClassVar[type[GelLinkModel]]
 
     def __new__(cls, *args: Any, **kwargs: Any) -> Self:
-        # Bypass GelModel's __new__ implementation.
-        new = super(GelModel, cls).__new__
-        if new is object.__new__:
-            return new(cls)
-        else:
-            return new(cls, *args, **kwargs)
+        return cls.__gel_model_construct__(None)
 
     def __init__(
         self,
@@ -872,6 +877,10 @@ class ProxyModel(
         id: uuid.UUID = UNSET_UUID,  # noqa: A002
         **kwargs: Any,
     ) -> None:
+        # Note, we don't call super().__init__() here.
+        # GelModel.__init__ and GelSourceModel.__init__ don't do anything
+        # useful for the proxy.
+
         # We want ProxyModel to be a trasparent wrapper, so we
         # forward the constructor arguments to the wrapped object.
         wrapped = self.__proxy_of__(id, **kwargs)

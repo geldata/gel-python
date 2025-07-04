@@ -304,14 +304,7 @@ class _MultiProperty(
                 generic_args[1],  # type: ignore [valid-type]
             ]
         )
-        if isinstance(value, lt):
-            return value
-        elif isinstance(value, (list, _dlist.TrackedList)):
-            return lt(value)
-        else:
-            raise TypeError(
-                f"could not convert {type(value)} to {cls.__name__}"
-            )
+        return _dlist.convert_to_dlist(value, lt)
 
 
 class _ComputedMultiProperty(
@@ -326,7 +319,7 @@ MultiProperty = TypeAliasType(
     Annotated[
         _MultiProperty[_ST_co, _BT_co],
         pydantic.Field(
-            default_factory=list,
+            default_factory=_dlist.DefaultList,
             # Force validate call to convert the empty list
             # to a properly typed one.
             validate_default=True,
@@ -575,14 +568,7 @@ class _MultiLink(
         lt: type[_dlist.DistinctList[_MT_co]] = _dlist.DistinctList[
             generic_args[0],  # type: ignore [valid-type]
         ]
-        if isinstance(value, lt):
-            return value
-        elif isinstance(value, (list, _dlist.DistinctList)):
-            return lt(value)
-        else:
-            raise TypeError(
-                f"could not convert {type(value)} to {cls.__name__}"
-            )
+        return _dlist.convert_to_dlist(value, lt)
 
 
 class _MultiLinkWithProps(
@@ -629,19 +615,7 @@ class _MultiLinkWithProps(
             generic_args[0],  # type: ignore [valid-type]
             generic_args[1],  # type: ignore [valid-type]
         ]
-
-        if type(value) is list:
-            # Optimization for the most common scenario - user passes
-            # a list of objects to the constructor.
-            return lt(value)
-        elif isinstance(value, lt):
-            return value
-        elif isinstance(value, (list, _dlist.DistinctList)):
-            return lt(value)
-        else:
-            raise TypeError(
-                f"could not convert {type(value)} to {cls.__name__}"
-            )
+        return _dlist.convert_to_dlist(value, lt)
 
 
 MultiLink = TypeAliasType(
@@ -649,7 +623,7 @@ MultiLink = TypeAliasType(
     Annotated[
         _MultiLink[_MT_co, _MT_co],
         pydantic.Field(
-            default_factory=list,
+            default_factory=_dlist.DefaultList,
             # Force validate call to convert the empty list
             # to a properly typed one.
             validate_default=True,
@@ -667,7 +641,7 @@ RequiredMultiLink = TypeAliasType(
     Annotated[
         _MultiLink[_MT_co, _MT_co],
         pydantic.Field(
-            default_factory=list,
+            default_factory=_dlist.DefaultList,
             # Force validate call to convert the empty list
             # to a properly typed one.
             validate_default=True,
@@ -704,7 +678,7 @@ MultiLinkWithProps = TypeAliasType(
     Annotated[
         _MultiLinkWithProps[_PT_co, _MT_co],
         pydantic.Field(
-            default_factory=list,
+            default_factory=_dlist.DefaultList,
             # Force validate call to convert the empty list
             # to a properly typed one.
             validate_default=True,
@@ -723,7 +697,7 @@ RequiredMultiLinkWithProps = TypeAliasType(
     Annotated[
         _MultiLinkWithProps[_PT_co, _MT_co],
         pydantic.Field(
-            default_factory=list,
+            default_factory=_dlist.DefaultList,
             # Force validate call to convert the empty list
             # to a properly typed one.
             validate_default=True,
