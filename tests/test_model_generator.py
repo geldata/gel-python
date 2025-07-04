@@ -937,10 +937,9 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertIsNotNone(gp.__linkprops__)
 
         # Check that `groups` is not an allowed keyword-arg for `User.__init__`
-        self.assertEqual(
+        self.assertNotIn(
+            "groups",
             reveal_type(default.User),
-            "def (*, name: builtins.str, nickname: "
-            "Union[builtins.str, None] =) -> models.default.User",
         )
 
         # This also tests that "required computeds" are not "required" as
@@ -2117,9 +2116,8 @@ class TestModelGenerator(tb.ModelTestCase):
 
     @tb.typecheck
     def test_modelgen_save_31(self):
-        """
-        Test that using model_copy with a sparse model updates the target model
-        """
+        # Test that using model_copy with a sparse model updates
+        # the target model
 
         from models import default
         from pydantic import BaseModel
@@ -2137,6 +2135,103 @@ class TestModelGenerator(tb.ModelTestCase):
 
         user2 = self.client.get(default.User.filter(name="Anna").limit(1))
         self.assertEqual(user2.nickname, "Lacey")
+
+    @tb.typecheck
+    def test_modelgen_save_32(self):
+        # Test updating an existing model
+
+        import models.std as std
+        from models import default
+
+        u = self.client.get(default.User.filter(name="Alice").limit(1))
+
+        new_u = default.User(u.id, name="Victoria")
+        self.assertFalse(getattr(u, "__gel_overwrite_data__", False))
+        self.assertTrue(getattr(new_u, "__gel_overwrite_data__", False))
+        self.client.save(new_u)
+        self.client.save(u)
+        self.assertFalse(getattr(u, "__gel_overwrite_data__", False))
+
+        c = self.client.get(std.count(default.User.filter(name="Alice")))
+        self.assertEqual(c, 0)
+
+        u2 = self.client.get(default.User.filter(name="Victoria").limit(1))
+        self.assertEqual(u2.id, u.id)
+
+    @tb.typecheck
+    def test_modelgen_save_33(self):
+        # Test linked lists:
+        # - they must not be ever overridden (the state tracking must not
+        #   be interrupted)
+        # - the correctness of __gel_overwrite_data__ flag on models
+        #   and collections (test for explicit assignments, fetched data,
+        #   new data, default values)
+
+        from models import default
+
+        u = default.User(name="Wat")
+        self.assertEqual(u.__gel_get_changed_fields__(), {"name"})
+        self.assertFalse(getattr(u, "__gel_overwrite_data__", False))
+
+        #########
+
+        g = default.GameSession(num=909, public=False)
+        self.assertEqual(g.__gel_get_changed_fields__(), {"num", "public"})
+        self.assertEqual(g.__pydantic_fields_set__, {"num", "public"})
+
+        #########
+
+        players = g.players
+        self.assertEqual(g.players, [])
+        self.assertFalse(g.players.__gel_overwrite_data__)
+
+        #########
+
+        g.players = [u]
+        self.assertEqual(g.players, [u])
+        self.assertTrue(g.players.__gel_overwrite_data__)
+        self.assertIs(g.players, players)
+        self.assertEqual(
+            g.__gel_get_changed_fields__(), {"num", "public", "players"}
+        )
+        self.assertEqual(
+            g.__pydantic_fields_set__, {"num", "public", "players"}
+        )
+
+        self.client.save(g)
+        self.assertFalse(g.players.__gel_overwrite_data__)
+        self.assertEqual(g.__gel_get_changed_fields__(), set())
+
+        #########
+
+        g.players = []
+        self.assertEqual(g.players, [])
+        self.assertIs(g.players, players)
+        self.assertTrue(g.players.__gel_overwrite_data__)
+        self.assertEqual(g.__gel_get_changed_fields__(), {"players"})
+        self.assertEqual(
+            g.__pydantic_fields_set__, {"num", "public", "players"}
+        )
+
+        #########
+
+        with self.assertRaisesRegex(
+            TypeError, "cannot assign.*list is expected"
+        ):
+            g.players = None  # type: ignore [assignment]
+
+        #########
+
+        g = default.GameSession(num=909, public=False, players=[])
+        self.assertFalse(getattr(g, "__gel_overwrite_data__", False))
+        self.assertEqual(g.players, [])
+        self.assertTrue(g.players.__gel_overwrite_data__)
+        self.assertEqual(
+            g.__gel_get_changed_fields__(), {"num", "public", "players"}
+        )
+        self.assertEqual(
+            g.__pydantic_fields_set__, {"num", "public", "players"}
+        )
 
     @tb.typecheck
     def test_modelgen_scalars_01(self):
@@ -3747,7 +3842,7 @@ class TestModelGenerator(tb.ModelTestCase):
             upper_name: std.str
 
         with self.assertRaisesRegex(ValueError, "computed field"):
-            UserWithUpperName(name="user with upper name", upper_name="test")  # type: ignore [call-arg]
+            UserWithUpperName(name="user with upper name", upper_name="test")  # type: ignore [call-overload]
 
         users = self.client.query(
             UserWithUpperName.select(
@@ -3758,6 +3853,15 @@ class TestModelGenerator(tb.ModelTestCase):
 
         with self.assertRaisesRegex(ValueError, "is frozen"):
             users[0].upper_name = "foo"
+
+    @tb.typecheck
+    def test_modelgen_result_inference(self):
+        import models.std as std
+        from models import default
+
+        c = self.client.get(std.count(default.User.filter(name="Alice")))
+        self.assertEqual(reveal_type(c), "builtins.int")
+        self.assertEqual(c, 1)
 
 
 class TestEmptyAiModelGenerator(tb.ModelTestCase):

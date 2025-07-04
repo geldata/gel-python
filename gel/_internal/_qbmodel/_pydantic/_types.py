@@ -139,6 +139,11 @@ _py_type_to_schema: dict[
 
 
 class PyTypeScalar(_abstract.PyTypeScalar[_PT_co]):
+    if TYPE_CHECKING:
+
+        @classmethod
+        def __edgeql__(cls) -> tuple[type[_PT_co], str]: ...  # type: ignore [override]
+
     @classmethod
     def __get_pydantic_core_schema__(
         cls,

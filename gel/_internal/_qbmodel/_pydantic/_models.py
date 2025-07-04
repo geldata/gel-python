@@ -33,6 +33,7 @@ from pydantic_core import core_schema
 from pydantic._internal import _model_construction  # noqa: PLC2701
 
 from gel._internal import _qb
+from gel._internal import _dlist
 from gel._internal import _typing_inspect
 from gel._internal import _utils
 from gel._internal._unsetid import UNSET_UUID
@@ -371,7 +372,7 @@ class GelSourceModel(
             else:
                 return cls.model_construct()
 
-        self = cls.__new__(cls)
+        self = object.__new__(cls)
         if __dict__ is not None:
             ll_setattr(self, "__dict__", __dict__)
             ll_setattr(self, "__pydantic_fields_set__", set(__dict__.keys()))
@@ -458,7 +459,13 @@ class GelSourceModel(
         ll_setattr(self, "__gel_changed_fields__", None)
 
     def __setattr__(self, name: str, value: Any) -> None:
-        if name not in self.__pydantic_fields__:
+        # Implement state tracking and multi-link/multi-prop custom handling
+
+        cls = type(self)
+        ptr = cls.__gel_reflection__.pointers.get(name, None)
+        if ptr is None:
+            # Not a field defined by the database reflection, defer
+            # to Pydantic's __setattr__.
             super().__setattr__(name, value)
             return
 
@@ -466,15 +473,38 @@ class GelSourceModel(
         if value == current_value:
             return
 
-        super().__setattr__(name, value)
+        try:
+            if not ptr.cardinality.is_multi():
+                super().__setattr__(name, value)
+                return
 
-        dirty: set[str] | None = object.__getattribute__(
-            self, "__gel_changed_fields__"
-        )
-        if dirty is None:
-            dirty = set()
-            object.__setattr__(self, "__gel_changed_fields__", dirty)
-        dirty.add(name)
+            # *multi links* and *multi props* are implemented with a special
+            # collection type that tracks changes. We need to make sure
+            # that the user can't override the collection with assignments and
+            # mess up the state tracking.
+
+            if not isinstance(value, list):
+                raise TypeError(
+                    f"cannot assign values of type {type(value).__name__!r} to "
+                    f"{type(self).__name__}.{name}; a list is expected"
+                )
+
+            assert isinstance(current_value, _dlist.AbstractTrackedList)
+            current_value.clear()
+            if value:
+                current_value.extend(value)
+
+            # Ensure compatibility with pydantic's __setattr__
+            self.__pydantic_fields_set__.add(name)
+
+            current_value.__gel_overwrite_data__ = True
+
+        finally:
+            dirty: set[str] | None = ll_getattr(self, "__gel_changed_fields__")
+            if dirty is None:
+                dirty = set()
+                object.__setattr__(self, "__gel_changed_fields__", dirty)
+            dirty.add(name)
 
     def __delattr__(self, name: str) -> None:
         # The semantics of 'del' isn't straightforward. Probably we should
@@ -511,8 +541,19 @@ class GelModel(
     _abstract.GelModel,
     __gel_root_class__=True,
 ):
+    __slots__ = ("__gel_overwrite_data__",)
+
     if TYPE_CHECKING:
         id: uuid.UUID
+
+        # If a model is created with an existing `id`, we set this to `True`.
+        # This is used in `save()` to determine if *multi links* should be
+        # updated with `+=` operation or just replaced with the new value.
+        # It gets cleared when the model is saved in `__gel_commit__()`.
+        __gel_overwrite_data__: bool
+
+        # Computed fields can't be passed to the constructor and we
+        # need to enforce that. Set by `__gel_gen_computed_fields__()`.
         __gel_computed_fields__: ClassVar[frozenset[str] | None]
 
     @classmethod
@@ -528,33 +569,23 @@ class GelModel(
         cls.__gel_computed_fields__ = comp_fields
         return comp_fields
 
-    def __init__(
-        self,
-        /,
-        *,
-        id: uuid.UUID = UNSET_UUID,  # noqa: A002
-        **kwargs: Any,
-    ) -> None:
-        cls = type(self)
-
-        try:
-            comp_fields = type.__getattribute__(cls, "__gel_computed_fields__")
-        except AttributeError:
-            comp_fields = cls.__gel_gen_computed_fields__()
-
-        if id is not UNSET_UUID:
-            raise ValueError(
-                "models do not support setting `id` on construction; "
-                "`id` is set automatically by the `client.save()` method"
-            )
-
+    @classmethod
+    def __gel_ensure_no_computed_args__(
+        cls,
+        kwargs: dict[str, Any],
+    ) -> frozenset[str] | None:
         # Prohibit passing computed fields to the constructor.
         # Unfortunately `init=False` doesn't work with BaseModel
         # pydantic classes (the docs states it only works in
         # dataclasses mode).
-        #
-        # We can potentially optimize this by caching a frozenset
-        # of field names that are computed.
+
+        comp_fields: frozenset[str] | None
+
+        try:
+            comp_fields = ll_type_getattr(cls, "__gel_computed_fields__")
+        except AttributeError:
+            comp_fields = cls.__gel_gen_computed_fields__()
+
         if comp_fields is not None and (
             comp_args := comp_fields & kwargs.keys()
         ):
@@ -564,6 +595,67 @@ class GelModel(
                 f"argument, it is a computed field "
                 f"(the database computes it for you)"
             )
+
+        return comp_fields
+
+    def __new__(
+        cls,
+        /,
+        id: uuid.UUID = UNSET_UUID,  # noqa: A002
+        **kwargs: Any,
+    ) -> Self:
+        if id is UNSET_UUID:
+            # No 'id' argument: new object, just follow the normal
+            # __new__ / __init__ machinery.
+            new = super().__new__
+            if new is object.__new__:
+                return new(cls)
+            else:
+                return new(cls, **kwargs)
+
+        # We allow creating a model with an id. In that case, we assume
+        # that the model is bound to an existing object in the database.
+        # We will create the object in `__new__`, set fields, including
+        # the `id` and return. The `__init__` will see that the `id` is
+        # set and skip the initialization.
+        #
+        # All set fields are considered "dirty" and will be saved to the
+        # database when `client.save()` is called.
+
+        cls.__gel_ensure_no_computed_args__(kwargs)
+
+        # Using __gel_model_construct__ here makes objects created with
+        # an `id` to behave just like objects fetched from the db.
+        # E.g. if a multi-pointer wasn't specified it wouldn't be set
+        # (just like it wouldn't be set if it wasn't fetched). This makes
+        # Write/ReadWrite modes work the same way for both cases.
+        self = cls.__gel_model_construct__(None)
+        for arg, value in kwargs.items():
+            setattr(self, arg, value)
+
+        self.__dict__["id"] = id
+        ll_setattr(self, "__gel_overwrite_data__", True)  # noqa: FBT003
+
+        return self
+
+    def __init__(
+        self,
+        /,
+        id: uuid.UUID = UNSET_UUID,  # noqa: A002
+        **kwargs: Any,
+    ) -> None:
+        if id is not UNSET_UUID:
+            if self.__dict__.get("id") is None:
+                raise ValueError(
+                    "models do not support setting `id` on construction; "
+                    "`id` is set automatically by the `client.save()` method"
+                )
+            else:
+                # The object was created and initialized by __new__,
+                # nothing to do in `__init__`.
+                return
+
+        comp_fields = self.__gel_ensure_no_computed_args__(kwargs)
 
         super().__init__(**kwargs)
 
@@ -601,7 +693,7 @@ class GelModel(
         # without the link specified, in which case the codec wouldn't
         # construct the list; we can do that lazily.
 
-        if field.default_factory is list:
+        if field.default_factory is _dlist.DefaultList:
             # A multi link?
             ptrs = cls.__gel_reflection__.pointers
             ptr = ptrs.get(name)
@@ -617,7 +709,9 @@ class GelModel(
                 )
                 # Fetch the validated/coerced value (`list` will be converted
                 # to a variant of TrackedList.)
-                return getattr(self, name)
+                lst: _dlist.AbstractTrackedList[Any] = getattr(self, name)
+                lst._mode = _dlist.Mode.Write
+                return lst
 
         # Delegate to the descriptor.
         return object.__getattribute__(self, name)
@@ -633,6 +727,7 @@ class GelModel(
                 )
             object.__setattr__(self, "id", new_id)
 
+        ll_setattr(self, "__gel_overwrite_data__", False)  # noqa: FBT003
         super().__gel_commit__()
 
     def __eq__(self, other: object) -> bool:
@@ -773,10 +868,22 @@ class ProxyModel(
         __linkprops__: GelLinkModel
         __lprops__: ClassVar[type[GelLinkModel]]
 
-    def __init__(self, /, **kwargs: Any) -> None:
+    def __new__(cls, *args: Any, **kwargs: Any) -> Self:
+        return cls.__gel_model_construct__(None)
+
+    def __init__(
+        self,
+        /,
+        id: uuid.UUID = UNSET_UUID,  # noqa: A002
+        **kwargs: Any,
+    ) -> None:
+        # Note, we don't call super().__init__() here.
+        # GelModel.__init__ and GelSourceModel.__init__ don't do anything
+        # useful for the proxy.
+
         # We want ProxyModel to be a trasparent wrapper, so we
         # forward the constructor arguments to the wrapped object.
-        wrapped = self.__proxy_of__(**kwargs)
+        wrapped = self.__proxy_of__(id, **kwargs)
         ll_setattr(self, "_p__obj__", wrapped)
         ll_setattr(
             self, "__linkprops__", self.__lprops__.__gel_model_construct__({})

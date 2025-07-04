@@ -592,13 +592,21 @@ def make_plan(objs: Iterable[GelModel]) -> SavePlan:
 
             removed = linked.__gel_get_removed__()
             if removed:
-                m_rem = MultiLinkRemove(
-                    name=prop.name,
-                    info=prop,
-                    removed=unwrap_dlist(removed),
-                )
+                # TODO: this should probably be handled in the DistinctList
+                # itself (GelModel and DistinctList are tightly coupled anyway)
+                removed = [
+                    m
+                    for m in unwrap_dlist(removed)
+                    if ll_attr(m, "id") is not UNSET_UUID
+                ]
+                if removed:
+                    m_rem = MultiLinkRemove(
+                        name=prop.name,
+                        info=prop,
+                        removed=removed,
+                    )
 
-                push_change(requireds, sched, m_rem)
+                    push_change(requireds, sched, m_rem)
 
             # __gel_get_added__() will return *new* links, but we also
             # have to take care about link property updates on *existing*

@@ -14,6 +14,8 @@ from typing import (
     final,
 )
 
+from typing_extensions import Self
+
 import dataclasses
 import typing
 
@@ -44,8 +46,8 @@ if TYPE_CHECKING:
 
         def __edgeql_qb_expr__(self) -> _qb.Expr: ...
 
-        @staticmethod
-        def __edgeql__() -> tuple[type, str]: ...
+        @classmethod
+        def __edgeql__(cls) -> tuple[type[Self], str]: ...
 
         @staticmethod
         def __edgeql_expr__() -> str: ...
