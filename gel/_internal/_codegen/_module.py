@@ -37,6 +37,7 @@ class ImportTime(enum.Enum):
     runtime = enum.auto()
     late_runtime = enum.auto()
     typecheck = enum.auto()
+    typecheck_runtime = enum.auto()
 
 
 class _ImportKind(enum.Enum):
@@ -74,7 +75,7 @@ def _in_ns(imported: str, ns: AbstractSet[str] | None) -> bool:
 class GeneratedModule:
     INDENT = " " * 4
 
-    def __init__(self, preamble: str) -> None:
+    def __init__(self, preamble: str, substrate_module: str) -> None:
         self._comment_preamble = preamble
         self._indent_level = 0
         self._in_type_checking = False
@@ -84,6 +85,7 @@ class GeneratedModule:
         self._imports: defaultdict[ImportTime, _Imports] = defaultdict(
             _new_imports_map
         )
+        self._substrate_module = substrate_module
         self._globals: set[str] = set()
         self._exports: set[str] = set()
         self._imported_names: dict[tuple[str, str, ImportTime], str] = {}
@@ -308,6 +310,11 @@ class GeneratedModule:
         localns: frozenset[str] | None = None,
     ) -> str:
         if directly:
+            if import_time is ImportTime.typecheck_runtime:
+                raise ValueError(
+                    "typecheck/deferred import time does not "
+                    "support direct name imports"
+                )
             return self._do_import_name(
                 module,
                 name,
@@ -471,14 +478,18 @@ class GeneratedModule:
             return ""
 
     def render_imports(self) -> str:
+        tc_runtime = self._imports[ImportTime.typecheck_runtime]
         typecheck_sections = self._render_imports(
             self._imports[ImportTime.typecheck],
             indent="    ",
-        )
+        ) + self._render_imports(tc_runtime, indent="    ")
 
         tc = None
         if any(typecheck_sections):
             tc = self.import_name("typing", "TYPE_CHECKING")
+        defimp = None
+        if self._has_imports(tc_runtime):
+            defimp = self.import_name(self._substrate_module, "DeferredImport")
 
         sections = ["from __future__ import annotations"]
         sections.extend(
@@ -490,6 +501,14 @@ class GeneratedModule:
             sections.append(f"if {tc}:")
             sections.extend(typecheck_sections)
 
+        if defimp is not None:
+            lazy_imports = self._render_deferred_imports(
+                tc_runtime, indent="    ", deferred_import=defimp
+            )
+            if lazy_imports:
+                sections.append("else:")
+                sections.extend(lazy_imports)
+
         return "\n\n".join(filter(None, sections))
 
     def render_late_imports(self) -> str:
@@ -499,6 +518,15 @@ class GeneratedModule:
         )
 
         return "\n\n".join(filter(None, sections))
+
+    def _has_imports(
+        self,
+        imports: _Imports,
+    ) -> bool:
+        return bool(imports) and any(
+            bool(sources) and any(sources.values())
+            for sources in imports.values()
+        )
 
     def _render_imports(
         self,
@@ -572,6 +600,82 @@ class GeneratedModule:
             else:
                 import_line += names_part + noqa_suf
             output.append(import_line)
+
+        result = "\n".join(output)
+        if indent:
+            result = textwrap.indent(result, indent)
+        return result
+
+    def _render_deferred_imports(
+        self,
+        imports: _Imports,
+        *,
+        indent: str = "",
+        deferred_import: str,
+    ) -> list[str]:
+        blocks = []
+        for source in _ImportSource.__members__.values():
+            block = self._render_deferred_imports_source_block(
+                imports[source],
+                indent=indent,
+                deferred_import=deferred_import,
+            )
+            if block:
+                blocks.append(block)
+        return blocks
+
+    def _render_deferred_imports_source_block(
+        self,
+        imports: Mapping[_ImportKind, Mapping[str, set[str]]],
+        *,
+        indent: str = "",
+        deferred_import: str,
+    ) -> str:
+        output: list[str] = []
+        self_imports = imports[_ImportKind.self]
+        mods = sorted(
+            self_imports.items(),
+            key=lambda kv: (len(kv[1]) == 0, kv[0]),
+        )
+
+        for modname, aliases in mods:
+            for maybe_alias in aliases:
+                if modname.startswith("."):
+                    match = re.match(r"^(\.+)(.*)", modname)
+                    assert match
+                    relative = match.group(1)
+                    rest = match.group(2)
+                    pkg, _, name = rest.rpartition(".")
+                    alias = maybe_alias or name
+                    import_line = (
+                        f"{alias} = {deferred_import}("
+                        f'"{relative}{pkg}", attr="{name}", '
+                        f'alias="{alias}", package=__package__)'
+                    )
+                else:
+                    alias = maybe_alias or modname
+                    import_line = (
+                        f"{alias} = {deferred_import}("
+                        f'"{modname}", alias="{alias}", package=__package__)'
+                    )
+                output.append(import_line)
+
+        name_imports = imports[_ImportKind.names]
+        mods = sorted(
+            name_imports.items(),
+            key=lambda kv: (len(kv[1]) == 0, kv[0]),
+        )
+
+        for modname, names in mods:
+            for imp_expr in names:
+                name, _, alias = imp_expr.partition(" as ")
+                if not alias:
+                    alias = name
+                output.append(
+                    f"{alias} = {deferred_import}("
+                    f'"{modname}", attr="{name}", '
+                    f'alias="{alias}", package=__package__)'
+                )
 
         result = "\n".join(output)
         if indent:
