@@ -118,7 +118,7 @@ class DeferredImport:
 
             >>> # Equivalent to: from .parent import submodule
             >>> submodule = DeferredImport('parent', attr='submodule',
-                                          package=__name__)
+                                           package=__package__)
 
         Note:
             The actual import is deferred until the first attribute access on
