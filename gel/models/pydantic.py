@@ -10,6 +10,7 @@ from pydantic import (
     computed_field,
 )
 
+from gel._internal._deferred_import import DeferredImport
 from gel._internal._edgeql import Cardinality, PointerKind
 from gel._internal._lazyprop import LazyClassProperty
 from gel._internal._reflection import SchemaPath
@@ -107,6 +108,7 @@ __all__ = (
     "DateTimeImpl",
     "DateTimeLike",
     "DefaultValue",
+    "DeferredImport",
     "Direction",
     "EmptyDirection",
     "ExprClosure",

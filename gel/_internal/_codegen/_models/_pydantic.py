@@ -619,9 +619,9 @@ class BaseGeneratedModule:
         self._schema_part = schema_part
         self._is_package = self.mod_is_package(modname, schema_part)
         self._py_files = {
-            ModuleAspect.MAIN: GeneratedModule(COMMENT),
-            ModuleAspect.VARIANTS: GeneratedModule(COMMENT),
-            ModuleAspect.LATE: GeneratedModule(COMMENT),
+            ModuleAspect.MAIN: GeneratedModule(COMMENT, BASE_IMPL),
+            ModuleAspect.VARIANTS: GeneratedModule(COMMENT, BASE_IMPL),
+            ModuleAspect.LATE: GeneratedModule(COMMENT, BASE_IMPL),
         }
         self._current_py_file = self._py_files[ModuleAspect.MAIN]
         self._current_aspect = ModuleAspect.MAIN
@@ -1122,8 +1122,18 @@ class BaseGeneratedModule:
                 else ImportTime.runtime
             )
 
+        if (
+            import_time is ImportTime.typecheck_runtime
+            or import_time is ImportTime.late_runtime
+        ):
+            foreign_import_time = ImportTime.runtime
+        else:
+            foreign_import_time = import_time
+
         if reflection.is_array_type(stype):
-            arr = self.import_name(BASE_IMPL, "Array")
+            arr = self.import_name(
+                BASE_IMPL, "Array", import_time=foreign_import_time
+            )
             elem_type = self.get_type(
                 self._types[stype.array_element_id],
                 import_time=import_time,
@@ -1135,7 +1145,9 @@ class BaseGeneratedModule:
             return f"{arr}[{elem_type}]"
 
         elif reflection.is_tuple_type(stype):
-            tup = self.import_name(BASE_IMPL, "Tuple")
+            tup = self.import_name(
+                BASE_IMPL, "Tuple", import_time=foreign_import_time
+            )
             elem_types = [
                 self.get_type(
                     self._types[elem.type_id],
@@ -1150,7 +1162,9 @@ class BaseGeneratedModule:
             return f"{tup}[{', '.join(elem_types)}]"
 
         elif reflection.is_range_type(stype):
-            rang = self.import_name(BASE_IMPL, "Range")
+            rang = self.import_name(
+                BASE_IMPL, "Range", import_time=foreign_import_time
+            )
             elem_type = self.get_type(
                 self._types[stype.range_element_id],
                 import_time=import_time,
@@ -1162,7 +1176,9 @@ class BaseGeneratedModule:
             return f"{rang}[{elem_type}]"
 
         elif reflection.is_multi_range_type(stype):
-            rang = self.import_name(BASE_IMPL, "MultiRange")
+            rang = self.import_name(
+                BASE_IMPL, "MultiRange", import_time=foreign_import_time
+            )
             elem_type = self.get_type(
                 self._types[stype.multirange_element_id],
                 import_time=import_time,
@@ -1176,15 +1192,15 @@ class BaseGeneratedModule:
         elif reflection.is_pseudo_type(stype):
             if stype.name == "anyobject":
                 return self.import_name(
-                    BASE_IMPL, "GelModel", import_time=import_time
+                    BASE_IMPL, "GelModel", import_time=foreign_import_time
                 )
             elif stype.name == "anytuple":
                 return self.import_name(
-                    BASE_IMPL, "AnyTuple", import_time=import_time
+                    BASE_IMPL, "AnyTuple", import_time=foreign_import_time
                 )
             elif stype.name == "anytype":
                 return self.import_name(
-                    BASE_IMPL, "GelType", import_time=import_time
+                    BASE_IMPL, "GelType", import_time=foreign_import_time
                 )
             else:
                 raise AssertionError(f"unsupported pseudo-type: {stype.name}")
@@ -1196,14 +1212,20 @@ class BaseGeneratedModule:
             type_name = f"{mod}::{self.get_tuple_name(stype)}"
             if import_directly is None:
                 import_directly = True
+            if import_time is ImportTime.typecheck_runtime:
+                # TODO: deferred import cannot be used for direct imports
+                #       but things break if tuples are NOT imported directly
+                #       from __types__.
+                import_time = ImportTime.late_runtime
             # Named tuples are always imported from __types__,
             # which has only the MAIN aspect.
             aspect = ModuleAspect.MAIN
 
         else:
             type_name = stype.name
-            if import_directly is None:
-                import_directly = False
+
+        if import_directly is None:
+            import_directly = False
 
         type_path = reflection.parse_name(type_name)
 
@@ -1279,6 +1301,8 @@ class BaseGeneratedModule:
                 if self.in_type_checking
                 else ImportTime.runtime
             )
+        elif import_time is ImportTime.typecheck_runtime:
+            import_time = ImportTime.runtime
         type_ = self.import_name("builtins", "type", import_time=import_time)
         return f"{type_}[{tp}]"
 
@@ -1718,6 +1742,11 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                 f"could not find Python base type for scalar type {stype.name}"
             )
         else:
+            if (
+                import_time is ImportTime.typecheck_runtime
+                or import_time is ImportTime.late_runtime
+            ):
+                import_time = ImportTime.runtime
             return sorted(
                 self.import_name(*t, import_time=import_time, localns=localns)
                 for t in base_type
@@ -2853,7 +2882,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
 
                         # Map Python type to canonical Gel scalar type
                         py_coerce_map[ptype_sym] = self.get_type(
-                            st, import_time=ImportTime.late_runtime
+                            st, import_time=ImportTime.typecheck_runtime
                         )
 
                 param_cast_map[param_idx] = py_coerce_map
@@ -4239,7 +4268,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                 # The type class (i.e another qb expression)
                 pt_str = self.get_type_type(
                     item,
-                    import_time=ImportTime.late_runtime,
+                    import_time=ImportTime.typecheck_runtime,
                     typevars=typevars,
                 )
                 union.append(pt_str)
@@ -4247,7 +4276,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                 if reflection.is_primitive_type(item):
                     pt_str = self.get_type(
                         item,
-                        import_time=ImportTime.late_runtime,
+                        import_time=ImportTime.typecheck_runtime,
                         typevars=typevars,
                     )
                     union.append(pt_str)
@@ -4296,7 +4325,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             ret_type,
             function.return_typemod,
             typevars=typevars,
-            import_time=ImportTime.late_runtime,
+            import_time=ImportTime.typecheck_runtime,
         )
 
         fname = ident(function.ident)
@@ -4362,12 +4391,12 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                 # Simple case: no generic type inference needed
                 rtype_rt = self.get_type(
                     ret_type,
-                    import_time=ImportTime.late_runtime,
+                    import_time=ImportTime.typecheck_runtime,
                 )
                 nullable_params = {
                     n: self.get_type(
                         t,
-                        import_time=ImportTime.late_runtime,
+                        import_time=ImportTime.typecheck_runtime,
                         typevars=typevars,
                     )
                     for n, t in nullable_param_types.items()
@@ -4472,7 +4501,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                 nullable_params = {
                     n: self.get_type(
                         t,
-                        import_time=ImportTime.late_runtime,
+                        import_time=ImportTime.typecheck_runtime,
                         typevars=rtypevars,
                     )
                     for n, t in nullable_param_types.items()
