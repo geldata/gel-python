@@ -59,8 +59,10 @@ if TYPE_CHECKING:
         Iterator,
         Mapping,
         Sequence,
+        Set as AbstractSet,
     )
 
+    from gel._internal._reflection._callables import CallableParamKey
     from gel._internal._reflection._types import Indirection
 
 
@@ -1135,7 +1137,7 @@ class BaseGeneratedModule:
                 BASE_IMPL, "Array", import_time=foreign_import_time
             )
             elem_type = self.get_type(
-                self._types[stype.array_element_id],
+                stype.get_element_type(self._types),
                 import_time=import_time,
                 import_directly=import_directly,
                 aspect=aspect,
@@ -1150,14 +1152,14 @@ class BaseGeneratedModule:
             )
             elem_types = [
                 self.get_type(
-                    self._types[elem.type_id],
+                    elem_type,
                     import_time=import_time,
                     import_directly=import_directly,
                     aspect=aspect,
                     localns=localns,
                     typevars=typevars,
                 )
-                for elem in stype.tuple_elements
+                for elem_type in stype.get_element_types(self._types)
             ]
             return f"{tup}[{', '.join(elem_types)}]"
 
@@ -1166,7 +1168,7 @@ class BaseGeneratedModule:
                 BASE_IMPL, "Range", import_time=foreign_import_time
             )
             elem_type = self.get_type(
-                self._types[stype.range_element_id],
+                stype.get_element_type(self._types),
                 import_time=import_time,
                 import_directly=import_directly,
                 aspect=aspect,
@@ -1180,7 +1182,7 @@ class BaseGeneratedModule:
                 BASE_IMPL, "MultiRange", import_time=foreign_import_time
             )
             elem_type = self.get_type(
-                self._types[stype.multirange_element_id],
+                stype.get_element_type(self._types),
                 import_time=import_time,
                 import_directly=import_directly,
                 aspect=aspect,
@@ -1312,21 +1314,13 @@ class BaseGeneratedModule:
     ) -> set[reflection.Type]:
         if stype.generic:
             return {stype}
-        elif reflection.is_array_type(stype):
-            return self.get_type_generics(self._types[stype.array_element_id])
-        elif reflection.is_range_type(stype):
-            return self.get_type_generics(self._types[stype.range_element_id])
-        elif reflection.is_multi_range_type(stype):
-            return self.get_type_generics(
-                self._types[stype.multirange_element_id]
-            )
-        elif reflection.is_tuple_type(stype) or reflection.is_named_tuple_type(
-            stype
-        ):
+        elif isinstance(stype, reflection.HomogeneousCollectionType):
+            return self.get_type_generics(stype.get_element_type(self._types))
+        elif isinstance(stype, reflection.HeterogeneousCollectionType):
             return set(
                 itertools.chain.from_iterable(
-                    self.get_type_generics(self._types[el.type_id])
-                    for el in stype.tuple_elements
+                    self.get_type_generics(el_type)
+                    for el_type in stype.get_element_types(self._types)
                 )
             )
         else:
@@ -1771,7 +1765,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                     )
                 )
         elif reflection.is_array_type(stype):
-            el_type = self._types[stype.array_element_id]
+            el_type = stype.get_element_type(self._types)
             if reflection.is_primitive_type(el_type):
                 el = self._get_pytype_for_primitive_type(
                     el_type,
@@ -1783,7 +1777,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             lst = self.import_name("builtins", "list")
             return f"{lst}[{el}]"
         elif reflection.is_range_type(stype):
-            el_type = self._types[stype.range_element_id]
+            el_type = stype.get_element_type(self._types)
             if reflection.is_primitive_type(el_type):
                 el = self._get_pytype_for_primitive_type(
                     el_type, import_time=import_time, localns=localns
@@ -1793,7 +1787,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             rng = self.import_name("gel", "Range")
             return f"{rng}[{el}]"
         elif reflection.is_multi_range_type(stype):
-            el_type = self._types[stype.multirange_element_id]
+            el_type = stype.get_element_type(self._types)
             if reflection.is_primitive_type(el_type):
                 el = self._get_pytype_for_primitive_type(
                     el_type, import_time=import_time, localns=localns
@@ -1806,8 +1800,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             stype
         ):
             elems = []
-            for elem in stype.tuple_elements:
-                el_type = self._types[elem.type_id]
+            for el_type in stype.get_element_types(self._types):
                 if reflection.is_primitive_type(el_type):
                     el = self._get_pytype_for_primitive_type(
                         el_type, import_time=import_time, localns=localns
@@ -2258,7 +2251,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         other = "__args__[0]"
         # Tuple parameters need ExprCompatible casting
         # due to a possible mypy bug.
-        if reflection.is_tuple_type(self._types[op.params[0].type.id]):
+        if reflection.is_tuple_type(op.params[0].get_type(self._types)):
             other = f"{cast_}({expr_compat!r}, {other})"
 
         args = [
@@ -2329,7 +2322,9 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         this = f"__args__[{this_idx}]"
         other = f"__args__[{other_idx}]"
 
-        if reflection.is_tuple_type(self._types[op.params[other_idx].type.id]):
+        if reflection.is_tuple_type(
+            op.params[other_idx].get_type(self._types)
+        ):
             other = f"{cast_}({expr_compat!r}, {other})"
 
         args = [
@@ -2407,7 +2402,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
 
         other = "__args__[0]"  # The other operand from method arguments
         # Tuple parameters need ExprCompatible casting due to type limits
-        if reflection.is_tuple_type(self._types[op.params[0].type.id]):
+        if reflection.is_tuple_type(op.params[0].get_type(self._types)):
             other = f"{cast_}({expr_compat!r}, {other})"
 
         args = [
@@ -2458,7 +2453,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                 )
                 for op in bin_ops
                 if op.swapped_infix_ident is not None
-                and op.params[1].type.id == stype.id
+                and op.params[1].get_type(self._types) == stype
             ]
 
             self._write_infix_operators(
@@ -2495,18 +2490,21 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             # Build exclusion map to prevent type conflicts between normal and
             # swapped operators. If A + B is explicitly defined, then
             # B.__radd__ should not accept type A to avoid ambiguous dispatch.
-            explicit = frozenset(op.params[0].type.id for op in bin_ops)
+            explicit = frozenset(
+                op.params[0].get_type(self._types) for op in bin_ops
+            )
             excluded_param_types: dict[
                 reflection.Operator,
                 dict[reflection.CallableParamKey, frozenset[reflection.Type]],
             ] = {
                 op: {
                     0: frozenset(
-                        self._types[other_op.params[0].type.id]
+                        other_op.params[0].get_type(self._types)
                         for other_op in self._operators.binary_ops_by_name.get(
                             op.name, frozenset()
                         )
-                        if other_op.params[0].type.id not in explicit
+                        if other_op.params[0].get_type(self._types)
+                        not in explicit
                     ),
                 }
                 for op in swapped_ops
@@ -2648,8 +2646,9 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         partitions = self._partition_potentially_overlapping_overloads(
             overloads
         )
+        num_generated_total = 0
         for overlapping in partitions.values():
-            self._write_potentially_overlapping_overloads(
+            generated = self._write_potentially_overlapping_overloads(
                 overlapping,
                 style=style,
                 nominal_overloads_total=len(overloads),
@@ -2658,12 +2657,13 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                 node_ctor=node_ctor,
                 excluded_param_types=excluded_param_types,
             )
-        if len(overloads) > 1:
+            num_generated_total += len(generated)
+
+        if num_generated_total > 1:
             # Generate dispatcher that delegates to appropriate overload
             self._write_function_overload_dispatcher(
                 overloads[0],
                 style=style,
-                type_ignore=type_ignore,
             )
 
     def _write_potentially_overlapping_overloads(
@@ -2680,7 +2680,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             dict[reflection.CallableParamKey, frozenset[reflection.Type]],
         ]
         | None = None,
-    ) -> None:
+    ) -> list[_Callable_T]:
         """Generate overloads that may have overlapping parameter types.
 
         Performs type expansion by adding implicit casts and Python type
@@ -2712,11 +2712,11 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         ] = defaultdict(set)
         for overload in overloads:
             for param in overload.params:
-                param_type = self._types[param.type.id]
+                param_type = param.get_type(self._types)
                 # Unwrap the variadic type (it is reflected as an array of T)
                 if param.kind is reflection.CallableParamKind.Variadic:
                     assert reflection.is_array_type(param_type)
-                    param_type = self._types[param_type.element_type_id]
+                    param_type = param_type.get_element_type(self._types)
                 param_type_usages[param.key].add(param_type)
 
         annotated_overloads: dict[
@@ -2730,13 +2730,114 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             annotated_overloads[overload] = {}
             for param in param_getter(overload):
                 param_overload_map[param.key].add(overload)
-                param_type = self._types[param.type.id]
+                param_type = param.get_type(self._types)
                 # Unwrap the variadic type (it is reflected as an array of T)
                 if param.kind is reflection.CallableParamKind.Variadic:
                     assert reflection.is_array_type(param_type)
-                    param_type = self._types[param_type.element_type_id]
+                    param_type = param_type.get_element_type(self._types)
                 # Start with the base parameter type
                 annotated_overloads[overload][param.key] = [param_type]
+
+        overloads_specialiizations: dict[_Callable_T, list[_Callable_T]] = {}
+        num_specializations = 0
+        base_scalars = _qbmodel.get_base_scalars_backed_by_py_type()
+        overlapping_py_types = {
+            t: i for i, t in enumerate(_qbmodel.get_overlapping_py_types())
+        }
+        num_overlapping_py_types = len(overlapping_py_types)
+
+        def specialization_sort_key(t: reflection.Type) -> int:
+            return overlapping_py_types.get(
+                base_scalars[t.name],
+                num_overlapping_py_types,
+            )
+
+        for overload in overloads:
+            generics = overload.generics(self._types)
+            if (gen_return := generics.get("__return__")) is not None:
+                overload_specializations = []
+                gen_type_map: dict[reflection.Type, list[reflection.Type]] = {}
+                in_params: defaultdict[
+                    reflection.Type,
+                    list[tuple[CallableParamKey, AbstractSet[Indirection]]],
+                ] = defaultdict(list)
+                for param_key, param_generics in generics.items():
+                    if param_key != "__return__":
+                        for type_, paths in param_generics.items():
+                            in_params[type_].append((param_key, paths))
+
+                for gen_t in gen_return:
+                    if gen_t not in in_params:
+                        continue
+
+                    if isinstance(gen_t, reflection.ScalarType):
+                        descendants = gen_t.descendants(self._types)
+                        gen_type_map[gen_t] = sorted(
+                            (
+                                descendant
+                                for descendant in descendants
+                                if descendant.name in base_scalars
+                            ),
+                            key=specialization_sort_key,
+                        )
+                    elif gen_t.name == "anytype":
+                        gen_type_map[gen_t] = sorted(
+                            (
+                                self._types_by_name[tn]
+                                for tn in base_scalars
+                                if tn in self._types_by_name
+                            ),
+                            key=specialization_sort_key,
+                        )
+
+                for gen_t, specializations in gen_type_map.items():
+                    if not specializations:
+                        continue
+
+                    for specialization in specializations:
+                        param_specializations = {
+                            param_key: dict.fromkeys(
+                                paths,
+                                (gen_t, specialization),
+                            )
+                            for param_key, paths in (
+                                ("__return__", gen_return[gen_t]),
+                                *in_params[gen_t],
+                            )
+                        }
+
+                        specialized = overload.specialize(
+                            param_specializations, schema=self._types
+                        )
+                        spec_param_types: reflection.CallableParamTypeMap = {
+                            param.key: [param.get_type(self._types)]
+                            for param in param_getter(specialized)
+                        }
+
+                        if not self._would_cause_overlap(
+                            overload,
+                            spec_param_types,
+                            annotated_overloads,
+                        ):
+                            overload_specializations.append(specialized)
+                            annotated_overloads[specialized] = spec_param_types
+
+                            for param in param_getter(specialized):
+                                param_overload_map[param.key].add(specialized)
+
+                overloads_specialiizations[overload] = overload_specializations
+                num_specializations += len(overload_specializations)
+
+        if num_specializations > 0:
+            nominal_overloads_total += num_specializations
+
+            # Splice generic specializations into the overloads list
+            expanded_overloads: list[_Callable_T] = []
+            for overload in overloads:
+                if overload_specs := overloads_specialiizations[overload]:
+                    expanded_overloads.extend(overload_specs)
+                expanded_overloads.append(overload)
+            overloads = expanded_overloads
 
         # Add implicit casts to each overload where they don't cause conflicts
         for overload in overloads:
@@ -2744,7 +2845,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
 
             for param in param_getter(overload):
                 param_types = overload_param_types[param.key]
-                param_type = self._types[param.type.id]
+                param_type = param.get_type(self._types)
                 # Find overloads that could potentially conflict
                 potentially_overlapping_overloads = {
                     k: v
@@ -2816,6 +2917,8 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             defaultdict[PyTypeName, dict[_Callable_T, reflection.Type]],
         ] = defaultdict(lambda: defaultdict(dict))
 
+        overloads_type_ignores: dict[_Callable_T, list[str]] = {}
+
         # Add Python type coercions in ranking order, avoiding overlaps
         for param_key, param_py_ranks in param_py_overload_map.items():
             potentially_overlapping_py_overloads = {
@@ -2831,18 +2934,41 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                     param_py_types = overload_param_py_types[param_key]
                     param_py_types.append(py_type)
                     # Check if adding this Python type would cause overlap
+                    overload_param_py_types_only = {
+                        k: [
+                            pt
+                            for pt in v
+                            if not isinstance(pt, reflection.Type)
+                            or k != param_key
+                        ]
+                        for k, v in overload_param_py_types.items()
+                    }
                     if self._would_cause_overlap(
                         overload,
-                        overload_param_py_types,
+                        overload_param_py_types_only,
                         potentially_overlapping_py_overloads,
                     ):
                         param_py_types.pop()
                     else:
+                        if py_type in overlapping_py_types and (
+                            overlapping_with := self._would_cause_overlap(
+                                overload,
+                                overload_param_py_types_only,
+                                potentially_overlapping_py_overloads,
+                                consider_py_inheritance=True,
+                            )
+                        ):
+                            overloads_type_ignores[overlapping_with] = [
+                                "overload-overlap",
+                                "unused-ignore",
+                            ]
+
                         # Successfully added - record the mapping
                         param_py_scalar_map[param_key][py_type][overload] = st
 
         # Generate the final overload implementations with expanded types
-        for overload, params in annotated_overloads.items():
+        for overload in overloads:
+            params = annotated_overloads[overload]
             param_cast_map: dict[
                 reflection.CallableParamKey, dict[str, str]
             ] = {}
@@ -2888,6 +3014,14 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                 param_cast_map[param_idx] = py_coerce_map
                 param_type_unions[param_idx] = param_type_union
 
+            this_type_ignore: Sequence[str]
+            if overload_type_ignores := overloads_type_ignores.get(overload):
+                this_type_ignore = sorted(
+                    {*overload_type_ignores, *type_ignore}
+                )
+            else:
+                this_type_ignore = type_ignore
+
             # Generate the actual overload implementation
             self._write_function_overload(
                 overload,
@@ -2895,12 +3029,14 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                 param_types=param_type_unions,
                 cast_map=param_cast_map,
                 style=style,
-                type_ignore=type_ignore,
+                type_ignore=this_type_ignore,
                 param_getter=param_getter,
                 node_ctor=node_ctor,
             )
 
             self.write()
+
+        return overloads
 
     def write_object_types(
         self,
@@ -3804,7 +3940,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         score = 0
 
         # Score based on return type
-        return_type = self._types[fn.return_type.id]
+        return_type = fn.get_return_type(self._types)
         # Generic types get a higher score
         if return_type.contained_generics(self._types):
             score += 100
@@ -3815,15 +3951,14 @@ class GeneratedSchemaModule(BaseGeneratedModule):
 
         # Score based on parameter types
         for param in fn.params:
-            param_type = self._types.get(param.type.id)
-            if param_type:
-                # Generic types get a higher score
-                if param_type.contained_generics(self._types):
-                    score += 100
+            param_type = param.get_type(self._types)
+            # Generic types get a higher score
+            if param_type.contained_generics(self._types):
+                score += 100
 
-                # Score based on inheritance depth
-                if isinstance(param_type, reflection.InheritingType):
-                    score += len(param_type.ancestors)
+            # Score based on inheritance depth
+            if isinstance(param_type, reflection.InheritingType):
+                score += len(param_type.ancestors)
 
         return score
 
@@ -3905,21 +4040,25 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         overload: _Callable_T,
         overload_param_types: reflection.CallableParamTypeMap,
         other_overloads: dict[_Callable_T, reflection.CallableParamTypeMap],
-    ) -> bool:
+        *,
+        consider_py_inheritance: bool = False,
+    ) -> _Callable_T | None:
         """Check if adding a type to a parameter union in a callable form
-        would cause an overload overlap.
+        would cause an overload overlap and if so, return the first other
+        overload this overload would overlap with.
         """
         schema = self._types
-        return bool(other_overloads) and any(
-            overload != other_overload
-            and overload.overlaps(
+        for other_overload, other_param_types in other_overloads.items():
+            if overload != other_overload and overload.overlaps(
                 other_overload,
                 param_types=other_param_types,
                 other_param_types=overload_param_types,
                 schema=schema,
-            )
-            for other_overload, other_param_types in other_overloads.items()
-        )
+                consider_py_inheritance=consider_py_inheritance,
+            ):
+                return other_overload
+
+        return None
 
     def _partition_function_params(
         self,
@@ -4252,7 +4391,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             else:
                 param_type = None
             if param_type is None:
-                param_type = [self._types[param.type.id]]
+                param_type = [param.get_type(self._types)]
 
             if param.typemod is TypeModifier.Optional:
                 nullable_param_types[param.name] = param_type[0]
@@ -4320,7 +4459,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             params.append("*")
         params.extend(kwargs)
 
-        ret_type = self._types[function.return_type.id]
+        ret_type = function.get_return_type(self._types)
         rtype = self.render_callable_return_type(
             ret_type,
             function.return_typemod,
@@ -4804,19 +4943,19 @@ class GeneratedGlobalModule(BaseGeneratedModule):
         def type_dispatch(t: reflection.Type, ref_t: str) -> None:
             if reflection.is_named_tuple_type(t):
                 graph[ref_t].add(t.id)
-                for elem in t.tuple_elements:
-                    type_dispatch(self._types[elem.type_id], t.id)
+                for elem_type in t.get_element_types(self._types):
+                    type_dispatch(elem_type, t.id)
             elif reflection.is_tuple_type(t):
-                for elem in t.tuple_elements:
-                    type_dispatch(self._types[elem.type_id], ref_t)
+                for elem_type in t.get_element_types(self._types):
+                    type_dispatch(elem_type, ref_t)
             elif reflection.is_array_type(t):
-                type_dispatch(self._types[t.array_element_id], ref_t)
+                type_dispatch(t.get_element_type(self._types), ref_t)
 
         for t in types.values():
             if reflection.is_named_tuple_type(t):
                 graph[t.id] = set()
-                for elem in t.tuple_elements:
-                    type_dispatch(self._types[elem.type_id], t.id)
+                for elem_type in t.get_element_types(self._types):
+                    type_dispatch(elem_type, t.id)
 
         for tid in graphlib.TopologicalSorter(graph).static_order():
             t = self._types[tid]
@@ -4835,12 +4974,16 @@ class GeneratedGlobalModule(BaseGeneratedModule):
         self.write("#")
         classname = self.get_tuple_name(t)
         with self._class_def(f"_{classname}", [namedtuple]):
-            for elem in t.tuple_elements:
-                elem_type = self.get_type(
-                    self._types[elem.type_id],
+            for elem, elem_type in zip(
+                t.tuple_elements,
+                t.get_element_types(self._types),
+                strict=True,
+            ):
+                elem_type_anno = self.get_type(
+                    elem_type,
                     import_time=ImportTime.late_runtime,
                 )
-                self.write(f"{elem.name}: {elem_type}")
+                self.write(f"{elem.name}: {elem_type_anno}")
         self.write_section_break()
         with self._class_def(classname, [f"_{classname}", anytuple]):
             self.write_type_reflection(t)

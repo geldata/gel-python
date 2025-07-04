@@ -104,11 +104,21 @@ def get_tuple_type_id_and_name(
     return type_id, type_name
 
 
+def get_named_tuple_type_id_and_name(
+    elements: dict[str, str],
+) -> tuple[uuid.UUID, str]:
+    body = ", ".join(f"{n}:{t}" for n, t in elements.items())
+    type_id = _get_type_id(f"tuple<{_mangle_name(body)}>", "Tuple")
+    type_name = f"tuple<{body}>"
+    return type_id, type_name
+
+
 __all__ = (
     "Cardinality",
     "PointerKind",
     "get_array_type_id_and_name",
     "get_multirange_type_id_and_name",
+    "get_named_tuple_type_id_and_name",
     "get_range_type_id_and_name",
     "get_tuple_type_id_and_name",
 )

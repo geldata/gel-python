@@ -48,9 +48,8 @@ from ._functions import assert_single
 
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Mapping, Sequence
-
     import enum
+    from collections.abc import Iterable, Mapping, Sequence
 
 
 _T = TypeVar("_T", bound=GelType)
@@ -456,7 +455,7 @@ _py_type_to_scalar_type: dict[tuple[str, str], tuple[str, ...]] = {
         "std::int32",
         "std::int16",
     ),
-    ("builtins", "str"): ("std::str",),
+    ("builtins", "str"): ("std::str", "std::json"),
     ("datetime", "datetime"): ("std::datetime", "std::cal::local_datetime"),
     ("datetime", "timedelta"): ("std::duration",),
     ("datetime", "date"): ("std::cal::local_date",),
@@ -464,6 +463,16 @@ _py_type_to_scalar_type: dict[tuple[str, str], tuple[str, ...]] = {
     ("decimal", "Decimal"): ("std::decimal",),
     ("uuid", "UUID"): ("std::uuid",),
 }
+
+#
+# Builtin types that overlap in Python but not in Gel
+# NB: the order specifies the order of overloads from
+#     more specific to less specific.
+#
+_overlapping_py_types = (
+    ("builtins", "bool"),
+    ("builtins", "int"),
+)
 
 _generic_scalar_type_to_py_type: dict[str, list[tuple[str, str] | str]] = {
     "std::anyfloat": [("builtins", "float")],
@@ -513,6 +522,14 @@ def get_py_type_for_scalar(
         return tuple(sorted(_get_py_type_for_generic_scalar(typename)))
     else:
         return ()
+
+
+def get_base_scalars_backed_by_py_type() -> Mapping[str, tuple[str, str]]:
+    return _scalar_type_to_py_type
+
+
+def get_overlapping_py_types() -> tuple[tuple[str, str], ...]:
+    return _overlapping_py_types
 
 
 def get_py_type_for_scalar_hierarchy(

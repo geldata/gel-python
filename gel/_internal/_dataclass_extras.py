@@ -165,6 +165,20 @@ def _coerce_to_dataclass(
 
         if (ft := _coerceable(field_type)) is not None:
             value = _coerce_to_dataclass(ft, value, cast_map=cast_map)
+        elif _typing_inspect.is_union_type(field_type):
+            last_error = None
+            for component in typing.get_args(field_type):
+                try:
+                    value = _coerce_to_dataclass(
+                        component, value, cast_map=cast_map
+                    )
+                except (TypeError, ValueError) as e:  # noqa: PERF203
+                    last_error = e
+                else:
+                    break
+            if last_error is not None:
+                raise last_error
+
         elif _typing_inspect.is_generic_alias(field_type):
             origin = typing.get_origin(field_type)
 

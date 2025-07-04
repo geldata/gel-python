@@ -7,7 +7,9 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, NamedTuple, TypeVar
 from typing_extensions import Self, TypeAliasType
 
+import dataclasses
 import functools
+import importlib
 import operator
 import typing
 import uuid
@@ -25,7 +27,7 @@ from gel._internal import _dataclass_extras
 from . import _query
 
 from ._base import sobject, struct, SchemaObject
-from ._types import Indirection, TypeRef, Type
+from ._types import Indirection, TypeRef, Type, Schema
 from ._enums import CallableParamKind, SchemaPart, TypeModifier
 
 
@@ -45,10 +47,16 @@ CallableParamTypeMap = TypeAliasType(
 )
 
 
+@functools.cache
+def _get_py_type(name: PyTypeName) -> type:
+    mod = importlib.import_module(name[0])
+    return getattr(mod, name[1])  # type: ignore [no-any-return]
+
+
 @struct
 class CallableParam:
     name: str
-    type: TypeRef
+    type: TypeRef | Type
     kind: CallableParamKind
     typemod: TypeModifier
     index: int
@@ -65,6 +73,21 @@ class CallableParam:
     @functools.cached_property
     def is_variadic(self) -> bool:
         return self.kind is CallableParamKind.Variadic
+
+    def get_type(self, schema: Schema) -> Type:
+        t = self.type
+        return schema[t.id] if isinstance(t, TypeRef) else t
+
+    def specialize(
+        self,
+        spec: Mapping[Indirection, tuple[Type, Type]],
+        *,
+        schema: Mapping[str, Type],
+    ) -> Self:
+        return dataclasses.replace(
+            self,
+            type=self.get_type(schema).specialize(spec, schema=schema),
+        )
 
 
 CallableGenericPositions = TypeAliasType(
@@ -253,7 +276,7 @@ class CallableSignature(NamedTuple):
 
 @sobject
 class Callable(SchemaObject):
-    return_type: TypeRef
+    return_type: TypeRef | Type
     return_typemod: TypeModifier
     params: list[CallableParam]
 
@@ -309,6 +332,10 @@ class Callable(SchemaObject):
                 kwargs_with_defaults=frozenset(kwargs_with_defaults),
             )
 
+    def get_return_type(self, schema: Schema) -> Type:
+        t = self.return_type
+        return schema[t.id] if isinstance(t, TypeRef) else t
+
     def generics(self, schema: Mapping[str, Type]) -> CallableGenericPositions:
         """Return generic types that appear in multiple positions across
         callable's parameters and return type.  See comment on
@@ -323,12 +350,12 @@ class Callable(SchemaObject):
             Type, dict[CallableParamKey, Indirection]
         ] = defaultdict(dict)
 
-        ret_type = schema[self.return_type.id]
+        ret_type = self.get_return_type(schema)
         for gt, paths in ret_type.contained_generics(schema).items():
             type_positions[gt]["__return__"] = min(paths, key=len)
 
         for param in self.params:
-            param_type = schema[param.type.id]
+            param_type = param.get_type(schema)
             for gt, paths in param_type.contained_generics(schema).items():
                 idx: CallableParamKey
                 if param.kind is CallableParamKind.NamedOnly:
@@ -349,6 +376,32 @@ class Callable(SchemaObject):
         object.__setattr__(self, "_generic_params", generic_params)  # noqa: PLC2801
 
         return generic_params
+
+    def specialize(
+        self,
+        spec: Mapping[
+            CallableParamKey, Mapping[Indirection, tuple[Type, Type]]
+        ],
+        *,
+        schema: Mapping[str, Type],
+    ) -> Self:
+        return dataclasses.replace(
+            self,
+            id=str(uuid.uuid4()),
+            params=[
+                (
+                    param.specialize(param_spec, schema=schema)
+                    if (param_spec := spec.get(param.key))
+                    else param
+                )
+                for param in self.params
+            ],
+            return_type=(
+                self.get_return_type(schema).specialize(rspec, schema=schema)
+                if (rspec := spec.get("__return__"))
+                else self.return_type
+            ),
+        )
 
     def assignable_from(
         self,
@@ -388,13 +441,13 @@ class Callable(SchemaObject):
             param_getter(specific),
             strict=False,
         ):
-            gen_type = schema[gen_param.type.id]
+            gen_type = gen_param.get_type(schema)
             if gen_param_types is not None:
                 gen_types = gen_param_types.get(gen_param.key, [gen_type])
             else:
                 gen_types = [gen_type]
 
-            spec_type = schema[spec_param.type.id]
+            spec_type = spec_param.get_type(schema)
             if spec_param_types is not None:
                 spec_types = spec_param_types.get(spec_param.key, [spec_type])
             else:
@@ -430,8 +483,8 @@ class Callable(SchemaObject):
                     return False
 
         # Check if return types are compatible
-        gen_return = schema[general.return_type.id]
-        spec_return = schema[specific.return_type.id]
+        gen_return = general.get_return_type(schema)
+        spec_return = specific.get_return_type(schema)
 
         if (retgenerics := gen_generics.get("__return__")) is not None:
             ret_generics = {
@@ -458,6 +511,7 @@ class Callable(SchemaObject):
             "params"
         ),
         schema: Mapping[str, Type],
+        consider_py_inheritance: bool = False,
     ) -> bool:
         """Check if this callable overlaps the *other* callable
         in signature (regardless of the return type).
@@ -475,9 +529,9 @@ class Callable(SchemaObject):
             if typemap is not None:
                 types = typemap.get(param.key)
                 if types is None:
-                    types = [schema[param.type.id]]
+                    types = [param.get_type(schema)]
             else:
-                types = [schema[param.type.id]]
+                types = [param.get_type(schema)]
 
             return types
 
@@ -508,20 +562,32 @@ class Callable(SchemaObject):
             self_generics: dict[Indirection, Type] | None,
             other_generics: dict[Indirection, Type] | None,
         ) -> bool:
-            if isinstance(self_type, Type) and isinstance(other_type, Type):
-                return self_type.assignable_from(
-                    other_type,
-                    schema=schema,
-                    generics=self_generics,
-                    generic_bindings=generic_bindings,
-                ) or other_type.assignable_from(
-                    self_type,
-                    schema=schema,
-                    generics=other_generics,
-                    generic_bindings=generic_bindings,
-                )
+            if isinstance(self_type, Type):
+                if isinstance(other_type, Type):
+                    return self_type.assignable_from(
+                        other_type,
+                        schema=schema,
+                        generics=self_generics,
+                        generic_bindings=generic_bindings,
+                    ) or other_type.assignable_from(
+                        self_type,
+                        schema=schema,
+                        generics=other_generics,
+                        generic_bindings=generic_bindings,
+                    )
+                else:
+                    return False
             else:
-                return self_type == other_type
+                if isinstance(other_type, Type):
+                    return False
+                elif consider_py_inheritance:
+                    self_py_type = _get_py_type(self_type)
+                    other_py_type = _get_py_type(other_type)
+                    return issubclass(
+                        self_py_type, other_py_type
+                    ) or issubclass(other_py_type, self_py_type)
+                else:
+                    return self_type == other_type
 
         # Check overlaps on positional parameters
         def params_overlap(
