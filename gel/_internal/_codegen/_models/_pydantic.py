@@ -2718,8 +2718,8 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                 overloads to prevent type conflicts
         """
         if len(overloads) > 1:
-            # Remove redundant overloads and sort by type generality
-            overloads = self._sort_and_minimize_overloads(
+            # Remove redundant overloads
+            overloads = self._minimize_overloads(
                 overloads,
                 param_getter=param_getter,
             )
@@ -2787,29 +2787,29 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             node_ctor: Custom node constructor for query building
             excluded_param_types: Parameter types to exclude from overloads
         """
-        # Track which types are explicitly used to avoid creating overlaps
-        # when adding implicit casts
-        param_type_usages: defaultdict[
-            reflection.CallableParamKey, set[reflection.Type]
-        ] = defaultdict(set)
-        for overload in overloads:
-            for param in overload.params:
-                param_type = param.get_type(self._types)
-                # Unwrap the variadic type (it is reflected as an array of T)
-                if param.kind is reflection.CallableParamKind.Variadic:
-                    assert reflection.is_array_type(param_type)
-                    param_type = param_type.get_element_type(self._types)
-                param_type_usages[param.key].add(param_type)
-
-        annotated_overloads: dict[
+        overload_signatures: dict[
             _Callable_T, reflection.CallableParamTypeMap
         ] = {}
+
+        # Signature union: all possible parameters with sets of overloads
+        # that have them.
         param_overload_map: defaultdict[
             reflection.CallableParamKey, set[_Callable_T]
         ] = defaultdict(set)
-        implicit_casts_map = self._casts.implicit_casts_to
+
+        # Sort overloads by generality from least generic to most generic
+        overloads = sorted(
+            overloads,
+            key=functools.cmp_to_key(
+                functools.partial(
+                    reflection.compare_callable_generality,
+                    schema=self._types,
+                )
+            ),
+        )
+
         for overload in overloads:
-            annotated_overloads[overload] = {}
+            overload_signatures[overload] = {}
             for param in param_getter(overload):
                 param_overload_map[param.key].add(overload)
                 param_type = param.get_type(self._types)
@@ -2818,9 +2818,9 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                     assert reflection.is_array_type(param_type)
                     param_type = param_type.get_element_type(self._types)
                 # Start with the base parameter type
-                annotated_overloads[overload][param.key] = [param_type]
+                overload_signatures[overload][param.key] = [param_type]
 
-        overloads_specialiizations: dict[_Callable_T, list[_Callable_T]] = {}
+        overloads_specializations: dict[_Callable_T, list[_Callable_T]] = {}
         num_specializations = 0
         base_scalars = _qbmodel.get_base_scalars_backed_by_py_type()
         overlapping_py_types = {
@@ -2899,15 +2899,15 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                         if not self._would_cause_overlap(
                             overload,
                             spec_param_types,
-                            annotated_overloads,
+                            overload_signatures,
                         ):
                             overload_specializations.append(specialized)
-                            annotated_overloads[specialized] = spec_param_types
+                            overload_signatures[specialized] = spec_param_types
 
                             for param in param_getter(specialized):
                                 param_overload_map[param.key].add(specialized)
 
-                overloads_specialiizations[overload] = overload_specializations
+                overloads_specializations[overload] = overload_specializations
                 num_specializations += len(overload_specializations)
 
         if num_specializations > 0:
@@ -2916,42 +2916,60 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             # Splice generic specializations into the overloads list
             expanded_overloads: list[_Callable_T] = []
             for overload in overloads:
-                if overload_specs := overloads_specialiizations[overload]:
+                if overload_specs := overloads_specializations[overload]:
                     expanded_overloads.extend(overload_specs)
                 expanded_overloads.append(overload)
             overloads = expanded_overloads
 
-        # Add implicit casts to each overload where they don't cause conflicts
+        # Track which types are explicitly used to avoid creating overlaps
+        # when adding implicit casts
+        param_type_usages: defaultdict[
+            reflection.CallableParamKey, set[reflection.Type]
+        ] = defaultdict(set)
         for overload in overloads:
-            overload_param_types = annotated_overloads[overload]
-
-            for param in param_getter(overload):
-                param_types = overload_param_types[param.key]
+            for param in overload.params:
                 param_type = param.get_type(self._types)
-                # Find overloads that could potentially conflict
-                potentially_overlapping_overloads = {
-                    k: v
-                    for k, v in annotated_overloads.items()
-                    if k in param_overload_map[param.key]
-                }
-                # Try to add each available implicit cast
+                # Unwrap the variadic type (it is reflected as an array of T)
+                if param.kind is reflection.CallableParamKind.Variadic:
+                    assert reflection.is_array_type(param_type)
+                    param_type = param_type.get_element_type(self._types)
+                param_type_usages[param.key].add(param_type)
+
+        # Add implicit casts to each overload where they don't cause conflicts
+        implicit_casts_map = self._casts.implicit_casts_to
+        for param_key, param_overloads in param_overload_map.items():
+            potentially_overlapping_overloads = {
+                k: v
+                for k, v in overload_signatures.items()
+                if k in param_overloads
+            }
+            cast_rankings: defaultdict[
+                reflection.Type, list[tuple[int, _Callable_T]]
+            ] = defaultdict(list)
+            for param_overload in param_overloads:
+                param = param_overload.param_map[param_key]
+                param_type = param.get_type(self._types)
                 if icasts := implicit_casts_map.get(param_type.id):
-                    # Only consider casts not already explicitly used
-                    icast_types = sorted(
-                        {
-                            self._types[icast_id] for icast_id in icasts
-                        }.difference(param_type_usages[param.key]),
-                        key=lambda t: t.name,
-                    )
-                    for icast_type in icast_types:
-                        param_types.append(icast_type)
-                        # Remove the cast if it would cause overlap
-                        if self._would_cause_overlap(
-                            overload,
-                            overload_param_types,
-                            potentially_overlapping_overloads,
-                        ):
-                            param_types.pop()
+                    for icast_type_id, icast_dist in icasts.items():
+                        icast_type = self._types[icast_type_id]
+                        cast_rankings[icast_type].append(
+                            (icast_dist, param_overload)
+                        )
+
+            for icast_type, ranking in cast_rankings.items():
+                ranking.sort(key=operator.itemgetter(0))
+
+                for _, param_overload in ranking:
+                    overload_param_types = overload_signatures[param_overload]
+                    param_types = overload_param_types[param_key]
+                    param_types.append(icast_type)
+                    # Remove the cast if it would cause overlap
+                    if self._would_cause_overlap(
+                        param_overload,
+                        overload_param_types,
+                        potentially_overlapping_overloads,
+                    ):
+                        param_types.pop()
 
         # Build mapping of Python types to overloads with ranking
         # (lower rank == higher priority for overload).
@@ -2964,7 +2982,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         ] = defaultdict(lambda: defaultdict(list))
 
         # Collect Python type coercions for scalar parameters
-        for overload, params in list(annotated_overloads.items()):
+        for overload, params in overload_signatures.items():
             if excluded_param_types is not None:
                 ov_excluded = excluded_param_types.get(overload, {})
             else:
@@ -3005,14 +3023,14 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         for param_key, param_py_ranks in param_py_overload_map.items():
             potentially_overlapping_py_overloads = {
                 k: v
-                for k, v in annotated_overloads.items()
+                for k, v in overload_signatures.items()
                 if k in param_overload_map[param_key]
             }
             for py_type, ranked_overloads in param_py_ranks.items():
                 # Process overloads in rank order (best matches first)
                 ranked_overloads.sort(key=operator.itemgetter(0))
                 for _, overload, st in ranked_overloads:
-                    overload_param_py_types = annotated_overloads[overload]
+                    overload_param_py_types = overload_signatures[overload]
                     param_py_types = overload_param_py_types[param_key]
                     param_py_types.append(py_type)
                     # Check if adding this Python type would cause overlap
@@ -3050,7 +3068,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
 
         # Generate the final overload implementations with expanded types
         for overload in overloads:
-            params = annotated_overloads[overload]
+            params = overload_signatures[overload]
             param_cast_map: dict[
                 reflection.CallableParamKey, dict[str, reflection.Type]
             ] = {}
@@ -4086,7 +4104,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
 
     def _get_type_generality_score(self, fn: reflection.Callable) -> int:
         """Calculate how generic a function is based on its parameter and
-        return types. Lower score means more specific, higher score means
+        return types. Higher score means more specific, lower score means
         more general.
         """
         score = 0
@@ -4095,7 +4113,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         return_type = fn.get_return_type(self._types)
         # Generic types get a higher score
         if return_type.contained_generics(self._types):
-            score += 100
+            score -= 100
 
         # Score based on inheritance depth
         if isinstance(return_type, reflection.InheritingType):
@@ -4106,7 +4124,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             param_type = param.get_type(self._types)
             # Generic types get a higher score
             if param_type.contained_generics(self._types):
-                score += 100
+                score -= 100
 
             # Score based on inheritance depth
             if isinstance(param_type, reflection.InheritingType):
@@ -4114,13 +4132,13 @@ class GeneratedSchemaModule(BaseGeneratedModule):
 
         return score
 
-    def _sort_and_minimize_overloads(
+    def _minimize_overloads(
         self,
         overloads: Sequence[_Callable_T],
         param_getter: reflection.CallableParamGetter[_Callable_T],
     ) -> Sequence[_Callable_T]:
         """Minimize the number of overloads by removing those that are subsumed
-        by more general ones, and sort them from least generic to most generic.
+        by more general ones.
         """
 
         if len(overloads) <= 1:
@@ -4143,8 +4161,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                 minimized = [ex for ex in minimized if not assignable(fn, ex)]
                 minimized.append(fn)
 
-        # Sort by generality score (less generic first)
-        return sorted(minimized, key=self._get_type_generality_score)
+        return minimized
 
     def _write_function_overload_dispatcher(
         self,
@@ -5002,7 +5019,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             union = {bare_ptr_type}
             assn_casts = self._casts.assignment_casts_to.get(
                 target_type.id,
-                [],
+                {},
             )
             for type_id in assn_casts:
                 assn_type = self._types[type_id]

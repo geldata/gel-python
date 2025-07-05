@@ -9,9 +9,11 @@ from typing import (
     Any,
     Literal,
     TypeGuard,
+    TypeVar,
+    cast,
 )
 from typing_extensions import Self, TypeAliasType
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 
 import abc
 import dataclasses
@@ -187,6 +189,19 @@ class InheritingType(Type):
             result = tuple(descendants)
 
         return result
+
+    @functools.cached_property
+    def ancestors_ids(self) -> frozenset[str]:
+        return frozenset(t.id for t in self.ancestors)
+
+    def get_ancestors(self, schema: Schema) -> tuple[Self, ...]:
+        return tuple(cast("Self", schema[t.id]) for t in self.ancestors)
+
+    def issubclass(self, parent: Self) -> bool:
+        return self == parent or parent.id in self.ancestors_ids
+
+
+_InheritingType_T = TypeVar("_InheritingType_T", bound=InheritingType)
 
 
 @struct
@@ -515,6 +530,66 @@ class NamedTupleType(_TupleType):
             }
         )
         return str(id_), name
+
+
+def compare_type_generality(a: Type, b: Type, *, schema: Schema) -> int:
+    """Return 1 if a is more general than b, -1 if a is more specific
+    than b, and 0 if a and b are considered of equal generality."""
+    if a == b:
+        return 0
+    elif a.assignable_from(b, schema=schema):
+        return 1
+    elif b.assignable_from(a, schema=schema):
+        return -1
+    elif isinstance(a, InheritingType) and isinstance(b, InheritingType):
+        common = get_nearest_common_ancestors([a, b], schema)
+        if common:
+            a_ancestors = [t.id for t in a.ancestors]
+            b_ancestors = [t.id for t in b.ancestors]
+
+            for ancestor in common:
+                a_distance = a_ancestors.index(ancestor.id)
+                b_distance = b_ancestors.index(ancestor.id)
+
+                if a_distance < b_distance:
+                    return 1
+                elif a_distance > b_distance:
+                    return -1
+
+        if "std::anyreal" in {t.name for t in common}:
+            # Special case for floats vs non-floats where we consider
+            # floats to be more general than ints (alas their ancestry
+            # distance in Gel is equal).
+            a_is_float = any(
+                t.name == "std::anyfloat" for t in a.get_ancestors(schema)
+            )
+            b_is_float = any(
+                t.name == "std::anyfloat" for t in b.get_ancestors(schema)
+            )
+            return a_is_float - b_is_float
+
+    return 0
+
+
+def get_nearest_common_ancestors(
+    types: Iterable[_InheritingType_T],
+    schema: Schema,
+) -> list[_InheritingType_T]:
+    # First, find the intersection of parents
+    types = [*types]
+    first = [types[0]]
+    first.extend(types[0].get_ancestors(schema))
+    common = set(first).intersection(
+        *({*c.get_ancestors(schema)} | {c} for c in types[1:])
+    )
+    nearests: list[_InheritingType_T] = []
+    # Then find the common ancestors that don't have any subclasses that
+    # are also nearest common ancestors.
+    for anc in sorted(common, key=first.index):
+        if not any(x.issubclass(anc) for x in nearests):
+            nearests.append(anc)
+
+    return nearests
 
 
 PrimitiveType = (

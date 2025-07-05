@@ -5,17 +5,15 @@
 
 from __future__ import annotations
 from typing import TYPE_CHECKING
-from collections.abc import (
-    MutableMapping,
-)
 from typing_extensions import (
     Self,
     TypeAliasType,
 )
+from collections.abc import MutableMapping
 
 import dataclasses
 import uuid
-from collections import ChainMap, defaultdict
+from collections import ChainMap, defaultdict, deque
 
 from gel._internal import _dataclass_extras
 
@@ -36,27 +34,37 @@ class Cast:
     allow_assignment: bool
 
 
-CastMap = TypeAliasType("CastMap", MutableMapping[str, list[str]])
+CastMap = TypeAliasType("CastMap", MutableMapping[str, dict[str, int]])
 
 
 def _trace_all_casts(
     from_type: str,
     cast_map: CastMap,
-    *,
-    _seen: set[str] | None = None,
-) -> set[str]:
-    if _seen is None:
-        _seen = set()
-    if from_type in _seen:
-        return set()
-    _seen.add(from_type)
-    reachable = set()
+) -> dict[str, int]:
+    """Compute shortest distances to all reachable types using BFS.
 
-    for to_type in cast_map[from_type]:
-        reachable.add(to_type)
-        reachable.update(_trace_all_casts(to_type, cast_map, _seen=_seen))
+    Returns a dictionary mapping type names to their shortest distances.
+    """
+    distances: dict[str, int] = {}
+    queue: deque[tuple[str, int]] = deque([(from_type, 0)])
 
-    return reachable
+    while queue:
+        current_type, distance = queue.popleft()
+
+        # Skip if we've already found a shorter path to this type
+        if current_type in distances:
+            continue
+
+        distances[current_type] = distance
+
+        # Add neighbors to queue with distance + 1
+        for neighbor in cast_map.get(current_type, {}):
+            if neighbor not in distances:
+                queue.append((neighbor, distance + 1))
+
+    # Remove the starting type from results (distance 0 to itself)
+    distances.pop(from_type, None)
+    return distances
 
 
 @struct
@@ -105,12 +113,12 @@ def fetch_casts(
     builtin = schema_part is _enums.SchemaPart.STD
     casts: list[Cast] = db.query(_query.CASTS, builtin=builtin)
 
-    casts_from: CastMap = defaultdict(list)
-    casts_to: CastMap = defaultdict(list)
-    implicit_casts_from: CastMap = defaultdict(list)
-    implicit_casts_to: CastMap = defaultdict(list)
-    assignment_casts_from: CastMap = defaultdict(list)
-    assignment_casts_to: CastMap = defaultdict(list)
+    casts_from: CastMap = defaultdict(dict)
+    casts_to: CastMap = defaultdict(dict)
+    implicit_casts_from: CastMap = defaultdict(dict)
+    implicit_casts_to: CastMap = defaultdict(dict)
+    assignment_casts_from: CastMap = defaultdict(dict)
+    assignment_casts_to: CastMap = defaultdict(dict)
     types: set[str] = set()
 
     for raw_cast in casts:
@@ -119,16 +127,16 @@ def fetch_casts(
         )
         types.add(cast.from_type.id)
         types.add(cast.to_type.id)
-        casts_from[cast.from_type.id].append(cast.to_type.id)
-        casts_to[cast.to_type.id].append(cast.from_type.id)
+        casts_from[cast.from_type.id][cast.to_type.id] = 1
+        casts_to[cast.to_type.id][cast.from_type.id] = 1
 
         if cast.allow_implicit or cast.allow_assignment:
-            assignment_casts_from[cast.from_type.id].append(cast.to_type.id)
-            assignment_casts_to[cast.to_type.id].append(cast.from_type.id)
+            assignment_casts_from[cast.from_type.id][cast.to_type.id] = 1
+            assignment_casts_to[cast.to_type.id][cast.from_type.id] = 1
 
         if cast.allow_implicit:
-            implicit_casts_from[cast.from_type.id].append(cast.to_type.id)
-            implicit_casts_to[cast.to_type.id].append(cast.from_type.id)
+            implicit_casts_from[cast.from_type.id][cast.to_type.id] = 1
+            implicit_casts_to[cast.to_type.id][cast.from_type.id] = 1
 
     all_implicit_casts_from: CastMap = {}
     all_implicit_casts_to: CastMap = {}
@@ -136,17 +144,17 @@ def fetch_casts(
     all_assignment_casts_to: CastMap = {}
 
     for type_ in types:
-        all_implicit_casts_from[type_] = list(
-            _trace_all_casts(type_, implicit_casts_from)
+        all_implicit_casts_from[type_] = _trace_all_casts(
+            type_, implicit_casts_from
         )
-        all_implicit_casts_to[type_] = list(
-            _trace_all_casts(type_, implicit_casts_to)
+        all_implicit_casts_to[type_] = _trace_all_casts(
+            type_, implicit_casts_to
         )
-        all_assignment_casts_from[type_] = list(
-            _trace_all_casts(type_, assignment_casts_from)
+        all_assignment_casts_from[type_] = _trace_all_casts(
+            type_, assignment_casts_from
         )
-        all_assignment_casts_to[type_] = list(
-            _trace_all_casts(type_, assignment_casts_to)
+        all_assignment_casts_to[type_] = _trace_all_casts(
+            type_, assignment_casts_to
         )
 
     return CastMatrix(
