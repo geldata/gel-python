@@ -83,6 +83,10 @@ class ProxyDistinctList(
         else:
             return id(item) in self._wrapped_index
 
+    def __gel_reset_snapshot__(self) -> None:
+        super().__gel_reset_snapshot__()
+        self._wrapped_index = None
+
     def extend(self, values: Iterable[_PT_co | _BMT_co]) -> None:
         # An optimized version of `extend()`
 
@@ -239,6 +243,8 @@ class ProxyDistinctList(
                 self._unhashables.values()
                 if self._unhashables is not None
                 else None,
+                self._mode,
+                self.__gel_overwrite_data__,
             ),
         )
 
@@ -252,6 +258,8 @@ class ProxyDistinctList(
         initial_items: list[_PT_co] | None,
         hashables: set[_PT_co] | None,
         unhashables: list[_PT_co] | None,
+        mode: _dlist.Mode,
+        gel_overwrite_data: bool,  # noqa: FBT001
     ) -> ProxyDistinctList[_PT_co, _BMT_co]:
         cls = cast(
             "type[ProxyDistinctList[_PT_co, _BMT_co]]",
@@ -273,6 +281,9 @@ class ProxyDistinctList(
             lst._unhashables = None
         else:
             lst._unhashables = {id(item): item for item in unhashables}
+
+        lst._mode = mode
+        lst.__gel_overwrite_data__ = gel_overwrite_data
 
         return lst
 
@@ -298,3 +309,4 @@ class ProxyDistinctList(
         def count(self, value: _PT_co | _BMT_co) -> int: ...
         def __add__(self, other: Iterable[_PT_co | _BMT_co]) -> Self: ...
         def __iadd__(self, other: Iterable[_PT_co | _BMT_co]) -> Self: ...
+        def __isub__(self, other: Iterable[_PT_co | _BMT_co]) -> Self: ...

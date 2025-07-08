@@ -2157,47 +2157,530 @@ class TestModelGenerator(tb.ModelTestCase):
 
     @tb.typecheck
     def test_modelgen_save_33(self):
-        # Test updating linked lists - they must not be ever overridden
-        # (the state tracking must not be interrupted)
+        # Test linked lists:
+        # - they must not be ever overridden (the state tracking must not
+        #   be interrupted)
+        # - the correctness of __gel_overwrite_data__ flag on models
+        #   and collections (test for explicit assignments, fetched data,
+        #   new data, default values)
 
+        from gel._internal._dlist import Mode
         from models import default
 
         u = default.User(name="Wat")
         self.assertEqual(u.__gel_get_changed_fields__(), {"name"})
 
+        #########
+
         g = default.GameSession(num=909, public=False)
         self.assertEqual(g.__gel_get_changed_fields__(), {"num", "public"})
         self.assertEqual(g.__pydantic_fields_set__, {"num", "public"})
 
+        #########
+
         players = g.players
+
+        #########
+
         self.assertEqual(g.players, [])
+        self.assertTrue(g.players.__gel_overwrite_data__)
+        self.assertEqual(g.players._mode, Mode.ReadWrite)
+
+        #########
 
         g.players = [u]
         self.assertEqual(g.players, [u])
+        self.assertTrue(g.players.__gel_overwrite_data__)
         self.assertIs(g.players, players)
+        self.assertEqual(g.players._mode, Mode.ReadWrite)
         self.assertEqual(
             g.__gel_get_changed_fields__(), {"num", "public", "players"}
         )
         self.assertEqual(
             g.__pydantic_fields_set__, {"num", "public", "players"}
         )
+
+        self.client.save(g)
+        self.assertFalse(g.players.__gel_overwrite_data__)
+        self.assertEqual(g.__gel_get_changed_fields__(), set())
+        self.assertEqual(g.players._mode, Mode.ReadWrite)
+
+        #########
 
         g.players = []
         self.assertEqual(g.players, [])
         self.assertIs(g.players, players)
-        self.assertEqual(
-            g.__gel_get_changed_fields__(), {"num", "public", "players"}
-        )
+        self.assertTrue(g.players.__gel_overwrite_data__)
+        self.assertEqual(g.players._mode, Mode.ReadWrite)
+        self.assertEqual(g.__gel_get_changed_fields__(), {"players"})
         self.assertEqual(
             g.__pydantic_fields_set__, {"num", "public", "players"}
         )
+
+        #########
 
         with self.assertRaisesRegex(
             TypeError, "cannot assign.*list is expected"
         ):
             g.players = None  # type: ignore [assignment]
 
+        #########
+
+        g = default.GameSession(num=909, public=False, players=[])
+        self.assertEqual(g.players._mode, Mode.ReadWrite)
+        self.assertEqual(g.players, [])
+        self.assertTrue(g.players.__gel_overwrite_data__)
+        self.assertEqual(
+            g.__gel_get_changed_fields__(), {"num", "public", "players"}
+        )
+        self.assertEqual(
+            g.__pydantic_fields_set__, {"num", "public", "players"}
+        )
+
+        #########
+
+        gdb = self.client.get(default.GameSession.limit(1))
+        self.assertEqual(gdb.players._mode, Mode.Write)
+        self.assertEqual(gdb.players.unsafe_len(), 0)
+        self.assertFalse(gdb.players.__gel_overwrite_data__)
+        gdb.players = []
+        self.assertEqual(gdb.players._mode, Mode.ReadWrite)
+        self.assertTrue(gdb.players.__gel_overwrite_data__)
+
+        #########
+
+        gdb = self.client.get(
+            default.GameSession.select(
+                "*",
+                players=lambda g: g.players.select("*").limit(0),
+                # NOTE: `.limit(0)` is meaningful here, don't change it.
+            ).limit(1)
+        )
+        self.assertEqual(gdb.players._mode, Mode.ReadWrite)
+        self.assertEqual(gdb.players, [])
+        self.assertFalse(gdb.players.__gel_overwrite_data__)
+        gdb.players = []
+        self.assertEqual(gdb.players._mode, Mode.ReadWrite)
+        self.assertTrue(gdb.players.__gel_overwrite_data__)
+
+        #########
+
+        g = default.GameSession(id=gdb.id, num=909, public=False, players=[])
+        self.assertEqual(g.players._mode, Mode.ReadWrite)
+        self.assertEqual(g.players, [])
+        self.assertTrue(g.players.__gel_overwrite_data__)
+        self.assertEqual(
+            g.__gel_get_changed_fields__(), {"num", "public", "players"}
+        )
+        self.assertEqual(
+            g.__pydantic_fields_set__, {"num", "public", "players"}
+        )
+
+        #########
+
+        g = default.GameSession(id=gdb.id, num=909, public=False)
+        self.assertEqual(g.players._mode, Mode.Write)
+        self.assertEqual(g.players.unsafe_len(), 0)
+        self.assertFalse(g.players.__gel_overwrite_data__)
+        self.assertEqual(g.__gel_get_changed_fields__(), {"num", "public"})
+        self.assertEqual(
+            g.__pydantic_fields_set__, {"num", "public", "players"}
+        )
+
+        #########
+
+        g = default.GameSession.model_construct(
+            num=909, public=False, players=[]
+        )
+        self.assertEqual(g.players._mode, Mode.ReadWrite)
+        self.assertEqual(g.players, [])
+        self.assertTrue(g.players.__gel_overwrite_data__)
+        self.assertEqual(
+            g.__gel_get_changed_fields__(), {"num", "public", "players"}
+        )
+        self.assertEqual(
+            g.__pydantic_fields_set__, {"num", "public", "players"}
+        )
+
+        #########
+
+        g = default.GameSession.model_construct(
+            id=gdb.id, num=909, public=False, players=[]
+        )
+        self.assertEqual(g.players._mode, Mode.ReadWrite)
+        self.assertEqual(g.players, [])
+        self.assertTrue(g.players.__gel_overwrite_data__)
+        self.assertEqual(
+            g.__gel_get_changed_fields__(), {"num", "public", "players"}
+        )
+        self.assertEqual(
+            g.__pydantic_fields_set__, {"num", "public", "players"}
+        )
+
+        #########
+
+        g = default.GameSession.model_construct(
+            id=gdb.id, num=909, public=False
+        )
+        self.assertEqual(g.players._mode, Mode.Write)
+        self.assertEqual(g.players.unsafe_len(), 0)
+        self.assertFalse(g.players.__gel_overwrite_data__)
+        self.assertEqual(g.__gel_get_changed_fields__(), {"num", "public"})
+        self.assertEqual(g.__pydantic_fields_set__, {"num", "public"})
+        g.players.append(u)
+        self.assertEqual(g.players._mode, Mode.Write)
+        self.assertEqual(g.players.unsafe_len(), 1)
+        self.assertFalse(g.players.__gel_overwrite_data__)
+        self.assertEqual(g.__gel_get_changed_fields__(), {"num", "public"})
+        self.assertEqual(g.__pydantic_fields_set__, {"num", "public"})
+
+        g.players = []
+        self.assertEqual(g.players._mode, Mode.ReadWrite)
+        self.assertTrue(g.players.__gel_overwrite_data__)
+        self.assertEqual(
+            g.__gel_get_changed_fields__(), {"num", "public", "players"}
+        )
+        self.assertEqual(
+            g.__pydantic_fields_set__, {"num", "public", "players"}
+        )
+
+        #########
+
+        g = default.GameSession.model_construct(
+            id=gdb.id, num=909, public=False, players=[u]
+        )
+        self.assertEqual(g.players._mode, Mode.ReadWrite)
+        self.assertEqual(g.players, [u])
+        self.assertTrue(g.players.__gel_overwrite_data__)
+        self.assertEqual(
+            g.__gel_get_changed_fields__(), {"num", "public", "players"}
+        )
+        self.assertEqual(
+            g.__pydantic_fields_set__, {"num", "public", "players"}
+        )
+
     @tb.typecheck
+    def test_modelgen_save_34(self):
+        # new User and GameSession objects with players assignment
+        # Select data, modify it, check consistency
+        from gel._internal._dlist import Mode
+        from models import default
+
+        # Create new users
+        u1 = default.User(name="TestUser1")
+        u2 = default.User(name="TestUser2")
+
+        # Save users first
+        self.client.save(u1)
+        self.client.save(u2)
+
+        # Create new GameSession
+        g = default.GameSession(num=1000, public=True)
+        self.assertEqual(g.players, [])
+        self.assertTrue(g.players.__gel_overwrite_data__)
+        self.assertEqual(g.players._mode, Mode.ReadWrite)
+
+        # Assign players
+        g.players = [u1, u2]
+        self.assertEqual(g.players, [u1, u2])
+        self.assertTrue(g.players.__gel_overwrite_data__)
+        self.assertEqual(g.players._mode, Mode.ReadWrite)
+
+        # Save and verify
+        self.client.save(g)
+        self.assertFalse(g.players.__gel_overwrite_data__)
+        self.assertEqual(g.players._mode, Mode.ReadWrite)
+
+        # Select and verify data
+        g_fetched = self.client.get(
+            default.GameSession.filter(num=1000).select(
+                "*", players=lambda g: g.players.select("*")
+            )
+        )
+        self.assertEqual(len(g_fetched.players), 2)
+        self.assertEqual(
+            {p.name for p in g_fetched.players}, {"TestUser1", "TestUser2"}
+        )
+
+        # Modify by removing one player
+        g_fetched.players = [u1]
+        self.assertTrue(g_fetched.players.__gel_overwrite_data__)
+        self.client.save(g_fetched)
+
+        # Check consistency
+        g_final = self.client.get(
+            default.GameSession.filter(num=1000).select(
+                "*", players=lambda g: g.players.select("*")
+            )
+        )
+        self.assertEqual(len(g_final.players), 1)
+        self.assertEqual(g_final.players[0].name, "TestUser1")
+
+    def test_modelgen_save_35(self):
+        # GameSession with players assignment then clear
+        # Select data, modify it, check consistency
+        from gel._internal._dlist import Mode
+        from models import default
+
+        # Get existing user
+        u = self.client.get(default.User.filter(name="Elsa"))
+
+        # Create GameSession with player
+        g = default.GameSession(num=1001, public=False, players=[u])
+        self.assertEqual(g.players, [u])
+        self.assertTrue(g.players.__gel_overwrite_data__)
+        self.assertEqual(g.players._mode, Mode.ReadWrite)
+
+        # Save
+        self.client.save(g)
+        self.assertFalse(g.players.__gel_overwrite_data__)
+
+        # Select the saved game
+        g_fetched = self.client.get(
+            default.GameSession.filter(num=1001).select(
+                "*", players=lambda g: g.players.select("*")
+            )
+        )
+        self.assertEqual(len(g_fetched.players), 1)
+        self.assertEqual(g_fetched.players[0].name, "Elsa")
+
+        # Clear players
+        g_fetched.players = []
+        self.assertTrue(g_fetched.players.__gel_overwrite_data__)
+        self.client.save(g_fetched)
+
+        # Check consistency
+        g_final = self.client.get(
+            default.GameSession.filter(num=1001).select(
+                "*", players=lambda g: g.players.select("*")
+            )
+        )
+        self.assertEqual(len(g_final.players), 0)
+
+    def test_modelgen_save_36(self):
+        # Fetch a GameSession object, save its id. Make a new GameSession
+        # instance, pass id to it (but not players). Test overriding
+        # `.players` link with a new collection
+        from gel._internal._dlist import Mode
+        from models import default
+
+        # Get existing GameSession with players
+        existing_session = self.client.get(
+            default.GameSession.filter(num=123).select(
+                "*", players=lambda g: g.players.select("*")
+            )
+        )
+        session_id = existing_session.id
+        self.assertEqual(len(existing_session.players), 2)
+        original_player_names = {p.name for p in existing_session.players}
+        self.assertEqual(original_player_names, {"Alice", "Billie"})
+
+        # Create new instance with same id but without players
+        new_session = default.GameSession(
+            id=session_id,
+            num=999,
+            public=True,
+        )
+        # Players should be in write mode since we didn't fetch them
+        self.assertEqual(new_session.players._mode, Mode.Write)
+        self.assertFalse(new_session.players.__gel_overwrite_data__)
+
+        # Get new users to replace players with
+        elsa = self.client.get(default.User.filter(name="Elsa"))
+        zoe = self.client.get(default.User.filter(name="Zoe"))
+
+        # Override players with new collection
+        new_session.players = [elsa, zoe]
+        self.assertEqual(new_session.players._mode, Mode.ReadWrite)
+        self.assertTrue(new_session.players.__gel_overwrite_data__)
+        self.assertEqual(len(new_session.players), 2)
+        self.assertEqual(
+            {p.name for p in new_session.players}, {"Elsa", "Zoe"}
+        )
+
+        # Save the changes
+        self.client.save(new_session)
+
+        # Verify the changes persisted
+        final_session = self.client.get(
+            default.GameSession.filter(id=session_id).select(
+                "*", players=lambda g: g.players.select("*")
+            )
+        )
+        self.assertEqual(final_session.num, 999)
+        self.assertEqual(final_session.public, True)
+        self.assertEqual(len(final_session.players), 2)
+        self.assertEqual(
+            {p.name for p in final_session.players}, {"Elsa", "Zoe"}
+        )
+
+    def test_modelgen_save_37(self):
+        # Fetch a GameSession object, save its id.
+        # Make a new GameSession instance,
+        # pass id to it. Test appending to players.
+        from gel._internal._dlist import Mode
+        from models import default
+
+        # Get existing GameSession with players
+        existing_session = self.client.get(
+            default.GameSession.filter(num=456).select(
+                "*", players=lambda g: g.players.select("*")
+            )
+        )
+        session_id = existing_session.id
+        self.assertEqual(len(existing_session.players), 1)
+        self.assertEqual(existing_session.players[0].name, "Dana")
+
+        # Create new instance with same id
+        new_session = default.GameSession(id=session_id, num=789, public=True)
+        # Players should be in write mode
+        self.assertEqual(new_session.players._mode, Mode.Write)
+        self.assertFalse(new_session.players.__gel_overwrite_data__)
+
+        # Get new users to append
+        elsa = self.client.get(default.User.filter(name="Elsa"))
+        zoe = self.client.get(default.User.filter(name="Zoe"))
+
+        # Append to players (this should use += in EdgeQL)
+        new_session.players.append(elsa)
+        new_session.players.append(zoe)
+        # Still in write mode because we haven't reassigned the collection
+        self.assertEqual(new_session.players._mode, Mode.Write)
+        self.assertFalse(new_session.players.__gel_overwrite_data__)
+
+        # Save the changes
+        self.client.save(new_session)
+
+        # Verify the changes persisted - should have original player p
+        # lus new ones
+        final_session = self.client.get(
+            default.GameSession.filter(id=session_id).select(
+                "*",
+                players=lambda g: g.players.select("*").order_by(name=True),
+            )
+        )
+        self.assertEqual(final_session.num, 789)
+        self.assertEqual(final_session.public, True)
+        self.assertEqual(len(final_session.players), 3)
+        self.assertEqual(
+            [p.name for p in final_session.players], ["Dana", "Elsa", "Zoe"]
+        )
+
+    def test_modelgen_save_38(self):
+        # Fetch a GameSession object, save its id. Make a new GameSession
+        # instance, pass id and players list to it. Test that save()
+        # overrides the data.
+        from gel._internal._dlist import Mode
+        from models import default
+
+        # Get existing GameSession with players
+        existing_session = self.client.get(
+            default.GameSession.filter(num=123).select(
+                "*", players=lambda g: g.players.select("*")
+            )
+        )
+        session_id = existing_session.id
+        self.assertEqual(len(existing_session.players), 2)
+        original_player_names = {p.name for p in existing_session.players}
+        self.assertEqual(original_player_names, {"Alice", "Billie"})
+
+        # Get a different set of users
+        elsa = self.client.get(default.User.filter(name="Elsa"))
+
+        # Create new instance with same id and explicit players list
+        new_session = default.GameSession(
+            id=session_id, num=777, public=False, players=[elsa]
+        )
+        # Players should be in read-write mode because we provided them
+        self.assertEqual(new_session.players._mode, Mode.ReadWrite)
+        self.assertTrue(new_session.players.__gel_overwrite_data__)
+        self.assertEqual(len(new_session.players), 1)
+        self.assertEqual(new_session.players[0].name, "Elsa")
+
+        # Save the changes
+        self.client.save(new_session)
+
+        # Verify the changes persisted - should only have Elsa
+        final_session = self.client.get(
+            default.GameSession.filter(id=session_id).select(
+                "*", players=lambda g: g.players.select("*")
+            )
+        )
+        self.assertEqual(final_session.num, 777)
+        self.assertEqual(final_session.public, False)
+        self.assertEqual(len(final_session.players), 1)
+        self.assertEqual(final_session.players[0].name, "Elsa")
+
+    def test_modelgen_write_only_dlist_errors(self):
+        # Test that reading operations on write-only dlists raise
+        # RuntimeError
+        from gel._internal._dlist import Mode
+        from models import default
+
+        # Create a GameSession with a known ID but without fetching players
+        # This puts the players dlist in write-only mode
+        session_id = self.client.get(
+            default.GameSession.filter(num=123).select()
+        ).id
+
+        # Create new session with ID but no players - this makes
+        # players write-only
+        session = default.GameSession(id=session_id, num=999, public=True)
+        self.assertEqual(session.players._mode, Mode.Write)
+
+        # Test all read methods that should raise RuntimeError
+        read_methods = [
+            ("__len__", lambda: len(session.players), "get the length of"),
+            ("__getitem__", lambda: session.players[0], "index items of"),
+            ("__iter__", lambda: list(session.players), "iterate over"),
+            (
+                "__contains__",
+                lambda: None in session.players,
+                "use `in` operator on",
+            ),
+            ("index", lambda: session.players.index(None), "index items of"),
+            ("count", lambda: session.players.count(None), "count items of"),
+            (
+                "__bool__",
+                lambda: bool(session.players),
+                "get the length of",
+            ),  # __bool__ uses len internally
+        ]
+
+        for method_name, method_call, action_phrase in read_methods:
+            with self.assertRaisesRegex(
+                RuntimeError,
+                rf"Cannot {action_phrase} the collection in write-only mode",
+                msg=f"Method {method_name} should raise RuntimeError",
+            ):
+                method_call()
+
+        # Verify write operations still work
+        user = self.client.get(default.User.filter(name="Elsa"))
+
+        # Test append works
+        session.players.append(user)
+        self.assertEqual(session.players.unsafe_len(), 1)
+
+        # Test extend works
+        session.players.extend([user])
+        self.assertEqual(session.players.unsafe_len(), 2)
+
+        # Test += works
+        session.players += [user]
+        self.assertEqual(session.players.unsafe_len(), 3)
+
+        # Test remove works
+        session.players.remove(user)
+        self.assertEqual(session.players.unsafe_len(), 2)
+
+        # Test -= works
+        session.players -= [user]
+        self.assertEqual(session.players.unsafe_len(), 1)
+
+        # Verify mode stays write-only after modifications
+        self.assertEqual(session.players._mode, Mode.Write)
+
     def test_modelgen_scalars_01(self):
         import json
         import datetime as dt

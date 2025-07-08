@@ -98,11 +98,18 @@ class SingleLinkChange(BaseFieldChange):
 
 
 @_struct
+class MultiLinkReset(BaseFieldChange):
+    pass
+
+
+@_struct
 class MultiLinkAdd(BaseFieldChange):
     added: list[GelModel]
 
     added_props: list[LinkPropertiesValues] | None = None
     props_info: dict[str, GelPointerReflection] | None = None
+
+    replace: bool = False
 
     def __post_init__(self) -> None:
         assert not any(isinstance(o, ProxyModel) for o in self.added)
@@ -155,7 +162,8 @@ FieldChange = TypeAliasType(
     | MultiPropRemove
     | SingleLinkChange
     | MultiLinkAdd
-    | MultiLinkRemove,
+    | MultiLinkRemove
+    | MultiLinkReset,
 )
 
 FieldChangeMap = TypeAliasType("FieldChangeMap", dict[str, FieldChange])
@@ -335,11 +343,11 @@ def iter_graph(objs: Iterable[GelModel]) -> Iterable[GelModel]:
 
             if prop.cardinality.is_multi():
                 if is_proxy_link_list(linked):
-                    for proxy in linked:
+                    for proxy in linked._items:
                         yield from _traverse(unwrap_proxy_no_check(proxy))
                 else:
                     assert is_link_dlist(linked)
-                    for lobj in linked:
+                    for lobj in linked._items:
                         yield from _traverse(lobj)
             else:
                 yield from _traverse(unwrap_proxy(cast("GelModel", linked)))
@@ -370,14 +378,14 @@ def get_linked_new_objects(obj: GelModel) -> Iterable[GelModel]:
 
         if prop.cardinality.is_multi():
             if is_proxy_link_list(linked):
-                for pmod in linked:
+                for pmod in linked._items:
                     unwrapped = unwrap_proxy_no_check(pmod)
                     if unwrapped.id is UNSET_UUID and unwrapped not in visited:
                         visited.track(unwrapped)
                         yield unwrapped
             else:
                 assert is_link_dlist(linked)
-                for mod in linked:
+                for mod in linked._items:
                     if mod.id is UNSET_UUID and mod not in visited:
                         visited.track(mod)
                         yield mod
@@ -427,7 +435,7 @@ def push_change(
         isinstance(change, (MultiLinkAdd, SingleLinkChange))
         and not change.info.cardinality.is_optional()
     ):
-        # Fir links we do care -- we want to populate *requireds* with
+        # For links we do care -- we want to populate *requireds* with
         # only required links to make `insert` queries have as few dependencies
         # as possible.
         requireds[change.name] = change
@@ -590,15 +598,28 @@ def make_plan(objs: Iterable[GelModel]) -> SavePlan:
                 f"`linked` is not dlist, it is {type(linked)}"
             )
 
+            replace = linked.__gel_overwrite_data__
+
             removed = linked.__gel_get_removed__()
             if removed:
-                m_rem = MultiLinkRemove(
-                    name=prop.name,
-                    info=prop,
-                    removed=unwrap_dlist(removed),
-                )
+                # 'replace' is set for new collections only
+                assert not replace
 
-                push_change(requireds, sched, m_rem)
+                # TODO: this should probably be handled in the DistinctList
+                # itself (GelModel and DistinctList are tightly coupled anyway)
+                removed = [
+                    m
+                    for m in unwrap_dlist(removed)
+                    if ll_attr(m, "id") is not UNSET_UUID
+                ]
+                if removed:
+                    m_rem = MultiLinkRemove(
+                        name=prop.name,
+                        info=prop,
+                        removed=removed,
+                    )
+
+                    push_change(requireds, sched, m_rem)
 
             # __gel_get_added__() will return *new* links, but we also
             # have to take care about link property updates on *existing*
@@ -621,7 +642,7 @@ def make_plan(objs: Iterable[GelModel]) -> SavePlan:
                 added_index.track_many(
                     cast("list[ProxyModel[GelModel]]", added)
                 )
-                for el in linked:
+                for el in linked._items:
                     assert isinstance(el, ProxyModel)
                     if el in added_index:
                         continue
@@ -630,9 +651,21 @@ def make_plan(objs: Iterable[GelModel]) -> SavePlan:
                     if lp.__gel_get_changed_fields__():
                         added.append(el)
 
-            # No adds or changes for this link? Continue to the next one.
+            # No adds or changes for this link?
             if not added:
-                continue
+                if replace:
+                    # Need to reset this link to an empty list
+                    push_change(
+                        requireds,
+                        sched,
+                        MultiLinkReset(
+                            name=prop.name,
+                            info=prop,
+                        ),
+                    )
+                else:
+                    # Continue to the next object
+                    continue
 
             added_proxies: Sequence[ProxyModel[GelModel]] = added  # type: ignore [assignment]
 
@@ -645,6 +678,7 @@ def make_plan(objs: Iterable[GelModel]) -> SavePlan:
                     name=prop.name,
                     info=prop,
                     added=unwrap_dlist(added),
+                    replace=replace,
                 )
                 push_change(requireds, sched, mch)
                 continue
@@ -674,6 +708,7 @@ def make_plan(objs: Iterable[GelModel]) -> SavePlan:
                     for link in cast("list[ProxyModel[GelModel]]", added)
                 ],
                 props_info={p.name: p for p in props_info},
+                replace=replace,
             )
 
             push_change(requireds, sched, mch)
@@ -863,14 +898,14 @@ class SaveExecutor:
                 if prop.kind is PointerKind.Link:
                     if prop.cardinality.is_multi():
                         if is_proxy_link_list(linked):
-                            for proxy in linked:
+                            for proxy in linked._items:
                                 ll_attr(
                                     proxy, "__linkprops__"
                                 ).__gel_commit__()
                                 _traverse(unwrap_proxy_no_check(proxy))
                         else:
                             assert is_link_dlist(linked)
-                            for model in linked:
+                            for model in linked._items:
                                 _traverse(model)
                         linked.__gel_commit__()
                     else:
@@ -1072,6 +1107,8 @@ class SaveExecutor:
                 )
 
             elif isinstance(ch, MultiLinkAdd):
+                assign_op = ":=" if (for_insert or ch.replace) else "+="
+
                 if ch.added_props:
                     assert ch.props_info
 
@@ -1108,8 +1145,6 @@ class SaveExecutor:
                         for i, p in enumerate(ch.props_info)
                     )
 
-                    assign_op = ":=" if for_insert else "+="
-
                     shape_parts.append(
                         f"{quote_ident(ch.name)} {assign_op} "
                         f"assert_distinct(("
@@ -1125,14 +1160,20 @@ class SaveExecutor:
                         [self._get_id(o) for o in ch.added],
                     )
 
-                    assign_op = ":=" if for_insert else "+="
-
                     shape_parts.append(
                         f"{quote_ident(ch.name)} {assign_op} "
                         f"assert_distinct("
                         f"<{ch.info.typexpr}>array_unpack({arg})"
                         f")"
                     )
+
+            elif isinstance(ch, MultiLinkReset):
+                assert not for_insert
+
+                shape_parts.append(
+                    f"{quote_ident(ch.name)} := <{ch.info.typexpr}>{{}}"
+                )
+
             else:
                 raise TypeError(f"unknown model change {type(ch).__name__}")
 
@@ -1149,7 +1190,6 @@ class SaveExecutor:
                 query = f"insert {q_type_name}"
         else:
             assert shape
-            assert args_types
 
             arg = add_arg("std::uuid", self._get_id(obj))
             query = f"""\

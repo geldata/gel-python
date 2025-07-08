@@ -32,6 +32,8 @@ cdef dict CARDS_MAP = {
     datatypes.EdgeFieldCardinality.AT_LEAST_ONE: enums.Cardinality.AT_LEAST_ONE,
 }
 
+cdef DLIST_READ_WRITE = _dlist.Mode.ReadWrite
+
 
 @cython.final
 cdef class ObjectCodec(BaseNamedRecordCodec):
@@ -308,7 +310,11 @@ cdef class ObjectCodec(BaseNamedRecordCodec):
                 if dlist_factory is tuple:
                     elem = tuple(elem)
                 elif dlist_factory is not None:
-                    elem = dlist_factory(elem, __wrap_list__=True)
+                    elem = dlist_factory(
+                        elem,
+                        __wrap_list__=True,
+                        __mode__=DLIST_READ_WRITE,
+                    )
                 result_dict[name] = elem
 
         if return_type_proxy is not None:
