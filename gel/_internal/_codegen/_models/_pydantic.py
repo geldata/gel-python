@@ -3591,7 +3591,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             if (
                 objtype.name != "std::FreeObject"
                 and not objtype.name.startswith("schema::")
-                # and not objtype.name.startswith("std::")
+                and not objtype.name.startswith("std::")
             ):
                 render_id_variant = True
 
@@ -4808,10 +4808,6 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             localns=localns,
         )
 
-        if style == "unspec_arg":
-            unspec_t = self.import_name(BASE_IMPL, "UnspecifiedType")
-            unspec = self.import_name(BASE_IMPL, "Unspecified")
-
         if reflection.is_primitive_type(target_type):
             bare_ptr_type = self._get_pytype_for_primitive_type(
                 target_type,
@@ -4901,6 +4897,8 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                     default = None
 
                 if style == "unspec_arg":
+                    unspec_t = self.import_name(BASE_IMPL, "UnspecifiedType")
+                    unspec = self.import_name(BASE_IMPL, "Unspecified")
                     result = f"{type_} | {unspec_t} = {unspec}"
                 elif style == "arg_no_default":
                     result = f"{type_}"
