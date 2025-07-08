@@ -920,7 +920,7 @@ def gen_lock_key():
     return os.getpid() * 1000 + _lock_cnt
 
 
-def _typecheck(func, imports=None):
+def _typecheck(func, imports=None, *, xfail=False):
     wrapped = inspect.unwrap(func)
     is_async = inspect.iscoroutinefunction(wrapped)
 
@@ -1043,13 +1043,15 @@ class TestModel(unittest.TestCase):
 
     if is_async:
 
+        @functools.wraps(func)
         async def runner(run=run):
             await run()
 
-        return runner
+        return unittest.expectedFailure(runner) if xfail else runner
 
     else:
-        return run
+        run = functools.wraps(func)(run)
+        return unittest.expectedFailure(run) if xfail else run
 
 
 def typecheck(arg):
@@ -1059,6 +1061,17 @@ def typecheck(arg):
 
         def decorator(func):
             return _typecheck(func, arg)
+
+        return decorator
+
+
+def typecheck_xfail(arg):
+    if callable(arg):
+        return _typecheck(arg, xfail=True)
+    else:
+
+        def decorator(func):
+            return _typecheck(func, arg, xfail=True)
 
         return decorator
 
