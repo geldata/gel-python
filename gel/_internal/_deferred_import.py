@@ -3,15 +3,13 @@
 # SPDX-FileCopyrightText: Copyright Gel Data Inc. and the contributors.
 
 from __future__ import annotations
-from typing import TYPE_CHECKING, Any, NamedTuple
+from typing import Any, NamedTuple
 
 import importlib
 import inspect
 import sys
+import types
 import weakref
-
-if TYPE_CHECKING:
-    import types
 
 
 def _get_caller_module(stack_offset: int = 2) -> types.ModuleType | None:
@@ -36,18 +34,32 @@ def _get_caller_module(stack_offset: int = 2) -> types.ModuleType | None:
     return None
 
 
-def _possibly_circular_import_error(err: AttributeError) -> bool:
-    """Check if a given AttribueError could have arisen from accessing
-    a partially initialized module."""
-    spec = getattr(err.obj, "__spec__", None)
+def _mod_is_initializing(
+    module: types.ModuleType,
+    submod: str | None = None,
+) -> bool:
+    spec = getattr(module, "__spec__", None)
     if spec is not None:
         if getattr(spec, "_initializing", False):
             return True
-        uninit_submodules = getattr(spec, "_uninitialized_submodules", None)
-        if uninit_submodules and err.name in uninit_submodules:
-            return True
+        if submod is not None:
+            uninit_submodules = getattr(
+                spec, "_uninitialized_submodules", None
+            )
+            if uninit_submodules and submod in uninit_submodules:
+                return True
 
-    return "circular import" in str(err.args[0])
+    return False
+
+
+def _possibly_circular_import_error(err: AttributeError) -> bool:
+    """Check if a given AttribueError could have arisen from accessing
+    a partially initialized module."""
+
+    return (
+        isinstance(mod := err.obj, types.ModuleType)
+        and _mod_is_initializing(mod, err.name)
+    ) or "circular import" in str(err.args[0])
 
 
 class _Import(NamedTuple):
@@ -66,7 +78,13 @@ def _import(what: _Import) -> types.ModuleType:
         else:
             submod = f"{modname}.{attr}"
 
-        module = importlib.import_module(submod, what.package)
+        try:
+            module = importlib.import_module(submod, what.package)
+        except AttributeError as e:
+            if _possibly_circular_import_error(e):
+                raise NameError(e.name) from e
+            else:
+                raise
 
     return module
 
@@ -158,8 +176,12 @@ class DeferredImport:
             # do the real import
             mod = _import(self.__lm_import__)
             self.__lm_module__ = weakref.ref(mod)
-            impmod_ref = self.__lm_importing_module__
-            if impmod_ref is not None and (impmod := impmod_ref()) is not None:
+
+            if (
+                not _mod_is_initializing(mod)
+                and (impmod_ref := self.__lm_importing_module__) is not None
+                and (impmod := impmod_ref()) is not None
+            ):
                 try:
                     setattr(impmod, self.__lm_import__.alias, mod)
                 except (AttributeError, TypeError):

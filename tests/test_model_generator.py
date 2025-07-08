@@ -4311,6 +4311,15 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(c, 1)
 
 
+class TestEmptyModelGenerator(tb.ModelTestCase):
+    DEFAULT_MODULE = "default"
+
+    @tb.typecheck
+    def test_modelgen_empty_schema_1(self):
+        # This is it, we're just testing empty import.
+        from models import default, std  # noqa: F401
+
+
 class TestEmptyAiModelGenerator(tb.ModelTestCase):
     DEFAULT_MODULE = "default"
     SCHEMA = os.path.join(os.path.dirname(__file__), "dbsetup", "empty_ai.gel")
