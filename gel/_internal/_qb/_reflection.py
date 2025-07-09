@@ -10,13 +10,13 @@ import dataclasses
 if TYPE_CHECKING:
     import uuid
     from gel._internal import _edgeql
-    from gel._internal import _reflection
+    from gel._internal._schemapath import SchemaPath
 
 
 @dataclasses.dataclass(frozen=True, kw_only=True)
 class GelPointerReflection:
     name: str
-    type: _reflection.SchemaPath
+    type: SchemaPath
     typexpr: str
     kind: _edgeql.PointerKind
     cardinality: _edgeql.Cardinality
@@ -28,13 +28,13 @@ class GelPointerReflection:
 
 class GelReflectionProto(Protocol):
     id: ClassVar[uuid.UUID]
-    name: ClassVar[_reflection.SchemaPath]
+    name: ClassVar[SchemaPath]
 
 
 class GelSchemaMetadata:
     class __gel_reflection__:  # noqa: N801
         id: ClassVar[uuid.UUID]
-        name: ClassVar[_reflection.SchemaPath]
+        name: ClassVar[SchemaPath]
 
 
 class GelSourceMetadata(GelSchemaMetadata):

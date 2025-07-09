@@ -42,7 +42,7 @@ from ._reflection import GelTypeMetadata
 if TYPE_CHECKING:
     from collections.abc import Iterable
 
-    from gel._internal._reflection import SchemaPath
+    from gel._internal._schemapath import SchemaPath
     from ._abstract import Expr
 
 

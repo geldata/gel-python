@@ -41,7 +41,7 @@ from gel._internal import _qb
 from gel._internal import _typing_parametric
 from gel._internal._lazyprop import LazyClassProperty
 from gel._internal._polyfills._strenum import StrEnum
-from gel._internal._reflection import SchemaPath
+from gel._internal._schemapath import SchemaPath
 
 from ._base import GelType, GelTypeConstraint, GelTypeMeta
 from ._functions import assert_single

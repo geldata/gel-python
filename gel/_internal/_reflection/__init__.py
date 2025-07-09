@@ -12,11 +12,6 @@ from ._enums import (
     TypeModifier,
 )
 
-from ._base import (
-    SchemaPath,
-    parse_name,
-)
-
 from ._casts import (
     CastMatrix,
     fetch_casts,
@@ -111,7 +106,6 @@ __all__ = (
     "PseudoType",
     "ScalarType",
     "SchemaPart",
-    "SchemaPath",
     "ServerVersion",
     "TupleType",
     "Type",
@@ -137,5 +131,4 @@ __all__ = (
     "is_range_type",
     "is_scalar_type",
     "is_tuple_type",
-    "parse_name",
 )
