@@ -44,6 +44,7 @@ from gel._internal import _version as _ver_utils
 from gel._internal._namespace import ident, dunder
 from gel._internal._qbmodel import _abstract as _qbmodel
 from gel._internal._reflection._enums import SchemaPart, TypeModifier
+from gel._internal._schemapath import SchemaPath
 
 from .._generator import C, AbstractCodeGenerator
 from .._module import ImportTime, CodeSection, GeneratedModule
@@ -332,8 +333,8 @@ class SchemaGenerator:
         self._client = client
         self._schema_part = schema_part
         self._basemodule = "models"
-        self._modules: dict[reflection.SchemaPath, IntrospectedModule] = {}
-        self._std_modules: list[reflection.SchemaPath] = []
+        self._modules: dict[SchemaPath, IntrospectedModule] = {}
+        self._std_modules: list[SchemaPath] = []
         self._types: Mapping[str, reflection.Type] = {}
         self._casts: reflection.CastMatrix
         self._operators: reflection.OperatorMatrix
@@ -348,9 +349,9 @@ class SchemaGenerator:
 
     def dry_run_manifest(self) -> set[pathlib.Path]:
         part = self._schema_part
-        std_modules: dict[reflection.SchemaPath, bool] = dict.fromkeys(
+        std_modules: dict[SchemaPath, bool] = dict.fromkeys(
             (
-                reflection.parse_name(mod)
+                SchemaPath.from_schema_name(mod)
                 for mod in reflection.fetch_modules(self._client, part)
             ),
             False,
@@ -379,7 +380,7 @@ class SchemaGenerator:
         written: set[pathlib.Path] = set()
 
         written.update(self._generate_common_types(outdir))
-        modules: dict[reflection.SchemaPath, GeneratedSchemaModule] = {}
+        modules: dict[SchemaPath, GeneratedSchemaModule] = {}
         order = sorted(
             self._modules.items(),
             key=operator.itemgetter(0),
@@ -415,7 +416,7 @@ class SchemaGenerator:
         if self._schema_part is not reflection.SchemaPart.STD:
             all_modules += [m for m in self._std_modules if len(m.parts) == 1]
         module = GeneratedSchemaModule(
-            reflection.SchemaPath(),
+            SchemaPath(),
             all_types=self._types,
             all_casts=self._casts,
             all_operators=self._operators,
@@ -423,7 +424,7 @@ class SchemaGenerator:
             schema_part=self._schema_part,
         )
         module.write_submodules([m for m in all_modules if len(m.parts) == 1])
-        default_module = modules.get(reflection.SchemaPath("default"))
+        default_module = modules.get(SchemaPath("default"))
         if default_module is not None:
             module.reexport_module(default_module)
         written.update(module.write_files(outdir))
@@ -432,7 +433,7 @@ class SchemaGenerator:
 
     def introspect_schema(self) -> Schema:
         for mod in reflection.fetch_modules(self._client, self._schema_part):
-            self._modules[reflection.parse_name(mod)] = {
+            self._modules[SchemaPath.from_schema_name(mod)] = {
                 "scalar_types": {},
                 "object_types": {},
                 "functions": [],
@@ -459,7 +460,7 @@ class SchemaGenerator:
             self._operators = self._operators.chain(std_operators)
             self._functions = these_funcs + self._std_schema.functions
             self._std_modules = [
-                reflection.parse_name(mod)
+                SchemaPath.from_schema_name(mod)
                 for mod in reflection.fetch_modules(self._client, std_part)
             ]
         else:
@@ -467,16 +468,16 @@ class SchemaGenerator:
 
         for t in these_types.values():
             if reflection.is_object_type(t):
-                name = reflection.parse_name(t.name)
+                name = t.schemapath
                 self._modules[name.parent]["object_types"][name.name] = t
             elif reflection.is_scalar_type(t):
-                name = reflection.parse_name(t.name)
+                name = t.schemapath
                 self._modules[name.parent]["scalar_types"][name.name] = t
             elif reflection.is_named_tuple_type(t):
                 self._named_tuples[t.id] = t
 
         for f in these_funcs:
-            name = reflection.parse_name(f.name)
+            name = f.schemapath
             self._modules[name.parent]["functions"].append(f)
 
         return Schema(
@@ -518,30 +519,30 @@ class Import(NamedTuple):
 
 @functools.cache
 def get_modpath(
-    modpath: reflection.SchemaPath,
+    modpath: SchemaPath,
     aspect: ModuleAspect,
-) -> reflection.SchemaPath:
+) -> SchemaPath:
     if aspect is ModuleAspect.MAIN:
         pass
     elif aspect is ModuleAspect.VARIANTS:
-        modpath = reflection.SchemaPath("__variants__") / modpath
+        modpath = SchemaPath("__variants__") / modpath
     elif aspect is ModuleAspect.LATE:
-        modpath = reflection.SchemaPath("__variants__") / "__late__" / modpath
+        modpath = SchemaPath("__variants__") / "__late__" / modpath
 
     return modpath
 
 
 def get_common_types_modpath(
     schema_part: reflection.SchemaPart,
-) -> reflection.SchemaPath:
-    mod = reflection.SchemaPath("__types__")
+) -> SchemaPath:
+    mod = SchemaPath("__types__")
     if schema_part is reflection.SchemaPart.STD:
-        mod = reflection.SchemaPath("std") / mod
+        mod = SchemaPath("std") / mod
     return mod
 
 
 def mod_is_package(
-    mod: reflection.SchemaPath,
+    mod: SchemaPath,
     schema_part: reflection.SchemaPart,
 ) -> bool:
     return not mod.parts or (
@@ -550,7 +551,7 @@ def mod_is_package(
 
 
 def mod_filename(
-    modpath: reflection.SchemaPath,
+    modpath: SchemaPath,
     *,
     as_pkg: bool,
 ) -> pathlib.Path:
@@ -594,10 +595,10 @@ CORE_OBJECTS = frozenset(
 )
 GENERIC_TYPES = frozenset(
     {
-        reflection.SchemaPath("std", "array"),
-        reflection.SchemaPath("std", "tuple"),
-        reflection.SchemaPath("std", "range"),
-        reflection.SchemaPath("std", "multirange"),
+        SchemaPath("std", "array"),
+        SchemaPath("std", "tuple"),
+        SchemaPath("std", "range"),
+        SchemaPath("std", "multirange"),
     }
 )
 
@@ -676,12 +677,12 @@ def _get_object_type_body(
 class BaseGeneratedModule:
     def __init__(
         self,
-        modname: reflection.SchemaPath,
+        modname: SchemaPath,
         *,
         all_types: Mapping[str, reflection.Type],
         all_casts: reflection.CastMatrix,
         all_operators: reflection.OperatorMatrix,
-        modules: Collection[reflection.SchemaPath],
+        modules: Collection[SchemaPath],
         schema_part: reflection.SchemaPart,
     ) -> None:
         super().__init__()
@@ -729,7 +730,7 @@ class BaseGeneratedModule:
 
     def get_mod_schema_part(
         self,
-        mod: reflection.SchemaPath,
+        mod: SchemaPath,
     ) -> reflection.SchemaPart:
         if (
             self._schema_part is reflection.SchemaPart.STD
@@ -741,7 +742,7 @@ class BaseGeneratedModule:
 
     def mod_is_package(
         self,
-        mod: reflection.SchemaPath,
+        mod: SchemaPath,
         schema_part: reflection.SchemaPart,
     ) -> bool:
         return mod_is_package(mod, schema_part) or bool(self._submodules)
@@ -774,14 +775,14 @@ class BaseGeneratedModule:
             self._current_aspect = prev_aspect
 
     @property
-    def canonical_modpath(self) -> reflection.SchemaPath:
+    def canonical_modpath(self) -> SchemaPath:
         return self._modpath
 
     @property
-    def current_modpath(self) -> reflection.SchemaPath:
+    def current_modpath(self) -> SchemaPath:
         return self.modpath(self._current_aspect)
 
-    def modpath(self, aspect: ModuleAspect) -> reflection.SchemaPath:
+    def modpath(self, aspect: ModuleAspect) -> SchemaPath:
         return get_modpath(self._modpath, aspect)
 
     @property
@@ -792,7 +793,7 @@ class BaseGeneratedModule:
     def _open_py_file(
         self,
         path: pathlib.Path,
-        modpath: reflection.SchemaPath,
+        modpath: SchemaPath,
         *,
         as_pkg: bool,
     ) -> Generator[io.TextIOWrapper, None, None]:
@@ -1178,7 +1179,7 @@ class BaseGeneratedModule:
 
     def _resolve_rel_import(
         self,
-        module: reflection.SchemaPath,
+        module: SchemaPath,
         aspect: ModuleAspect,
     ) -> Import | None:
         imp_mod = module
@@ -1328,15 +1329,13 @@ class BaseGeneratedModule:
             mod = "__types__"
             if stype.builtin:
                 mod = f"std::{mod}"
-            type_name = f"{mod}::{self.get_tuple_name(stype)}"
+            type_path = SchemaPath(mod, self.get_tuple_name(stype))
             # Named tuples are always imported from __types__,
             # which has only the MAIN aspect.
             aspect = ModuleAspect.MAIN
 
         else:
-            type_name = stype.name
-
-        type_path = reflection.parse_name(type_name)
+            type_path = stype.schemapath
 
         if (
             self._schema_part is reflection.SchemaPart.STD
@@ -1356,7 +1355,7 @@ class BaseGeneratedModule:
 
         cur_aspect = self.current_aspect
         cache_key = (
-            type_name,
+            type_path.as_schema_name(),
             aspect,
             cur_aspect,
             False,
@@ -1695,7 +1694,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
 
             self.export(export)
 
-    def write_submodules(self, mods: list[reflection.SchemaPath]) -> None:
+    def write_submodules(self, mods: list[SchemaPath]) -> None:
         if not mods:
             return
 
@@ -1757,11 +1756,11 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         graph: dict[str, set[str]] = {}
         for t in types:
             graph[t.id] = set()
-            t_name = reflection.parse_name(t.name)
+            t_name = t.schemapath
 
             for base_ref in t.bases:
                 base = self._types[base_ref.id]
-                base_name = reflection.parse_name(base.name)
+                base_name = base.schemapath
                 if t_name.parent == base_name.parent:
                     graph[t.id].add(base.id)
 
@@ -1924,7 +1923,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         with self.aspect(ModuleAspect.VARIANTS):
             scalars: list[reflection.ScalarType] = []
             for scalar in self._sorted_types(scalar_types.values()):
-                type_name = reflection.parse_name(scalar.name)
+                type_name = scalar.schemapath
                 scalars.append(scalar)
                 self.py_file.add_global(type_name.name)
 
@@ -1944,7 +1943,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
 
     def prepare_namespace(self, mod: IntrospectedModule) -> None:
         with self.aspect(ModuleAspect.VARIANTS):
-            if self.canonical_modpath == reflection.SchemaPath("std"):
+            if self.canonical_modpath == SchemaPath("std"):
                 # Only std "defines" generic types at the moment.
                 self.py_file.update_globals(gt.name for gt in GENERIC_TYPES)
 
@@ -1960,7 +1959,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         self,
         mod: IntrospectedModule,
     ) -> None:
-        if self.canonical_modpath != reflection.SchemaPath("std"):
+        if self.canonical_modpath != SchemaPath("std"):
             # Only std "defines" generic types at the moment.
             return
 
@@ -1986,12 +1985,10 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             self.write(f'_Tt = {typevartup}("_Tt")')
 
             generics = {
-                reflection.SchemaPath("std", "tuple"): f"{tup}[{unpack}[_Tt]]",
-                reflection.SchemaPath("std", "array"): f"{arr}[{t_anytype}]",
-                reflection.SchemaPath("std", "range"): f"{rang}[{t_anypt}]",
-                reflection.SchemaPath(
-                    "std", "multirange"
-                ): f"{mrang}[{t_anypt}]",
+                SchemaPath("std", "tuple"): f"{tup}[{unpack}[_Tt]]",
+                SchemaPath("std", "array"): f"{arr}[{t_anytype}]",
+                SchemaPath("std", "range"): f"{rang}[{t_anypt}]",
+                SchemaPath("std", "multirange"): f"{mrang}[{t_anypt}]",
             }
             for gt, base in generics.items():
                 with self._class_def(gt.name, [base]):
@@ -2026,7 +2023,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         self,
         stype: reflection.ScalarType,
     ) -> None:
-        type_name = reflection.parse_name(stype.name)
+        type_name = stype.schemapath
         tname = type_name.name
         assert stype.enum_values
         anyenum = self.import_name(BASE_IMPL, "AnyEnum")
@@ -2049,7 +2046,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         self,
         stype: reflection.ScalarType,
     ) -> None:
-        type_name = reflection.parse_name(stype.name)
+        type_name = stype.schemapath
         tname = type_name.name
 
         # Find runtime base class for this scalar type, which might
@@ -3171,7 +3168,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         objtypes = []
         for objtype in self._sorted_types(object_types.values()):
             objtypes.append(objtype)
-            type_name = reflection.parse_name(objtype.name)
+            type_name = objtype.schemapath
             if objtype.name not in CORE_OBJECTS:
                 self.py_file.add_global(type_name.name)
             self.py_file.export(type_name.name)
@@ -3197,7 +3194,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
 
         with self.aspect(ModuleAspect.VARIANTS):
             for objtype in objtypes:
-                type_name = reflection.parse_name(objtype.name)
+                type_name = objtype.schemapath
                 self.py_file.add_global(type_name.name)
 
             for objtype in objtypes:
@@ -3865,7 +3862,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         *,
         local: bool | None = None,
     ) -> list[reflection.Pointer]:
-        type_name = reflection.parse_name(objtype.name)
+        type_name = objtype.schemapath
 
         def _filter(ptr: reflection.Pointer) -> bool:
             if not reflection.is_link(ptr):
@@ -3874,7 +3871,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                 return False
 
             target_type = self._types[ptr.target_id]
-            target_type_name = reflection.parse_name(target_type.name)
+            target_type_name = target_type.schemapath
 
             return local is None or local == (
                 target_type_name.parent == type_name.parent
@@ -3909,7 +3906,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                 )
 
         with self.not_type_checking():
-            type_name = reflection.parse_name(objtype.name)
+            type_name = objtype.schemapath
             obj_class = type_name.name
             for pointer in pointers:
                 ptrname = pointer.name
@@ -3942,7 +3939,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         is_forward_decl: bool = False,
         variant: str | None = None,
     ) -> str:
-        type_name = reflection.parse_name(objtype.name)
+        type_name = objtype.schemapath
         name = type_name.name
 
         self_t = self.import_name("typing_extensions", "Self")
@@ -4033,7 +4030,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                     lprop_line = f"{lprop.name}: {pytype} | None = None"
                     lprops.append(lprop_line)
 
-            type_name = reflection.parse_name(objtype.name)
+            type_name = objtype.schemapath
             qualname = f"{type_name.name}.__links__.{pname}.__lprops__"
             self.write(f"__lprops__.__qualname__ = {qualname!r}")
 
@@ -4079,7 +4076,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         self.write(f"# type {objtype.name}")
         self.write("#")
 
-        type_name = reflection.parse_name(objtype.name)
+        type_name = objtype.schemapath
         name = type_name.name
 
         base = self.get_type(
@@ -5071,7 +5068,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             and not prefer_broad_target_type
         ):
             if self.current_aspect is ModuleAspect.VARIANTS:
-                target_name = reflection.parse_name(target_type.name)
+                target_name = target_type.schemapath
                 if target_name.parent != objtype_name.parent:
                     aspect = ModuleAspect.LATE
             ptr_type = f"{objtype_name.name}.__links__.{prop.name}"

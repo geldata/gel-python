@@ -43,7 +43,7 @@ from gel._internal._qbmodel._pydantic._models import GelModel
 from gel._internal._qbmodel._pydantic._pdlist import (
     ProxyDistinctList,
 )
-from gel._internal._reflection import SchemaPath
+from gel._internal._schemapath import SchemaPath
 
 
 @dataclasses.dataclass

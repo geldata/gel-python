@@ -16,10 +16,10 @@ import weakref
 from dataclasses import dataclass, field
 
 from gel._internal import _edgeql
-from gel._internal import _reflection
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Iterator, Mapping
+    from gel._internal._schemapath import SchemaPath
 
 
 @dataclass(kw_only=True, frozen=True)
@@ -78,7 +78,7 @@ class Expr(Node):
     def precedence(self) -> _edgeql.Precedence: ...
 
     @abc.abstractproperty
-    def type(self) -> _reflection.SchemaPath: ...
+    def type(self) -> SchemaPath: ...
 
     @abc.abstractmethod
     def __edgeql_expr__(self, *, ctx: ScopeContext | None) -> str: ...
@@ -89,10 +89,10 @@ class Expr(Node):
 
 @dataclass(kw_only=True, frozen=True)
 class TypedExpr(Expr):
-    type_: _reflection.SchemaPath
+    type_: SchemaPath
 
     @property
-    def type(self) -> _reflection.SchemaPath:
+    def type(self) -> SchemaPath:
         return self.type_
 
 
@@ -453,7 +453,7 @@ class ImplicitIteratorStmt(IteratorExpr, Stmt):
     """Base class for statements that are implicit iterators"""
 
     @property
-    def type(self) -> _reflection.SchemaPath:
+    def type(self) -> SchemaPath:
         return self.iter_expr.type
 
     @property

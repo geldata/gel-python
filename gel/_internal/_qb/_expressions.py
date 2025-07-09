@@ -19,9 +19,8 @@ import weakref
 from dataclasses import dataclass, field
 
 from gel._internal import _edgeql
-from gel._internal import _reflection
 from gel._internal._polyfills import _strenum
-from gel._internal._reflection import SchemaPath
+from gel._internal._schemapath import SchemaPath
 
 from ._abstract import (
     AtomicExpr,
@@ -87,7 +86,7 @@ class Variable(Symbol):
 
 @dataclass(kw_only=True, frozen=True)
 class SchemaSet(IdentLikeExpr):
-    type_: _reflection.SchemaPath
+    type_: SchemaPath
 
     def __edgeql_expr__(self, *, ctx: ScopeContext | None) -> str:
         return "::".join(self.type.parts)
@@ -292,13 +291,11 @@ class CastOp(PrefixOp):
         return f"<{self.type.as_quoted_schema_name()}>{expr}"
 
 
-def empty_set(type_: _reflection.SchemaPath) -> CastOp:
+def empty_set(type_: SchemaPath) -> CastOp:
     return CastOp(expr=SetLiteral(items=(), type_=type_), type_=type_)
 
 
-def empty_set_if_none(
-    val: _T | None, type_: _reflection.SchemaPath
-) -> _T | CastOp:
+def empty_set_if_none(val: _T | None, type_: SchemaPath) -> _T | CastOp:
     return empty_set(type_) if val is None else val
 
 
@@ -483,7 +480,7 @@ class OrderByElem(Expr):
         return (self.expr,)
 
     @property
-    def type(self) -> _reflection.SchemaPath:
+    def type(self) -> SchemaPath:
         return self.expr.type
 
     @property
@@ -729,7 +726,7 @@ class ForStmt(IteratorExpr):
         object.__setattr__(self, "var", var)
 
     @property
-    def type(self) -> _reflection.SchemaPath:
+    def type(self) -> SchemaPath:
         return self.body.type
 
     def subnodes(self) -> Iterable[Node]:
@@ -751,7 +748,7 @@ class Splat(_strenum.StrEnum):
 @dataclass(kw_only=True, frozen=True)
 class ShapeElement(Node):
     name: str | Splat
-    origin: _reflection.SchemaPath
+    origin: SchemaPath
     expr: Expr | None = None
 
     def subnodes(self) -> Iterable[Node]:
@@ -763,7 +760,7 @@ class ShapeElement(Node):
     @classmethod
     def splat(
         cls,
-        source: _reflection.SchemaPath,
+        source: SchemaPath,
         *,
         kind: Splat = Splat.STAR,
     ) -> Self:
@@ -780,7 +777,7 @@ class Shape(Node):
     @classmethod
     def splat(
         cls,
-        source: _reflection.SchemaPath,
+        source: SchemaPath,
         *,
         kind: Splat = Splat.STAR,
     ) -> Self:
@@ -838,7 +835,7 @@ class ShapeOp(IteratorExpr):
         return (self.iter_expr, self.shape)
 
     @property
-    def type(self) -> _reflection.SchemaPath:
+    def type(self) -> SchemaPath:
         return self.iter_expr.type
 
     @property

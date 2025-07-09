@@ -23,9 +23,10 @@ from collections import defaultdict
 
 from gel._internal import _dataclass_extras
 from gel._internal import _edgeql
+from gel._internal._schemapath import SchemaPath
 
 from . import _query
-from ._base import struct, sobject, SchemaObject, SchemaPath
+from ._base import struct, sobject, SchemaObject
 from ._enums import Cardinality, PointerKind, SchemaPart, TypeKind
 
 if TYPE_CHECKING:
