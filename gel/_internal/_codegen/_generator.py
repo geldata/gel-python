@@ -40,6 +40,7 @@ class AbstractCodeGenerator:
         self._default_module = "default"
         self._async = False
         self._no_cache = args.no_cache
+        self._quiet = args.quiet
 
         self._interactive = interactive
         self._stderr: TextIO
@@ -58,9 +59,10 @@ class AbstractCodeGenerator:
                 )
                 self.abort(2)
 
-            self.print_msg(
-                f"Found Gel project: {C.BOLD}{self._project_dir}{C.ENDC}"
-            )
+            if not self._quiet:
+                self.print_msg(
+                    f"Found Gel project: {C.BOLD}{self._project_dir}{C.ENDC}"
+                )
         else:
             self._project_dir = project_dir
 

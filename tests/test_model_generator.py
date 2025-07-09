@@ -22,7 +22,11 @@ import dataclasses
 import datetime as dt
 import json
 import os
+import pathlib
+import shutil
+import subprocess
 import sys
+import tempfile
 import typing
 import unittest
 
@@ -31,6 +35,7 @@ if typing.TYPE_CHECKING:
 
 from gel import MultiRange, Range, errors
 from gel import _testbase as tb
+from gel._internal import _dirdiff
 from gel._internal import _typing_inspect
 from gel._internal._dlist import DistinctList
 from gel._internal._edgeql import Cardinality, PointerKind
@@ -4448,3 +4453,60 @@ class TestModelGeneratorOther(tb.ModelTestCase):
         self.assertEqual(len(res.configure), 1)
         self.assertEqual(res.configure[0].name, "Alice")
         self.assertEqual(res.configure[0].__linkprops__.create, True)
+
+
+class TestModelGeneratorReproducibility(tb.ModelTestCase):
+    SCHEMA = os.path.join(os.path.dirname(__file__), "dbsetup", "orm.gel")
+
+    def test_modelgen_reproducibility(self):
+        conn_env = {}
+        for k, v in self.get_connect_args().items():
+            conn_env[f"EDGEDB_{k.upper()}"] = str(v)
+
+        env = os.environ | conn_env
+
+        hashseeds = [
+            0,
+            42,
+            123456789,
+            4294967295,
+            99,
+        ]
+
+        with tempfile.TemporaryDirectory() as tdn:
+            td = pathlib.Path(tdn)
+            (td / "gel.toml").write_text("")
+            for i, hashseed in enumerate(hashseeds):
+                prev_models = td / "models.prev"
+                if i > 0:
+                    if prev_models.exists():
+                        shutil.rmtree(prev_models)
+                    os.rename(td / "models", prev_models)
+
+                env["PYTHONHASHSEED"] = str(hashseed)
+                subprocess.run(
+                    [
+                        sys.executable,
+                        "-m",
+                        "gel.codegen.cli2",
+                        "--no-cache",
+                        "--quiet",
+                        "models",
+                        "--output=models",
+                    ],
+                    cwd=td,
+                    env=env,
+                    check=True,
+                )
+
+                if i > 0:
+                    diff = _dirdiff.unified_dir_diff(
+                        td / "models.prev",
+                        td / "models",
+                    )
+
+                    if diff:
+                        self.fail(
+                            "Generated model output is nondeterministic:\n\n"
+                            + "\n".join(diff)
+                        )

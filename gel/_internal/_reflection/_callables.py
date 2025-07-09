@@ -72,6 +72,10 @@ class CallableParam:
             return self.index
 
     @functools.cached_property
+    def sort_key(self) -> str:
+        return str(self.key)
+
+    @functools.cached_property
     def is_variadic(self) -> bool:
         return self.kind is CallableParamKind.Variadic
 
