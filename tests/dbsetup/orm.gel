@@ -22,6 +22,9 @@ type GameSession {
     required public: bool {
         default := false;
     };
+    time_limit: int64 {
+        default := 60;
+    };
     # one-to-many
     multi link players: User {
         constraint exclusive;
