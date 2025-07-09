@@ -3409,6 +3409,15 @@ class TestModelGenerator(tb.ModelTestCase):
                     readonly=False,
                     type=SchemaPath("std", "bool"),
                 ),
+                MockPointer(
+                    name="time_limit",
+                    cardinality=Cardinality.AtMostOne,
+                    computed=False,
+                    properties=None,
+                    kind=PointerKind.Property,
+                    readonly=False,
+                    type=SchemaPath("std", "int64"),
+                ),
             ],
         )
 
