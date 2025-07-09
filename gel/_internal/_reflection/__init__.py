@@ -29,6 +29,7 @@ from ._callables import (
     CallableParamKey,
     CallableParamTypeMap,
     CallableSignature,
+    compare_callable_generality,
 )
 
 from ._functions import (
@@ -62,6 +63,7 @@ from ._types import (
     ScalarType,
     TupleType,
     Type,
+    compare_type_generality,
     fetch_types,
     is_array_type,
     is_link,
@@ -115,6 +117,8 @@ __all__ = (
     "Type",
     "TypeKind",
     "TypeModifier",
+    "compare_callable_generality",
+    "compare_type_generality",
     "fetch_branch_state",
     "fetch_casts",
     "fetch_functions",

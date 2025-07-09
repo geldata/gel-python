@@ -3395,7 +3395,7 @@ class TestModelGenerator(tb.ModelTestCase):
             "tuple<a:std::str, b:tuple<c:std::int64, d:std::str>>",
         )
 
-    @tb.typecheck_xfail
+    @tb.typecheck
     def test_modelgen_function_overloads_01(self):
         """Test basic function overloads with different parameter types"""
         from models import default
@@ -3537,7 +3537,7 @@ class TestModelGenerator(tb.ModelTestCase):
         )
         self.assertEqual(result_str_int, "str+int: value 200")
 
-    @tb.typecheck_xfail
+    @tb.typecheck
     def test_modelgen_function_overloads_with_python_values(self):
         """Test that function overloads work with regular Python values"""
         from models import default

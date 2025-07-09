@@ -16,6 +16,7 @@ import uuid
 from collections import defaultdict
 from collections.abc import (
     Collection,
+    Iterator,
     Iterable,
     Mapping,
     MutableMapping,
@@ -27,7 +28,7 @@ from gel._internal import _dataclass_extras
 from . import _query
 
 from ._base import sobject, struct, SchemaObject
-from ._types import Indirection, TypeRef, Type, Schema
+from ._types import Indirection, TypeRef, Type, Schema, compare_type_generality
 from ._enums import CallableParamKind, SchemaPart, TypeModifier
 
 
@@ -273,6 +274,46 @@ class CallableSignature(NamedTuple):
             sig1.kwargs
         ) and combined_required.issubset(sig2.kwargs)
 
+    def iter_param_keys(self) -> Iterator[CallableParamKey]:
+        yield from range(self.num_pos + self.has_variadic)
+        yield from self.kwargs
+
+
+def compare_callable_generality(
+    a: Callable, b: Callable, *, schema: Schema
+) -> int:
+    """Return 1 if a is more general than b, -1 if a is more specific
+    than b, and 0 if a and b are considered of equal generality."""
+    if a == b:
+        return 0
+    elif a.assignable_from(b, schema=schema):
+        return 1
+    elif b.assignable_from(a, schema=schema):
+        return -1
+    else:
+        for a_param in a.params:
+            b_param = b.param_map.get(a_param.key)
+            if b_param is None:
+                continue
+            a_param_type = a_param.get_type(schema)
+            b_param_type = b_param.get_type(schema)
+
+            param_comparison = compare_type_generality(
+                a_param_type, b_param_type, schema=schema
+            )
+
+            if param_comparison != 0:
+                return param_comparison
+
+        # If all compared parameters are equal, the one with fewer parameters
+        # is more general (can accept more call patterns)
+        if len(a.params) < len(b.params):
+            return 1
+        elif len(a.params) > len(b.params):
+            return -1
+
+    return 0
+
 
 @sobject
 class Callable(SchemaObject):
@@ -283,6 +324,10 @@ class Callable(SchemaObject):
     @functools.cached_property
     def ident(self) -> str:
         return self.schemapath.name
+
+    @functools.cached_property
+    def param_map(self) -> Mapping[CallableParamKey, CallableParam]:
+        return {p.key: p for p in self.params}
 
     @functools.cached_property
     def signature(self) -> CallableSignature:
