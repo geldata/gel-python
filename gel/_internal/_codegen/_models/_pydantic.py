@@ -231,7 +231,8 @@ class PydanticModelsGenerator(AbstractCodeGenerator):
 
                 _dirsync.dirsync(outdir, models_root, keep=std_manifest)
 
-        self.print_msg(f"{C.GREEN}{C.BOLD}Done.{C.ENDC}")
+        if not self._quiet:
+            self.print_msg(f"{C.GREEN}{C.BOLD}Done.{C.ENDC}")
 
     def _cache_key(self, suf: str, sv: reflection.ServerVersion) -> str:
         return f"gm-c-{_gel_py_ver.__version__}-s-{sv.major}.{sv.minor}-{suf}"
@@ -557,6 +558,10 @@ def _map_name(
         name = transform(name)
         result.append(f"{mod}.{name}" if mod else name)
     return result
+
+
+def _indirection_key(path: Indirection) -> tuple[str, ...]:
+    return tuple(s if isinstance(s, str) else f"{s[0]}[{s[1]}]" for s in path)
 
 
 BASE_IMPL = "gel.models.pydantic"
@@ -2798,15 +2803,13 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         ] = defaultdict(set)
 
         # Sort overloads by generality from least generic to most generic
-        overloads = sorted(
-            overloads,
-            key=functools.cmp_to_key(
-                functools.partial(
-                    reflection.compare_callable_generality,
-                    schema=self._types,
-                )
-            ),
+        generality_key = functools.cmp_to_key(
+            functools.partial(
+                reflection.compare_callable_generality,
+                schema=self._types,
+            )
         )
+        overloads = sorted(overloads, key=generality_key)
 
         for overload in overloads:
             overload_signatures[overload] = {}
@@ -2957,7 +2960,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                         )
 
             for icast_type, ranking in cast_rankings.items():
-                ranking.sort(key=operator.itemgetter(0))
+                ranking.sort(key=lambda v: (v[0], generality_key(v[1])))
 
                 for _, param_overload in ranking:
                     overload_param_types = overload_signatures[param_overload]
@@ -3028,7 +3031,9 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             }
             for py_type, ranked_overloads in param_py_ranks.items():
                 # Process overloads in rank order (best matches first)
-                ranked_overloads.sort(key=operator.itemgetter(0))
+                ranked_overloads.sort(
+                    key=lambda v: (v[0], generality_key(v[1]))
+                )
                 for _, overload, st in ranked_overloads:
                     overload_param_py_types = overload_signatures[overload]
                     param_py_types = overload_param_py_types[param_key]
@@ -3064,7 +3069,9 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                             ]
 
                         # Successfully added - record the mapping
-                        param_py_scalar_map[param_key][py_type][overload] = st
+                        scalar_map = param_py_scalar_map[param_key][py_type]
+                        if overload not in scalar_map:
+                            scalar_map[overload] = st
 
         # Generate the final overload implementations with expanded types
         for overload in overloads:
@@ -4727,7 +4734,10 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                 )
                 rtypevars = {}
                 for gt in typevars:
-                    sources = generic_params[gt]
+                    sources = sorted(
+                        generic_params[gt],
+                        key=lambda p: (p[0].sort_key, _indirection_key(p[1])),
+                    )
                     gtvar = dunder(gt.name)  # e.g., __anytype__
                     rtypevars[gt] = gtvar
                     self.write(f"{gtvar}: {anytype}")
