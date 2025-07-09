@@ -36,11 +36,11 @@ from contextlib import contextmanager
 
 import gel
 from gel import abstract
-from gel import _version as _gel_py_ver
 from gel._internal import _cache
 from gel._internal import _dataclass_extras
 from gel._internal import _dirsync
 from gel._internal import _reflection as reflection
+from gel._internal import _version as _ver_utils
 from gel._internal._namespace import ident, dunder
 from gel._internal._qbmodel import _abstract as _qbmodel
 from gel._internal._reflection._enums import SchemaPart, TypeModifier
@@ -165,6 +165,12 @@ class Schema:
     functions: list[reflection.Function]
 
 
+@dataclasses.dataclass(kw_only=True, frozen=True)
+class GeneratedState:
+    db: reflection.BranchState
+    client_version: str
+
+
 class PydanticModelsGenerator(AbstractCodeGenerator):
     def run(self) -> None:
         try:
@@ -182,6 +188,7 @@ class PydanticModelsGenerator(AbstractCodeGenerator):
 
         with tmp_models_root, self._client:
             db_state = reflection.fetch_branch_state(self._client)
+            this_client_ver = _ver_utils.get_project_version_key()
             std_schema: Schema | None = None
 
             std_gen = SchemaGenerator(
@@ -194,7 +201,8 @@ class PydanticModelsGenerator(AbstractCodeGenerator):
 
             if (
                 file_state is None
-                or file_state.server_version != db_state.server_version
+                or file_state.db.server_version != db_state.server_version
+                or file_state.client_version != this_client_ver
                 or self._no_cache
             ):
                 std_schema, std_manifest = std_gen.run(outdir)
@@ -210,8 +218,9 @@ class PydanticModelsGenerator(AbstractCodeGenerator):
 
             if (
                 file_state is None
-                or file_state.server_version != db_state.server_version
-                or file_state.top_migration != db_state.top_migration
+                or file_state.db.server_version != db_state.server_version
+                or file_state.db.top_migration != db_state.top_migration
+                or file_state.client_version != this_client_ver
                 or self._no_cache
             ):
                 usr_gen = SchemaGenerator(
@@ -222,7 +231,10 @@ class PydanticModelsGenerator(AbstractCodeGenerator):
                 usr_gen.run(outdir)
                 need_dirsync = True
 
-            self._write_state(db_state, outdir)
+            self._write_state(
+                GeneratedState(db=db_state, client_version=this_client_ver),
+                outdir,
+            )
 
             if need_dirsync:
                 for fn in list(std_manifest):
@@ -234,7 +246,8 @@ class PydanticModelsGenerator(AbstractCodeGenerator):
         self.print_msg(f"{C.GREEN}{C.BOLD}Done.{C.ENDC}")
 
     def _cache_key(self, suf: str, sv: reflection.ServerVersion) -> str:
-        return f"gm-c-{_gel_py_ver.__version__}-s-{sv.major}.{sv.minor}-{suf}"
+        ver_key = _ver_utils.get_project_version_key()
+        return f"gm-c-{ver_key}-s-{sv.major}.{sv.minor}-{suf}"
 
     def _save_std_schema_cache(
         self, schema: Schema, sv: reflection.ServerVersion
@@ -259,7 +272,7 @@ class PydanticModelsGenerator(AbstractCodeGenerator):
         except Exception:
             return None
 
-    def _get_last_state(self) -> reflection.BranchState | None:
+    def _get_last_state(self) -> GeneratedState | None:
         state_json = self._project_dir / "models" / "_state.json"
         try:
             with open(state_json, encoding="utf8") as f:
@@ -268,8 +281,9 @@ class PydanticModelsGenerator(AbstractCodeGenerator):
             return None
 
         try:
-            server_version = state_data["server_version"]
-            top_migration = state_data["top_migration"]
+            server_version = state_data["db"]["server_version"]
+            top_migration = state_data["db"]["top_migration"]
+            client_version = state_data["client_version"]
         except KeyError:
             return None
 
@@ -280,17 +294,23 @@ class PydanticModelsGenerator(AbstractCodeGenerator):
         ):
             return None
 
+        if not isinstance(client_version, str) or not client_version:
+            return None
+
         if not isinstance(top_migration, str):
             return None
 
-        return reflection.BranchState(
-            server_version=reflection.ServerVersion(*server_version),
-            top_migration=top_migration,
+        return GeneratedState(
+            db=reflection.BranchState(
+                server_version=reflection.ServerVersion(*server_version),
+                top_migration=top_migration,
+            ),
+            client_version=client_version,
         )
 
     def _write_state(
         self,
-        state: reflection.BranchState,
+        state: GeneratedState,
         outdir: pathlib.Path,
     ) -> None:
         state_json = outdir / "_state.json"
