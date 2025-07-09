@@ -2611,6 +2611,29 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(len(final_session.players), 1)
         self.assertEqual(final_session.players[0].name, "Elsa")
 
+    def test_modelgen_save_39(self):
+        # Test defaults
+        from models import default
+
+        new_session_with_default_limit = default.GameSession(
+            num=9000,
+        )
+        self.client.save(new_session_with_default_limit)
+        session = self.client.get(
+            default.GameSession.filter(num=9000)
+        )
+        self.assertEqual(session.time_limit, 60)
+
+        new_session_without_limit = default.GameSession(
+            num=9001,
+            time_limit=None,
+        )
+        self.client.save(new_session_without_limit)
+        session = self.client.get(
+            default.GameSession.filter(num=9001)
+        )
+        self.assertEqual(session.time_limit, None)
+
     def test_modelgen_write_only_dlist_errors(self):
         # Test that reading operations on write-only dlists raise
         # RuntimeError
