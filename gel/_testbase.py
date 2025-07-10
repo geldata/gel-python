@@ -997,9 +997,10 @@ if not typing.TYPE_CHECKING:
 class TestModel(ModelTestCase):
     if typing.TYPE_CHECKING:
     {
-        "       client: gel.AsyncIOClient = gel.create_async_client()"
+        "      client: typing.ClassVar[gel.AsyncIOClient] = "
+        "gel.create_async_client()"
         if is_async
-        else "       client: gel.Client = gel.create_client()"
+        else "       client: typing.ClassVar[gel.Client] = gel.create_client()"
     }
 
     {"async " if is_async else ""}def {wrapped.__name__}(self) -> None:

@@ -18,22 +18,35 @@
 
 
 from __future__ import annotations
+from typing import (
+    Any,
+    Generic,
+    overload,
+)
+
 import abc
 import dataclasses
 import typing
+import typing_extensions
 
 from . import datatypes
 from . import describe
 from . import enums
 from . import errors
 from . import options
-from .protocol import protocol  # type: ignore
+from .protocol import protocol  # pyright: ignore [reportAttributeAccessIssue]
 
 __all__ = (
     "QueryWithArgs",
     "QueryCache",
     "QueryOptions",
+    "BaseQueryContext",
     "QueryContext",
+    "QuerySingleContext",
+    "QueryRequiredSingleContext",
+    "QueryJsonContext",
+    "QuerySingleJsonContext",
+    "QueryRequiredSingleJsonContext",
     "Executor",
     "ExecuteContext",
     "AsyncIOExecutor",
@@ -44,58 +57,77 @@ __all__ = (
 )
 
 
-T_ql = typing.TypeVar("T_ql", covariant=True)
-T_get = typing.TypeVar("T_get")
+_T_ql = typing.TypeVar("_T_ql", covariant=True)
+_T_get = typing.TypeVar("_T_get")
 
 
 if typing.TYPE_CHECKING:
-    from gel._internal._qbmodel._pydantic._models import GelModel
 
-    TM_ql = typing.TypeVar("TM_ql", covariant=True, bound=GelModel)
+    class QueryableObject(typing_extensions.Protocol, typing.Generic[_T_ql]):
+        def __edgeql__(self) -> tuple[type[_T_ql], str]: ...
 
-    class InstanceSupportsEdgeQL(typing.Protocol, typing.Generic[T_ql]):
-        def __edgeql__(self) -> tuple[type[T_ql], str]: ...
-
-    class TypeSupportsEdgeQL(typing.Protocol, typing.Generic[T_ql]):
+    class QueryableType(typing_extensions.Protocol, typing.Generic[_T_ql]):
         @classmethod
-        def __edgeql__(cls) -> tuple[type[T_ql], str]: ...
+        def __edgeql__(cls) -> tuple[type[_T_ql], str]: ...
 
-    SupportsEdgeQL = typing.TypeAliasType(
-        "SupportsEdgeQL",
-        InstanceSupportsEdgeQL[T_ql] | type[TypeSupportsEdgeQL[T_ql]],
-        type_params=(T_ql,),
+    Queryable = typing_extensions.TypeAliasType(
+        "Queryable",
+        QueryableObject[_T_ql] | type[QueryableType[_T_ql]],
+        type_params=(_T_ql,),
     )
-
-    AnyEdgeQLQuery = str | SupportsEdgeQL[GelModel]
 
 
 _unset = object()
 
 
 @dataclasses.dataclass(frozen=True)
-class TypeWrapper(typing.Generic[T_ql]):
-    tp: type[T_ql]
+class TypedQuery(typing.Generic[_T_ql]):
+    tp: type[_T_ql]
     query: str
 
-    def __edgeql__(self) -> tuple[type[T_ql], str]:
+    def __edgeql__(self) -> tuple[type[_T_ql], str]:
         return (self.tp, self.query)
 
 
-def with_type(tp: type[T_ql], query: str) -> TypeWrapper[T_ql]:
-    return TypeWrapper(tp, query)
+def with_type(tp: type[_T_ql], query: str) -> TypedQuery[_T_ql]:
+    return TypedQuery(tp, query)
 
 
-class QueryWithArgs(typing.NamedTuple):
-    query: str
-    return_type: typing.Type | None
-    args: typing.Tuple
-    kwargs: typing.Dict[str, typing.Any]
+@dataclasses.dataclass(frozen=True)
+class QueryWithArgs(Generic[_T_ql]):
+    query: str | Queryable[_T_ql]
+    return_type: type[_T_ql] | None
+    args: tuple[Any, ...]
+    kwargs: dict[str, Any]
     input_language: protocol.InputLanguage = protocol.InputLanguage.EDGEQL
 
+    @overload
     @classmethod
-    def from_query(cls, query: AnyEdgeQLQuery, args, kwargs) -> QueryWithArgs:
+    def from_query(
+        cls,
+        query: Queryable[_T_ql],
+        args: Any,
+        kwargs: Any,
+    ) -> QueryWithArgs[_T_ql]: ...
+
+    @overload
+    @classmethod
+    def from_query(
+        cls,
+        query: str,
+        args: Any,
+        kwargs: Any,
+    ) -> QueryWithArgs[Any]: ...
+
+    @classmethod
+    def from_query(
+        cls,
+        query: str | Queryable[_T_ql],
+        args: Any,
+        kwargs: Any,
+    ) -> QueryWithArgs[Any]:
         if type(query) is str or isinstance(query, str):
-            return cls(query, None, args, kwargs)  # type: ignore
+            return cls(query, None, args, kwargs)
 
         try:
             eql = query.__edgeql__
@@ -119,15 +151,16 @@ class QueryOptions(typing.NamedTuple):
     required_one: bool
 
 
-class QueryContext(typing.NamedTuple):
-    query: QueryWithArgs
+@dataclasses.dataclass(kw_only=True, frozen=True)
+class BaseQueryContext(Generic[_T_ql]):
+    query: QueryWithArgs[_T_ql]
     cache: QueryCache
     query_options: QueryOptions
-    retry_options: typing.Optional[options.RetryOptions]
-    state: typing.Optional[options.State]
+    retry_options: options.RetryOptions | None
+    state: options.State | None
     warning_handler: options.WarningHandler
-    annotations: typing.Dict[str, str]
-    transaction_options: typing.Optional[options.TransactionOptions]
+    annotations: dict[str, str]
+    transaction_options: options.TransactionOptions | None
 
     def lower(
         self, *, allow_capabilities: enums.Capability
@@ -150,14 +183,69 @@ class QueryContext(typing.NamedTuple):
         )
 
 
-class ExecuteContext(typing.NamedTuple):
-    query: QueryWithArgs
+@dataclasses.dataclass(kw_only=True, frozen=True)
+class QueryContext(BaseQueryContext[_T_ql]):
+    query_options: QueryOptions = QueryOptions(
+        output_format=protocol.OutputFormat.BINARY,
+        expect_one=False,
+        required_one=False,
+    )
+
+
+@dataclasses.dataclass(kw_only=True, frozen=True)
+class QuerySingleContext(BaseQueryContext[_T_ql]):
+    query_options: QueryOptions = QueryOptions(
+        output_format=protocol.OutputFormat.BINARY,
+        expect_one=True,
+        required_one=False,
+    )
+
+
+@dataclasses.dataclass(kw_only=True, frozen=True)
+class QueryRequiredSingleContext(BaseQueryContext[_T_ql]):
+    query_options: QueryOptions = QueryOptions(
+        output_format=protocol.OutputFormat.BINARY,
+        expect_one=True,
+        required_one=True,
+    )
+
+
+@dataclasses.dataclass(kw_only=True, frozen=True)
+class QueryJsonContext(BaseQueryContext[_T_ql]):
+    query_options: QueryOptions = QueryOptions(
+        output_format=protocol.OutputFormat.JSON,
+        expect_one=False,
+        required_one=False,
+    )
+
+
+@dataclasses.dataclass(kw_only=True, frozen=True)
+class QuerySingleJsonContext(BaseQueryContext[_T_ql]):
+    query_options: QueryOptions = QueryOptions(
+        output_format=protocol.OutputFormat.JSON,
+        expect_one=True,
+        required_one=False,
+    )
+
+
+@dataclasses.dataclass(kw_only=True, frozen=True)
+class QueryRequiredSingleJsonContext(BaseQueryContext[_T_ql]):
+    query_options: QueryOptions = QueryOptions(
+        output_format=protocol.OutputFormat.JSON,
+        expect_one=True,
+        required_one=True,
+    )
+
+
+@dataclasses.dataclass(kw_only=True, frozen=True)
+class ExecuteContext(Generic[_T_ql]):
+    query: QueryWithArgs[_T_ql]
     cache: QueryCache
-    retry_options: typing.Optional[options.RetryOptions]
-    state: typing.Optional[options.State]
+    retry_options: options.RetryOptions | None
+    state: options.State | None
     warning_handler: options.WarningHandler
-    annotations: typing.Dict[str, str]
-    transaction_options: typing.Optional[options.TransactionOptions]
+    annotations: dict[str, str]
+    transaction_options: options.TransactionOptions | None
 
     def lower(
         self, *, allow_capabilities: enums.Capability
@@ -181,7 +269,7 @@ class ExecuteContext(typing.NamedTuple):
 @dataclasses.dataclass
 class DescribeContext:
     query: str
-    state: typing.Optional[options.State]
+    state: options.State | None
     inject_type_names: bool
     input_language: protocol.InputLanguage
     output_format: protocol.OutputFormat
@@ -208,42 +296,10 @@ class DescribeContext:
 
 @dataclasses.dataclass
 class DescribeResult:
-    input_type: typing.Optional[describe.AnyType]
-    output_type: typing.Optional[describe.AnyType]
+    input_type: describe.AnyType | None
+    output_type: describe.AnyType | None
     output_cardinality: enums.Cardinality
     capabilities: enums.Capability
-
-
-_query_opts = QueryOptions(
-    output_format=protocol.OutputFormat.BINARY,
-    expect_one=False,
-    required_one=False,
-)
-_query_single_opts = QueryOptions(
-    output_format=protocol.OutputFormat.BINARY,
-    expect_one=True,
-    required_one=False,
-)
-_query_required_single_opts = QueryOptions(
-    output_format=protocol.OutputFormat.BINARY,
-    expect_one=True,
-    required_one=True,
-)
-_query_json_opts = QueryOptions(
-    output_format=protocol.OutputFormat.JSON,
-    expect_one=False,
-    required_one=False,
-)
-_query_single_json_opts = QueryOptions(
-    output_format=protocol.OutputFormat.JSON,
-    expect_one=True,
-    required_one=False,
-)
-_query_required_single_json_opts = QueryOptions(
-    output_format=protocol.OutputFormat.JSON,
-    expect_one=True,
-    required_one=True,
-)
 
 
 class BaseReadOnlyExecutor(abc.ABC):
@@ -253,7 +309,7 @@ class BaseReadOnlyExecutor(abc.ABC):
     def _get_query_cache(self) -> QueryCache: ...
 
     @abc.abstractmethod
-    def _get_retry_options(self) -> typing.Optional[options.RetryOptions]: ...
+    def _get_retry_options(self) -> options.RetryOptions | None: ...
 
     @abc.abstractmethod
     def _get_state(self) -> options.State: ...
@@ -261,7 +317,7 @@ class BaseReadOnlyExecutor(abc.ABC):
     @abc.abstractmethod
     def _get_warning_handler(self) -> options.WarningHandler: ...
 
-    def _get_annotations(self) -> typing.Dict[str, str]:
+    def _get_annotations(self) -> dict[str, str]:
         return {}
 
 
@@ -270,35 +326,68 @@ class ReadOnlyExecutor(BaseReadOnlyExecutor):
 
     __slots__ = ()
 
+    @overload
+    def _query(self, query_context: QueryContext[_T_ql]) -> list[_T_ql]: ...
+
+    @overload
+    def _query(
+        self, query_context: QuerySingleContext[_T_ql]
+    ) -> _T_ql | None: ...
+
+    @overload
+    def _query(
+        self, query_context: QueryRequiredSingleContext[_T_ql]
+    ) -> _T_ql: ...
+
+    @overload
+    def _query(self, query_context: QueryJsonContext[_T_ql]) -> str: ...
+
+    @overload
+    def _query(self, query_context: QuerySingleJsonContext[_T_ql]) -> str: ...
+
+    @overload
+    def _query(
+        self, query_context: QueryRequiredSingleJsonContext[_T_ql]
+    ) -> str: ...
+
     @abc.abstractmethod
-    def _query(self, query_context: QueryContext) -> typing.Any: ...
+    def _query(
+        self, query_context: BaseQueryContext[_T_ql]
+    ) -> list[_T_ql] | _T_ql | str | None: ...
 
     @abc.abstractmethod
     def _get_active_tx_options(
         self,
-    ) -> typing.Optional[options.TransactionOptions]: ...
-
-    @typing.overload
-    def query(
-        self, query: str, *args: typing.Any, **kwargs: typing.Any
-    ) -> list[typing.Any]: ...
+    ) -> options.TransactionOptions | None: ...
 
     @typing.overload
     def query(
         self,
-        query: SupportsEdgeQL[T_ql],
+        query: Queryable[_T_ql],
         /,
-        **kwargs: typing.Any,
-    ) -> list[T_ql]: ...
+        **kwargs: Any,
+    ) -> list[_T_ql]: ...
+
+    @typing.overload
+    def query(
+        self,
+        query: str,
+        /,
+        *args: Any,
+        **kwargs: Any,
+    ) -> list[Any]: ...
 
     def query(
-        self, query: AnyEdgeQLQuery, *args: typing.Any, **kwargs: typing.Any
-    ) -> list[typing.Any]:
+        self,
+        query: str | Queryable[_T_ql],
+        /,
+        *args: Any,
+        **kwargs: Any,
+    ) -> list[Any] | list[_T_ql]:
         return self._query(
             QueryContext(
                 query=QueryWithArgs.from_query(query, args, kwargs),
                 cache=self._get_query_cache(),
-                query_options=_query_opts,
                 retry_options=self._get_retry_options(),
                 state=self._get_state(),
                 transaction_options=self._get_active_tx_options(),
@@ -308,36 +397,35 @@ class ReadOnlyExecutor(BaseReadOnlyExecutor):
         )
 
     @typing.overload
-    def get(self, query: str, /, **kwargs: typing.Any) -> typing.Any: ...
+    def get(self, query: str, /, **kwargs: Any) -> Any: ...
 
     @typing.overload
-    def get(
-        self, query: str, default: T_get, /, **kwargs: typing.Any
-    ) -> typing.Any | T_get: ...
+    def get(self, query: str, default: _T_get, /, **kwargs: Any) -> _T_get: ...
 
     @typing.overload
     def get(
         self,
-        query: SupportsEdgeQL[T_ql],
+        query: Queryable[_T_ql],
         /,
-        **kwargs: typing.Any,
-    ) -> T_ql: ...
+        **kwargs: Any,
+    ) -> _T_ql: ...
 
     @typing.overload
     def get(
         self,
-        query: SupportsEdgeQL[T_ql],
-        default: T_get,
+        query: Queryable[_T_ql],
+        default: _T_ql,  # type: ignore [misc]
         /,
-        **kwargs: typing.Any,
-    ) -> T_ql | T_get: ...
+        **kwargs: Any,
+    ) -> _T_ql: ...
 
     def get(
         self,
-        query: AnyEdgeQLQuery,
-        default: typing.Any = _unset,
-        **kwargs: typing.Any,
-    ) -> typing.Any:
+        query: str | Queryable[_T_ql],
+        default: Any = _unset,
+        /,
+        **kwargs: Any,
+    ) -> _T_ql | Any:
         if hasattr(query, "__edgeql__"):
             query = query.__gel_assert_single__(  # type: ignore
                 message=(
@@ -362,22 +450,24 @@ class ReadOnlyExecutor(BaseReadOnlyExecutor):
 
     @typing.overload
     def query_single(
-        self, query: str, *args: typing.Any, **kwargs: typing.Any
-    ) -> typing.Any | None: ...
+        self, query: Queryable[_T_ql], **kwargs: Any
+    ) -> _T_ql | None: ...
 
     @typing.overload
     def query_single(
-        self, query: SupportsEdgeQL[T_ql], **kwargs: typing.Any
-    ) -> T_ql | None: ...
+        self, query: str, *args: Any, **kwargs: Any
+    ) -> Any | None: ...
 
     def query_single(
-        self, query: AnyEdgeQLQuery, *args: typing.Any, **kwargs: typing.Any
-    ) -> typing.Any:
+        self,
+        query: str | Queryable[_T_ql],
+        *args: Any,
+        **kwargs: Any,
+    ) -> _T_ql | Any:
         return self._query(
-            QueryContext(
+            QuerySingleContext(
                 query=QueryWithArgs.from_query(query, args, kwargs),
                 cache=self._get_query_cache(),
-                query_options=_query_single_opts,
                 retry_options=self._get_retry_options(),
                 state=self._get_state(),
                 transaction_options=self._get_active_tx_options(),
@@ -388,22 +478,24 @@ class ReadOnlyExecutor(BaseReadOnlyExecutor):
 
     @typing.overload
     def query_required_single(
-        self, query: str, *args: typing.Any, **kwargs: typing.Any
-    ) -> typing.Any: ...
+        self, query: Queryable[_T_ql], **kwargs: Any
+    ) -> _T_ql: ...
 
     @typing.overload
     def query_required_single(
-        self, query: SupportsEdgeQL[T_ql], **kwargs: typing.Any
-    ) -> T_ql: ...
+        self, query: str, *args: Any, **kwargs: Any
+    ) -> Any: ...
 
     def query_required_single(
-        self, query: AnyEdgeQLQuery, *args: typing.Any, **kwargs: typing.Any
-    ) -> typing.Any:
+        self,
+        query: str | Queryable[_T_ql],
+        *args: Any,
+        **kwargs: Any,
+    ) -> _T_ql | Any:
         return self._query(
-            QueryContext(
+            QueryRequiredSingleContext(
                 query=QueryWithArgs.from_query(query, args, kwargs),
                 cache=self._get_query_cache(),
-                query_options=_query_required_single_opts,
                 retry_options=self._get_retry_options(),
                 state=self._get_state(),
                 transaction_options=self._get_active_tx_options(),
@@ -412,12 +504,13 @@ class ReadOnlyExecutor(BaseReadOnlyExecutor):
             )
         )
 
-    def query_json(self, query: AnyEdgeQLQuery, *args, **kwargs) -> str:
+    def query_json(
+        self, query: str | Queryable[_T_ql], *args: Any, **kwargs: Any
+    ) -> str:
         return self._query(
-            QueryContext(
+            QueryJsonContext(
                 query=QueryWithArgs.from_query(query, args, kwargs),
                 cache=self._get_query_cache(),
-                query_options=_query_json_opts,
                 retry_options=self._get_retry_options(),
                 state=self._get_state(),
                 transaction_options=self._get_active_tx_options(),
@@ -426,12 +519,16 @@ class ReadOnlyExecutor(BaseReadOnlyExecutor):
             )
         )
 
-    def query_single_json(self, query: AnyEdgeQLQuery, *args, **kwargs) -> str:
+    def query_single_json(
+        self,
+        query: str | Queryable[_T_ql],
+        *args: Any,
+        **kwargs: Any,
+    ) -> str:
         return self._query(
-            QueryContext(
+            QuerySingleJsonContext(
                 query=QueryWithArgs.from_query(query, args, kwargs),
                 cache=self._get_query_cache(),
-                query_options=_query_single_json_opts,
                 retry_options=self._get_retry_options(),
                 state=self._get_state(),
                 transaction_options=self._get_active_tx_options(),
@@ -441,13 +538,15 @@ class ReadOnlyExecutor(BaseReadOnlyExecutor):
         )
 
     def query_required_single_json(
-        self, query: AnyEdgeQLQuery, *args, **kwargs
+        self,
+        query: str | Queryable[_T_ql],
+        *args: Any,
+        **kwargs: Any,
     ) -> str:
         return self._query(
-            QueryContext(
+            QueryRequiredSingleJsonContext(
                 query=QueryWithArgs.from_query(query, args, kwargs),
                 cache=self._get_query_cache(),
-                query_options=_query_required_single_json_opts,
                 retry_options=self._get_retry_options(),
                 state=self._get_state(),
                 transaction_options=self._get_active_tx_options(),
@@ -459,8 +558,8 @@ class ReadOnlyExecutor(BaseReadOnlyExecutor):
     def query_sql(
         self,
         query: str,
-        *args,
-        **kwargs,
+        *args: Any,
+        **kwargs: Any,
     ) -> list[datatypes.Record]:  # type: ignore
         return self._query(
             QueryContext(
@@ -472,7 +571,6 @@ class ReadOnlyExecutor(BaseReadOnlyExecutor):
                     input_language=protocol.InputLanguage.SQL,
                 ),
                 cache=self._get_query_cache(),
-                query_options=_query_opts,
                 retry_options=self._get_retry_options(),
                 state=self._get_state(),
                 transaction_options=self._get_active_tx_options(),
@@ -482,9 +580,9 @@ class ReadOnlyExecutor(BaseReadOnlyExecutor):
         )
 
     @abc.abstractmethod
-    def _execute(self, execute_context: ExecuteContext): ...
+    def _execute(self, execute_context: ExecuteContext[_T_ql]) -> None: ...
 
-    def execute(self, commands: str, *args, **kwargs) -> None:
+    def execute(self, commands: str, *args: Any, **kwargs: Any) -> None:
         self._execute(
             ExecuteContext(
                 query=QueryWithArgs(commands, None, args, kwargs),
@@ -497,7 +595,12 @@ class ReadOnlyExecutor(BaseReadOnlyExecutor):
             )
         )
 
-    def execute_sql(self, commands: str, *args, **kwargs) -> None:
+    def execute_sql(
+        self,
+        commands: str,
+        *args: Any,
+        **kwargs: Any,
+    ) -> None:
         self._execute(
             ExecuteContext(
                 query=QueryWithArgs(
@@ -528,30 +631,70 @@ class AsyncIOReadOnlyExecutor(BaseReadOnlyExecutor):
 
     __slots__ = ()
 
+    @overload
+    async def _query(
+        self, query_context: QueryContext[_T_ql]
+    ) -> list[_T_ql]: ...
+
+    @overload
+    async def _query(
+        self, query_context: QuerySingleContext[_T_ql]
+    ) -> _T_ql | None: ...
+
+    @overload
+    async def _query(
+        self, query_context: QueryRequiredSingleContext[_T_ql]
+    ) -> _T_ql: ...
+
+    @overload
+    async def _query(self, query_context: QueryJsonContext[_T_ql]) -> str: ...
+
+    @overload
+    async def _query(
+        self, query_context: QuerySingleJsonContext[_T_ql]
+    ) -> str: ...
+
+    @overload
+    async def _query(
+        self, query_context: QueryRequiredSingleJsonContext[_T_ql]
+    ) -> str: ...
+
     @abc.abstractmethod
-    async def _query(self, query_context: QueryContext) -> typing.Any: ...
+    async def _query(self, query_context: BaseQueryContext[_T_ql]) -> Any: ...
 
     @abc.abstractmethod
     def _get_active_tx_options(
         self,
-    ) -> typing.Optional[options.TransactionOptions]: ...
+    ) -> options.TransactionOptions | None: ...
 
     @typing.overload
     async def query(
-        self, query: str, *args: typing.Any, **kwargs: typing.Any
-    ) -> list[typing.Any]: ...
+        self,
+        query: str,
+        /,
+        *args: Any,
+        **kwargs: Any,
+    ) -> list[Any]: ...
 
     @typing.overload
     async def query(
-        self, query: SupportsEdgeQL[T_ql], **kwargs: typing.Any
-    ) -> list[T_ql]: ...
+        self,
+        query: Queryable[_T_ql],
+        /,
+        **kwargs: Any,
+    ) -> list[_T_ql]: ...
 
-    async def query(self, query: AnyEdgeQLQuery, *args, **kwargs) -> list:
+    async def query(
+        self,
+        query: str | Queryable[_T_ql],
+        /,
+        *args: Any,
+        **kwargs: Any,
+    ) -> list[_T_ql] | list[Any]:
         return await self._query(
             QueryContext(
                 query=QueryWithArgs.from_query(query, args, kwargs),
                 cache=self._get_query_cache(),
-                query_options=_query_opts,
                 retry_options=self._get_retry_options(),
                 state=self._get_state(),
                 transaction_options=self._get_active_tx_options(),
@@ -561,36 +704,46 @@ class AsyncIOReadOnlyExecutor(BaseReadOnlyExecutor):
         )
 
     @typing.overload
-    async def get(self, query: str, /, **kwargs: typing.Any) -> typing.Any: ...
-
-    @typing.overload
-    async def get(
-        self, query: str, default: T_get, /, **kwargs: typing.Any
-    ) -> typing.Any | T_get: ...
-
-    @typing.overload
     async def get(
         self,
-        query: SupportsEdgeQL[T_ql],
+        query: str,
         /,
-        **kwargs: typing.Any,
-    ) -> T_ql: ...
+        **kwargs: Any,
+    ) -> Any: ...
 
     @typing.overload
     async def get(
         self,
-        query: SupportsEdgeQL[T_ql],
-        default: T_get,
+        query: str,
+        default: _T_get,
         /,
-        **kwargs: typing.Any,
-    ) -> T_ql | T_get: ...
+        **kwargs: Any,
+    ) -> Any | _T_get: ...
+
+    @typing.overload
+    async def get(
+        self,
+        query: Queryable[_T_ql],
+        /,
+        **kwargs: Any,
+    ) -> _T_ql: ...
+
+    @typing.overload
+    async def get(
+        self,
+        query: Queryable[_T_ql],
+        default: _T_ql,  # type: ignore [misc]
+        /,
+        **kwargs: Any,
+    ) -> _T_ql: ...
 
     async def get(
         self,
-        query: AnyEdgeQLQuery,
-        default: typing.Any = _unset,
-        **kwargs: typing.Any,
-    ) -> typing.Any:
+        query: str | Queryable[_T_ql],
+        default: Any = _unset,
+        /,
+        **kwargs: Any,
+    ) -> _T_ql | Any:
         if hasattr(query, "__edgeql__"):
             query = query.__gel_assert_single__(  # type: ignore
                 message=(
@@ -615,22 +768,24 @@ class AsyncIOReadOnlyExecutor(BaseReadOnlyExecutor):
 
     @typing.overload
     async def query_single(
-        self, query: str, *args: typing.Any, **kwargs: typing.Any
-    ) -> typing.Any | None: ...
+        self, query: Queryable[_T_ql], **kwargs: Any
+    ) -> _T_ql | None: ...
 
     @typing.overload
     async def query_single(
-        self, query: SupportsEdgeQL[T_ql], **kwargs: typing.Any
-    ) -> T_ql | None: ...
+        self, query: str, *args: Any, **kwargs: Any
+    ) -> Any | None: ...
 
     async def query_single(
-        self, query: AnyEdgeQLQuery, *args, **kwargs
-    ) -> typing.Any:
+        self,
+        query: str | Queryable[_T_ql],
+        *args: Any,
+        **kwargs: Any,
+    ) -> _T_ql | Any:
         return await self._query(
-            QueryContext(
+            QuerySingleContext(
                 query=QueryWithArgs.from_query(query, args, kwargs),
                 cache=self._get_query_cache(),
-                query_options=_query_single_opts,
                 retry_options=self._get_retry_options(),
                 state=self._get_state(),
                 transaction_options=self._get_active_tx_options(),
@@ -641,22 +796,32 @@ class AsyncIOReadOnlyExecutor(BaseReadOnlyExecutor):
 
     @typing.overload
     async def query_required_single(
-        self, query: str, *args: typing.Any, **kwargs: typing.Any
-    ) -> typing.Any: ...
+        self,
+        query: Queryable[_T_ql],
+        /,
+        **kwargs: Any,
+    ) -> _T_ql: ...
 
     @typing.overload
     async def query_required_single(
-        self, query: SupportsEdgeQL[T_ql], **kwargs: typing.Any
-    ) -> T_ql: ...
+        self,
+        query: str,
+        /,
+        *args: Any,
+        **kwargs: Any,
+    ) -> Any: ...
 
     async def query_required_single(
-        self, query: AnyEdgeQLQuery, *args, **kwargs
-    ) -> typing.Any:
+        self,
+        query: str | Queryable[_T_ql],
+        /,
+        *args: Any,
+        **kwargs: Any,
+    ) -> _T_ql | Any:
         return await self._query(
-            QueryContext(
+            QueryRequiredSingleContext(
                 query=QueryWithArgs.from_query(query, args, kwargs),
                 cache=self._get_query_cache(),
-                query_options=_query_required_single_opts,
                 retry_options=self._get_retry_options(),
                 state=self._get_state(),
                 transaction_options=self._get_active_tx_options(),
@@ -665,12 +830,17 @@ class AsyncIOReadOnlyExecutor(BaseReadOnlyExecutor):
             )
         )
 
-    async def query_json(self, query: AnyEdgeQLQuery, *args, **kwargs) -> str:
+    async def query_json(
+        self,
+        query: str | Queryable[_T_ql],
+        /,
+        *args: Any,
+        **kwargs: Any,
+    ) -> str:
         return await self._query(
-            QueryContext(
+            QueryJsonContext(
                 query=QueryWithArgs.from_query(query, args, kwargs),
                 cache=self._get_query_cache(),
-                query_options=_query_json_opts,
                 retry_options=self._get_retry_options(),
                 state=self._get_state(),
                 transaction_options=self._get_active_tx_options(),
@@ -680,13 +850,16 @@ class AsyncIOReadOnlyExecutor(BaseReadOnlyExecutor):
         )
 
     async def query_single_json(
-        self, query: AnyEdgeQLQuery, *args, **kwargs
+        self,
+        query: str | Queryable[_T_ql],
+        /,
+        *args: Any,
+        **kwargs: Any,
     ) -> str:
         return await self._query(
-            QueryContext(
+            QuerySingleJsonContext(
                 query=QueryWithArgs.from_query(query, args, kwargs),
                 cache=self._get_query_cache(),
-                query_options=_query_single_json_opts,
                 retry_options=self._get_retry_options(),
                 state=self._get_state(),
                 transaction_options=self._get_active_tx_options(),
@@ -696,13 +869,16 @@ class AsyncIOReadOnlyExecutor(BaseReadOnlyExecutor):
         )
 
     async def query_required_single_json(
-        self, query: AnyEdgeQLQuery, *args, **kwargs
+        self,
+        query: str | Queryable[_T_ql],
+        /,
+        *args: Any,
+        **kwargs: Any,
     ) -> str:
         return await self._query(
-            QueryContext(
+            QueryRequiredSingleJsonContext(
                 query=QueryWithArgs.from_query(query, args, kwargs),
                 cache=self._get_query_cache(),
-                query_options=_query_required_single_json_opts,
                 retry_options=self._get_retry_options(),
                 state=self._get_state(),
                 transaction_options=self._get_active_tx_options(),
@@ -711,7 +887,13 @@ class AsyncIOReadOnlyExecutor(BaseReadOnlyExecutor):
             )
         )
 
-    async def query_sql(self, query: str, *args, **kwargs) -> typing.Any:
+    async def query_sql(
+        self,
+        query: str,
+        /,
+        *args: Any,
+        **kwargs: Any,
+    ) -> Any:
         return await self._query(
             QueryContext(
                 query=QueryWithArgs(
@@ -722,7 +904,6 @@ class AsyncIOReadOnlyExecutor(BaseReadOnlyExecutor):
                     input_language=protocol.InputLanguage.SQL,
                 ),
                 cache=self._get_query_cache(),
-                query_options=_query_opts,
                 retry_options=self._get_retry_options(),
                 state=self._get_state(),
                 transaction_options=self._get_active_tx_options(),
@@ -732,9 +913,17 @@ class AsyncIOReadOnlyExecutor(BaseReadOnlyExecutor):
         )
 
     @abc.abstractmethod
-    async def _execute(self, execute_context: ExecuteContext) -> None: ...
+    async def _execute(
+        self, execute_context: ExecuteContext[_T_ql]
+    ) -> None: ...
 
-    async def execute(self, commands: str, *args, **kwargs) -> None:
+    async def execute(
+        self,
+        commands: str,
+        /,
+        *args: Any,
+        **kwargs: Any,
+    ) -> None:
         await self._execute(
             ExecuteContext(
                 query=QueryWithArgs(commands, None, args, kwargs),
@@ -747,7 +936,13 @@ class AsyncIOReadOnlyExecutor(BaseReadOnlyExecutor):
             )
         )
 
-    async def execute_sql(self, commands: str, *args, **kwargs) -> None:
+    async def execute_sql(
+        self,
+        commands: str,
+        /,
+        *args: Any,
+        **kwargs: Any,
+    ) -> None:
         await self._execute(
             ExecuteContext(
                 query=QueryWithArgs(

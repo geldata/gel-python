@@ -17,6 +17,7 @@
 #
 
 from __future__ import annotations
+from typing import Any
 from typing_extensions import Self
 
 import abc
@@ -334,7 +335,7 @@ class State:
             globals_=new_globals,
         )
 
-    def as_dict(self):
+    def as_dict(self) -> dict[str, Any]:
         rv = {}
         if self._module is not None:
             rv["module"] = self._module
