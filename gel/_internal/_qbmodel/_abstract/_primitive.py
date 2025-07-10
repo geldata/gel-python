@@ -201,7 +201,7 @@ class Array(  # type: ignore [misc]
     @classmethod
     def __gel_reflection__(cls) -> type[GelPrimitiveType.__gel_reflection__]:  # pyright: ignore [reportIncompatibleVariableOverride]
         tid, tname = _edgeql.get_array_type_id_and_name(
-            cls.__element_type__.__gel_reflection__.name.as_schema_name()
+            str(cls.__element_type__.__gel_reflection__.name)
         )
 
         class __gel_reflection__(GelPrimitiveType.__gel_reflection__):  # noqa: N801
@@ -282,8 +282,7 @@ class Tuple(  # type: ignore[misc]
     @classmethod
     def __gel_reflection__(cls) -> type[GelPrimitiveType.__gel_reflection__]:  # pyright: ignore [reportIncompatibleVariableOverride]
         tid, tname = _edgeql.get_tuple_type_id_and_name(
-            el.__gel_reflection__.name.as_schema_name()
-            for el in cls.__element_types__
+            str(el.__gel_reflection__.name) for el in cls.__element_types__
         )
 
         class __gel_reflection__(GelPrimitiveType.__gel_reflection__):  # noqa: N801
@@ -319,7 +318,7 @@ class Range(
     @classmethod
     def __gel_reflection__(cls) -> type[GelPrimitiveType.__gel_reflection__]:  # pyright: ignore [reportIncompatibleVariableOverride]
         tid, tname = _edgeql.get_range_type_id_and_name(
-            cls.__element_type__.__gel_reflection__.name.as_schema_name()
+            str(cls.__element_type__.__gel_reflection__.name)
         )
 
         class __gel_reflection__(GelPrimitiveType.__gel_reflection__):  # noqa: N801
@@ -612,7 +611,7 @@ _ambiguous_py_types: dict[
             for parent in {p.parent for p in scalars}
         }
         for key, scalars in {
-            key: tuple(SchemaPath.from_schema_name(v) for v in vals)
+            key: tuple(SchemaPath(v) for v in vals)
             for key, vals in _py_type_to_scalar_type.items()
         }.items()
         if len(scalars) > 1

@@ -45,7 +45,7 @@ class SchemaObject:
 
     @functools.cached_property
     def schemapath(self) -> SchemaPath:
-        return SchemaPath.from_schema_name(self.name)
+        return SchemaPath(self.name)
 
     @functools.cached_property
     def uuid(self) -> uuid.UUID:

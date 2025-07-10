@@ -351,7 +351,7 @@ class SchemaGenerator:
         part = self._schema_part
         std_modules: dict[SchemaPath, bool] = dict.fromkeys(
             (
-                SchemaPath.from_schema_name(mod)
+                SchemaPath(mod)
                 for mod in reflection.fetch_modules(self._client, part)
             ),
             False,
@@ -433,7 +433,7 @@ class SchemaGenerator:
 
     def introspect_schema(self) -> Schema:
         for mod in reflection.fetch_modules(self._client, self._schema_part):
-            self._modules[SchemaPath.from_schema_name(mod)] = {
+            self._modules[SchemaPath(mod)] = {
                 "scalar_types": {},
                 "object_types": {},
                 "functions": [],
@@ -460,7 +460,7 @@ class SchemaGenerator:
             self._operators = self._operators.chain(std_operators)
             self._functions = these_funcs + self._std_schema.functions
             self._std_modules = [
-                SchemaPath.from_schema_name(mod)
+                SchemaPath(mod)
                 for mod in reflection.fetch_modules(self._client, std_part)
             ]
         else:
@@ -566,7 +566,7 @@ def mod_filename(
         dirpath = modpath.parent
         filename = f"{modpath.name}.py"
 
-    return pathlib.Path(dirpath) / filename
+    return dirpath.as_pathlib_path() / filename
 
 
 def _map_name(
@@ -1355,7 +1355,7 @@ class BaseGeneratedModule:
 
         cur_aspect = self.current_aspect
         cache_key = (
-            type_path.as_schema_name(),
+            str(type_path),
             aspect,
             cur_aspect,
             False,
@@ -5188,7 +5188,7 @@ class GeneratedGlobalModule(BaseGeneratedModule):
         anytuple = self.import_name(BASE_IMPL, "AnyNamedTuple")
 
         self.write("#")
-        self.write(f"# tuple type {t.schemapath.as_schema_name()}")
+        self.write(f"# tuple type {t.schemapath}")
         self.write("#")
         classname = self.get_tuple_name(t)
         with self._class_def(f"_{classname}", [namedtuple]):
