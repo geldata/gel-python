@@ -16,6 +16,7 @@
 # limitations under the License.
 #
 
+from __future__ import annotations
 
 import argparse
 import asyncio
@@ -41,6 +42,11 @@ import time
 import typing
 import unittest
 import warnings
+
+
+if typing.TYPE_CHECKING:
+    import pydantic
+
 
 import gel
 from gel import asyncio_client
@@ -764,6 +770,35 @@ class ModelTestCase(SyncQueryTestCase):
             if not cls.orm_debug:
                 cls.tmp_model_dir.cleanup()
 
+    def assertPydanticSerializes(
+        self,
+        model: pydantic.BaseModel,
+        expected: typing.Any,
+    ) -> None:
+        self.assertEqual(pop_ids(model.model_dump()), expected)
+        self.assertEqual(
+            json.loads(pop_ids_json(model.model_dump_json())),
+            expected,
+        )
+
+    def assertPydanticPickles(
+        self,
+        model: pydantic.BaseModel,
+    ) -> None:
+        dump = model.model_dump()
+        dump_json = model.model_dump_json()
+        model2 = repickle(model)
+        self.assertEqual(dump, model2.model_dump())
+        self.assertEqual(dump_json, model2.model_dump_json())
+        self.assertEqual(
+            model.__pydantic_fields_set__,
+            model2.__pydantic_fields_set__,
+        )
+        self.assertEqual(
+            getattr(model, "__gel_changed_fields__", ...),
+            getattr(model2, "__gel_changed_fields__", ...),
+        )
+
 
 class ORMTestCase(SyncQueryTestCase):
     MODEL_PACKAGE = None
@@ -948,13 +983,16 @@ import unittest
 import typing
 
 import gel
+
+from gel._testbase import ModelTestCase
+
 {add_imports}
 
 if not typing.TYPE_CHECKING:
     def reveal_type(_: typing.Any) -> str:
         return ''
 
-class TestModel(unittest.TestCase):
+class TestModel(ModelTestCase):
     if typing.TYPE_CHECKING:
     {
         "       client: gel.AsyncIOClient = gel.create_async_client()"
