@@ -45,6 +45,7 @@ from gel._internal._unsetid import UNSET_UUID
 from gel._internal._qbmodel import _abstract
 
 from . import _utils as _pydantic_utils
+from . import _fields
 
 if TYPE_CHECKING:
     import types
@@ -368,20 +369,41 @@ def _process_pydantic_fields(
         fdef = field.default
         overrides: dict[str, Any] = {}
 
+        field_anno: Any = field.annotation
+        if isinstance(field_anno, type) and issubclass(field_anno, GelModel):
+            # Required link -- inject the annotation.
+            # Context: we want to have the less amount of noise in generated
+            # files possible, so instead of:
+            #
+            #    class Type:
+            #        another: RequiredLink[AnotherType]        # noqa: ERA001
+            #
+            # we generate:
+            #
+            #    class Type:
+            #        another: AnotherType                      # noqa: ERA001
+            #
+            # But we do need to inject the required link annotation
+            # so that pydantic can set up our custom serialization
+            # for the field.
+            field_anno = _fields.RequiredLink[field_anno]
+            cls.__annotations__[fn] = field_anno
+            overrides["annotation"] = field_anno
+
         anno = _typing_inspect.inspect_annotation(
-            field.annotation,
+            field_anno,
             annotation_source=_typing_inspect.AnnotationSource.CLASS,
             unpack_type_aliases="lenient",
         )
 
-        if _typing_inspect.is_generic_type_alias(field.annotation):
+        if _typing_inspect.is_generic_type_alias(field_anno):
             field_infos = [
                 a
                 for a in anno.metadata
                 if isinstance(a, pydantic.fields.FieldInfo)
             ]
             if field_infos:
-                overrides["annotation"] = field.annotation
+                overrides["annotation"] = field_anno
         else:
             field_infos = []
 

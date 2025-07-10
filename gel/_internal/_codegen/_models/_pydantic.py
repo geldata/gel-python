@@ -4989,8 +4989,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                     desc = self.import_name(BASE_IMPL, "ComputedLink")
                     pytype = f"{desc}[{narrow_type}]"
                 case False, False, False, False:
-                    desc = self.import_name(BASE_IMPL, "RequiredLink")
-                    pytype = f"{desc}[{narrow_type}]"
+                    pytype = narrow_type
                 case _:
                     raise RuntimeError(
                         f"no handler for the combination of flags for "
