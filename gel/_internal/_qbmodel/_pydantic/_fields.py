@@ -753,8 +753,8 @@ ComputedMultiLink = TypeAliasType(
     type_params=(_MT_co,),
 )
 
-MultiLinkWithProps = TypeAliasType(
-    "MultiLinkWithProps",
+OptionalMultiLinkWithProps = TypeAliasType(
+    "OptionalMultiLinkWithProps",
     Annotated[
         _MultiLinkWithProps[_PT_co, _MT_co],
         pydantic.Field(
