@@ -12,6 +12,7 @@ from typing import (
     TypeGuard,
     TypeVar,
     final,
+    overload,
 )
 
 from typing_extensions import Self
@@ -51,6 +52,23 @@ if TYPE_CHECKING:
 
         @staticmethod
         def __edgeql_expr__() -> str: ...
+
+        @overload
+        def __get__(
+            self, instance: None, owner: type[Any], /
+        ) -> type[Self]: ...
+
+        @overload
+        def __get__(
+            self, instance: Any, owner: type[Any] | None = None, /
+        ) -> Self: ...
+
+        def __get__(
+            self,
+            instance: Any | None,
+            owner: type[Any] | None = None,
+            /,
+        ) -> type[Self] | Self: ...
 
 else:
     GelTypeMeta = type

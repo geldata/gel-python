@@ -63,23 +63,6 @@ class GelPrimitiveTypeConstraint(GelTypeConstraint[_GelPrimitiveType_T]):
 class GelPrimitiveType(GelType):
     if TYPE_CHECKING:
 
-        @overload
-        def __get__(
-            self, instance: None, owner: type[Any], /
-        ) -> type[Self]: ...
-
-        @overload
-        def __get__(
-            self, instance: Any, owner: type[Any] | None = None, /
-        ) -> Self: ...
-
-        def __get__(
-            self,
-            instance: Any | None,
-            owner: type[Any] | None = None,
-            /,
-        ) -> type[Self] | Self: ...
-
         @classmethod
         def __gel_assert_single__(
             cls,
@@ -99,7 +82,7 @@ class GelPrimitiveType(GelType):
             message: str | None = None,
             __operand__: _qb.ExprAlias | None = None,
         ) -> type[Self]:
-            return _qb.AnnotatedExpr(  # type: ignore [return-value]
+            return _qb.AnnotatedExpr(
                 cls,
                 assert_single(cls, message=message, __operand__=__operand__),
             )
