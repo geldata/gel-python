@@ -3549,6 +3549,57 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(p1.nickname, "HACKED")
         self.assertEqual(p1.__linkprops__.is_tall_enough, False)
 
+    @tb.typecheck
+    def test_modelgen_globals_01(self):
+        """Test reflection of globals"""
+        from models import default
+
+        self.assertEqual(
+            reveal_type(default.current_game_session_num),
+            "type[models.__variants__.std.int64]",
+        )
+
+        sess_num = 988
+
+        sess = default.GameSession(
+            num=sess_num,
+            time_limit=sess_num + 10,
+            players=[default.User(name="General Global")],
+        )
+        self.client.save(sess)
+
+        sess_client = self.client.with_globals(
+            {"default::current_game_session_num": sess_num}
+        )
+
+        # Test we can read scalar globals
+        self.assertEqual(
+            sess_client.get(default.current_game_session_num),
+            sess_num,
+        )
+
+        # And that they proxy the underlying type properly
+        self.assertTrue(
+            sess_client.get(default.current_game_session_num < 1000)
+        )
+
+        # That object globals work also
+        fetched_sess = sess_client.get(default.CurrentGameSession)
+        self.assertEqual(fetched_sess, sess)
+
+        fetched_sess = sess_client.get(
+            default.CurrentGameSession.select(
+                num=True,
+                players=lambda s: s.players.select(name=True),
+            ).filter(
+                lambda s: s.time_limit == default.current_game_session_num + 10
+            )
+        )
+        self.assertEqual(fetched_sess, sess)
+        self.assertEqual(fetched_sess.num, sess_num)
+        self.assertEqual(len(fetched_sess.players), 1)
+        self.assertEqual(fetched_sess.players[0].name, "General Global")
+
     def test_modelgen_reflection_1(self):
         from models import default
 

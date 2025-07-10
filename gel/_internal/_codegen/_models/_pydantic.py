@@ -152,10 +152,10 @@ logger = logging.getLogger(__name__)
 
 
 class IntrospectedModule(TypedDict):
-    imports: dict[str, str]
     object_types: dict[str, reflection.ObjectType]
     scalar_types: dict[str, reflection.ScalarType]
     functions: list[reflection.Function]
+    globals: list[reflection.Global]
 
 
 @dataclasses.dataclass(kw_only=True, frozen=True)
@@ -164,6 +164,7 @@ class Schema:
     casts: reflection.CastMatrix
     operators: reflection.OperatorMatrix
     functions: list[reflection.Function]
+    globals: list[reflection.Global]
 
 
 @dataclasses.dataclass(kw_only=True, frozen=True)
@@ -339,6 +340,7 @@ class SchemaGenerator:
         self._casts: reflection.CastMatrix
         self._operators: reflection.OperatorMatrix
         self._functions: list[reflection.Function]
+        self._globals: list[reflection.Global]
         self._named_tuples: dict[str, reflection.NamedTupleType] = {}
         self._wrapped_types: set[str] = set()
         self._std_schema = std_schema
@@ -396,6 +398,7 @@ class SchemaGenerator:
                 all_types=self._types,
                 all_casts=self._casts,
                 all_operators=self._operators,
+                all_globals=self._globals,
                 modules=self._modules,
                 schema_part=self._schema_part,
             )
@@ -420,6 +423,7 @@ class SchemaGenerator:
             all_types=self._types,
             all_casts=self._casts,
             all_operators=self._operators,
+            all_globals=self._globals,
             modules=all_modules,
             schema_part=self._schema_part,
         )
@@ -437,7 +441,7 @@ class SchemaGenerator:
                 "scalar_types": {},
                 "object_types": {},
                 "functions": [],
-                "imports": {},
+                "globals": [],
             }
 
         this_part = self._schema_part
@@ -449,6 +453,8 @@ class SchemaGenerator:
         self._operators = reflection.fetch_operators(self._client, this_part)
         these_funcs = reflection.fetch_functions(self._client, this_part)
         self._functions = these_funcs
+        these_globals = reflection.fetch_globals(self._client, this_part)
+        self._globals = these_globals
 
         if self._schema_part is not std_part:
             assert self._std_schema is not None
@@ -459,6 +465,7 @@ class SchemaGenerator:
             std_operators = self._std_schema.operators
             self._operators = self._operators.chain(std_operators)
             self._functions = these_funcs + self._std_schema.functions
+            self._globals = these_globals + self._std_schema.globals
             self._std_modules = [
                 SchemaPath(mod)
                 for mod in reflection.fetch_modules(self._client, std_part)
@@ -480,11 +487,16 @@ class SchemaGenerator:
             name = f.schemapath
             self._modules[name.parent]["functions"].append(f)
 
+        for g in these_globals:
+            name = g.schemapath
+            self._modules[name.parent]["globals"].append(g)
+
         return Schema(
             types=self._types,
             casts=self._casts,
             operators=self._operators,
             functions=self._functions,
+            globals=self._globals,
         )
 
     def get_comment_preamble(self) -> str:
@@ -499,6 +511,7 @@ class SchemaGenerator:
             all_types=self._types,
             all_casts=self._casts,
             all_operators=self._operators,
+            all_globals=self._globals,
             modules=self._modules,
             schema_part=self._schema_part,
         )
@@ -682,6 +695,7 @@ class BaseGeneratedModule:
         all_types: Mapping[str, reflection.Type],
         all_casts: reflection.CastMatrix,
         all_operators: reflection.OperatorMatrix,
+        all_globals: list[reflection.Global],
         modules: Collection[SchemaPath],
         schema_part: reflection.SchemaPart,
     ) -> None:
@@ -691,6 +705,7 @@ class BaseGeneratedModule:
         self._types_by_name: dict[str, reflection.Type] = {}
         self._casts = all_casts
         self._operators = all_operators
+        self._globals = all_globals
         schema_obj_type = None
         for t in all_types.values():
             self._types_by_name[t.name] = t
@@ -852,15 +867,27 @@ class BaseGeneratedModule:
     def write_type_reflection(
         self,
         stype: reflection.Type,
+        *,
+        base_metadata_class: str = "GelTypeMetadata",
+    ) -> None:
+        return self.write_schema_reflection(
+            stype, base_metadata_class=base_metadata_class
+        )
+
+    def write_schema_reflection(
+        self,
+        sobj: reflection.SchemaObject,
+        *,
+        base_metadata_class: str = "GelSchemaMetadata",
     ) -> None:
         uuid = self.import_name("uuid", "UUID")
         schemapath = self.import_name(BASE_IMPL, "SchemaPath")
-        if isinstance(stype, reflection.InheritingType):
+        if isinstance(sobj, reflection.InheritingType):
             base_types = [
-                self.get_type(self._types[base.id]) for base in stype.bases
+                self.get_type(self._types[base.id]) for base in sobj.bases
             ]
         else:
-            gmm = self.import_name(BASE_IMPL, "GelTypeMetadata")
+            gmm = self.import_name(BASE_IMPL, base_metadata_class)
             base_types = [gmm]
         with self._class_def(
             "__gel_reflection__",
@@ -869,8 +896,8 @@ class BaseGeneratedModule:
                 base_types,
             ),
         ):
-            self.write(f"id = {uuid}(int={stype.uuid.int})")
-            self.write(f"name = {stype.schemapath.as_code(schemapath)}")
+            self.write(f"id = {uuid}(int={sobj.uuid.int})")
+            self.write(f"name = {sobj.schemapath.as_code(schemapath)}")
 
     def write_object_type_reflection(
         self,
@@ -1362,25 +1389,44 @@ class BaseGeneratedModule:
             import_time,
         )
         result = self._type_import_cache.get(cache_key)
-        if result is not None:
-            return result
-
-        type_name = type_path.name
-        rel_import = self._resolve_rel_import(type_path.parent, aspect)
-        if rel_import is None:
-            result = type_name
-        else:
-            result = self.import_qual_name(
-                rel_import.module,
-                type_name,
-                suggested_module_alias=rel_import.module_alias,
+        if result is None:
+            result = self.get_object(
+                type_path,
                 import_time=import_time,
+                aspect=aspect,
+                localns=localns,
             )
-
-        if import_time is not ImportTime.local:
-            self._type_import_cache[cache_key] = result
+            if import_time is not ImportTime.local:
+                self._type_import_cache[cache_key] = result
 
         return result
+
+    def get_object(
+        self,
+        obj_path: SchemaPath,
+        *,
+        import_time: ImportTime | None = None,
+        aspect: ModuleAspect = ModuleAspect.MAIN,
+        localns: frozenset[str] | None = None,
+    ) -> str:
+        obj_name = obj_path.name
+        rel_import = self._resolve_rel_import(obj_path.parent, aspect)
+        if rel_import is None:
+            return obj_name
+        else:
+            if import_time is None:
+                import_time = (
+                    ImportTime.typecheck
+                    if self.in_type_checking
+                    else ImportTime.runtime
+                )
+            return self.import_qual_name(
+                rel_import.module,
+                obj_name,
+                suggested_module_alias=rel_import.module_alias,
+                import_time=import_time,
+                localns=localns,
+            )
 
     def get_type_type(
         self,
@@ -1670,6 +1716,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                 if op.schemapath.parent == self.canonical_modpath
             ]
         )
+        self.write_globals(mod["globals"])
 
     def reexport_module(self, mod: GeneratedSchemaModule) -> None:
         exports = sorted(mod.exports)
@@ -1941,6 +1988,36 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                 self.write(f"{stype_ident} = {classname}")
                 self.export(stype_ident)
 
+    def write_globals(
+        self,
+        globals_list: list[reflection.Global],
+    ) -> None:
+        for glob in globals_list:
+            self._write_global(glob)
+
+    def _write_global(
+        self,
+        glob: reflection.Global,
+    ) -> None:
+        type_ = self.get_type(
+            glob.get_type(self._types),
+            import_time=ImportTime.typecheck_runtime,
+        )
+        name = ident(glob.schemapath.name)
+
+        with self.aspect(ModuleAspect.VARIANTS):
+            global_ = self.import_name(BASE_IMPL, "Global")
+            name = ident(glob.schemapath.name)
+            with self._class_def(name, [global_]):
+                self.write_schema_reflection(glob)
+
+        impl = self.get_object(
+            glob.schemapath,
+            aspect=ModuleAspect.VARIANTS,
+        )
+        self.write(f"{name} = {impl}.global_({type_})")
+        self.write()
+
     def prepare_namespace(self, mod: IntrospectedModule) -> None:
         with self.aspect(ModuleAspect.VARIANTS):
             if self.canonical_modpath == SchemaPath("std"):
@@ -1952,6 +2029,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             for t in itertools.chain(
                 mod["scalar_types"].values(),
                 mod["object_types"].values(),
+                mod["globals"],
             )
         )
 

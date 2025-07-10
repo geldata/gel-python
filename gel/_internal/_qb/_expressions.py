@@ -92,6 +92,22 @@ class SchemaSet(IdentLikeExpr):
         return "::".join(self.type.parts)
 
 
+@dataclass(kw_only=True, frozen=True)
+class Global(TypedExpr):
+    name: SchemaPath
+    type_: SchemaPath
+
+    @property
+    def precedence(self) -> _edgeql.Precedence:
+        return _edgeql.PRECEDENCE[_edgeql.Token.GLOBAL]
+
+    def subnodes(self) -> Iterable[Node]:
+        return ()
+
+    def __edgeql_expr__(self, *, ctx: ScopeContext | None) -> str:
+        return f"global {self.name.as_quoted_schema_name()}"
+
+
 class Literal(IdentLikeExpr):
     pass
 
@@ -580,9 +596,7 @@ class IteratorStmt(ImplicitIteratorStmt):
         if isinstance(expr, ShapeOp):
             expr = expr.iter_expr
         expr_text = edgeql(expr, ctx=ctx)
-        token = _edgeql.Token.IN if self.self_ref is not None else self.stmt
-        prec = _edgeql.PRECEDENCE[token]
-        if _need_right_parens(self.precedence, expr, rprec=prec):
+        if not isinstance(expr, AtomicExpr):
             expr_text = f"({expr_text})"
         return expr_text
 

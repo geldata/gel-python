@@ -18,7 +18,9 @@ type UserGroup extending Named {
 }
 
 type GameSession {
-    required num: int64;
+    required num: int64 {
+        constraint exclusive;
+    };
     required public: bool {
         default := false;
     };
@@ -31,6 +33,14 @@ type GameSession {
         property is_tall_enough: bool;
     };
 }
+
+global current_game_session_num: std::int64;
+single global CurrentGameSession := (
+    select
+        GameSession
+    filter
+        .num = global current_game_session_num
+);
 
 type User extending Named {
     # test computed backlink
