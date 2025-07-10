@@ -399,7 +399,7 @@ def get_linked_new_objects(obj: GelModel) -> Iterable[GelModel]:
 
 
 def obj_to_name_ql(obj: GelModel) -> str:
-    return quote_ident(type(obj).__gel_reflection__.name.as_schema_name())
+    return type(obj).__gel_reflection__.name.as_quoted_schema_name()
 
 
 def shift_dict_list(inp: dict[str, list[T]]) -> dict[str, T]:

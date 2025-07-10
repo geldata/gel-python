@@ -43,7 +43,7 @@ def _get_prefixed_ptr(
 
     ptr = getattr(cls, ptrname, Unspecified)
     if ptr is Unspecified:
-        sn = this_type.as_schema_name()
+        sn = str(this_type)
         msg = f"{ptrname} is not a valid {sn} property"
         raise AttributeError(msg)
     if not isinstance(ptr, _qb.PathAlias):

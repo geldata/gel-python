@@ -254,7 +254,7 @@ class CollectionType(Type):
 
     @functools.cached_property
     def schemapath(self) -> SchemaPath:
-        return SchemaPath(self.name)
+        return SchemaPath.from_segments(self.name)
 
 
 @struct

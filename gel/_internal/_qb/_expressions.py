@@ -562,7 +562,7 @@ class InsertStmt(Stmt, TypedExpr):
         return (self.shape,)
 
     def _edgeql(self, ctx: ScopeContext) -> str:
-        text = f"{self.stmt} {self.type.as_schema_name()}"
+        text = f"{self.stmt} {self.type.as_quoted_schema_name()}"
         if self.shape is not None:
             source = SchemaSet(type_=self.type)
             text = f"{text} {_render_shape(self.shape, source, ctx)}"
