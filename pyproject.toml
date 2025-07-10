@@ -110,6 +110,7 @@ local_partial_types = true
 
 [[tool.mypy.overrides]]
 module = [
+    "gel.abstract",
     "gel.models.*",
     "gel.fastapi.*",
     "gel._internal.*",
@@ -126,6 +127,16 @@ module = [
 ]
 strict = true
 ignore_errors = false
+
+[[tool.mypy.overrides]]
+module = [
+    "gel.asyncio_client",
+    "gel.base_client",
+    "gel.blocking_client",
+]
+strict = true
+ignore_errors = false
+disallow_untyped_calls = false
 
 # ========================
 #         PYRIGHT
@@ -191,8 +202,9 @@ extend-select = [
     # "RUF",    # ruff specific
     # "SIM",    # flake8-simplify
     # "T20",    # flake8-print
-    # "UP",     # pyupgrade
-    "W", # warning
+    # "TC",       # flake8-type-checking
+    # "UP",       # pyupgrade
+    "W",        # warning
 ]
 extend-ignore = [
     "B018", # useless-expression

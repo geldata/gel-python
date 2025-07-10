@@ -17,7 +17,7 @@
 #
 
 from __future__ import annotations
-from typing import Any
+from typing import Any, TypeVar
 
 import contextlib
 import collections
@@ -35,7 +35,7 @@ from . import base_client
 from . import con_utils
 from . import errors
 from . import transaction
-from .protocol import blocking_proto
+from .protocol import blocking_proto  # type: ignore [attr-defined, unused-ignore]
 from .protocol.protocol import InputLanguage, OutputFormat
 
 from ._internal._save import make_save_executor_constructor
@@ -48,7 +48,8 @@ DEFAULT_PING_BEFORE_IDLE_TIMEOUT = datetime.timedelta(seconds=5)
 MINIMUM_PING_WAIT_TIME = datetime.timedelta(seconds=1)
 
 
-T = typing.TypeVar("T")
+_T = TypeVar("_T")
+_T_co = TypeVar("_T_co", covariant=True)
 
 
 @dataclasses.dataclass
@@ -69,24 +70,32 @@ class SaveQueryDebug:
     args_analyze: object = None
 
 
-def iter_coroutine(coro: typing.Coroutine[None, None, T]) -> T:
+def iter_coroutine(coro: typing.Coroutine[None, None, _T]) -> _T:
     try:
         coro.send(None)
     except StopIteration as ex:
-        return ex.value
+        return ex.value  # type: ignore [no-any-return]
+    else:
+        raise RuntimeError(
+            f"coroutine {coro!r} did not stop after one iteration!"
+        )
     finally:
         coro.close()
 
 
-class BlockingIOConnection(base_client.BaseConnection):
+class BlockingIOConnection(base_client.BaseConnection[threading.Event]):
     __slots__ = ("_ping_wait_time",)
 
-    async def connect_addr(self, addr, timeout):
+    async def connect_addr(
+        self, addr: str | tuple[str, int], timeout: float
+    ) -> None:
         deadline = time.monotonic() + timeout
 
         if isinstance(addr, str):
             # UNIX socket
-            res_list = [(socket.AF_UNIX, socket.SOCK_STREAM, -1, None, addr)]
+            res_list: Any = [
+                (socket.AF_UNIX, socket.SOCK_STREAM, -1, None, addr)
+            ]
         else:
             host, port = addr
             try:
@@ -104,7 +113,7 @@ class BlockingIOConnection(base_client.BaseConnection):
             try:
                 sock = socket.socket(af, socktype, proto)
             except OSError as e:
-                sock.close()
+                sock.close()  # pyright: ignore[reportPossiblyUnboundVariable]
                 if i < len(res_list) - 1:
                     continue
                 else:
@@ -121,7 +130,13 @@ class BlockingIOConnection(base_client.BaseConnection):
             else:
                 break
 
-    async def _connect_addr(self, sock, addr, sa, deadline):
+    async def _connect_addr(
+        self,
+        sock: socket.socket,
+        addr: str | tuple[str, int],
+        sa: str | tuple[str, int],
+        deadline: float,
+    ) -> None:
         try:
             time_left = deadline - time.monotonic()
             if time_left <= 0:
@@ -174,13 +189,15 @@ class BlockingIOConnection(base_client.BaseConnection):
 
             self._protocol = proto
             self._addr = addr
+            settings = self.get_settings()
+            system_config = settings.get("system_config") if settings else None
+            session_idle_timeout = (
+                system_config.session_idle_timeout
+                if system_config
+                else DEFAULT_PING_BEFORE_IDLE_TIMEOUT
+            )
             self._ping_wait_time = max(
-                (
-                    self.get_settings()
-                    .get("system_config")
-                    .session_idle_timeout
-                    - DEFAULT_PING_BEFORE_IDLE_TIMEOUT
-                ),
+                (session_idle_timeout - DEFAULT_PING_BEFORE_IDLE_TIMEOUT),
                 MINIMUM_PING_WAIT_TIME,
             ).total_seconds()
 
@@ -188,10 +205,10 @@ class BlockingIOConnection(base_client.BaseConnection):
             sock.close()
             raise
 
-    async def sleep(self, seconds):
+    async def sleep(self, seconds: float) -> None:
         time.sleep(seconds)
 
-    def is_closed(self):
+    def is_closed(self) -> bool:
         proto = self._protocol
         return not (
             proto
@@ -200,7 +217,7 @@ class BlockingIOConnection(base_client.BaseConnection):
             and proto.connected
         )
 
-    async def close(self, timeout=None):
+    async def close(self, timeout: float | None = None) -> None:
         """Send graceful termination message wait for connection to drop."""
         if not self.is_closed():
             try:
@@ -220,11 +237,13 @@ class BlockingIOConnection(base_client.BaseConnection):
             finally:
                 self._cleanup()
 
-    def _dispatch_log_message(self, msg):
+    def _dispatch_log_message(self, msg: Any) -> None:
         for cb in self._log_listeners:
-            cb(self, msg)
+            cb(self, msg)  # type: ignore [arg-type]
 
-    async def raw_query(self, query_context: abstract.QueryContext):
+    async def raw_query(
+        self, query_context: abstract.BaseQueryContext[_T_co]
+    ) -> Any:
         try:
             if (
                 time.monotonic() - self._protocol.last_active_timestamp
@@ -237,57 +256,72 @@ class BlockingIOConnection(base_client.BaseConnection):
         return await super().raw_query(query_context)
 
 
-class _PoolConnectionHolder(base_client.PoolConnectionHolder):
+class _PoolConnectionHolder(
+    base_client.PoolConnectionHolder[BlockingIOConnection, threading.Event]
+):
     __slots__ = ()
     _event_class = threading.Event
 
-    async def close(self, *, wait=True, timeout=None):
+    async def close(
+        self, *, wait: bool = True, timeout: float | None = None
+    ) -> None:
         if self._con is None:
             return
         await self._con.close(timeout=timeout)
 
-    async def wait_until_released(self, timeout=None):
-        return self._release_event.wait(timeout)
+    async def wait_until_released(self, timeout: float | None = None) -> None:
+        result = self._release_event.wait(timeout)
+        if timeout is not None and not result:
+            raise TimeoutError
 
 
-class _PoolImpl(base_client.BasePoolImpl):
+class _PoolImpl(
+    base_client.BasePoolImpl[BlockingIOConnection, threading.Event]
+):
     _holder_class = _PoolConnectionHolder
 
     def __init__(
         self,
-        connect_args,
+        connect_args: Any,
         *,
-        max_concurrency: typing.Optional[int],
-        connection_class,
-    ):
-        if not issubclass(connection_class, BlockingIOConnection):
+        max_concurrency: int | None,
+        connection_factory: type[BlockingIOConnection],
+    ) -> None:
+        if not issubclass(connection_factory, BlockingIOConnection):
             raise TypeError(
-                f"connection_class is expected to be a subclass of "
+                f"connection_factory is expected to be a subclass of "
                 f"gel.blocking_client.BlockingIOConnection, "
-                f"got {connection_class}"
+                f"got {connection_factory}"
             )
         super().__init__(
             connect_args,
-            connection_class,
+            connection_factory,
             max_concurrency=max_concurrency,
         )
 
-    def _ensure_initialized(self):
+    def _ensure_initialized(self) -> None:
         if self._queue is None:
-            self._queue = queue.LifoQueue(maxsize=self._max_concurrency)
-            self._first_connect_lock = threading.Lock()
+            self._queue: queue.LifoQueue[_PoolConnectionHolder] = (
+                queue.LifoQueue(maxsize=self._max_concurrency)
+            )
+            self._first_connect_lock: threading.Lock = threading.Lock()
             self._resize_holder_pool()
 
-    def _set_queue_maxsize(self, maxsize):
+    def _set_queue_maxsize(self, maxsize: int) -> None:
         with self._queue.mutex:
             self._queue.maxsize = maxsize
 
-    async def _maybe_get_first_connection(self):
+    async def _maybe_get_first_connection(
+        self,
+    ) -> BlockingIOConnection | None:
         with self._first_connect_lock:
             if self._working_addr is None:
                 return await self._get_first_connection()
+        return None
 
-    async def acquire(self, timeout=None):
+    async def acquire(
+        self, timeout: float | None = None
+    ) -> BlockingIOConnection:
         self._ensure_initialized()
 
         if self._closing:
@@ -305,17 +339,24 @@ class _PoolImpl(base_client.BasePoolImpl):
             ch._timeout = timeout
             return con
 
-    async def _release(self, holder):
-        if not isinstance(holder._con, BlockingIOConnection):
+    async def _release(
+        self,
+        connection: base_client.PoolConnectionHolder[
+            BlockingIOConnection, threading.Event
+        ],
+    ) -> None:
+        if connection._con is not None and not isinstance(
+            connection._con, BlockingIOConnection
+        ):
             raise errors.InterfaceError(
                 f"release() received invalid connection: "
-                f"{holder._con!r} does not belong to any connection pool"
+                f"{connection._con!r} does not belong to any connection pool"
             )
 
         timeout = None
-        return await holder.release(timeout)
+        await connection.release(timeout)
 
-    async def close(self, timeout=None):
+    async def close(self, timeout: float | None = None) -> None:
         if self._closed:
             return
         self._closing = True
@@ -331,8 +372,7 @@ class _PoolImpl(base_client.BasePoolImpl):
                     secs = deadline - time.monotonic()
                     if secs <= 0:
                         raise TimeoutError
-                    if not await ch.wait_until_released(secs):
-                        raise TimeoutError
+                    await ch.wait_until_released(timeout=secs)
                 for ch in self._holders:
                     secs = deadline - time.monotonic()
                     if secs <= 0:
@@ -341,8 +381,8 @@ class _PoolImpl(base_client.BasePoolImpl):
         except TimeoutError as e:
             self.terminate()
             raise errors.InterfaceError(
-                "client is not fully closed in {} seconds; "
-                "terminating now.".format(timeout)
+                f"client is not fully closed in {timeout} seconds; "
+                "terminating now."
             ) from e
         except Exception:
             self.terminate()
@@ -355,12 +395,12 @@ class _PoolImpl(base_client.BasePoolImpl):
 class Iteration(transaction.BaseTransaction, abstract.Executor):
     __slots__ = ("_managed", "_lock")
 
-    def __init__(self, retry, client, iteration):
+    def __init__(self, retry: Retry, client: Client, iteration: int) -> None:
         super().__init__(retry, client, iteration)
         self._managed = False
         self._lock = threading.Lock()
 
-    def __enter__(self):
+    def __enter__(self) -> Iteration:
         with self._exclusive():
             if self._managed:
                 raise errors.InterfaceError(
@@ -369,12 +409,17 @@ class Iteration(transaction.BaseTransaction, abstract.Executor):
             self._managed = True
             return self
 
-    def __exit__(self, extype, ex, tb):
+    def __exit__(
+        self,
+        extype: type[BaseException] | None,
+        ex: BaseException | None,
+        tb: Any | None,
+    ) -> bool | None:
         with self._exclusive():
             self._managed = False
-            return iter_coroutine(self._exit(extype, ex))
+            return iter_coroutine(self._exit(extype, ex))  # type: ignore [no-any-return]
 
-    async def _ensure_transaction(self):
+    async def _ensure_transaction(self) -> None:
         if not self._managed:
             raise errors.InterfaceError(
                 "Only managed retriable transactions are supported. "
@@ -382,16 +427,16 @@ class Iteration(transaction.BaseTransaction, abstract.Executor):
             )
         await super()._ensure_transaction()
 
-    def _query(self, query_context: abstract.QueryContext):
+    def _query(self, query_context: abstract.BaseQueryContext[Any]) -> Any:
         with self._exclusive():
-            return iter_coroutine(super()._query(query_context))
+            return iter_coroutine(super()._query(query_context))  # type: ignore [arg-type]
 
-    def _execute(self, execute_context: abstract.ExecuteContext) -> None:
+    def _execute(self, execute_context: abstract.ExecuteContext[Any]) -> None:  # type: ignore[override]
         with self._exclusive():
             iter_coroutine(super()._execute(execute_context))
 
     @contextlib.contextmanager
-    def _exclusive(self):
+    def _exclusive(self) -> typing.Generator[None, None, None]:
         if not self._lock.acquire(blocking=False):
             raise errors.InterfaceError(
                 "concurrent queries within the same transaction "
@@ -404,10 +449,10 @@ class Iteration(transaction.BaseTransaction, abstract.Executor):
 
 
 class Retry(transaction.BaseRetry):
-    def __iter__(self):
+    def __iter__(self) -> Retry:
         return self
 
-    def __next__(self):
+    def __next__(self) -> Iteration:
         # Note: when changing this code consider also
         # updating AsyncIORetry.__anext__.
         if self._done:
@@ -423,13 +468,15 @@ class Retry(transaction.BaseRetry):
 class BatchIteration(transaction.BaseTransaction):
     __slots__ = ("_managed", "_lock", "_batched_ops")
 
-    def __init__(self, retry, client, iteration):
+    def __init__(self, retry: Batch, client: Client, iteration: int) -> None:
         super().__init__(retry, client, iteration)
         self._managed = False
         self._lock = threading.Lock()
-        self._batched_ops = []
+        self._batched_ops: list[
+            abstract.BaseQueryContext[Any] | abstract.ExecuteContext[Any]
+        ] = []
 
-    def __enter__(self):
+    def __enter__(self) -> BatchIteration:
         with self._exclusive():
             if self._managed:
                 raise errors.InterfaceError(
@@ -438,19 +485,24 @@ class BatchIteration(transaction.BaseTransaction):
             self._managed = True
             return self
 
-    def __exit__(self, extype, ex, tb):
+    def __exit__(
+        self,
+        extype: type[BaseException] | None,
+        ex: BaseException | None,
+        tb: Any | None,
+    ) -> bool | None:
         with self._exclusive():
             if extype is None:
                 # Normal exit, wait for the remaining batched operations
                 # to complete, discarding any results.
                 try:
                     iter_coroutine(self._wait())
-                except Exception as ex:
+                except Exception as inner_ex:
                     # If an exception occurs while waiting, we need to
                     # ensure that the transaction is exited properly,
                     # including to consider that exception for retry.
                     self._managed = False
-                    if iter_coroutine(self._exit(type(ex), ex)):
+                    if iter_coroutine(self._exit(type(inner_ex), inner_ex)):
                         # Shall retry, mute the exception
                         return True
                     else:
@@ -459,9 +511,9 @@ class BatchIteration(transaction.BaseTransaction):
                         # because the outer `extype` and `ex` are all None.
                         raise
             self._managed = False
-            return iter_coroutine(self._exit(extype, ex))
+            return iter_coroutine(self._exit(extype, ex))  # type: ignore [no-any-return]
 
-    async def _ensure_transaction(self):
+    async def _ensure_transaction(self) -> None:
         if not self._managed:
             raise errors.InterfaceError(
                 "Only managed retriable transactions are supported. "
@@ -470,7 +522,7 @@ class BatchIteration(transaction.BaseTransaction):
         await super()._ensure_transaction()
 
     @contextlib.contextmanager
-    def _exclusive(self):
+    def _exclusive(self) -> typing.Generator[None, None, None]:
         if not self._lock.acquire(blocking=False):
             raise errors.InterfaceError(
                 "concurrent queries within the same transaction "
@@ -481,12 +533,11 @@ class BatchIteration(transaction.BaseTransaction):
         finally:
             self._lock.release()
 
-    def send_query(self, query: str, *args, **kwargs) -> None:
+    def send_query(self, query: str, *args: Any, **kwargs: Any) -> None:
         self._batched_ops.append(
             abstract.QueryContext(
                 query=abstract.QueryWithArgs(query, None, args, kwargs),
                 cache=self._client._get_query_cache(),
-                query_options=abstract._query_opts,
                 retry_options=None,
                 state=self._client._get_state(),
                 transaction_options=None,
@@ -495,12 +546,11 @@ class BatchIteration(transaction.BaseTransaction):
             )
         )
 
-    def send_query_single(self, query: str, *args, **kwargs) -> None:
+    def send_query_single(self, query: str, *args: Any, **kwargs: Any) -> None:
         self._batched_ops.append(
-            abstract.QueryContext(
+            abstract.QuerySingleContext(
                 query=abstract.QueryWithArgs(query, None, args, kwargs),
                 cache=self._client._get_query_cache(),
-                query_options=abstract._query_single_opts,
                 retry_options=None,
                 state=self._client._get_state(),
                 transaction_options=None,
@@ -509,12 +559,13 @@ class BatchIteration(transaction.BaseTransaction):
             )
         )
 
-    def send_query_required_single(self, query: str, *args, **kwargs) -> None:
+    def send_query_required_single(
+        self, query: str, *args: Any, **kwargs: Any
+    ) -> None:
         self._batched_ops.append(
-            abstract.QueryContext(
+            abstract.QueryRequiredSingleContext(
                 query=abstract.QueryWithArgs(query, None, args, kwargs),
                 cache=self._client._get_query_cache(),
-                query_options=abstract._query_required_single_opts,
                 retry_options=None,
                 state=self._client._get_state(),
                 transaction_options=None,
@@ -523,7 +574,7 @@ class BatchIteration(transaction.BaseTransaction):
             )
         )
 
-    def send_execute(self, commands: str, *args, **kwargs) -> None:
+    def send_execute(self, commands: str, *args: Any, **kwargs: Any) -> None:
         self._batched_ops.append(
             abstract.ExecuteContext(
                 query=abstract.QueryWithArgs(commands, None, args, kwargs),
@@ -543,14 +594,16 @@ class BatchIteration(transaction.BaseTransaction):
     async def _wait(self) -> list[Any]:
         await self._ensure_transaction()
         ops, self._batched_ops[:] = self._batched_ops[:], []
-        return await self._connection.batch_query(ops)
+        if self._connection is not None:
+            return await self._connection.batch_query(ops)  # type: ignore [no-any-return]
+        return []
 
 
 class Batch(transaction.BaseRetry):
-    def __iter__(self):
+    def __iter__(self) -> Batch:
         return self
 
-    def __next__(self):
+    def __next__(self) -> BatchIteration:
         # Note: when changing this code consider also
         # updating AsyncIOBatch.__anext__.
         if self._done:
@@ -563,7 +616,10 @@ class Batch(transaction.BaseRetry):
         return iteration
 
 
-class Client(base_client.BaseClient, abstract.Executor):
+class Client(
+    base_client.BaseClient[BlockingIOConnection, threading.Event],
+    abstract.Executor,
+):
     """A lazy connection pool.
 
     A Client can be used to manage a set of connections to the database.
@@ -599,7 +655,9 @@ class Client(base_client.BaseClient, abstract.Executor):
         make_executor = make_save_executor_constructor(objs)
         plan_time = time.monotonic_ns() - ns
 
-        queries = collections.defaultdict(SaveQueryDebug)
+        queries: dict[str, SaveQueryDebug] = collections.defaultdict(
+            SaveQueryDebug
+        )
 
         for tx in self._batch():
             with tx:
@@ -643,16 +701,18 @@ class Client(base_client.BaseClient, abstract.Executor):
             plan_time=plan_time / 1_000_000.0,
         )
 
-    def _query(self, query_context: abstract.QueryContext):
+    def _query(self, query_context: abstract.BaseQueryContext[_T_co]) -> Any:
         return iter_coroutine(super()._query(query_context))
 
-    def _execute(self, execute_context: abstract.ExecuteContext) -> None:
+    def _execute(  # type: ignore [override]
+        self, execute_context: abstract.ExecuteContext[_T_co]
+    ) -> None:
         iter_coroutine(super()._execute(execute_context))
 
     def check_connection(self) -> base_client.ConnectionInfo:
         return iter_coroutine(self._impl.ensure_connected())
 
-    def ensure_connected(self):
+    def ensure_connected(self) -> Client:
         self.check_connection()
         return self
 
@@ -668,7 +728,7 @@ class Client(base_client.BaseClient, abstract.Executor):
             )
         )
 
-    def close(self, timeout=None):
+    def close(self, timeout: float | None = None) -> None:
         """Attempt to gracefully close all connections in the client.
 
         Wait until all pool connections are released, close them and
@@ -678,10 +738,15 @@ class Client(base_client.BaseClient, abstract.Executor):
         """
         iter_coroutine(self._impl.close(timeout))
 
-    def __enter__(self):
+    def __enter__(self) -> Client:
         return self.ensure_connected()
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: Any | None,
+    ) -> None:
         self.close()
 
     def _describe_query(
@@ -708,24 +773,24 @@ class Client(base_client.BaseClient, abstract.Executor):
 
 
 def create_client(
-    dsn=None,
+    dsn: str | None = None,
     *,
-    max_concurrency=None,
-    host: str = None,
-    port: int = None,
-    credentials: str = None,
-    credentials_file: str = None,
-    user: str = None,
-    password: str = None,
-    secret_key: str = None,
-    database: str = None,
-    branch: str = None,
-    tls_ca: str = None,
-    tls_ca_file: str = None,
-    tls_security: str = None,
+    max_concurrency: int | None = None,
+    host: str | None = None,
+    port: int | None = None,
+    credentials: str | None = None,
+    credentials_file: str | None = None,
+    user: str | None = None,
+    password: str | None = None,
+    secret_key: str | None = None,
+    database: str | None = None,
+    branch: str | None = None,
+    tls_ca: str | None = None,
+    tls_ca_file: str | None = None,
+    tls_security: str | None = None,
     wait_until_available: int = 30,
     timeout: int = 10,
-):
+) -> Client:
     return Client(
         connection_class=BlockingIOConnection,
         max_concurrency=max_concurrency,

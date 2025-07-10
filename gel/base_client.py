@@ -17,6 +17,10 @@
 #
 
 
+from __future__ import annotations
+from typing import Any, Generic, TypeVar, Protocol
+from typing_extensions import Self
+
 import abc
 import dataclasses
 import random
@@ -28,22 +32,31 @@ from . import con_utils
 from . import enums
 from . import errors
 from . import options as _options
-from .protocol import protocol
+from .protocol import protocol  # pyright: ignore [reportAttributeAccessIssue]
 
 
-BaseConnection_T = typing.TypeVar("BaseConnection_T", bound="BaseConnection")
 QUERY_CACHE_SIZE = 1000
 
 
-class BaseConnection(metaclass=abc.ABCMeta):
-    _protocol: typing.Any
-    _addr: typing.Optional[typing.Union[str, typing.Tuple[str, int]]]
-    _addrs: typing.Iterable[typing.Union[str, typing.Tuple[str, int]]]
+class EventProtocol(Protocol):
+    def __init__(self) -> None: ...
+    def is_set(self) -> bool: ...
+    def set(self) -> None: ...
+    def clear(self) -> None: ...
+
+
+_T_co = typing.TypeVar("_T_co", covariant=True)
+_T_Event = TypeVar("_T_Event", bound=EventProtocol, covariant=True)
+
+
+class BaseConnection(Generic[_T_Event], metaclass=abc.ABCMeta):
+    _protocol: Any
+    _holder: PoolConnectionHolder[Self, _T_Event] | None
+    _addr: str | tuple[str, int] | None
+    _addrs: typing.Iterable[str | tuple[str, int]]
     _config: con_utils.ClientConfiguration
     _params: con_utils.ResolvedConnectConfig
-    _log_listeners: typing.Set[
-        typing.Callable[[BaseConnection_T, errors.EdgeDBMessage], None]
-    ]
+    _log_listeners: set[typing.Callable[[Self, errors.EdgeDBMessage], object]]
     __slots__ = (
         "__weakref__",
         "_protocol",
@@ -57,10 +70,10 @@ class BaseConnection(metaclass=abc.ABCMeta):
 
     def __init__(
         self,
-        addrs: typing.Iterable[typing.Union[str, typing.Tuple[str, int]]],
+        addrs: typing.Iterable[str | tuple[str, int]],
         config: con_utils.ClientConfiguration,
         params: con_utils.ResolvedConnectConfig,
-    ):
+    ) -> None:
         self._addr = None
         self._protocol = None
         self._addrs = addrs
@@ -70,34 +83,32 @@ class BaseConnection(metaclass=abc.ABCMeta):
         self._holder = None
 
     @abc.abstractmethod
-    def _dispatch_log_message(self, msg): ...
+    def _dispatch_log_message(self, msg: errors.EdgeDBMessage) -> None: ...
 
-    def _on_log_message(self, msg):
+    def _on_log_message(self, msg: errors.EdgeDBMessage) -> None:
         if self._log_listeners:
             self._dispatch_log_message(msg)
 
-    def connected_addr(self):
+    def connected_addr(self) -> str | tuple[str, int] | None:
         return self._addr
 
-    def _get_last_status(self) -> typing.Optional[str]:
+    def _get_last_status(self) -> str | None:
         if self._protocol is None:
             return None
         status = self._protocol.last_status
         if status is not None:
             status = status.decode()
-        return status
+        return status  # type: ignore [no-any-return]
 
-    def _cleanup(self):
+    def _cleanup(self) -> None:
         self._log_listeners.clear()
         if self._holder:
             self._holder._release_on_close()
             self._holder = None
 
     def add_log_listener(
-        self: BaseConnection_T,
-        callback: typing.Callable[
-            [BaseConnection_T, errors.EdgeDBMessage], None
-        ],
+        self,
+        callback: typing.Callable[[Self, errors.EdgeDBMessage], None],
     ) -> None:
         """Add a listener for EdgeDB log messages.
 
@@ -109,37 +120,37 @@ class BaseConnection(metaclass=abc.ABCMeta):
         self._log_listeners.add(callback)
 
     def remove_log_listener(
-        self: BaseConnection_T,
-        callback: typing.Callable[
-            [BaseConnection_T, errors.EdgeDBMessage], None
-        ],
+        self,
+        callback: typing.Callable[[Self, errors.EdgeDBMessage], None],
     ) -> None:
         """Remove a listening callback for log messages."""
         self._log_listeners.discard(callback)
 
     @property
     def dbname(self) -> str:
-        return self._params.database
+        return self._params.database  # type: ignore [no-any-return]
 
     @property
     def branch(self) -> str:
-        return self._params.branch
+        return self._params.branch  # type: ignore [no-any-return]
 
     @abc.abstractmethod
     def is_closed(self) -> bool: ...
 
     @abc.abstractmethod
-    async def connect_addr(self, addr, timeout): ...
+    async def connect_addr(
+        self, addr: str | tuple[str, int], timeout: float
+    ) -> None: ...
 
     @abc.abstractmethod
-    async def sleep(self, seconds): ...
+    async def sleep(self, seconds: float) -> None: ...
 
-    async def connect(self, *, single_attempt=False):
+    async def connect(self, *, single_attempt: bool = False) -> None:
         start = time.monotonic()
         if single_attempt:
             max_time = 0
         else:
-            max_time = start + self._config.wait_until_available
+            max_time = start + self._config.wait_until_available  # type: ignore [assignment]
         iteration = 1
 
         while True:
@@ -175,8 +186,8 @@ class BaseConnection(metaclass=abc.ABCMeta):
             await self.sleep(0.01 + random.random() * 0.2)
 
     async def privileged_execute(
-        self, execute_context: abstract.ExecuteContext
-    ):
+        self, execute_context: abstract.ExecuteContext[Any]
+    ) -> None:
         if self._protocol.is_legacy:
             await self._protocol.legacy_simple_query(
                 execute_context.query.query, enums.Capability.ALL
@@ -191,12 +202,17 @@ class BaseConnection(metaclass=abc.ABCMeta):
 
         :return bool: True if inside transaction, False otherwise.
         """
-        return self._protocol.is_in_transaction()
+        return self._protocol.is_in_transaction()  # type: ignore [no-any-return]
 
-    def get_settings(self) -> typing.Dict[str, typing.Any]:
-        return self._protocol.get_settings()
+    def get_settings(self) -> dict[str, Any]:
+        return self._protocol.get_settings()  # type: ignore [no-any-return]
 
-    async def _retry_operation(self, func, retry_options, ctx):
+    async def _retry_operation(
+        self,
+        func: typing.Callable[[], typing.Awaitable[Any]],
+        retry_options: _options.RetryOptions | None,
+        ctx: Any,
+    ) -> Any:
         reconnect = False
         i = 0
         while True:
@@ -224,7 +240,9 @@ class BaseConnection(metaclass=abc.ABCMeta):
                 await self.sleep(rule.backoff(i))
                 reconnect = self.is_closed()
 
-    async def raw_query(self, query_context: abstract.QueryContext):
+    async def raw_query(
+        self, query_context: abstract.BaseQueryContext[Any]
+    ) -> Any:
         if self.is_closed():
             await self.connect()
 
@@ -234,7 +252,7 @@ class BaseConnection(metaclass=abc.ABCMeta):
             allow_capabilities = enums.Capability.EXECUTE
         ctx = query_context.lower(allow_capabilities=allow_capabilities)
 
-        async def _inner():
+        async def _inner() -> Any:
             if self._protocol.is_legacy:
                 return await self._protocol.legacy_execute_anonymous(ctx)
             else:
@@ -247,7 +265,9 @@ class BaseConnection(metaclass=abc.ABCMeta):
             _inner, query_context.retry_options, ctx
         )
 
-    async def _execute(self, execute_context: abstract.ExecuteContext) -> None:
+    async def _execute(
+        self, execute_context: abstract.ExecuteContext[Any]
+    ) -> None:
         if self._protocol.is_legacy:
             if execute_context.query.args or execute_context.query.kwargs:
                 raise errors.InterfaceError(
@@ -261,21 +281,19 @@ class BaseConnection(metaclass=abc.ABCMeta):
                 allow_capabilities=enums.Capability.EXECUTE
             )
 
-            async def _inner():
+            async def _inner() -> None:
                 res = await self._protocol.execute(ctx)
                 if ctx.warnings:
-                    res = execute_context.warning_handler(ctx.warnings, res)
+                    execute_context.warning_handler(ctx.warnings, res)
 
-            return await self._retry_operation(
+            await self._retry_operation(
                 _inner, execute_context.retry_options, ctx
             )
 
     async def batch_query(
         self,
-        ops: list[
-            typing.Union[abstract.QueryContext, abstract.ExecuteContext]
-        ],
-    ) -> list[typing.Any]:
+        ops: list[abstract.QueryContext[Any] | abstract.ExecuteContext[Any]],
+    ) -> list[Any]:
         ctxs = [
             ctx.lower(
                 allow_capabilities=(
@@ -304,14 +322,14 @@ class BaseConnection(metaclass=abc.ABCMeta):
             capabilities=ctx.capabilities,
         )
 
-    def terminate(self):
+    def terminate(self) -> None:
         if not self.is_closed():
             try:
                 self._protocol.abort()
             finally:
                 self._cleanup()
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         if self.is_closed():
             return "<{classname} [closed] {id:#x}>".format(
                 classname=self.__class__.__name__, id=id(self)
@@ -324,7 +342,10 @@ class BaseConnection(metaclass=abc.ABCMeta):
             )
 
 
-class PoolConnectionHolder(abc.ABC):
+_T_Conn = TypeVar("_T_Conn", bound=BaseConnection[EventProtocol])
+
+
+class PoolConnectionHolder(abc.ABC, Generic[_T_Conn, _T_Event]):
     __slots__ = (
         "_con",
         "_pool",
@@ -332,25 +353,32 @@ class PoolConnectionHolder(abc.ABC):
         "_timeout",
         "_generation",
     )
-    _event_class = NotImplemented
+    _event_class: type[_T_Event]
 
-    def __init__(self, pool):
+    def __init__(self, pool: BasePoolImpl[_T_Conn, _T_Event]) -> None:
         self._pool = pool
-        self._con = None
+        self._con: _T_Conn | None = None
 
-        self._timeout = None
-        self._generation = None
+        self._timeout: float | None = None
+        self._generation: int | None = None
 
         self._release_event = self._event_class()
         self._release_event.set()
 
     @abc.abstractmethod
-    async def close(self, *, wait=True): ...
+    async def close(
+        self,
+        *,
+        wait: bool = True,
+        timeout: float | None = None,
+    ) -> None: ...
 
     @abc.abstractmethod
-    async def wait_until_released(self, timeout=None): ...
+    async def wait_until_released(
+        self, timeout: float | None = None
+    ) -> None: ...
 
-    async def connect(self):
+    async def connect(self) -> None:
         if self._con is not None:
             raise errors.InternalClientError(
                 "PoolConnectionHolder.connect() called while another "
@@ -362,7 +390,7 @@ class PoolConnectionHolder(abc.ABC):
         self._con._holder = self
         self._generation = self._pool._generation
 
-    async def acquire(self) -> BaseConnection:
+    async def acquire(self) -> _T_Conn:
         if self._con is None or self._con.is_closed():
             self._con = None
             await self.connect()
@@ -376,16 +404,17 @@ class PoolConnectionHolder(abc.ABC):
 
         self._release_event.clear()
 
+        assert self._con is not None
         return self._con
 
-    async def release(self, timeout):
+    async def release(self, timeout: float | None) -> None:
         if self._release_event.is_set():
             raise errors.InternalClientError(
                 "PoolConnectionHolder.release() called on "
                 "a free connection holder"
             )
 
-        if self._con.is_closed():
+        if self._con is not None and self._con.is_closed():
             # This is usually the case when the connection is broken rather
             # than closed by the user, so we need to call _release_on_close()
             # here to release the holder back to the queue, because
@@ -407,17 +436,17 @@ class PoolConnectionHolder(abc.ABC):
         # connection proxy.
         self._release()
 
-    def terminate(self):
+    def terminate(self) -> None:
         if self._con is not None:
             # AsyncIOConnection.terminate() will call _release_on_close() to
             # finish holder cleanup.
             self._con.terminate()
 
-    def _release_on_close(self):
+    def _release_on_close(self) -> None:
         self._release()
         self._con = None
 
-    def _release(self):
+    def _release(self) -> None:
         """Release this connection holder."""
         if self._release_event.is_set():
             # The holder is not checked out.
@@ -437,7 +466,7 @@ class ConnectionInfo:
     config: con_utils.ClientConfiguration
 
 
-class BasePoolImpl(abc.ABC):
+class BasePoolImpl(abc.ABC, Generic[_T_Conn, _T_Event]):
     __slots__ = (
         "_connect_args",
         "_codecs_registry",
@@ -459,15 +488,15 @@ class BasePoolImpl(abc.ABC):
         "_generation",
     )
 
-    _holder_class = NotImplemented
+    _holder_class: type[PoolConnectionHolder[_T_Conn, _T_Event]]
 
     def __init__(
         self,
-        connect_args,
-        connection_factory,
+        connect_args: dict[str, Any],
+        connection_factory: typing.Callable[..., _T_Conn],
         *,
-        max_concurrency: typing.Optional[int],
-    ):
+        max_concurrency: int | None,
+    ) -> None:
         self._connection_factory = connection_factory
         self._connect_args = connect_args
         self._codecs_registry = protocol.CodecsRegistry()
@@ -486,68 +515,79 @@ class BasePoolImpl(abc.ABC):
         self._user_max_concurrency = max_concurrency
         self._max_concurrency = max_concurrency if max_concurrency else 1
 
-        self._holders = []
-        self._queue = None
+        self._holders: list[PoolConnectionHolder[_T_Conn, _T_Event]] = []
+        self._queue: Any = None
 
-        self._first_connect_lock = None
-        self._working_addr = None
-        self._working_config = None
-        self._working_params = None
+        self._first_connect_lock: Any = None
+        self._working_addr: str | tuple[str, int] | None = None
+        self._working_config: con_utils.ClientConfiguration | None = None
+        self._working_params: con_utils.ResolvedConnectConfig | None = None
 
         self._closing = False
         self._closed = False
         self._generation = 0
 
     @abc.abstractmethod
-    def _ensure_initialized(self): ...
+    def _ensure_initialized(self) -> None: ...
 
     @abc.abstractmethod
-    def _set_queue_maxsize(self, maxsize): ...
+    def _set_queue_maxsize(self, maxsize: int) -> None: ...
 
     @abc.abstractmethod
-    async def _maybe_get_first_connection(self): ...
+    async def _maybe_get_first_connection(self) -> _T_Conn | None: ...
 
     @abc.abstractmethod
-    async def acquire(self, timeout=None): ...
+    async def acquire(self, timeout: float | None = None) -> _T_Conn: ...
 
     @abc.abstractmethod
-    async def _release(self, connection): ...
+    async def _release(
+        self, connection: PoolConnectionHolder[_T_Conn, _T_Event]
+    ) -> None: ...
+
+    @abc.abstractmethod
+    async def close(self, timeout: float | None = None) -> None: ...
 
     @property
-    def codecs_registry(self):
+    def codecs_registry(self) -> Any:
         return self._codecs_registry
 
     @property
-    def query_cache(self):
+    def query_cache(self) -> Any:
         return self._query_cache
 
-    def _resize_holder_pool(self):
+    def _resize_holder_pool(self) -> None:
         resize_diff = self._max_concurrency - len(self._holders)
 
         if resize_diff > 0:
-            if self._queue.maxsize != self._max_concurrency:
+            if (
+                self._queue is not None
+                and self._queue.maxsize != self._max_concurrency
+            ):
                 self._set_queue_maxsize(self._max_concurrency)
 
             for _ in range(resize_diff):
                 ch = self._holder_class(self)
 
                 self._holders.append(ch)
-                self._queue.put_nowait(ch)
+                if self._queue is not None:
+                    self._queue.put_nowait(ch)
         elif resize_diff < 0:
             # TODO: shrink the pool
             pass
 
-    def get_max_concurrency(self):
+    def get_max_concurrency(self) -> int:
         return self._max_concurrency
 
-    def get_free_size(self):
+    def get_free_size(self) -> int:
         if self._queue is None:
             # Queue has not been initialized yet
             return self._max_concurrency
 
-        return self._queue.qsize()
+        return self._queue.qsize()  # type: ignore [no-any-return]
 
-    def set_connect_args(self, dsn=None, **connect_kwargs):
+    def set_connect_args(
+        self, dsn: str | None = None, **connect_kwargs: Any
+    ) -> None:
         r"""Set the new connection arguments for this pool.
 
         The new connection arguments will be used for all subsequent
@@ -573,7 +613,7 @@ class BasePoolImpl(abc.ABC):
         self._working_config = None
         self._working_params = None
 
-    async def _get_first_connection(self):
+    async def _get_first_connection(self) -> _T_Conn:
         # First connection attempt on this pool.
         connect_config, client_config = con_utils.parse_connect_arguments(
             **self._connect_args,
@@ -598,7 +638,7 @@ class BasePoolImpl(abc.ABC):
                 self._resize_holder_pool()
         return con
 
-    async def _get_new_connection(self):
+    async def _get_new_connection(self) -> _T_Conn:
         con = None
         if self._working_addr is None:
             con = await self._maybe_get_first_connection()
@@ -615,7 +655,7 @@ class BasePoolImpl(abc.ABC):
 
         return con
 
-    async def release(self, connection):
+    async def release(self, connection: _T_Conn) -> None:
         if not isinstance(connection, BaseConnection):
             raise errors.InterfaceError(
                 f"BasePoolImpl.release() received invalid connection: "
@@ -633,9 +673,9 @@ class BasePoolImpl(abc.ABC):
                 f"{connection!r} is not a member of this pool"
             )
 
-        return await self._release(ch)
+        return await self._release(ch)  # type: ignore [arg-type]
 
-    def terminate(self):
+    def terminate(self) -> None:
         """Terminate all connections in the pool."""
         if self._closed:
             return
@@ -643,7 +683,7 @@ class BasePoolImpl(abc.ABC):
             ch.terminate()
         self._closed = True
 
-    def expire_connections(self):
+    def expire_connections(self) -> None:
         """Expire all currently open connections.
 
         Cause all currently open connections to get replaced on the
@@ -668,17 +708,29 @@ class BasePoolImpl(abc.ABC):
         assert self._working_addr is not None
         assert self._working_config is not None
         assert self._working_params is not None
+        assert self._working_addr is not None
+        assert self._working_config is not None
+        assert self._working_params is not None
+        if isinstance(self._working_addr, tuple):
+            host, port = self._working_addr
+        else:
+            host = self._working_addr
+            port = 5656  # default port
         return ConnectionInfo(
-            host=self._working_addr[0],
-            port=self._working_addr[1],
+            host=host,
+            port=port,
             config=self._working_config,
             params=self._working_params,
         )
 
 
-class BaseClient(abstract.BaseReadOnlyExecutor, _options._OptionsMixin):
+class BaseClient(
+    abstract.BaseReadOnlyExecutor,
+    _options._OptionsMixin,
+    Generic[_T_Conn, _T_Event],
+):
     __slots__ = ("_impl", "_options")
-    _impl_class = NotImplemented
+    _impl_class: type[BasePoolImpl[_T_Conn, _T_Event]]
 
     # Number of stack frames that the Retry objects used by
     # transaction() need to look up to find their caller from for
@@ -690,26 +742,26 @@ class BaseClient(abstract.BaseReadOnlyExecutor, _options._OptionsMixin):
     def __init__(
         self,
         *,
-        connection_class,
-        max_concurrency: typing.Optional[int],
-        dsn=None,
-        host: str = None,
-        port: int = None,
-        credentials: str = None,
-        credentials_file: str = None,
-        user: str = None,
-        password: str = None,
-        secret_key: str = None,
-        database: str = None,
-        branch: str = None,
-        tls_ca: str = None,
-        tls_ca_file: str = None,
-        tls_security: str = None,
-        tls_server_name: str = None,
+        connection_class: type[_T_Conn],
+        max_concurrency: int | None,
+        dsn: str | None = None,
+        host: str | None = None,
+        port: int | None = None,
+        credentials: str | None = None,
+        credentials_file: str | None = None,
+        user: str | None = None,
+        password: str | None = None,
+        secret_key: str | None = None,
+        database: str | None = None,
+        branch: str | None = None,
+        tls_ca: str | None = None,
+        tls_ca_file: str | None = None,
+        tls_security: str | None = None,
+        tls_server_name: str | None = None,
         wait_until_available: int = 30,
         timeout: int = 10,
-        **kwargs,
-    ):
+        **kwargs: Any,
+    ) -> None:
         super().__init__()
         connect_args = {
             "dsn": dsn,
@@ -732,12 +784,12 @@ class BaseClient(abstract.BaseReadOnlyExecutor, _options._OptionsMixin):
 
         self._impl = self._impl_class(
             connect_args,
-            connection_class=connection_class,
+            connection_factory=connection_class,
             max_concurrency=max_concurrency,
             **kwargs,
         )
 
-    def _shallow_clone(self):
+    def _shallow_clone(self) -> Self:  # pyright: ignore [reportIncompatibleMethodOverride]
         new_client = self.__class__.__new__(self.__class__)
         new_client._impl = self._impl
         return new_client
@@ -748,27 +800,27 @@ class BaseClient(abstract.BaseReadOnlyExecutor, _options._OptionsMixin):
             query_cache=self._impl.query_cache,
         )
 
-    def _get_retry_options(self) -> typing.Optional[_options.RetryOptions]:
+    def _get_retry_options(self) -> _options.RetryOptions | None:
         # This is overloaded in transaction.py to return None, to prevent
         # retrying *inside* a transaction.
-        return self._options.retry_options
+        return self._options.retry_options  # type: ignore [no-any-return]
 
     def _get_active_tx_options(
         self,
-    ) -> typing.Optional[_options.TransactionOptions]:
+    ) -> _options.TransactionOptions | None:
         # This is overloaded in transaction.py to return None, since
         # the tx options are applied at the *start* of transactions,
         # not inside them.
-        return self._options.transaction_options
+        return self._options.transaction_options  # type: ignore [no-any-return]
 
     def _get_state(self) -> _options.State:
-        return self._options.state
+        return self._options.state  # type: ignore [no-any-return]
 
     def _get_warning_handler(self) -> _options.WarningHandler:
-        return self._options.warning_handler
+        return self._options.warning_handler  # type: ignore [no-any-return]
 
-    def _get_annotations(self) -> typing.Dict[str, str]:
-        return self._options.annotations
+    def _get_annotations(self) -> dict[str, str]:
+        return self._options.annotations  # type: ignore [no-any-return]
 
     @property
     def max_concurrency(self) -> int:
@@ -782,14 +834,18 @@ class BaseClient(abstract.BaseReadOnlyExecutor, _options._OptionsMixin):
 
         return self._impl.get_free_size()
 
-    async def _query(self, query_context: abstract.QueryContext):
+    async def _query(
+        self, query_context: abstract.BaseQueryContext[_T_co]
+    ) -> Any:
         con = await self._impl.acquire()
         try:
             return await con.raw_query(query_context)
         finally:
             await self._impl.release(con)
 
-    async def _execute(self, execute_context: abstract.ExecuteContext) -> None:
+    async def _execute(
+        self, execute_context: abstract.ExecuteContext[_T_co]
+    ) -> None:
         con = await self._impl.acquire()
         try:
             await con._execute(execute_context)
@@ -805,6 +861,6 @@ class BaseClient(abstract.BaseReadOnlyExecutor, _options._OptionsMixin):
         finally:
             await self._impl.release(con)
 
-    def terminate(self):
+    def terminate(self) -> None:
         """Terminate all connections in the pool."""
         self._impl.terminate()

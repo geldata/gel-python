@@ -16,6 +16,7 @@
 # limitations under the License.
 #
 
+from typing import Any, overload
 
 import io
 import os
@@ -30,6 +31,9 @@ __all__ = (
 
 
 class Meta(type):
+    _base_class_index: dict[tuple[int, int, int, int], type]
+    _index: dict[int, type]
+
     def __new__(mcls, name, bases, dct):
         cls = super().__new__(mcls, name, bases, dct)
 
@@ -84,7 +88,7 @@ class EdgeDBError(Exception, metaclass=EdgeDBErrorMeta):
     _query = None
     tags = frozenset()
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         self._attrs = {}
         super().__init__(*args, **kwargs)
 
@@ -94,27 +98,27 @@ class EdgeDBError(Exception, metaclass=EdgeDBErrorMeta):
     @property
     def _position(self):
         # not a stable API method
-        return int(self._read_str_field(FIELD_POSITION_START, -1))
+        return int(self._read_str_field(FIELD_POSITION_START, "-1"))
 
     @property
     def _position_start(self):
         # not a stable API method
-        return int(self._read_str_field(FIELD_CHARACTER_START, -1))
+        return int(self._read_str_field(FIELD_CHARACTER_START, "-1"))
 
     @property
     def _position_end(self):
         # not a stable API method
-        return int(self._read_str_field(FIELD_CHARACTER_END, -1))
+        return int(self._read_str_field(FIELD_CHARACTER_END, "-1"))
 
     @property
     def _line(self):
         # not a stable API method
-        return int(self._read_str_field(FIELD_LINE_START, -1))
+        return int(self._read_str_field(FIELD_LINE_START, "-1"))
 
     @property
     def _col(self):
         # not a stable API method
-        return int(self._read_str_field(FIELD_COLUMN_START, -1))
+        return int(self._read_str_field(FIELD_COLUMN_START, "-1"))
 
     @property
     def _hint(self):
@@ -126,7 +130,17 @@ class EdgeDBError(Exception, metaclass=EdgeDBErrorMeta):
         # not a stable API method
         return self._read_str_field(FIELD_DETAILS)
 
-    def _read_str_field(self, key, default=None):
+    @overload
+    def _read_str_field(
+        self, key: int, default: None = None
+    ) -> str | None: ...
+
+    @overload
+    def _read_str_field(self, key: int, default: str) -> str: ...
+
+    def _read_str_field(
+        self, key: int, default: str | None = None
+    ) -> str | None:
         val = self._attrs.get(key)
         if isinstance(val, bytes):
             return val.decode("utf-8")
