@@ -698,8 +698,8 @@ class _MultiLinkWithProps(
         return _dlist.convert_to_dlist(value, lt)
 
 
-MultiLink = TypeAliasType(
-    "MultiLink",
+OptionalMultiLink = TypeAliasType(
+    "OptionalMultiLink",
     Annotated[
         _MultiLink[_MT_co, _MT_co],
         pydantic.Field(

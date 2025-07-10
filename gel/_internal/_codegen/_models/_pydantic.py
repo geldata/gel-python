@@ -4955,7 +4955,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                     )
                     pytype = f"{desc}[{narrow_type}, {broad_type}]"
                 case True, True, False, False:
-                    desc = self.import_name(BASE_IMPL, "MultiLink")
+                    desc = self.import_name(BASE_IMPL, "OptionalMultiLink")
                     pytype = f"{desc}[{narrow_type}]"
                 case True, False, False, False:
                     desc = self.import_name(BASE_IMPL, "RequiredMultiLink")
