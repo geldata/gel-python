@@ -4942,7 +4942,9 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                 prop.is_computed,
             ):
                 case True, True, True, False:
-                    desc = self.import_name(BASE_IMPL, "MultiLinkWithProps")
+                    desc = self.import_name(
+                        BASE_IMPL, "OptionalMultiLinkWithProps"
+                    )
                     pytype = f"{desc}[{narrow_type}, {broad_type}]"
                 case True, False, True, False:
                     desc = self.import_name(
