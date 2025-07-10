@@ -217,6 +217,24 @@ type EnumTest {
     required color: Color;
 };
 
+type TestSingleLinks {
+    required link req_wprop_friend: User {
+        strength: int32;
+    }
+    comp_req_wprop_friend := .req_wprop_friend;
+
+    required link req_friend: User;
+    comp_req_friend := .req_friend;
+
+    link opt_friend: User;
+    comp_opt_friend := .opt_friend;
+
+    link opt_wprop_friend: User {
+        strength: int32;
+    };
+    comp_opt_wprop_friend := .opt_wprop_friend;
+}
+
 # Functions for testing overloads
 function add_numbers(a: int64, b: int64) -> int64 {
     using (a + b)

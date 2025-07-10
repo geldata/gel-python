@@ -21,11 +21,11 @@ from typing_extensions import (
 )
 
 import inspect
+import itertools
 import typing
 import warnings
 import weakref
 import uuid
-
 
 import pydantic
 import pydantic.fields
@@ -33,6 +33,8 @@ import pydantic_core
 from pydantic_core import core_schema
 
 from pydantic._internal import _model_construction  # noqa: PLC2701
+from pydantic._internal import _decorators  # noqa: PLC2701
+from pydantic._internal._core_utils import get_type_ref  # noqa: PLC2701
 
 from gel._internal import _qb
 from gel._internal import _dlist
@@ -62,6 +64,11 @@ _model_pointers_cache: weakref.WeakKeyDictionary[
 
 
 class GelModelMeta(_model_construction.ModelMetaclass, _abstract.GelModelMeta):
+    if TYPE_CHECKING:
+        __gel_cached_decorator_fields__: dict[
+            str, _decorators.Decorator[pydantic.fields.ComputedFieldInfo]
+        ]
+
     def __new__(  # noqa: PYI034
         mcls,
         name: str,
@@ -90,13 +97,21 @@ class GelModelMeta(_model_construction.ModelMetaclass, _abstract.GelModelMeta):
                 ),
             )
 
+        # See the comment in mcls.__setattr__ where
+        # we set __gel_cached_decorator_fields__.
+        cls.__pydantic_decorators__.computed_fields = {
+            **cls.__gel_cached_decorator_fields__,
+            **cls.__pydantic_decorators__.computed_fields,
+        }
+        del cls.__gel_cached_decorator_fields__
+
+        # We have optimizations in __gel_model_construct__ that
+        # assume model_config is DEFAULT_MODEL_CONFIG.
+        # To prevent accidental breakage (by ourselves),
+        # we raise an error if model_config is set to something else.
         model_config = getattr(cls, "model_config", None)
         def_model_config = model_config == DEFAULT_MODEL_CONFIG
         if __gel_root_class__ and not def_model_config:
-            # We have optimizations in __gel_model_construct__ that
-            # assume model_config is DEFAULT_MODEL_CONFIG.
-            # To prevent accidental breakage (by ourselves),
-            # we raise an error if model_config is set to something else.
             raise TypeError(
                 f"class {name}(__gel_root_class__=True) has a non-default"
                 f"model config"
@@ -122,6 +137,18 @@ class GelModelMeta(_model_construction.ModelMetaclass, _abstract.GelModelMeta):
                 desc = _abstract.field_descriptor(cls, fname, field.annotation)
                 setattr(cls, fname, desc)
 
+        for fname, comp_field in cls.__pydantic_computed_fields__.items():
+            if fname in cls.__annotations__:
+                if comp_field.return_type is None:
+                    raise AssertionError(
+                        f"unexpected unnannotated model computed field: "
+                        f"{name}.{fname}"
+                    )
+                desc = _abstract.field_descriptor(
+                    cls, fname, comp_field.return_type
+                )
+                setattr(cls, fname, desc)
+
         if __gel_type_id__ is not None:
             mcls.register_class(__gel_type_id__, cls)
 
@@ -130,12 +157,25 @@ class GelModelMeta(_model_construction.ModelMetaclass, _abstract.GelModelMeta):
         return cls
 
     def __setattr__(cls, name: str, value: Any, /) -> None:  # noqa: N805
-        if name == "__pydantic_fields__":
+        if name == "__pydantic_fields__" and not cls.__dict__.get(
+            "__pydantic_complete__"
+        ):
+            # We have to post-process `__pydantic_fields__` to
+            # add computed fields and resolve annotations.
+            # We only do this if the model is not complete yet,
+            # allowing us to "plug" into the the logic of
+            # `pydantic.set_model_fields()` function used by
+            # the pydantic metaclass and model_rebuild().
             cls = cast("type[GelModel]", cls)
-            fields = _process_pydantic_fields(cls, value)
-            super().__setattr__("__pydantic_fields__", fields)
+            _process_pydantic_fields(cls, value)
             _model_pointers_cache.pop(cls, None)
-        elif name == "__pydantic_parent_namespace__":
+        elif (
+            name == "__pydantic_parent_namespace__"
+            and "__pydantic_fields__" not in cls.__dict__
+        ):
+            # Intercept the first assignment to __pydantic_parent_namespace__
+            # (happens in `pydantic.ModelMetaclass.__new__`.)
+            #
             # pydantic.ModelMetaclass blindly assumes that it is never
             # subclassed and that its __new__ is called directly from
             # the model definition site, which is not the case here,
@@ -169,7 +209,33 @@ class GelModelMeta(_model_construction.ModelMetaclass, _abstract.GelModelMeta):
                         defining_frame.f_locals
                     )
 
-            super().__setattr__(name, value)
+            ll_type_setattr(cls, name, value)
+
+        elif (
+            name == "__pydantic_decorators__"
+            and "__pydantic_fields__" not in cls.__dict__
+        ):
+            # We intercept __pydantic_decorators__ to reset its
+            # `computed_fields` attribute to an empty dict.
+            # This happens during `pydantic.ModelMetaclass.__new__`;
+            # this is how we can slightly alter its logic.
+            #
+            # This is to prevent Pydantic's "collect_model_fields()"
+            # crashing when a field in __pydantic_fields__ is
+            # shadowed by a computed field. In our case, there
+            # is no shadowing, as computed field annotations
+            # only exist in __pydantic_fields__ temporarily while
+            # it's being built in the first place.
+            # We restore the original computed_fields in
+            # the metaclass, right after the call to
+            # `super().__new__()`.
+            assert isinstance(value, _decorators.DecoratorInfos)
+            ll_type_setattr(
+                cls, "__gel_cached_decorator_fields__", value.computed_fields
+            )
+            value.computed_fields = {}
+            ll_type_setattr(cls, name, value)
+
         else:
             super().__setattr__(name, value)
 
@@ -210,7 +276,9 @@ def _resolve_pointers(cls: type[GelSourceModel]) -> dict[str, type[GelType]]:
         raise TypeError(f"{cls} has unresolved fields")
 
     pointers = {}
-    for ptr_name in cls.__pydantic_fields__:
+    for ptr_name in itertools.chain(
+        cls.__pydantic_fields__, cls.__pydantic_computed_fields__
+    ):
         descriptor = inspect.getattr_static(cls, ptr_name)
         if not isinstance(descriptor, _abstract.ModelFieldDescriptor):
             raise AssertionError(
@@ -247,14 +315,58 @@ _NO_DEFAULT = frozenset({pydantic_core.PydanticUndefined, None})
 """Field default values that signal that a schema default is to be used."""
 
 
+def _new_computed_func(fn: str) -> property:
+    # We don't use these (we have direct __dict__ access)
+    # but maybe pydantic will, so let's have an idiomatic
+    # pydantic-style computed property.
+
+    def getter(self: GelModel) -> Any:
+        return self.__dict__[fn]
+
+    def setter(self: GelModel, value: Any) -> None:
+        raise ValueError(f"computed field {fn} is read-only")
+
+    return property(getter, setter)
+
+
 def _process_pydantic_fields(
     cls: type[GelModel],
     fields: dict[str, pydantic.fields.FieldInfo],
-) -> dict[str, pydantic.fields.FieldInfo]:
+) -> None:
+    computeds: dict[str, pydantic.fields.ComputedFieldInfo] = {}
+    new_fields: dict[str, pydantic.fields.FieldInfo] = {}
+
     for fn, field in fields.items():
+        if not field._complete:
+            new_fields[fn] = field
+            continue
+
+        ptr = cls.__gel_reflection__.pointers.get(fn)
+        if ptr is None or ptr.computed:
+            computeds[fn] = pydantic.fields.ComputedFieldInfo(
+                wrapped_property=_new_computed_func(fn),
+                return_type=field.annotation,
+                alias=None,
+                alias_priority=None,
+                title=None,
+                field_title_generator=None,
+                description=None,
+                deprecated=None,
+                examples=None,
+                json_schema_extra=None,
+                # We'll include computeds manually in __repr_args__
+                # or pydantic would crash with an AttributeError
+                # on unfetched computed fields
+                repr=False,
+            )
+
+            # Computeds will be excluded from __pydantic_fields__
+            # and will flow into __pydantic_computed_fields__ and
+            # __pydantic_decorators__ instead.
+            continue
+
         fdef = field.default
         overrides: dict[str, Any] = {}
-        ptr = cls.__gel_reflection__.pointers.get(fn)
 
         anno = _typing_inspect.inspect_annotation(
             field.annotation,
@@ -284,14 +396,17 @@ def _process_pydantic_fields(
                 for fi in field_infos
             )
         ):
+            # This field's default must come from the database --
+            # `db.save()` must not set it to pydantic's default:
+            # it must not include the field in the INSERT statement
+            # if the field was not initialized with a value explicitly.
             overrides["default"] = _abstract.DEFAULT_VALUE
         elif fdef_is_desc:
+            # ... is a special Pydantic marker meaning "the field is required
+            # but has no default"
             overrides["default"] = ...
 
-        if (
-            cls.__gel_variant__ is None
-            and fn not in cls.__gel_reflection__.pointers
-        ):
+        if cls.__gel_variant__ is None and ptr is None:
             # This is an ad-hoc computed pointer in a user-defined variant
             overrides["init"] = False
             overrides["frozen"] = True
@@ -313,9 +428,37 @@ def _process_pydantic_fields(
                     **overrides,
                 )
 
-            fields[fn] = merged
+            new_fields[fn] = merged
+        else:
+            new_fields[fn] = field
 
-    return fields
+    ll_type_setattr(cls, "__pydantic_fields__", new_fields)
+
+    if computeds:
+        # We can't just populate __pydantic_computed_fields__, sadly.
+        # Pydantic wants __pydantic_decorators__ to have a record of
+        # a `@computed_field` decorator for each computed field.
+        # We have to mock it.
+        decs = cls.__pydantic_decorators__
+        for field_name, comp_field_info in computeds.items():
+            func = comp_field_info.wrapped_property.fget
+            dec = _decorators.Decorator(
+                get_type_ref(cls),
+                cls_var_name=field_name,
+                shim=None,
+                info=comp_field_info,
+                func=func,  # type: ignore [arg-type]
+            )
+            decs.computed_fields[field_name] = dec
+
+        ll_type_setattr(
+            cls,
+            "__pydantic_computed_fields__",
+            {
+                **getattr(cls, "__pydantic_computed_fields__", {}),
+                **computeds,
+            },
+        )
 
 
 _unset: object = object()
@@ -325,6 +468,7 @@ _empty_str_set: frozenset[str] = frozenset()
 ll_setattr = object.__setattr__
 ll_getattr = object.__getattribute__
 ll_type_getattr = type.__getattribute__
+ll_type_setattr = type.__setattr__
 
 
 DEFAULT_MODEL_CONFIG = pydantic.ConfigDict(
@@ -444,6 +588,24 @@ class GelSourceModel(
 
         return self
 
+    def __repr_args__(self) -> Iterable[tuple[str | None, Any]]:
+        yielded = set()
+        for arg, val in super().__repr_args__():
+            yield arg, val
+            yielded.add(arg)
+
+        # Pydantic assumes computed fields are always present,
+        # but that's not the case for GelModel, where they might
+        # not be fetched. We don't want __repr__ to crash
+        # with an AttributeError - that's a guaranteed bad debug
+        # time.
+        for name in self.__pydantic_computed_fields__:
+            if name in yielded:
+                continue
+            val = getattr(self, name, _unset)
+            if val is not _unset:
+                yield name, val
+
     def __getstate__(self) -> dict[Any, Any]:
         state = super().__getstate__()
         state["__gel_changed_fields__"] = self.__gel_changed_fields__
@@ -523,8 +685,16 @@ class GelSourceModel(
                 # * or a field, but not a multi-link/multi-prop.
                 # In both cases, we can just delegate to pydantic's
                 # __setattr__.
-                super().__setattr__(name, value)
-                return
+                try:
+                    return super().__setattr__(name, value)
+                except Exception as e:
+                    if name in cls.__pydantic_computed_fields__:
+                        raise AttributeError(
+                            f"cannot set attribute on a computed field "
+                            f"{name!r}"
+                        ) from e
+                    else:
+                        raise
 
             # *multi links* and *multi props* are implemented with a special
             # collection type that tracks changes. We need to make sure
@@ -583,6 +753,9 @@ class GelSourceModel(
 def _kwargs_exclude_id(
     id_: uuid.UUID, kwargs: dict[str, Any], /
 ) -> dict[str, Any]:
+    # Helper to exclude unset `id` field from the dump.
+    # See model_dump() for more details.
+
     if id_ is UNSET_UUID:
         try:
             exclude = kwargs["exclude"]
@@ -598,6 +771,40 @@ def _kwargs_exclude_id(
     return kwargs
 
 
+def _kwargs_exclude_unset_computeds(
+    model: GelModel, kwargs: dict[str, Any], /
+) -> dict[str, Any]:
+    # Helper to exclude unset computed fields from the dump.
+    # See model_dump() for more details.
+
+    model.model_rebuild()
+
+    if not model.__pydantic_computed_fields__:
+        return kwargs
+
+    to_exclude: set[str] = set()
+    for fn in model.__pydantic_computed_fields__:
+        if fn not in model.__dict__:
+            to_exclude.add(fn)
+
+    if not to_exclude:
+        return kwargs
+
+    try:
+        exclude = kwargs["exclude"]
+    except KeyError:
+        kwargs["exclude"] = to_exclude
+    else:
+        if isinstance(exclude, set):
+            exclude.update(to_exclude)
+        else:
+            assert isinstance(exclude, dict)
+            for fn in to_exclude:
+                exclude[fn] = True
+
+    return kwargs
+
+
 class GelModel(
     GelSourceModel,
     _abstract.GelModel,
@@ -607,52 +814,6 @@ class GelModel(
 
     if TYPE_CHECKING:
         id: uuid.UUID
-
-        # Computed fields can't be passed to the constructor and we
-        # need to enforce that. Set by `__gel_gen_computed_fields__()`.
-        __gel_computed_fields__: ClassVar[frozenset[str] | None]
-
-    @classmethod
-    def __gel_gen_computed_fields__(cls) -> frozenset[str] | None:
-        cls.model_rebuild()
-        ret: set[str] = set()
-        for field_name, field in cls.__pydantic_fields__.items():
-            # ignore `field.init=None` - unset, so we're fine with it.
-            if field.init is False:
-                ret.add(field_name)
-        ret.discard("id")
-        comp_fields = frozenset(ret) if ret else None
-        cls.__gel_computed_fields__ = comp_fields
-        return comp_fields
-
-    @classmethod
-    def __gel_ensure_no_computed_args__(
-        cls,
-        kwargs: dict[str, Any],
-    ) -> frozenset[str] | None:
-        # Prohibit passing computed fields to the constructor.
-        # Unfortunately `init=False` doesn't work with BaseModel
-        # pydantic classes (the docs states it only works in
-        # dataclasses mode).
-
-        comp_fields: frozenset[str] | None
-
-        try:
-            comp_fields = ll_type_getattr(cls, "__gel_computed_fields__")
-        except AttributeError:
-            comp_fields = cls.__gel_gen_computed_fields__()
-
-        if comp_fields is not None and (
-            comp_args := comp_fields & kwargs.keys()
-        ):
-            comp_arg = next(iter(comp_args))
-            raise ValueError(
-                f"{cls.__qualname__} model does not accept {comp_arg!r} "
-                f"argument, it is a computed field "
-                f"(the database computes it for you)"
-            )
-
-        return comp_fields
 
     def __new__(
         cls,
@@ -678,8 +839,6 @@ class GelModel(
         # All set fields are considered "dirty" and will be saved to the
         # database when `client.save()` is called.
 
-        cls.__gel_ensure_no_computed_args__(kwargs)
-
         # Using __gel_model_construct__ here makes objects created with
         # an `id` to behave just like objects fetched from the db.
         # E.g. if a multi-pointer wasn't specified it wouldn't be set
@@ -690,7 +849,6 @@ class GelModel(
             setattr(self, arg, value)
 
         self.__dict__["id"] = id
-
         return self
 
     def __init__(
@@ -700,7 +858,7 @@ class GelModel(
         **kwargs: Any,
     ) -> None:
         if id is not UNSET_UUID:
-            if self.__dict__.get("id") is None:
+            if self.__dict__.get("id", _unset) is _unset:
                 raise ValueError(
                     "models do not support setting `id` on construction; "
                     "`id` is set automatically by the `client.save()` method"
@@ -710,22 +868,7 @@ class GelModel(
                 # nothing to do in `__init__`.
                 return
 
-        comp_fields = self.__gel_ensure_no_computed_args__(kwargs)
-
         super().__init__(**kwargs)
-
-        # This might be a bit too aggressive, but we want to clear
-        # computed fields from the instance. Currently computed fields
-        # use a custom validator that forces pydantic to auto-set
-        # *required* computed fields to None, which in turn is what
-        # allows us to not pass them in constructors. But we don't
-        # want those None values to ever surface anywhere, be that
-        # attribute access or serialization or anything else that
-        # reads from __dict__.
-        if comp_fields is not None:
-            pop = self.__dict__.pop
-            for field_name in comp_fields:
-                pop(field_name, None)
 
     def __getattr__(self, name: str) -> Any:
         cls = type(self)
@@ -864,6 +1007,12 @@ class GelModel(
         # the latter seems like the least bad option and easier to deal
         # with for the reciever when they validate the data.
         kwargs = _kwargs_exclude_id(self.id, kwargs)
+        # Pydantic assumes computed fields are always set, but that's
+        # not true for GelModel; they might not be fetched. Attempting
+        # to getattr them would raise an AttributeError -- that's the
+        # desired behavior. But we don't want them to crash `model_dump()`
+        # so we exclude them explicitly.
+        kwargs = _kwargs_exclude_unset_computeds(self, kwargs)
         return super().model_dump(**kwargs)
 
     @_utils.inherit_signature(  # type: ignore [arg-type]
@@ -871,6 +1020,7 @@ class GelModel(
     )
     def model_dump_json(self, /, **kwargs: Any) -> str:
         kwargs = _kwargs_exclude_id(self.id, kwargs)
+        kwargs = _kwargs_exclude_unset_computeds(self, kwargs)
         return super().model_dump_json(**kwargs)
 
 

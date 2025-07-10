@@ -30,6 +30,8 @@ import tempfile
 import typing
 import unittest
 
+import pydantic
+
 if typing.TYPE_CHECKING:
     from typing import reveal_type
 
@@ -256,7 +258,6 @@ class TestModelGenerator(tb.ModelTestCase):
 
         self.assertEqual(d.author.name, "Alice")
 
-    @tb.to_be_fixed
     @tb.typecheck
     def test_modelgen_data_unpack_1c(self):
         from models import default, std
@@ -643,7 +644,7 @@ class TestModelGenerator(tb.ModelTestCase):
         }
         self.assertEqual(pop_ids(sl.model_dump()), expected)
         self.assertEqual(
-            pop_ids_json(sl.model_dump_json()), json.dumps(expected)
+            json.loads(pop_ids_json(sl.model_dump_json())), expected
         )
 
         expected = {
@@ -663,8 +664,8 @@ class TestModelGenerator(tb.ModelTestCase):
         }
         self.assertEqual(pop_ids(sl.model_dump(exclude_none=True)), expected)
         self.assertEqual(
-            pop_ids_json(sl.model_dump_json(exclude_none=True)),
-            json.dumps(expected),
+            json.loads(pop_ids_json(sl.model_dump_json(exclude_none=True))),
+            expected,
         )
 
     @tb.typecheck
@@ -844,6 +845,251 @@ class TestModelGenerator(tb.ModelTestCase):
                 type(v_before).__name__, type(v_after).__name__, attr
             )
 
+    @tb.typecheck(["import typing, json"])
+    def test_modelgen_pydantic_apis_09(self):
+        # Test model_dump() and model_dump_json() on models;
+        # test nested serialization -- that it doesn't crash on
+        # unfetched computeds and does not leak UNSET_UUID.
+
+        from models import default
+        from gel._testbase import pop_ids, pop_ids_json
+
+        ug = self.client.query_required_single(
+            default.UserGroup.select(
+                name=True,
+                users=lambda s: s.users.select(name=True, name_len=True)
+                .order_by(name=True)
+                .limit(2),
+            )
+            .filter(name="red")
+            .limit(1)
+        )
+
+        u = default.User(name="aaa")
+        ug.users.append(u)
+
+        expected = {
+            "name": "red",
+            "users": [
+                {
+                    "name": "Alice",
+                    "name_len": 5,
+                },
+                {
+                    "name": "Billie",
+                    "name_len": 6,
+                },
+                {"name": "aaa", "nickname": None},
+            ],
+        }
+
+        self.assertEqual(
+            pop_ids(ug.model_dump()),
+            expected,
+        )
+
+        self.assertEqual(
+            json.loads(pop_ids_json(ug.model_dump_json())),
+            expected,
+        )
+
+    @tb.typecheck(["import typing, json, pydantic"])
+    def test_modelgen_pydantic_apis_10(self):
+        # Test model_dump() and model_dump_json() on models;
+        # test *single required* link serialization
+
+        from models import default
+        from gel._testbase import pop_ids, pop_ids_json
+
+        p = self.client.get(
+            default.Post.select(
+                body=True,
+                author=lambda s: s.author.select(name=True),
+            ).filter(body="Hello")
+        )
+
+        with self.assertRaisesRegex(
+            pydantic.ValidationError,
+            r"(?s)author\n.*Input should be a valid dictionary or.*\bUser\b",
+        ):
+            p.author = None  # type: ignore
+
+        expected = {
+            "body": "Hello",
+            "author": {
+                "name": "Alice",
+            },
+        }
+        self.assertEqual(pop_ids(p.model_dump()), expected)
+        self.assertEqual(
+            json.loads(pop_ids_json(p.model_dump_json())),
+            expected,
+        )
+
+    @tb.typecheck(["import typing, json, pydantic"])
+    def test_modelgen_pydantic_apis_11(self):
+        # Test model_dump() and model_dump_json() on models;
+        # test *single required* link serialization in all combinations
+
+        from models import default
+
+        u = default.User(name="aaa")
+        t = default.TestSingleLinks(
+            req_wprop_friend=default.TestSingleLinks.req_wprop_friend.link(
+                u, strength=123
+            ),
+            req_friend=u,
+        )
+
+        self.assertPydanticPickles(t)
+        self.assertPydanticSerializes(
+            t,
+            {
+                "opt_friend": None,
+                "opt_wprop_friend": None,
+                "req_friend": {"name": "aaa", "nickname": None},
+                "req_wprop_friend": {
+                    "name": "aaa",
+                    "nickname": None,
+                    "__linkprops__": {"strength": 123},
+                },
+            },
+        )
+
+        t.opt_friend = u
+
+        with self.assertRaisesRegex(
+            TypeError,
+            r".*\bopt_wprop_friend\b cannot wrap.*\breq_wprop_friend\b",
+        ):
+            t.opt_wprop_friend = default.TestSingleLinks.req_wprop_friend.link(
+                u, strength=123
+            )
+
+        t.opt_wprop_friend = default.TestSingleLinks.opt_wprop_friend.link(
+            u, strength=456
+        )
+
+        self.assertPydanticPickles(t)
+        self.assertPydanticSerializes(
+            t,
+            {
+                "opt_friend": {"name": "aaa", "nickname": None},
+                "opt_wprop_friend": {
+                    "name": "aaa",
+                    "nickname": None,
+                    "__linkprops__": {"strength": 456},
+                },
+                "req_friend": {"name": "aaa", "nickname": None},
+                "req_wprop_friend": {
+                    "name": "aaa",
+                    "nickname": None,
+                    "__linkprops__": {"strength": 123},
+                },
+            },
+        )
+
+        self.client.save(t)
+
+        t2 = self.client.get(
+            default.TestSingleLinks.select(
+                req_wprop_friend=lambda t: t.req_wprop_friend.select("*"),
+                comp_req_wprop_friend=lambda t: t.comp_req_wprop_friend.select(
+                    "*"
+                ),
+                req_friend=lambda t: t.req_friend.select("*"),
+                comp_req_friend=lambda t: t.comp_req_friend.select("*"),
+                opt_friend=lambda t: t.opt_friend.select("*"),
+                comp_opt_friend=lambda t: t.comp_opt_friend.select("*"),
+                opt_wprop_friend=lambda t: t.opt_wprop_friend.select("*"),
+                comp_opt_wprop_friend=lambda t: t.comp_opt_wprop_friend.select(
+                    "*"
+                ),
+            )
+        )
+
+        # Test typing (@typecheck will pick error up if any):
+        # required links can't be optional
+        user: default.User
+        user = t2.req_wprop_friend
+        user = t2.req_friend
+        user = t2.comp_req_friend
+        user = t2.comp_req_wprop_friend  # noqa: F841
+
+        common = {
+            "nickname": None,
+            "name": "aaa",
+            "name_len": 3,
+            "nickname_len": None,
+        }
+
+        self.assertPydanticPickles(t2)
+        self.assertPydanticSerializes(
+            t2,
+            {
+                "req_wprop_friend": {
+                    **common,
+                    "__linkprops__": {"strength": 123},
+                },
+                "req_friend": common,
+                "opt_friend": common,
+                "opt_wprop_friend": {
+                    **common,
+                    "__linkprops__": {"strength": 456},
+                },
+                "comp_opt_friend": common,
+                "comp_opt_wprop_friend": common,
+                "comp_req_friend": common,
+                "comp_req_wprop_friend": common,
+            },
+        )
+
+        t3 = self.client.get(
+            default.TestSingleLinks.select(
+                comp_req_wprop_friend=lambda t: t.comp_req_wprop_friend.select(
+                    name=True
+                ),
+                comp_req_friend=lambda t: t.comp_req_friend.select(name=True),
+                opt_friend=lambda t: t.opt_friend.select(name=True),
+                comp_opt_wprop_friend=lambda t: t.comp_opt_wprop_friend.select(
+                    name=True
+                ),
+            )
+        )
+
+        common = {
+            "name": "aaa",
+        }
+
+        self.assertPydanticPickles(t3)
+        self.assertPydanticSerializes(
+            t3,
+            {
+                "opt_friend": common,
+                "comp_opt_wprop_friend": common,
+                "comp_req_friend": common,
+                "comp_req_wprop_friend": common,
+            },
+        )
+
+        # Smoke test -- when computeds became proper pydantic computeds
+        # __gel_pointers__() stopped including them, which causes subtle
+        # bugs in codecs / data loading.
+        self.assertEqual(
+            set(default.TestSingleLinks.__gel_pointers__().keys()),
+            {
+                "id",
+                "opt_friend",
+                "opt_wprop_friend",
+                "req_friend",
+                "req_wprop_friend",
+                "comp_opt_friend",
+                "comp_opt_wprop_friend",
+                "comp_req_friend",
+                "comp_req_wprop_friend",
+            },
+        )
+
     @tb.typecheck
     def test_modelgen_data_unpack_polymorphic(self):
         from models import default
@@ -997,14 +1243,14 @@ class TestModelGenerator(tb.ModelTestCase):
         # Let's test computed link as an arg
         with self.assertRaisesRegex(
             ValueError,
-            r"(?s)User model does not accept .groups.*computed field",
+            r"(?s)groups\n\s*Extra inputs are not permitted",
         ):
             default.User(name="aaaa", groups=(1, 2, 3))  # type: ignore
 
         # Let's test computed property as an arg
         with self.assertRaisesRegex(
             ValueError,
-            r"(?s)User model does not accept .name_len.*computed field",
+            r"(?s)name_len\n\s*Extra inputs are not permitted",
         ):
             default.User(name="aaaa", name_len=123)  # type: ignore
 
@@ -1017,7 +1263,8 @@ class TestModelGenerator(tb.ModelTestCase):
             u.name_len
 
         with self.assertRaisesRegex(
-            ValueError, r"(?s)name_len.*Field is frozen"
+            AttributeError,
+            r"cannot set attribute on a computed field .name_len.",
         ):
             u.name_len = cast(std.int64, 123)  # type: ignore[assignment]
 
@@ -2624,9 +2871,7 @@ class TestModelGenerator(tb.ModelTestCase):
             num=9000,
         )
         self.client.save(new_session_with_default_limit)
-        session = self.client.get(
-            default.GameSession.filter(num=9000)
-        )
+        session = self.client.get(default.GameSession.filter(num=9000))
         self.assertEqual(session.time_limit, 60)
 
         new_session_without_limit = default.GameSession(
@@ -2634,9 +2879,7 @@ class TestModelGenerator(tb.ModelTestCase):
             time_limit=None,
         )
         self.client.save(new_session_without_limit)
-        session = self.client.get(
-            default.GameSession.filter(num=9001)
-        )
+        session = self.client.get(default.GameSession.filter(num=9001))
         self.assertEqual(session.time_limit, None)
 
     def test_modelgen_write_only_dlist_errors(self):
@@ -4325,7 +4568,43 @@ class TestModelGenerator(tb.ModelTestCase):
         class UserWithUpperName(default.User):
             upper_name: std.str
 
-        with self.assertRaisesRegex(ValueError, "computed field"):
+        class UserWithUpperNameSup(UserWithUpperName):
+            pass
+
+        self.assertEqual(
+            set(UserWithUpperName.__gel_pointers__().keys()),
+            {
+                "id",
+                "groups",
+                "nickname",
+                "nickname_len",
+                "name",
+                "name_len",
+                "upper_name",
+            },
+        )
+        self.assertEqual(
+            set(UserWithUpperNameSup.__gel_pointers__().keys()),
+            set(UserWithUpperName.__gel_pointers__().keys()),
+        )
+        self.assertEqual(
+            set(UserWithUpperName.__pydantic_computed_fields__.keys()),
+            {
+                "upper_name",
+                "groups",
+                "nickname_len",
+                "name_len",
+            },
+        )
+        self.assertEqual(
+            set(UserWithUpperNameSup.__pydantic_computed_fields__.keys()),
+            set(UserWithUpperName.__pydantic_computed_fields__.keys()),
+        )
+
+        with self.assertRaisesRegex(
+            ValueError,
+            r"(?s)\bupper_name\b\n.*Extra inputs are not permitted",
+        ):
             UserWithUpperName(name="user with upper name", upper_name="test")  # type: ignore [call-overload]
 
         users = self.client.query(
@@ -4335,7 +4614,10 @@ class TestModelGenerator(tb.ModelTestCase):
             ).limit(1)
         )
 
-        with self.assertRaisesRegex(ValueError, "is frozen"):
+        with self.assertRaisesRegex(
+            AttributeError,
+            r"cannot set attribute on a computed field .upper_name.",
+        ):
             users[0].upper_name = "foo"
 
     @tb.typecheck

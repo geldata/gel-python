@@ -4930,10 +4930,14 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         broad_type: str,
         cardinality: reflection.Cardinality,
     ) -> str:
+        pytype: str
+
         if reflection.is_link(prop):
+            is_multi = prop.card in {"AtLeastOne", "Many"}
+            is_optional = prop.card in {"AtMostOne", "Many", "Empty"}
             match (
-                prop.card in {"AtLeastOne", "Many"},  # is multi
-                prop.card in {"AtMostOne", "Many", "Empty"},  # is optional
+                is_multi,
+                is_optional,
                 bool(prop.pointers),
                 prop.is_computed,
             ):
@@ -4968,7 +4972,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                     )
                     pytype = f"{desc}[{narrow_type}, {broad_type}]"
                 case False, False, True, False:
-                    desc = self.import_name(BASE_IMPL, "LinkWithProps")
+                    desc = self.import_name(BASE_IMPL, "RequiredLinkWithProps")
                     pytype = f"{desc}[{narrow_type}, {broad_type}]"
                 case False, False, True, True:
                     desc = self.import_name(BASE_IMPL, "ComputedLinkWithProps")
@@ -4979,8 +4983,21 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                 case False, True, False, True:
                     desc = self.import_name(BASE_IMPL, "OptionalComputedLink")
                     pytype = f"{desc}[{narrow_type}]"
+                case False, False, False, True:
+                    desc = self.import_name(BASE_IMPL, "ComputedLink")
+                    pytype = f"{desc}[{narrow_type}]"
                 case False, False, False, False:
-                    pytype = narrow_type
+                    desc = self.import_name(BASE_IMPL, "RequiredLink")
+                    pytype = f"{desc}[{narrow_type}]"
+                case _:
+                    raise RuntimeError(
+                        f"no handler for the combination of flags for "
+                        f"the {prop.name!r} property: "
+                        f"is_multi={is_multi} / "
+                        f"is_optional={is_optional} / "
+                        f"has_props={bool(prop.pointers)} / "
+                        f"is_computed={prop.is_computed}"
+                    )
         else:
             match (
                 cardinality.is_multi(),
@@ -5006,8 +5023,16 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                     pytype = f"{desc}[{narrow_type}, {broad_type}]"
                 case False, False, False:
                     pytype = narrow_type
+                case _:
+                    raise RuntimeError(
+                        f"no handler for the combination of flags for "
+                        f"the {prop.name!r} property: "
+                        f"is_multi={cardinality.is_multi()} / "
+                        f"is_optional={cardinality.is_optional()} /"
+                        f"is_computed={prop.is_computed}"
+                    )
 
-        return pytype  # pyright: ignore [reportPossiblyUnboundVariable]  # pyright match block no bueno
+        return pytype
 
     def get_ptr_type(
         self,

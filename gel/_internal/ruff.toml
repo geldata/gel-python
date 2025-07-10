@@ -35,6 +35,7 @@ extend-select = [
     "W",   # warning
 ]
 extend-ignore = [
+    "SIM102",  # collapsible ifs
     "C408",    # unnecessary-collection-call
     "COM812",  # missing-trailing-comma
     "ISC002",  # multi-line-implicit-string-concatenation

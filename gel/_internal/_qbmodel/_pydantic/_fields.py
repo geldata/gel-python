@@ -10,6 +10,7 @@ from typing import (
     TYPE_CHECKING,
     Annotated,
     Any,
+    ClassVar,
     Generic,
     TypeVar,
     overload,
@@ -35,6 +36,8 @@ from gel._internal._qbmodel import _abstract
 
 from ._models import GelModel, ProxyModel
 from ._pdlist import ProxyDistinctList
+
+from . import _utils as _pydantic_utils
 
 from gel._internal._unsetid import UNSET_UUID
 
@@ -62,6 +65,8 @@ _PT_co = TypeVar("_PT_co", bound=ProxyModel[GelModel], covariant=True)
 
 
 class _MultiPointer(_abstract.PointerDescriptor[_T_co, _BT_co]):
+    constructor: ClassVar[type] = list
+
     @classmethod
     def _validate(
         cls,
@@ -70,6 +75,8 @@ class _MultiPointer(_abstract.PointerDescriptor[_T_co, _BT_co]):
     ) -> Any:
         raise NotImplementedError
 
+
+class _BaseMultiProperty(_MultiPointer[_T_co, _BT_co]):
     @classmethod
     def __get_pydantic_core_schema__(
         cls,
@@ -88,7 +95,37 @@ class _MultiPointer(_abstract.PointerDescriptor[_T_co, _BT_co]):
             return handler.generate_schema(source_type)
 
 
-class _ComputedMultiPointer(_abstract.PointerDescriptor[_T_co, _BT_co]):
+class _BaseMultiLink(_MultiPointer[_T_co, _BT_co]):
+    constructor: ClassVar[type] = list
+
+    @classmethod
+    def __get_pydantic_core_schema__(
+        cls,
+        source_type: Any,
+        handler: pydantic.GetCoreSchemaHandler,
+    ) -> pydantic_core.CoreSchema:
+        if _typing_inspect.is_generic_alias(source_type):
+            args = typing.get_args(source_type)
+            return core_schema.no_info_plain_validator_function(
+                functools.partial(cls._validate, generic_args=args),
+                serialization=core_schema.wrap_serializer_function_ser_schema(
+                    lambda els, _ser, info: cls.constructor(
+                        obj.model_dump(
+                            **_pydantic_utils.serialization_info_to_dump_kwargs(
+                                info
+                            )
+                        )
+                        for obj in els
+                    ),
+                    info_arg=True,
+                    when_used="always",  # Make sure it's always used
+                ),
+            )
+        else:
+            return handler.generate_schema(source_type)
+
+
+class _BaseComputedMultiPointer(_MultiPointer[_T_co, _BT_co]):
     if TYPE_CHECKING:
 
         @overload
@@ -112,21 +149,17 @@ class _ComputedMultiPointer(_abstract.PointerDescriptor[_T_co, _BT_co]):
     ) -> tuple[_BT_co, ...]:
         return tuple[type_args[0], ...]  # type: ignore [return-value, valid-type]
 
-    @classmethod
-    def __get_pydantic_core_schema__(
-        cls,
-        source_type: Any,
-        handler: pydantic.GetCoreSchemaHandler,
-    ) -> pydantic_core.CoreSchema:
-        if _typing_inspect.is_generic_alias(source_type):
-            args = typing.get_args(source_type)
-            item_type = args[0]
-            return core_schema.tuple_schema(
-                items_schema=[handler.generate_schema(item_type)],
-                variadic_item_index=0,
-            )
-        else:
-            return handler.generate_schema(source_type)
+
+class _BaseComputedMultiLink(
+    _BaseComputedMultiPointer[_T_co, _BT_co], _BaseMultiLink[_T_co, _BT_co]
+):
+    constructor = tuple
+
+
+class _BaseComputedMultiProperty(
+    _BaseComputedMultiPointer[_T_co, _BT_co], _BaseMultiProperty[_T_co, _BT_co]
+):
+    constructor = tuple
 
 
 class Property(_abstract.PropertyDescriptor[_ST_co, _BT_co]):
@@ -248,7 +281,7 @@ OptionalComputedProperty = TypeAliasType(
 
 
 class _MultiProperty(
-    _MultiPointer[_ST_co, _BT_co],
+    _BaseMultiProperty[_ST_co, _BT_co],
     _abstract.AnyPropertyDescriptor[_ST_co, _BT_co],
 ):
     if TYPE_CHECKING:
@@ -308,7 +341,7 @@ class _MultiProperty(
 
 
 class _ComputedMultiProperty(
-    _ComputedMultiPointer[_ST_co, _BT_co],
+    _BaseComputedMultiProperty[_ST_co, _BT_co],
     _abstract.AnyPropertyDescriptor[_ST_co, _BT_co],
 ):
     pass
@@ -354,6 +387,20 @@ ComputedMultiProperty = TypeAliasType(
 
 
 class _AnyLink(Generic[_MT_co, _BMT_co]):
+    @staticmethod
+    def _build_serialize() -> core_schema.SerSchema:
+        return core_schema.wrap_serializer_function_ser_schema(
+            lambda obj, _ser, info: obj.model_dump(
+                **_pydantic_utils.serialization_info_to_dump_kwargs(info)
+            )
+            if obj is not None
+            else None,
+            # XXX: maybe this should be more robust
+            # and RequiredLink should explicitly error out on None?
+            info_arg=True,
+            when_used="always",
+        )
+
     @classmethod
     def __get_pydantic_core_schema__(
         cls,
@@ -365,9 +412,13 @@ class _AnyLink(Generic[_MT_co, _BMT_co]):
             if issubclass(args[0], ProxyModel):
                 return core_schema.no_info_plain_validator_function(
                     functools.partial(cls._validate, generic_args=args),
+                    serialization=cls._build_serialize(),
                 )
             else:
-                return handler.generate_schema(args[0])
+                base_schema = handler.generate_schema(args[0])
+                ser = cls._build_serialize()
+                base_schema["serialization"] = ser  # type: ignore [index]
+                return base_schema
         else:
             return handler.generate_schema(source_type)
 
@@ -431,8 +482,8 @@ class _OptionalLink(
     pass
 
 
-LinkWithProps = TypeAliasType(
-    "LinkWithProps",
+RequiredLinkWithProps = TypeAliasType(
+    "RequiredLinkWithProps",
     Annotated[
         _Link[_MT_co, _BMT_co],
         _abstract.PointerInfo(
@@ -459,6 +510,35 @@ ComputedLinkWithProps = TypeAliasType(
         ),
     ],
     type_params=(_MT_co, _BMT_co),
+)
+
+ComputedLink = TypeAliasType(
+    "ComputedLink",
+    Annotated[
+        _Link[_MT_co, _MT_co],
+        pydantic.Field(init=False, frozen=True),
+        _abstract.PointerInfo(
+            computed=True,
+            readonly=True,
+            cardinality=_edgeql.Cardinality.One,
+            kind=_edgeql.PointerKind.Link,
+        ),
+    ],
+    type_params=(_MT_co,),
+)
+
+
+RequiredLink = TypeAliasType(
+    "RequiredLink",
+    Annotated[
+        _Link[_MT_co, _MT_co],
+        pydantic.Field(default=None),
+        _abstract.PointerInfo(
+            cardinality=_edgeql.Cardinality.AtMostOne,
+            kind=_edgeql.PointerKind.Link,
+        ),
+    ],
+    type_params=(_MT_co,),
 )
 
 
@@ -522,14 +602,14 @@ OptionalComputedLinkWithProps = TypeAliasType(
 
 
 class _ComputedMultiLink(
-    _ComputedMultiPointer[_MT_co, _BMT_co],
+    _BaseComputedMultiLink[_MT_co, _BMT_co],
     _abstract.AnyLinkDescriptor[_MT_co, _BMT_co],
 ):
     pass
 
 
 class _MultiLink(
-    _MultiPointer[_MT_co, _BMT_co],
+    _BaseMultiLink[_MT_co, _BMT_co],
     _abstract.AnyLinkDescriptor[_MT_co, _BMT_co],
 ):
     if TYPE_CHECKING:
@@ -572,7 +652,7 @@ class _MultiLink(
 
 
 class _MultiLinkWithProps(
-    _MultiPointer[_PT_co, _BMT_co],
+    _BaseMultiLink[_PT_co, _BMT_co],
     _abstract.AnyLinkDescriptor[_PT_co, _BMT_co],
 ):
     if TYPE_CHECKING:
