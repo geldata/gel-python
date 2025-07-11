@@ -26,6 +26,7 @@ import datetime
 import queue
 import socket
 import ssl
+import sys
 import threading
 import time
 import typing
@@ -92,6 +93,10 @@ class BlockingIOConnection(base_client.BaseConnection[threading.Event]):
         deadline = time.monotonic() + timeout
 
         if isinstance(addr, str):
+            if sys.platform == "win32":
+                raise RuntimeError(
+                    "connecting via Unix sockets is not supported on Windows"
+                )
             # UNIX socket
             res_list: Any = [
                 (socket.AF_UNIX, socket.SOCK_STREAM, -1, None, addr)
