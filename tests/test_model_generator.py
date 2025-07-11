@@ -199,7 +199,7 @@ class TestModelGenerator(tb.ModelTestCase):
         import gel
         from models import default
 
-        q = gel.with_type(
+        q = gel.expr(
             default.Post,
             """
             select Post {
@@ -1130,7 +1130,7 @@ class TestModelGenerator(tb.ModelTestCase):
         )
 
     @tb.typecheck
-    def test_modelgen_query_with_type(self):
+    def test_modelgen_typed_query_expr(self):
         import gel
         import models
 
@@ -1144,7 +1144,7 @@ class TestModelGenerator(tb.ModelTestCase):
         )
         p_expected = p_expected[0]
 
-        typed = gel.with_type(models.default.Post, q)
+        typed = gel.expr(models.default.Post, q)
         p = client.query(typed)
         self.assertEqual(
             reveal_type(p),

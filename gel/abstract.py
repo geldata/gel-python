@@ -81,7 +81,7 @@ _unset = object()
 
 
 @dataclasses.dataclass(frozen=True)
-class TypedQuery(typing.Generic[_T_ql]):
+class TypedQueryExpression(typing.Generic[_T_ql]):
     tp: type[_T_ql]
     query: str
 
@@ -89,8 +89,26 @@ class TypedQuery(typing.Generic[_T_ql]):
         return (self.tp, self.query)
 
 
-def with_type(tp: type[_T_ql], query: str) -> TypedQuery[_T_ql]:
-    return TypedQuery(tp, query)
+def expr(tp: type[_T_ql], query: str) -> TypedQueryExpression[_T_ql]:
+    """Create a typed query expression.
+
+    This function creates a TypedQueryExpression that associates a raw
+    EdgeQL query string with a return type.
+
+    Args:
+        tp: The expected return type of the query expression.
+        query: The raw EdgeQL query string.
+
+    Returns:
+        A TypedQueryExpression that combines the type and query string.
+
+    Example:
+        >>> from myapp.models import User
+        >>> users = client.query(gel.expr(User, "SELECT User { name, email }"))
+        >>> reveal_type(users)
+        note: Revealed type is "builtins.list[models.default.User]"
+    """
+    return TypedQueryExpression(tp, query)
 
 
 @dataclasses.dataclass(frozen=True)
