@@ -873,6 +873,9 @@ class GelModel(
             else:
                 return new(cls, **kwargs)
 
+        if type(id) is not uuid.UUID or not isinstance(id, uuid.UUID):
+            id = _pydantic_utils.validate_id(id)  # noqa: A001
+
         # We allow creating a model with an id. In that case, we assume
         # that the model is bound to an existing object in the database.
         # We will create the object in `__new__`, set fields, including

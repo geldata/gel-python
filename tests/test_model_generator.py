@@ -1091,6 +1091,28 @@ class TestModelGenerator(tb.ModelTestCase):
             },
         )
 
+    @tb.typecheck(["import typing, json, pydantic"])
+    def test_modelgen_pydantic_apis_12(self):
+        import uuid
+        from models import default
+
+        expected = uuid.uuid4()
+        ids = [
+            expected,
+            str(expected),
+            expected.bytes,
+            str(expected).encode(),
+        ]
+
+        for id_variant in ids:
+            o = default.UserGroup(id=id_variant)  # type: ignore
+            self.assertEqual(o.id, expected)
+
+        with self.assertRaisesRegex(ValueError, "id argument"):
+            default.UserGroup(id=123)  # type: ignore
+        with self.assertRaisesRegex(ValueError, "id argument"):
+            default.UserGroup(None)  # type: ignore
+
     @tb.typecheck
     def test_modelgen_data_unpack_polymorphic(self):
         from models import default
