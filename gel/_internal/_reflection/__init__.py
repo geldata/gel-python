@@ -2,6 +2,10 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright Gel Data Inc. and the contributors.
 
+from ._base import (
+    SchemaObject,
+)
+
 from ._enums import (
     CallableParamKind,
     Cardinality,
@@ -30,6 +34,11 @@ from ._callables import (
 from ._functions import (
     Function,
     fetch_functions,
+)
+
+from ._globals import (
+    Global,
+    fetch_globals,
 )
 
 from ._operators import (
@@ -92,6 +101,7 @@ __all__ = (
     "CastMatrix",
     "CollectionType",
     "Function",
+    "Global",
     "HeterogeneousCollectionType",
     "HomogeneousCollectionType",
     "InheritingType",
@@ -105,6 +115,7 @@ __all__ = (
     "PrimitiveType",
     "PseudoType",
     "ScalarType",
+    "SchemaObject",
     "SchemaPart",
     "ServerVersion",
     "TupleType",
@@ -116,6 +127,7 @@ __all__ = (
     "fetch_branch_state",
     "fetch_casts",
     "fetch_functions",
+    "fetch_globals",
     "fetch_modules",
     "fetch_operators",
     "fetch_types",

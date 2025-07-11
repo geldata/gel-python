@@ -29,6 +29,36 @@ ORDER BY
 """
 
 
+GLOBALS = """
+WITH
+    MODULE schema,
+SELECT schema::Global {
+    id,
+    name,
+    description := assert_single((
+        WITH
+            tid := .id,
+        SELECT DETACHED Operator {
+            description := (SELECT .annotations {
+                value := materialized(@value)
+            } FILTER .name = "std::description"),
+        } FILTER .id = tid
+    ).description.value),
+    type := (
+        IF .target.from_alias AND .target IS InheritingObject
+        THEN assert_single(.target[IS InheritingObject].bases)
+        ELSE .target
+    ),
+    required,
+    cardinality,
+}
+FILTER
+    .builtin = <bool>$builtin
+ORDER BY
+    .name
+"""
+
+
 CASTS = """
 WITH
     MODULE schema

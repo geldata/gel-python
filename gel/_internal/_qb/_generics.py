@@ -26,6 +26,7 @@ from gel._internal import _utils
 from ._abstract import AbstractDescriptor, AbstractFieldDescriptor
 from ._expressions import (
     BinaryOp,
+    Global,
     Path,
     Variable,
     get_object_type_splat,
@@ -295,6 +296,14 @@ class VarAlias(BaseAlias):
 
 def AnnotatedVar(origin: type[Any], metadata: Variable) -> VarAlias:  # noqa: N802
     return VarAlias(origin, metadata)
+
+
+class GlobalAlias(BaseAlias):
+    pass
+
+
+def AnnotatedGlobal(origin: type[Any], metadata: Global) -> GlobalAlias:  # noqa: N802
+    return GlobalAlias(origin, metadata)
 
 
 def is_pointer_descriptor(v: Any) -> bool:

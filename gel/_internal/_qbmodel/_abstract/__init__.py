@@ -31,6 +31,10 @@ from ._expressions import (
     empty_set_if_none,
 )
 
+from ._globals import (
+    Global,
+)
+
 from ._objects import (
     GelLinkModel,
     GelModel,
@@ -94,6 +98,7 @@ __all__ = (
     "GelSourceModel",
     "GelType",
     "GelTypeMeta",
+    "Global",
     "JSONImpl",
     "LinkDescriptor",
     "ModelFieldDescriptor",
