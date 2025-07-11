@@ -3393,6 +3393,10 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         self.write()
         self.write()
 
+        proplinks = self._get_links_with_props(objtype)
+        if proplinks:
+            self.write_object_type_link_models(objtype)
+
         gel_model_meta = self.import_name(BASE_IMPL, "GelModelMeta")
         if not base_types:
             gel_model = self.import_name(BASE_IMPL, "GelModel")
@@ -3436,7 +3440,6 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                 self._write_object_type_qb_methods(objtype)
             self.write()
 
-            proplinks = self._get_links_with_props(objtype)
             if base_types:
                 links_bases = _map_name(lambda s: f"{s}.__links__", base_types)
             else:
@@ -3957,6 +3960,22 @@ class GeneratedSchemaModule(BaseGeneratedModule):
 
         return list(filter(_filter, objtype.pointers))
 
+    def write_object_type_link_models(
+        self,
+        objtype: reflection.ObjectType,
+    ) -> None:
+        links = self._get_links_with_props(objtype)
+        if not links:
+            return
+
+        all_ptr_origins = self._get_all_pointer_origins(objtype)
+        for link in links:
+            self._write_object_type_link_model(
+                objtype,
+                link=link,
+                ptr_origins=all_ptr_origins[link.name],
+            )
+
     def write_object_type_link_variants(
         self,
         objtype: reflection.ObjectType,
@@ -3964,8 +3983,8 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         target_aspect: ModuleAspect = ModuleAspect.MAIN,
         variant: str | None = None,
     ) -> None:
-        pointers = self._get_links_with_props(objtype)
-        if not pointers:
+        links = self._get_links_with_props(objtype)
+        if not links:
             return
 
         all_ptr_origins = self._get_all_pointer_origins(objtype)
@@ -3973,11 +3992,11 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         type_ = self.import_name("builtins", "type")
 
         with self.type_checking():
-            for pointer in pointers:
+            for link in links:
                 self._write_object_type_link_variant(
                     objtype,
-                    pointer=pointer,
-                    ptr_origins=all_ptr_origins[pointer.name],
+                    link=link,
+                    ptr_origins=all_ptr_origins[link.name],
                     target_aspect=target_aspect,
                     is_forward_decl=True,
                     variant=variant,
@@ -3986,18 +4005,18 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         with self.not_type_checking():
             type_name = objtype.schemapath
             obj_class = type_name.name
-            for pointer in pointers:
-                ptrname = pointer.name
+            for link in links:
+                ptrname = link.name
                 with self._classmethod_def(
                     ptrname,
                     [],
-                    "type",
+                    type_,
                     decorators=[f"{lazyclassprop}[{type_}]"],
                 ):
                     classname = self._write_object_type_link_variant(
                         objtype,
-                        pointer=pointer,
-                        ptr_origins=all_ptr_origins[pointer.name],
+                        link=link,
+                        ptr_origins=all_ptr_origins[link.name],
                         target_aspect=target_aspect,
                         is_forward_decl=False,
                         variant=variant,
@@ -4007,18 +4026,78 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                     self.write(f"{classname}.__qualname__ = {qualname!r}")
                     self.write(f"return {classname}")
 
+    def _write_object_type_link_model(
+        self,
+        objtype: reflection.ObjectType,
+        *,
+        link: reflection.Pointer,
+        ptr_origins: list[reflection.ObjectType],
+    ) -> str:
+        type_name = objtype.schemapath
+        srcname = ident(type_name.name)
+        linkname = ident(link.name)
+
+        link_clsname = f"__{srcname}_{linkname}_link__"
+
+        ptr_origin_types = [
+            self.get_type(
+                origin,
+                import_time=ImportTime.runtime,
+                aspect=self.current_aspect,
+            )
+            for origin in ptr_origins
+        ]
+
+        if ptr_origin_types:
+            link_bases = _map_name(
+                functools.partial(
+                    lambda src, ln: f"__{src}_{ln}_link__",
+                    ln=linkname,
+                ),
+                ptr_origin_types,
+            )
+            reflection_bases = link_bases
+        else:
+            b = self.import_name(BASE_IMPL, "GelLinkModel")
+            link_bases = [b]
+            reflection_bases = []
+
+        # The link properties model class for this link
+        with self._class_def(link_clsname, link_bases):
+            self.write_link_reflection(link, reflection_bases)
+
+            assert link.pointers
+            for lprop in link.pointers:
+                if lprop.name in {"source", "target"}:
+                    continue
+                ttype = self._types[lprop.target_id]
+                assert reflection.is_scalar_type(ttype)
+                ptr_type = self.get_type(ttype)
+                pytype = " | ".join(self._get_pytype_for_scalar(ttype))
+                py_anno = self._py_anno_for_ptr(
+                    lprop,
+                    ptr_type,
+                    pytype,
+                    reflection.Cardinality(lprop.card),
+                )
+                self._write_model_attribute(lprop.name, py_anno)
+
+        self.write()
+
+        return link_clsname
+
     def _write_object_type_link_variant(
         self,
         objtype: reflection.ObjectType,
         *,
-        pointer: reflection.Pointer,
+        link: reflection.Pointer,
         ptr_origins: list[reflection.ObjectType],
         target_aspect: ModuleAspect | None = None,
         is_forward_decl: bool = False,
         variant: str | None = None,
     ) -> str:
-        type_name = objtype.schemapath
-        name = type_name.name
+        srcname = ident(objtype.schemapath.name)
+        link_name = ident(link.name)
 
         self_t = self.import_name("typing_extensions", "Self")
         proxymodel_t = self.import_name(BASE_IMPL, "ProxyModel")
@@ -4026,9 +4105,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         if target_aspect is None:
             target_aspect = self.current_aspect
 
-        ptr = pointer
-        pname = ptr.name
-        target_type = self._types[ptr.target_id]
+        target_type = self._types[link.target_id]
         assert isinstance(target_type, reflection.ObjectType)
         import_time = (
             ImportTime.typecheck
@@ -4052,7 +4129,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             for origin in ptr_origins
         ]
 
-        classname = pname if is_forward_decl else f"{name}__{pname}"
+        classname = link_name if is_forward_decl else f"{srcname}__{link_name}"
         if variant is not None:
             container = f"__links_{variant.lower()}__"
             line_comment = "type: ignore [misc]"
@@ -4060,59 +4137,32 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             container = "__links__"
             line_comment = None
 
+        link_clsname = f"__{srcname}_{link_name}_link__"
+
+        assert link.pointers
+        lprops = []
+        for lprop in link.pointers:
+            if lprop.name in {"source", "target"}:
+                continue
+            ttype = self._types[lprop.target_id]
+            assert reflection.is_scalar_type(ttype)
+            pytype = " | ".join(self._get_pytype_for_scalar(ttype))
+            lprop_line = f"{lprop.name}: {pytype} | None = None"
+            lprops.append(lprop_line)
+
         with self._class_def(
             classname,
             (
-                [f"{s}.{container}.{pname}" for s in ptr_origin_types]
+                [f"{s}.{container}.{link_name}" for s in ptr_origin_types]
                 + [target, f"{proxymodel_t}[{target}]"]
             ),
             line_comment=line_comment,
         ):
             self.write(
-                f'"""link {objtype.name}.{pname}: {target_type.name}"""'
+                f'"""link {objtype.name}.{link.name}: {target_type.name}"""'
             )
 
-            if ptr_origin_types:
-                lprops_bases = _map_name(
-                    functools.partial(
-                        lambda s, pn: f"{s}.{container}.{pn}.__lprops__",
-                        pn=pname,
-                    ),
-                    ptr_origin_types,
-                )
-                reflection_bases = lprops_bases
-            else:
-                b = self.import_name(BASE_IMPL, "GelLinkModel")
-                lprops_bases = [b]
-                reflection_bases = []
-
-            with self._class_def("__lprops__", lprops_bases):
-                self.write_link_reflection(pointer, reflection_bases)
-
-                assert ptr.pointers
-                lprops = []
-                for lprop in ptr.pointers:
-                    if lprop.name in {"source", "target"}:
-                        continue
-                    ttype = self._types[lprop.target_id]
-                    assert reflection.is_scalar_type(ttype)
-                    ptr_type = self.get_type(ttype, import_time=import_time)
-                    pytype = " | ".join(self._get_pytype_for_scalar(ttype))
-                    py_anno = self._py_anno_for_ptr(
-                        lprop,
-                        ptr_type,
-                        pytype,
-                        reflection.Cardinality(lprop.card),
-                    )
-                    self._write_model_attribute(lprop.name, py_anno)
-                    lprop_line = f"{lprop.name}: {pytype} | None = None"
-                    lprops.append(lprop_line)
-
-            type_name = objtype.schemapath
-            qualname = f"{type_name.name}.__links__.{pname}.__lprops__"
-            self.write(f"__lprops__.__qualname__ = {qualname!r}")
-
-            self.write("__linkprops__: __lprops__")
+            self.write(f"__linkprops__: {link_clsname}")
             self.write()
 
             if is_forward_decl:
@@ -4123,11 +4173,11 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                     self_t,
                     line_comment="type: ignore [override]",
                 ):
-                    if ptr.card.is_multi():
+                    if link.card.is_multi():
                         self.write(
                             get_multi_link_for_proxy_docsting(
                                 source_type=objtype.name,
-                                link_name=pname,
+                                link_name=link_name,
                                 target_type=target_type.name,
                             )
                         )
@@ -4135,7 +4185,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                         self.write(
                             get_single_link_for_proxy_docsting(
                                 source_type=objtype.name,
-                                link_name=pname,
+                                link_name=link_name,
                                 target_type=target_type.name,
                             )
                         )
