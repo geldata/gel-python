@@ -68,6 +68,13 @@ class _MultiPointer(_abstract.PointerDescriptor[_T_co, _BT_co]):
     constructor: ClassVar[type] = list
 
     @classmethod
+    def __gel_resolve_dlist__(
+        cls,
+        type_args: tuple[type[Any]] | tuple[type[Any], type[Any]],
+    ) -> type:
+        raise NotImplementedError
+
+    @classmethod
     def _validate(
         cls,
         value: Any,
@@ -106,8 +113,14 @@ class _BaseMultiLink(_MultiPointer[_T_co, _BT_co]):
     ) -> pydantic_core.CoreSchema:
         if _typing_inspect.is_generic_alias(source_type):
             args = typing.get_args(source_type)
-            return core_schema.no_info_plain_validator_function(
-                functools.partial(cls._validate, generic_args=args),
+
+            return core_schema.json_or_python_schema(
+                json_schema=core_schema.list_schema(
+                    handler.generate_schema(args[0])
+                ),
+                python_schema=core_schema.no_info_plain_validator_function(
+                    functools.partial(cls._validate, generic_args=args),
+                ),
                 serialization=core_schema.wrap_serializer_function_ser_schema(
                     lambda els, _ser, info: cls.constructor(
                         obj.model_dump(
@@ -118,7 +131,7 @@ class _BaseMultiLink(_MultiPointer[_T_co, _BT_co]):
                         for obj in els
                     ),
                     info_arg=True,
-                    when_used="always",  # Make sure it's always used
+                    when_used="always",
                 ),
             )
         else:
@@ -143,7 +156,7 @@ class _BaseComputedMultiPointer(_MultiPointer[_T_co, _BT_co]):
         ) -> type[_T_co] | tuple[_T_co, ...]: ...
 
     @classmethod
-    def __gel_resolve_dlist__(
+    def __gel_resolve_dlist__(  # type: ignore [override]
         cls,
         type_args: tuple[type[Any]] | tuple[type[Any], type[Any]],
     ) -> tuple[_BT_co, ...]:
@@ -319,7 +332,7 @@ class _MultiProperty(
         ) -> None: ...
 
     @classmethod
-    def __gel_resolve_dlist__(
+    def __gel_resolve_dlist__(  # type: ignore [override]
         cls,
         type_args: tuple[type[Any]] | tuple[type[Any], type[Any]],
     ) -> _dlist.DowncastingTrackedList[_ST_co, _BT_co]:
@@ -409,9 +422,14 @@ class _AnyLink(Generic[_MT_co, _BMT_co]):
     ) -> pydantic_core.CoreSchema:
         if _typing_inspect.is_generic_alias(source_type):
             args = typing.get_args(source_type)
+
             if issubclass(args[0], ProxyModel):
-                return core_schema.no_info_plain_validator_function(
-                    functools.partial(cls._validate, generic_args=args),
+                inner_schema = handler.generate_schema(args[0])
+                return core_schema.json_or_python_schema(
+                    json_schema=inner_schema,
+                    python_schema=core_schema.no_info_plain_validator_function(
+                        functools.partial(cls._validate, generic_args=args),
+                    ),
                     serialization=cls._build_serialize(),
                 )
             else:
@@ -433,10 +451,9 @@ class _AnyLink(Generic[_MT_co, _BMT_co]):
             return value
         elif isinstance(value, bmt):
             return mt.link(value)  # type: ignore [no-any-return]
-        else:
-            raise TypeError(
-                f"could not convert {type(value)} to {mt.__name__}"
-            )
+
+        # defer to Pydantic
+        return mt.model_validate(value)  # type: ignore [no-any-return]
 
 
 class _Link(
@@ -457,22 +474,6 @@ class _Link(
         ) -> type[_MT_co] | _MT_co: ...
 
         def __set__(self, obj: Any, value: _MT_co | _BMT_co) -> None: ...
-
-    @classmethod
-    def _validate(
-        cls,
-        value: Any,
-        generic_args: tuple[type[Any], type[Any]],
-    ) -> _MT_co:
-        mt, bmt = generic_args
-        if isinstance(value, mt):
-            return value  # type: ignore [no-any-return]
-        elif isinstance(value, bmt):
-            return mt.link(value)  # type: ignore [no-any-return]
-        else:
-            raise TypeError(
-                f"could not convert {type(value)} to {mt.__name__}"
-            )
 
 
 class _OptionalLink(
@@ -633,7 +634,7 @@ class _MultiLink(
         ) -> None: ...
 
     @classmethod
-    def __gel_resolve_dlist__(
+    def __gel_resolve_dlist__(  # type: ignore [override]
         cls,
         type_args: tuple[type[Any]] | tuple[type[Any], type[Any]],
     ) -> _dlist.DistinctList[_MT_co]:
@@ -676,7 +677,7 @@ class _MultiLinkWithProps(
         ) -> None: ...
 
     @classmethod
-    def __gel_resolve_dlist__(
+    def __gel_resolve_dlist__(  # type: ignore [override]
         cls,
         type_args: tuple[type[Any]] | tuple[type[Any], type[Any]],
     ) -> _dlist.DistinctList[_PT_co]:

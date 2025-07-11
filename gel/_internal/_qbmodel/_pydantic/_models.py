@@ -338,12 +338,15 @@ def _process_pydantic_fields(
     new_fields: dict[str, pydantic.fields.FieldInfo] = {}
 
     for fn, field in fields.items():
-        if not field._complete:
-            new_fields[fn] = field
-            continue
-
         ptr = cls.__gel_reflection__.pointers.get(fn)
-        if ptr is None or ptr.computed:
+        if (ptr is None or ptr.computed) and fn != "__linkprops__":
+            # Regarding `fn != "__linkprops__"`: see MergedModelMeta --
+            # it renames `linkprops____` to `__linkprops__` to circumvent
+            # Pydantic's restriction on fields starting with `_`.
+            # In that case, the merged model does not have `__linkprops__`
+            # in its pointers, but we still want it to be a regular
+            # filed, not computed (for validation to work.)
+
             computeds[fn] = pydantic.fields.ComputedFieldInfo(
                 wrapped_property=_new_computed_func(fn),
                 return_type=field.annotation,
@@ -428,8 +431,19 @@ def _process_pydantic_fields(
             # but has no default"
             overrides["default"] = ...
 
-        if cls.__gel_variant__ is None and ptr is None:
-            # This is an ad-hoc computed pointer in a user-defined variant
+        if (
+            cls.__gel_variant__ is None
+            and ptr is None
+            and fn != "__linkprops__"
+        ):
+            # This is an ad-hoc computed pointer in a user-defined variant.
+
+            # Regarding `fn != "__linkprops__"`: see MergedModelMeta --
+            # it renames `linkprops____` to `__linkprops__` to circumvent
+            # Pydantic's restriction on fields starting with `_`.
+            # In that case we still want the `__linkprops__` field
+            # to be writeable (for validation to work.)
+
             overrides["init"] = False
             overrides["frozen"] = True
 
@@ -523,6 +537,13 @@ class GelSourceModel(
 
     @classmethod
     def __gel_model_construct__(cls, __dict__: dict[str, Any] | None) -> Self:
+        if (
+            not ll_type_getattr(cls, "__pydantic_complete__")
+            and cls.model_rebuild() is False
+        ):
+            # This will save a lot of debugging time.
+            raise TypeError(f"{cls} has unresolved fields")
+
         def_model_config = ll_type_getattr(
             cls,
             "__gel_default_model_config__",
@@ -867,9 +888,13 @@ class GelModel(
         # (just like it wouldn't be set if it wasn't fetched). This makes
         # Write/ReadWrite modes work the same way for both cases.
         self = cls.__gel_model_construct__(None)
-        for arg, value in kwargs.items():
-            setattr(self, arg, value)
 
+        validator = cls.__pydantic_validator__
+        for arg, value in kwargs.items():
+            # Faster than setattr()
+            validator.validate_assignment(self, arg, value)
+
+        self.__gel_changed_fields__ = set(self.__pydantic_fields_set__)
         self.__dict__["id"] = id
         return self
 
@@ -1079,11 +1104,37 @@ class GelLinkModel(
 _MT_co = TypeVar("_MT_co", bound=GelModel, covariant=True)
 
 
+class _MergedModelMeta(GelModelMeta):
+    def __setattr__(cls, name: str, value: Any, /) -> None:  # noqa: N805
+        # We really need a "__linkprops__" field despite Pydantic's
+        # restriction on fields starting with `_`. So we rename it
+        # with force.
+
+        if name == "__pydantic_fields__" and not cls.__dict__.get(
+            "__pydantic_complete__"
+        ):
+            if "linkprops____" in value:
+                value["__linkprops__"] = value.pop("linkprops____")
+            if "linkprops____" in cls.__annotations__:
+                cls.__annotations__["__linkprops__"] = cls.__annotations__.pop(
+                    "linkprops____"
+                )
+        super().__setattr__(name, value)
+
+
+class _MergedModelBase(GelModel, metaclass=_MergedModelMeta):
+    # Used exclusively by ProxyModel.__gel_proxy_make_merged_model__.
+    pass
+
+
 class ProxyModel(
     GelModel,
     Generic[_MT_co],
     __gel_root_class__=True,
 ):
+    if TYPE_CHECKING:
+        __gel_proxy_merged_model_cache__: ClassVar[type[pydantic.BaseModel]]
+
     __slots__ = ("__linkprops__", "_p__obj__")
 
     __gel_proxied_dunders__: ClassVar[frozenset[str]] = frozenset(
@@ -1106,6 +1157,8 @@ class ProxyModel(
         self,
         /,
         id: uuid.UUID = UNSET_UUID,  # noqa: A002
+        *,
+        __linkprops__: Any = _unset,
         **kwargs: Any,
     ) -> None:
         # Note, we don't call super().__init__() here.
@@ -1116,6 +1169,7 @@ class ProxyModel(
         # forward the constructor arguments to the wrapped object.
         wrapped = self.__proxy_of__(id, **kwargs)
         ll_setattr(self, "_p__obj__", wrapped)
+
         ll_setattr(
             self, "__linkprops__", self.__lprops__.__gel_model_construct__({})
         )
@@ -1167,16 +1221,13 @@ class ProxyModel(
             "__proxy_of__",
             "__class__",
             "__lprops__",
-            "model_dump",
-            "model_dump_json",
-            "__pydantic_serializer__",
         }:
             # Fast path for the wrapped object itself / linkprops model
             # (this optimization is informed by profiling model
             # instantiation and save() operation)
             return ll_getattr(self, name)
 
-        if name == "id" or not name.startswith("_"):
+        if name == "id" or not name.startswith(("_", "model_")):
             # Faster path for "public-like" attributes
             return ll_getattr(ll_getattr(self, "_p__obj__"), name)
 
@@ -1210,6 +1261,39 @@ class ProxyModel(
             cls.__proxy_of__ = generic_meta["args"][0]
 
     @classmethod
+    def __gel_proxy_make_merged_model__(cls) -> type[pydantic.BaseModel]:
+        # Build a model that has all fields of the proxied model +
+        # the `__linkprops__` field. This is by far the most robust way
+        # (albeit maybe a resource demanding one) to implement
+        # validation schema for ProxyModel.
+        try:
+            return cast(
+                "type[pydantic.BaseModel]",
+                cls.__dict__["__gel_proxy_merged_model_cache__"],
+            )
+        except KeyError:
+            pass
+
+        if cls.__proxy_of__ is None or cls.__lprops__ is None:
+            raise TypeError("Subclass must set __proxy_of__ and __lprops__")
+
+        merged = pydantic.create_model(
+            cls.__name__,
+            __base__=(
+                _MergedModelBase,
+                cls.__proxy_of__,
+            ),  # inherit all wrapped fields
+            __config__=DEFAULT_MODEL_CONFIG,
+            linkprops____=(
+                cls.__lprops__,
+                pydantic.Field(None, alias="__linkprops__"),
+            ),
+        )
+
+        cls.__gel_proxy_merged_model_cache__ = merged
+        return merged
+
+    @classmethod
     def __get_pydantic_core_schema__(
         cls,
         source_type: Any,
@@ -1220,9 +1304,38 @@ class ProxyModel(
         ):
             return handler(source_type)
         else:
-            return core_schema.no_info_before_validator_function(
-                cls,  # pyright: ignore [reportArgumentType]
-                schema=handler.generate_schema(cls.__proxy_of__),
+
+            def _validate(value: Any) -> Any:
+                if isinstance(value, cls.__gel_proxy_merged_model_cache__):
+                    dct = value.__dict__
+
+                    lps = dct.pop("__linkprops__", None)
+                    lps_dct = None
+                    if lps is not None:
+                        lps_dct = lps.__dict__
+
+                    # construct in the fastest way possible, the data
+                    # has already been validated by the "merged" model.
+                    obj = cls.__proxy_of__.__gel_model_construct__(dct)
+                    return cls.__gel_proxy_construct__(obj, lps_dct or {})
+
+                if isinstance(value, cls):  # already wrapped (edge-case)
+                    return value
+
+                if isinstance(value, cls.__proxy_of__):
+                    return cls.__gel_proxy_construct__(value, {})
+
+                raise TypeError(
+                    f"cannot validate proxy, unexpected value type: "
+                    f"{type(value)}"
+                )
+
+            merged_schema = handler.generate_schema(
+                cls.__gel_proxy_make_merged_model__()
+            )
+            return core_schema.no_info_after_validator_function(
+                _validate,
+                schema=merged_schema,
                 serialization=core_schema.wrap_serializer_function_ser_schema(
                     lambda obj, _ser, info: obj.model_dump(
                         **_pydantic_utils.serialization_info_to_dump_kwargs(
@@ -1277,11 +1390,37 @@ class ProxyModel(
     def __repr_name__(self) -> str:
         cls = type(self)
         base_cls = cls.__bases__[0]
-        return f"Proxy[{base_cls.__module__}.{base_cls.__qualname__}]"
+
+        # Thank me later; this can happen when adjusting our complex
+        # serialization or __init__ / __new__ logic.
+        incomplete = ""
+        no_lprops = not hasattr(self, "__linkprops__")
+        no_obj = not hasattr(self, "_p__obj__")
+        if no_lprops or no_obj:
+            incomplete = "Incomplete["
+            if no_lprops:
+                incomplete += "no lprops"
+            if no_obj:
+                if no_lprops:
+                    incomplete += ","
+                incomplete += "no obj"
+            incomplete += "]"
+
+        return (
+            f"Proxy{incomplete}[{base_cls.__module__}.{base_cls.__qualname__}]"
+        )
 
     def __repr_args__(self) -> Iterable[tuple[str | None, Any]]:
-        yield from self.__linkprops__.__repr_args__()
-        yield from self._p__obj__.__repr_args__()
+        # We use `hasattr()` because an object might require working
+        # repr() halfway through its initialization. We don't want
+        # to crash in that case.
+        if hasattr(self, "__linkprops__"):
+            # We render `__linkprops__` as a field, not mixing in
+            # link properties with regular properties/links. It's
+            # utterly confusing when repr() disagrees with model_dump().
+            yield ("__linkprops__", self.__linkprops__)
+        if hasattr(self, "_p__obj__"):
+            yield from self._p__obj__.__repr_args__()
 
     @_utils.inherit_signature(  # type: ignore [arg-type]
         pydantic.BaseModel.model_dump,
@@ -1306,6 +1445,9 @@ class ProxyModel(
         pydantic.BaseModel.model_dump_json,
     )
     def model_dump_json(self, /, **kwargs: Any) -> str:
+        # model_dump_json() is a thin wrapper around model_dump(),
+        # so we don't need to repeat the logic of including
+        # __linkprops__ here.
         kwargs = _kwargs_exclude_id(self.id, kwargs)
         return super().model_dump_json(**kwargs)
 

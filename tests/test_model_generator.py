@@ -395,7 +395,8 @@ class TestModelGenerator(tb.ModelTestCase):
         # Check that validation is enabled for objects created by codecs
 
         with self.assertRaisesRegex(
-            ValueError, r"accepts only values of type.*User.*, got.*Post"
+            ValueError,
+            r"(?s)\bplayers\b\n.*dictionary or instance of players",
         ):
             d.players.append(post)  # type: ignore [arg-type]
 
@@ -586,30 +587,35 @@ class TestModelGenerator(tb.ModelTestCase):
             .limit(1)  # TODO: detect cardinality, name is exclusive
         )
 
+        expected = {
+            "name": "Gold Coin",
+            "owner": {
+                "name": "Billie",
+                "nickname": None,
+                "__linkprops__": {"bonus": True, "count": 34},
+            },
+        }
+
         self.assertEqual(
             pop_ids(sl.model_dump()),
-            {
-                "name": "Gold Coin",
-                "owner": {
-                    "name": "Billie",
-                    "nickname": None,
-                    "__linkprops__": {"bonus": True, "count": 34},
-                },
-            },
+            expected,
+        )
+
+        self.assertEqual(
+            sl.model_dump(exclude={"id": True, "owner": {"id": True}}),
+            expected,
         )
 
         self.assertEqual(
             pop_ids_json(sl.model_dump_json()),
             json.dumps(
-                {
-                    "name": "Gold Coin",
-                    "owner": {
-                        "name": "Billie",
-                        "nickname": None,
-                        "__linkprops__": {"bonus": True, "count": 34},
-                    },
-                },
+                expected,
             ),
+        )
+
+        self.assertEqual(
+            sl.model_dump_json(exclude={"id": True, "owner": {"id": True}}),
+            json.dumps(expected, separators=(",", ":")),
         )
 
         self.assertEqual(

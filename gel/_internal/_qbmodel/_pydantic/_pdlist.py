@@ -182,9 +182,10 @@ class ProxyDistinctList(
                 value,
             )
 
-        raise ValueError(
-            f"{cls!r} accepts only values of type {t.__name__} "
-            f"or {t.__proxy_of__.__name__}, got {tp_value!r}",
+        proxy = t.model_validate(value)
+        return (
+            proxy,
+            ll_getattr(proxy, "_p__obj__"),
         )
 
     def _check_value(self, value: Any) -> _PT_co:
