@@ -28,7 +28,8 @@ import pydantic_core
 from pydantic_core import core_schema
 
 
-from gel._internal import _dlist
+from gel._internal import _tracked_list
+from gel._internal._qbmodel._abstract._distinct_list import DistinctList
 from gel._internal import _edgeql
 from gel._internal import _typing_inspect
 
@@ -313,7 +314,7 @@ class _MultiProperty(
             instance: Any,
             owner: type[Any] | None = None,
             /,
-        ) -> _dlist.DowncastingTrackedList[_ST_co, _BT_co]: ...
+        ) -> _tracked_list.DowncastingTrackedList[_ST_co, _BT_co]: ...
 
         def __get__(
             self,
@@ -321,7 +322,9 @@ class _MultiProperty(
             owner: type[Any] | None = None,
             /,
         ) -> (
-            type[_ST_co] | _dlist.DowncastingTrackedList[_ST_co, _BT_co] | None
+            type[_ST_co]
+            | _tracked_list.DowncastingTrackedList[_ST_co, _BT_co]
+            | None
         ): ...
 
         def __set__(
@@ -335,22 +338,22 @@ class _MultiProperty(
     def __gel_resolve_dlist__(  # type: ignore [override]
         cls,
         type_args: tuple[type[Any]] | tuple[type[Any], type[Any]],
-    ) -> _dlist.DowncastingTrackedList[_ST_co, _BT_co]:
-        return _dlist.DowncastingTrackedList[type_args[0], type_args[1]]  # type: ignore [return-value, valid-type]
+    ) -> _tracked_list.DowncastingTrackedList[_ST_co, _BT_co]:
+        return _tracked_list.DowncastingTrackedList[type_args[0], type_args[1]]  # type: ignore [return-value, valid-type]
 
     @classmethod
     def _validate(
         cls,
         value: Any,
         generic_args: tuple[type[Any], type[Any]],
-    ) -> _dlist.DowncastingTrackedList[_ST_co, _BT_co]:
-        lt: type[_dlist.DowncastingTrackedList[_ST_co, _BT_co]] = (
-            _dlist.DowncastingTrackedList[
+    ) -> _tracked_list.DowncastingTrackedList[_ST_co, _BT_co]:
+        lt: type[_tracked_list.DowncastingTrackedList[_ST_co, _BT_co]] = (
+            _tracked_list.DowncastingTrackedList[
                 generic_args[0],  # type: ignore [valid-type]
                 generic_args[1],  # type: ignore [valid-type]
             ]
         )
-        return _dlist.convert_to_dlist(value, lt)
+        return DistinctList.__gel_validate__(lt, value)
 
 
 class _ComputedMultiProperty(
@@ -365,7 +368,7 @@ MultiProperty = TypeAliasType(
     Annotated[
         _MultiProperty[_ST_co, _BT_co],
         pydantic.Field(
-            default_factory=_dlist.DefaultList,
+            default_factory=_tracked_list.DefaultList,
             # Force validate call to convert the empty list
             # to a properly typed one.
             validate_default=True,
@@ -621,13 +624,13 @@ class _MultiLink(
         @overload
         def __get__(
             self, obj: object, objtype: Any = None
-        ) -> _dlist.DistinctList[_MT_co]: ...
+        ) -> DistinctList[_MT_co]: ...
 
         def __get__(
             self,
             obj: Any,
             objtype: Any = None,
-        ) -> type[_MT_co] | _dlist.DistinctList[_MT_co] | None: ...
+        ) -> type[_MT_co] | DistinctList[_MT_co] | None: ...
 
         def __set__(
             self, obj: Any, value: Sequence[_MT_co | _BMT_co]
@@ -637,19 +640,19 @@ class _MultiLink(
     def __gel_resolve_dlist__(  # type: ignore [override]
         cls,
         type_args: tuple[type[Any]] | tuple[type[Any], type[Any]],
-    ) -> _dlist.DistinctList[_MT_co]:
-        return _dlist.DistinctList[type_args[0]]  # type: ignore [return-value, valid-type]
+    ) -> DistinctList[_MT_co]:
+        return DistinctList[type_args[0]]  # type: ignore [return-value, valid-type]
 
     @classmethod
     def _validate(
         cls,
         value: Any,
         generic_args: tuple[type[Any], type[Any]],
-    ) -> _dlist.DistinctList[_MT_co]:
-        lt: type[_dlist.DistinctList[_MT_co]] = _dlist.DistinctList[
+    ) -> DistinctList[_MT_co]:
+        lt: type[DistinctList[_MT_co]] = DistinctList[
             generic_args[0],  # type: ignore [valid-type]
         ]
-        return _dlist.convert_to_dlist(value, lt)
+        return DistinctList.__gel_validate__(lt, value)
 
 
 class _MultiLinkWithProps(
@@ -680,7 +683,7 @@ class _MultiLinkWithProps(
     def __gel_resolve_dlist__(  # type: ignore [override]
         cls,
         type_args: tuple[type[Any]] | tuple[type[Any], type[Any]],
-    ) -> _dlist.DistinctList[_PT_co]:
+    ) -> DistinctList[_PT_co]:
         return ProxyDistinctList[
             type_args[0],  # type: ignore [valid-type]
             type_args[1],  # type: ignore [valid-type]
@@ -696,7 +699,7 @@ class _MultiLinkWithProps(
             generic_args[0],  # type: ignore [valid-type]
             generic_args[1],  # type: ignore [valid-type]
         ]
-        return _dlist.convert_to_dlist(value, lt)
+        return DistinctList.__gel_validate__(lt, value)
 
 
 OptionalMultiLink = TypeAliasType(
@@ -704,7 +707,7 @@ OptionalMultiLink = TypeAliasType(
     Annotated[
         _MultiLink[_MT_co, _MT_co],
         pydantic.Field(
-            default_factory=_dlist.DefaultList,
+            default_factory=_tracked_list.DefaultList,
             # Force validate call to convert the empty list
             # to a properly typed one.
             validate_default=True,
@@ -722,7 +725,7 @@ RequiredMultiLink = TypeAliasType(
     Annotated[
         _MultiLink[_MT_co, _MT_co],
         pydantic.Field(
-            default_factory=_dlist.DefaultList,
+            default_factory=_tracked_list.DefaultList,
             # Force validate call to convert the empty list
             # to a properly typed one.
             validate_default=True,
@@ -759,7 +762,7 @@ OptionalMultiLinkWithProps = TypeAliasType(
     Annotated[
         _MultiLinkWithProps[_PT_co, _MT_co],
         pydantic.Field(
-            default_factory=_dlist.DefaultList,
+            default_factory=_tracked_list.DefaultList,
             # Force validate call to convert the empty list
             # to a properly typed one.
             validate_default=True,
@@ -778,7 +781,7 @@ RequiredMultiLinkWithProps = TypeAliasType(
     Annotated[
         _MultiLinkWithProps[_PT_co, _MT_co],
         pydantic.Field(
-            default_factory=_dlist.DefaultList,
+            default_factory=_tracked_list.DefaultList,
             # Force validate call to convert the empty list
             # to a properly typed one.
             validate_default=True,

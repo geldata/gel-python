@@ -38,7 +38,7 @@ from gel import MultiRange, Range, errors
 from gel import _testbase as tb
 from gel._internal import _dirdiff
 from gel._internal import _typing_inspect
-from gel._internal._dlist import DistinctList
+from gel._internal._qbmodel._abstract._distinct_list import DistinctList
 from gel._internal._edgeql import Cardinality, PointerKind
 from gel._internal._qbmodel._pydantic._models import GelModel
 from gel._internal._qbmodel._pydantic._pdlist import (
@@ -377,7 +377,9 @@ class TestModelGenerator(tb.ModelTestCase):
 
     @tb.typecheck
     def test_modelgen_data_init_unfetched_link(self):
-        from gel._internal._dlist import AbstractDistinctList
+        from gel._internal._qbmodel._abstract._distinct_list import (
+            AbstractDistinctList,
+        )
         import models as m
 
         ug = self.client.query_required_single(m.UserGroup.limit(1))
@@ -2468,7 +2470,7 @@ class TestModelGenerator(tb.ModelTestCase):
         #   and collections (test for explicit assignments, fetched data,
         #   new data, default values)
 
-        from gel._internal._dlist import Mode
+        from gel._internal._tracked_list import Mode
         from models import default
 
         u = default.User(name="Wat")
@@ -2667,7 +2669,7 @@ class TestModelGenerator(tb.ModelTestCase):
     def test_modelgen_save_34(self):
         # new User and GameSession objects with players assignment
         # Select data, modify it, check consistency
-        from gel._internal._dlist import Mode
+        from gel._internal._tracked_list import Mode
         from models import default
 
         # Create new users
@@ -2723,7 +2725,7 @@ class TestModelGenerator(tb.ModelTestCase):
     def test_modelgen_save_35(self):
         # GameSession with players assignment then clear
         # Select data, modify it, check consistency
-        from gel._internal._dlist import Mode
+        from gel._internal._tracked_list import Mode
         from models import default
 
         # Get existing user
@@ -2765,7 +2767,7 @@ class TestModelGenerator(tb.ModelTestCase):
         # Fetch a GameSession object, save its id. Make a new GameSession
         # instance, pass id to it (but not players). Test overriding
         # `.players` link with a new collection
-        from gel._internal._dlist import Mode
+        from gel._internal._tracked_list import Mode
         from models import default
 
         # Get existing GameSession with players
@@ -2822,7 +2824,7 @@ class TestModelGenerator(tb.ModelTestCase):
         # Fetch a GameSession object, save its id.
         # Make a new GameSession instance,
         # pass id to it. Test appending to players.
-        from gel._internal._dlist import Mode
+        from gel._internal._tracked_list import Mode
         from models import default
 
         # Get existing GameSession with players
@@ -2874,7 +2876,7 @@ class TestModelGenerator(tb.ModelTestCase):
         # Fetch a GameSession object, save its id. Make a new GameSession
         # instance, pass id and players list to it. Test that save()
         # overrides the data.
-        from gel._internal._dlist import Mode
+        from gel._internal._tracked_list import Mode
         from models import default
 
         # Get existing GameSession with players
@@ -2937,7 +2939,7 @@ class TestModelGenerator(tb.ModelTestCase):
     def test_modelgen_write_only_dlist_errors(self):
         # Test that reading operations on write-only dlists raise
         # RuntimeError
-        from gel._internal._dlist import Mode
+        from gel._internal._tracked_list import Mode
         from models import default
 
         # Create a GameSession with a known ID but without fetching players

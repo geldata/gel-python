@@ -21,7 +21,7 @@ import inspect
 import typing
 
 from gel.datatypes import datatypes
-from gel._internal import _dlist
+from gel._internal import _tracked_list
 
 
 cdef dict CARDS_MAP = {
@@ -32,7 +32,7 @@ cdef dict CARDS_MAP = {
     datatypes.EdgeFieldCardinality.AT_LEAST_ONE: enums.Cardinality.AT_LEAST_ONE,
 }
 
-cdef DLIST_READ_WRITE = _dlist.Mode.ReadWrite
+cdef DLIST_READ_WRITE = _tracked_list.Mode.ReadWrite
 
 
 @cython.final
@@ -438,7 +438,7 @@ cdef class ObjectCodec(BaseNamedRecordCodec):
                         and (
                             issubclass(
                                 ptrtype,
-                                (_dlist.AbstractTrackedList, tuple),
+                                (_tracked_list.AbstractTrackedList, tuple),
                             )
                         )
                     ):

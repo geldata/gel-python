@@ -72,7 +72,9 @@ class GelModelMeta(GelObjectTypeMeta):
 
 
 class GelSourceModel(_qb.GelSourceMetadata):
-    pass
+    @classmethod
+    def __gel_validate__(cls, value: Any) -> GelSourceModel:
+        raise NotImplementedError
 
 
 class GelModel(
