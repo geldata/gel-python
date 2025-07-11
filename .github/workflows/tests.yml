@@ -27,12 +27,12 @@ jobs:
       matrix:
         python-version: ["3.10", "3.11", "3.12", "3.13"]
         gel-version: [6, nightly]
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os: [ubuntu-latest, macos-latest, windows-2025]
         loop: [asyncio, uvloop]
         exclude:
           # uvloop does not support windows
           - loop: uvloop
-            os: windows-latest
+            os: windows-2025
 
     steps:
     - uses: actions/checkout@v4
@@ -56,8 +56,8 @@ jobs:
       # branch restrictions.
 
     - name: Setup WSL
-      if: ${{ steps.release.outputs.version == 0 && matrix.os == 'windows-latest' }}
-      uses: vampire/setup-wsl@3b46b44374d5d0ae94654c45d114a3ed7a0e07a8  # v5.0.1
+      if: ${{ steps.release.outputs.version == 0 && startsWith(matrix.os, 'windows-') }}
+      uses: vampire/setup-wsl@6a8db447be7ed35f2f499c02c6e60ff77ef11278  # v6.0.0
       with:
         wsl-shell-user: edgedb
         additional-packages:
