@@ -21,10 +21,12 @@ from gel._internal._qbmodel._pydantic._models import (
     GelSourceModel,
     ProxyModel,
 )
-from gel._internal._dlist import (
-    AbstractDistinctList,
+from gel._internal._tracked_list import (
     TrackedList,
     DowncastingTrackedList,
+)
+from gel._internal._qbmodel._abstract._distinct_list import (
+    AbstractDistinctList,
     DistinctList,
 )
 from gel._internal._unsetid import UNSET_UUID

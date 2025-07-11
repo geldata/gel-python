@@ -16,12 +16,15 @@ from typing import (
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
+    from gel._internal._tracked_list import Mode
 
 from typing_extensions import (
     Self,
 )
 
-from gel._internal import _dlist
+from gel._internal._qbmodel._abstract._distinct_list import (
+    AbstractDistinctList,
+)
 from gel._internal import _typing_parametric as parametric
 
 from ._models import GelModel, ProxyModel
@@ -41,7 +44,7 @@ ll_getattr = object.__getattribute__
 
 class ProxyDistinctList(
     parametric.ParametricType,
-    _dlist.AbstractDistinctList[_PT_co],
+    AbstractDistinctList[_PT_co],
     Generic[_PT_co, _BMT_co],
 ):
     # Mapping of object IDs to ProxyModels that wrap them.
@@ -259,7 +262,7 @@ class ProxyDistinctList(
         initial_items: list[_PT_co] | None,
         hashables: set[_PT_co] | None,
         unhashables: list[_PT_co] | None,
-        mode: _dlist.Mode,
+        mode: Mode,
         gel_overwrite_data: bool,  # noqa: FBT001
     ) -> ProxyDistinctList[_PT_co, _BMT_co]:
         cls = cast(

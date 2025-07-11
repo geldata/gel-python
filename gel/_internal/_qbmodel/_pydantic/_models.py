@@ -37,7 +37,7 @@ from pydantic._internal import _decorators  # noqa: PLC2701
 from pydantic._internal._core_utils import get_type_ref  # noqa: PLC2701
 
 from gel._internal import _qb
-from gel._internal import _dlist
+from gel._internal import _tracked_list
 from gel._internal import _typing_inspect
 from gel._internal import _utils
 from gel._internal._unsetid import UNSET_UUID
@@ -600,30 +600,30 @@ class GelSourceModel(
             if not ptr.cardinality.is_multi():
                 continue
 
-            wrapped: _dlist.AbstractTrackedList[Any]
-            if not isinstance(val, _dlist.AbstractTrackedList):
+            wrapped: _tracked_list.AbstractTrackedList[Any]
+            if not isinstance(val, _tracked_list.AbstractTrackedList):
                 dlist_ctr = pointer_ctrs[name]
-                assert issubclass(dlist_ctr, _dlist.AbstractTrackedList)
+                assert issubclass(dlist_ctr, _tracked_list.AbstractTrackedList)
                 wrapped = dlist_ctr(
                     val,
                     __wrap_list__=True,
-                    __mode__=_dlist.Mode.ReadWrite,
+                    __mode__=_tracked_list.Mode.ReadWrite,
                 )
                 __dict__[name] = wrapped
             else:
                 wrapped = val
 
-            if type(val) is _dlist.DefaultList or (
+            if type(val) is _tracked_list.DefaultList or (
                 not val and name not in values
             ):
                 # The list is empty and it wasn't provided by the user
                 # explicitly, so it must be coming from a default.
                 # Adjuist the tracking flags accordingly.
-                wrapped._mode = _dlist.Mode.Write
+                wrapped._mode = _tracked_list.Mode.Write
                 wrapped.__gel_overwrite_data__ = False
             else:
                 wrapped.__gel_overwrite_data__ = True
-                wrapped._mode = _dlist.Mode.ReadWrite
+                wrapped._mode = _tracked_list.Mode.ReadWrite
 
         ll_setattr(
             self, "__gel_changed_fields__", set(self.__pydantic_fields_set__)
@@ -756,7 +756,7 @@ class GelSourceModel(
                     f"to {type(self).__name__}.{name}; a list is expected"
                 )
 
-            assert isinstance(current_value, _dlist.AbstractTrackedList)
+            assert isinstance(current_value, _tracked_list.AbstractTrackedList)
             current_value.clear()
             current_value.__gel_reset_snapshot__()
             if value:
@@ -769,7 +769,7 @@ class GelSourceModel(
             # signalling that the data should be replaced with new
             # data on save.
             current_value.__gel_overwrite_data__ = True
-            current_value._mode = _dlist.Mode.ReadWrite
+            current_value._mode = _tracked_list.Mode.ReadWrite
 
         finally:
             if ptr is not None:
@@ -791,6 +791,10 @@ class GelSourceModel(
         raise NotImplementedError(
             'Gel models do not support the "del" operation'
         )
+
+    @classmethod
+    def __gel_validate__(cls, value: Any) -> GelSourceModel:
+        return cls.model_validate(value)
 
 
 def _kwargs_exclude_id(
@@ -941,7 +945,7 @@ class GelModel(
         # without the link specified, in which case the codec wouldn't
         # construct the list; we can do that lazily.
 
-        if field.default_factory is _dlist.DefaultList:
+        if field.default_factory is _tracked_list.DefaultList:
             # A multi link?
             ptrs = cls.__gel_reflection__.pointers
             ptr = ptrs.get(name)
@@ -957,8 +961,10 @@ class GelModel(
                 )
                 # Fetch the validated/coerced value (`list` will be converted
                 # to a variant of TrackedList.)
-                lst: _dlist.AbstractTrackedList[Any] = getattr(self, name)
-                lst._mode = _dlist.Mode.Write
+                lst: _tracked_list.AbstractTrackedList[Any] = getattr(
+                    self, name
+                )
+                lst._mode = _tracked_list.Mode.Write
                 # This list was created on demand to allow append/remove
                 # operations. We don't want to *replace* the data with
                 # elements from this list, we want to update it by

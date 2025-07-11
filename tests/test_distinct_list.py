@@ -1,11 +1,16 @@
+from typing import Any
 from collections.abc import MutableSequence
 import unittest
 
-from gel._internal._dlist import DistinctList, Mode
+from gel._internal._tracked_list import Mode
+from gel._internal._qbmodel._abstract._distinct_list import DistinctList
+from gel._internal._qbmodel._abstract._objects import GelSourceModel
 
 
 # A concrete DistinctList that accepts any object
 class AnyList(DistinctList[object]):
+    # XXX fix this class - should use BoxedInt or something
+
     def __init__(self, *args, **kwargs) -> None:
         if "__mode__" not in kwargs:
             super().__init__(*args, __mode__=Mode.ReadWrite, **kwargs)
@@ -13,7 +18,18 @@ class AnyList(DistinctList[object]):
             super().__init__(*args, **kwargs)
 
 
-class IntList(DistinctList[int]):
+class BoxedInt(GelSourceModel):
+    def __init__(self, value: int):
+        self.value = value
+
+    @classmethod
+    def __gel_validate__(cls, value: Any):
+        if not isinstance(value, int):
+            return int(value)
+        return value
+
+
+class IntList(DistinctList[BoxedInt]):
     def __init__(self, *args, **kwargs) -> None:
         if "__mode__" not in kwargs:
             super().__init__(*args, __mode__=Mode.ReadWrite, **kwargs)
