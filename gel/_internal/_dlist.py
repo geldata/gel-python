@@ -24,7 +24,6 @@ from typing_extensions import (
 
 from collections.abc import (
     Callable,
-    Hashable,
     Iterable,
     Iterator,
     MutableSequence,
@@ -36,6 +35,9 @@ import functools
 from gel._internal import _typing_inspect
 from gel._internal import _typing_parametric as parametric
 from gel._internal._polyfills._strenum import StrEnum
+
+if TYPE_CHECKING:
+    from gel._internal._qbmodel._pydantic import GelModel
 
 
 _T_co = TypeVar("_T_co", covariant=True)
@@ -483,27 +485,27 @@ class DowncastingTrackedList(
         return lst
 
 
-_HT_co = TypeVar("_HT_co", bound=Hashable, covariant=True)
+_MT_co = TypeVar("_MT_co", bound="GelModel", covariant=True)
 
 
 @functools.total_ordering
-class AbstractDistinctList(AbstractTrackedList[_HT_co]):
+class AbstractDistinctList(AbstractTrackedList[_MT_co]):
     """A mutable, ordered set-like list that enforces element-type covariance
     at runtime and maintains distinctness of elements in insertion order using
     a list and set.
     """
 
     # Set of (hashable) items to maintain distinctness.
-    _set: set[_HT_co] | None
+    _set: set[_MT_co] | None
 
     # Assuming unhashable items compare by object identity,
     # the dict below is used as an extension for distinctness
     # checks.
-    _unhashables: dict[int, _HT_co] | None
+    _unhashables: dict[int, _MT_co] | None
 
     def __init__(
         self,
-        iterable: Iterable[_HT_co] = (),
+        iterable: Iterable[_MT_co] = (),
         *,
         __wrap_list__: bool = False,
         __mode__: Mode,
@@ -515,6 +517,15 @@ class AbstractDistinctList(AbstractTrackedList[_HT_co]):
             __wrap_list__=__wrap_list__,
             __mode__=__mode__,
         )
+
+    def _check_value(self, value: Any) -> _MT_co:
+        cls = type(self)
+
+        t = cls.type
+        if isinstance(value, cls.type):
+            return value
+
+        return t.model_validate(value)
 
     def _ensure_snapshot(self) -> None:
         # "_ensure_snapshot" is called right before any mutation:
@@ -547,7 +558,7 @@ class AbstractDistinctList(AbstractTrackedList[_HT_co]):
         else:
             assert self._unhashables is not None
 
-    def _track_item(self, item: _HT_co) -> None:  # type: ignore [misc]
+    def _track_item(self, item: _MT_co) -> None:  # type: ignore [misc]
         assert self._set is not None
         try:
             self._set.add(item)
@@ -559,7 +570,7 @@ class AbstractDistinctList(AbstractTrackedList[_HT_co]):
         assert self._unhashables is not None
         self._unhashables[id(item)] = item
 
-    def _untrack_item(self, item: _HT_co) -> None:  # type: ignore [misc]
+    def _untrack_item(self, item: _MT_co) -> None:  # type: ignore [misc]
         assert self._set is not None
         try:
             self._set.remove(item)
@@ -572,7 +583,7 @@ class AbstractDistinctList(AbstractTrackedList[_HT_co]):
         assert self._unhashables is not None
         self._unhashables.pop(id(item), None)
 
-    def _is_tracked(self, item: _HT_co) -> bool:  # type: ignore [misc]
+    def _is_tracked(self, item: _MT_co) -> bool:  # type: ignore [misc]
         self._init_tracking()
         assert self._set is not None
 
@@ -588,7 +599,7 @@ class AbstractDistinctList(AbstractTrackedList[_HT_co]):
     def __setitem__(
         self,
         index: SupportsIndex | slice,
-        value: _HT_co | Iterable[_HT_co],
+        value: _MT_co | Iterable[_MT_co],
     ) -> None:
         self._ensure_snapshot()
 
@@ -599,7 +610,7 @@ class AbstractDistinctList(AbstractTrackedList[_HT_co]):
                     "Slice assignment with step != 1 not supported",
                 )
 
-            new_values = self._check_values(value)  # type: ignore [arg-type]
+            new_values = self._check_values(value)
 
             for item in self._items[start:stop]:
                 self._untrack_item(item)
@@ -647,7 +658,7 @@ class AbstractDistinctList(AbstractTrackedList[_HT_co]):
     def __contains__(self, item: object) -> bool:
         return self._is_tracked(item)  # type: ignore [arg-type]
 
-    def insert(self, index: SupportsIndex, value: _HT_co) -> None:  # type: ignore [misc]
+    def insert(self, index: SupportsIndex, value: _MT_co) -> None:  # type: ignore [misc]
         """Insert item at index if not already present."""
         value = self._check_value(value)
 
@@ -663,24 +674,24 @@ class AbstractDistinctList(AbstractTrackedList[_HT_co]):
         self._items.insert(index, value)
         self._track_item(value)
 
-    def extend(self, values: Iterable[_HT_co]) -> None:
+    def extend(self, values: Iterable[_MT_co]) -> None:
         if values is self:
             values = list(values)
         for v in values:
             self.append(v)
 
-    def append(self, value: _HT_co) -> None:  # type: ignore [misc]
+    def append(self, value: _MT_co) -> None:  # type: ignore [misc]
         value = self._check_value(value)
         self._ensure_snapshot()
         self._append_no_check(value)
 
-    def _append_no_check(self, value: _HT_co) -> None:  # type: ignore[misc]
+    def _append_no_check(self, value: _MT_co) -> None:  # type: ignore[misc]
         if self._is_tracked(value):
             return
         self._track_item(value)
         self._items.append(value)
 
-    def remove(self, value: _HT_co) -> None:  # type: ignore [misc]
+    def remove(self, value: _MT_co) -> None:  # type: ignore [misc]
         """Remove item; raise ValueError if missing."""
         if not self._is_tracked(value):
             pass
@@ -690,7 +701,7 @@ class AbstractDistinctList(AbstractTrackedList[_HT_co]):
         self._untrack_item(value)
         self._items.remove(value)
 
-    def pop(self, index: SupportsIndex = -1) -> _HT_co:
+    def pop(self, index: SupportsIndex = -1) -> _MT_co:
         """Remove and return item at index (default last)."""
         self._ensure_snapshot()
         item = self._items.pop(index)
@@ -707,7 +718,7 @@ class AbstractDistinctList(AbstractTrackedList[_HT_co]):
     @requires_read("index items of")
     def index(
         self,
-        value: _HT_co,  # type: ignore [misc]
+        value: _MT_co,  # type: ignore [misc]
         start: SupportsIndex = 0,
         stop: SupportsIndex | None = None,
     ) -> int:
@@ -720,7 +731,7 @@ class AbstractDistinctList(AbstractTrackedList[_HT_co]):
         )
 
     @requires_read("count items of")
-    def count(self, value: _HT_co) -> int:  # type: ignore [misc]
+    def count(self, value: _MT_co) -> int:  # type: ignore [misc]
         """Return 1 if item is present, else 0."""
         value = self._check_value(value)
         if self._is_tracked(value):
@@ -730,8 +741,8 @@ class AbstractDistinctList(AbstractTrackedList[_HT_co]):
 
 
 class DistinctList(
-    parametric.SingleParametricType[_T_co],
-    AbstractDistinctList[_T_co],
+    parametric.SingleParametricType[_MT_co],
+    AbstractDistinctList[_MT_co],
 ):
     def __reduce__(self) -> tuple[Any, ...]:
         cls = type(self)
@@ -753,17 +764,17 @@ class DistinctList(
 
     @staticmethod
     def _reconstruct_from_pickle(  # noqa: PLR0917
-        origin: type[DistinctList[_T_co]],
-        tp: type[_T_co],  # pyright: ignore [reportGeneralTypeIssues]
-        items: list[_T_co],
-        initial_items: list[_T_co] | None,
-        hashables: set[_T_co] | None,
-        unhashables: list[_T_co] | None,
+        origin: type[DistinctList[_MT_co]],
+        tp: type[_MT_co],  # pyright: ignore [reportGeneralTypeIssues]
+        items: list[_MT_co],
+        initial_items: list[_MT_co] | None,
+        hashables: set[_MT_co] | None,
+        unhashables: list[_MT_co] | None,
         mode: Mode,
         gel_overwrite_data: bool,  # noqa: FBT001
-    ) -> DistinctList[_T_co]:
+    ) -> DistinctList[_MT_co]:
         cls = cast(
-            "type[DistinctList[_T_co]]",
+            "type[DistinctList[_MT_co]]",
             origin[tp],  # type: ignore [index]
         )
         lst = cls.__new__(cls)
