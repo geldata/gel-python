@@ -318,8 +318,9 @@ class TestSchemaPath(unittest.TestCase):
         """Test as_pathlib_path method."""
         path = SchemaPath("std::cal::local_time")
         pathlib_path = path.as_pathlib_path()
+        expected = pathlib.Path("std", "cal", "local_time")
         self.assertIsInstance(pathlib_path, pathlib.Path)
-        self.assertEqual(str(pathlib_path), "std/cal/local_time")
+        self.assertEqual(pathlib_path, expected)
 
     def test_schemapath_caching(self):
         """Test that properties are properly cached."""
