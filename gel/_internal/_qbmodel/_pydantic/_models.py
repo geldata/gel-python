@@ -13,7 +13,6 @@ from typing import (
     Generic,
     TypeVar,
     cast,
-    overload,
 )
 
 from typing_extensions import (
@@ -1139,33 +1138,12 @@ class GelModel(
         return copied
 
 
-_T_co = TypeVar("_T_co", covariant=True)
-
-
-class LinkPropsDescriptor(Generic[_T_co]):
-    @overload
-    def __get__(self, obj: None, owner: type[Any]) -> type[_T_co]: ...
-
-    @overload
-    def __get__(
-        self, obj: object, owner: type[Any] | None = None
-    ) -> _T_co: ...
-
-    def __get__(
-        self, obj: Any, owner: type[Any] | None = None
-    ) -> _T_co | type[_T_co]:
-        if obj is None:
-            assert owner is not None
-            return owner.__lprops__  # type: ignore [no-any-return]
-        else:
-            return obj.__linkprops__  # type: ignore [no-any-return]
-
-
 class GelLinkModel(
     GelSourceModel,
+    _abstract.GelLinkModel,
     __gel_root_class__=True,
 ):
-    # Base class for __lprops__ classes.
+    # Base class for __linkprops__ classes.
     __slots__ = ()
 
 
@@ -1205,7 +1183,7 @@ class ProxyModel(
     if TYPE_CHECKING:
         __gel_proxy_merged_model_cache__: ClassVar[type[pydantic.BaseModel]]
 
-    __slots__ = ("__linkprops__", "_p__obj__")
+    __slots__ = ("_p__obj__",)
 
     __gel_proxied_dunders__: ClassVar[frozenset[str]] = frozenset(
         {
@@ -1217,8 +1195,7 @@ class ProxyModel(
         _p__obj__: _MT_co
 
         __proxy_of__: ClassVar[type[_MT_co]]  # type: ignore [misc]
-        __linkprops__: GelLinkModel
-        __lprops__: ClassVar[type[GelLinkModel]]
+        __linkprops__: _abstract.GelLinkModelDescriptor[GelLinkModel]
 
     def __new__(cls, *args: Any, **kwargs: Any) -> Self:
         return cls.__gel_model_construct__(None)
@@ -1240,14 +1217,9 @@ class ProxyModel(
         wrapped = self.__proxy_of__(id, **kwargs)
         ll_setattr(self, "_p__obj__", wrapped)
 
-        ll_setattr(
-            self, "__linkprops__", self.__lprops__.__gel_model_construct__({})
-        )
-
     @classmethod
     def link(cls, obj: _MT_co, /, **link_props: Any) -> Self:  # type: ignore [misc]
         proxy_of = ll_type_getattr(cls, "__proxy_of__")
-        lprops_cls = ll_type_getattr(cls, "__lprops__")
 
         if type(obj) is not proxy_of:
             if isinstance(obj, ProxyModel):
@@ -1276,8 +1248,7 @@ class ProxyModel(
                 )
 
         self = cls.__new__(cls)
-
-        lprops = lprops_cls(**link_props)
+        lprops = cls.__linkprops__(**link_props)
         ll_setattr(self, "__linkprops__", lprops)
 
         ll_setattr(self, "_p__obj__", obj)
@@ -1290,7 +1261,6 @@ class ProxyModel(
             "__linkprops__",
             "__proxy_of__",
             "__class__",
-            "__lprops__",
         }:
             # Fast path for the wrapped object itself / linkprops model
             # (this optimization is informed by profiling model
@@ -1348,8 +1318,8 @@ class ProxyModel(
         except KeyError:
             pass
 
-        if cls.__proxy_of__ is None or cls.__lprops__ is None:
-            raise TypeError("Subclass must set __proxy_of__ and __lprops__")
+        if cls.__proxy_of__ is None or cls.__linkprops__ is None:
+            raise TypeError("Subclass must set __proxy_of__ and __linkprops__")
 
         merged = pydantic.create_model(
             cls.__name__,
@@ -1359,7 +1329,7 @@ class ProxyModel(
             ),  # inherit all wrapped fields
             __config__=DEFAULT_MODEL_CONFIG,
             linkprops____=(
-                cls.__lprops__,
+                cls.__linkprops__,
                 pydantic.Field(None, alias="__linkprops__"),
             ),
         )
@@ -1432,7 +1402,7 @@ class ProxyModel(
         object.__setattr__(
             pnv,
             "__linkprops__",
-            cls.__lprops__.__gel_model_construct__(lprops),
+            cls.__linkprops__.__gel_model_construct__(lprops),
         )
         return pnv
 

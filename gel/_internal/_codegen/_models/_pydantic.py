@@ -4101,6 +4101,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
 
         self_t = self.import_name("typing_extensions", "Self")
         proxymodel_t = self.import_name(BASE_IMPL, "ProxyModel")
+        lmdesc = self.import_name(BASE_IMPL, "GelLinkModelDescriptor")
 
         if target_aspect is None:
             target_aspect = self.current_aspect
@@ -4137,7 +4138,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             container = "__links__"
             line_comment = None
 
-        link_clsname = f"__{srcname}_{link_name}_link__"
+        link_desc = f"{lmdesc}[__{srcname}_{link_name}_link__]"
 
         assert link.pointers
         lprops = []
@@ -4162,7 +4163,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                 f'"""link {objtype.name}.{link.name}: {target_type.name}"""'
             )
 
-            self.write(f"__linkprops__: {link_clsname}")
+            self.write(f"__linkprops__: {link_desc} = {link_desc}()")
             self.write()
 
             if is_forward_decl:

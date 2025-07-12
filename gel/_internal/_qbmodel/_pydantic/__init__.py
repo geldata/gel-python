@@ -33,7 +33,6 @@ from ._models import (
     GelModel,
     GelModelMeta,
     LinkClassNamespace,
-    LinkPropsDescriptor,
     ProxyModel,
 )
 
@@ -59,7 +58,6 @@ __all__ = (
     "GelModelMeta",
     "IdProperty",
     "LinkClassNamespace",
-    "LinkPropsDescriptor",
     "MultiProperty",
     "MultiRange",
     "OptionalComputedLink",

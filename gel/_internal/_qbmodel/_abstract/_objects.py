@@ -5,13 +5,23 @@
 """Base object types used to implement class-based query builders"""
 
 from __future__ import annotations
-from typing import TYPE_CHECKING, Any, ClassVar, Literal, cast
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    ClassVar,
+    Generic,
+    Literal,
+    TypeVar,
+    cast,
+    overload,
+)
 from typing_extensions import Self
 
 import functools
 import weakref
 
 from gel._internal import _qb
+from gel._internal import _typing_parametric
 from gel._internal._xmethod import classonlymethod, hybridmethod
 
 from ._base import GelObjectType, GelObjectTypeMeta
@@ -74,6 +84,10 @@ class GelModelMeta(GelObjectTypeMeta):
 class GelSourceModel(_qb.GelSourceMetadata):
     @classmethod
     def __gel_validate__(cls, value: Any) -> GelSourceModel:
+        raise NotImplementedError
+
+    @classmethod
+    def __gel_model_construct__(cls, __dict__: dict[str, Any] | None) -> Self:
         raise NotImplementedError
 
 
@@ -268,3 +282,41 @@ class GelModel(
 
 class GelLinkModel(GelSourceModel):
     pass
+
+
+_LM = TypeVar("_LM", bound=GelLinkModel)
+
+
+class GelLinkModelDescriptor(
+    _typing_parametric.PickleableClassParametricType,
+    Generic[_LM],
+):
+    _link_model_class: ClassVar[type[_LM]]  # type: ignore [misc]
+
+    def __set_name__(self, owner: type[Any], name: str) -> None:
+        self._link_model_attr = name
+
+    @overload
+    def __get__(self, instance: None, owner: type[Any], /) -> type[_LM]: ...
+
+    @overload
+    def __get__(
+        self, instance: Any, owner: type[Any] | None = None, /
+    ) -> _LM: ...
+
+    def __get__(
+        self,
+        instance: Any | None,
+        owner: type[Any] | None = None,
+        /,
+    ) -> type[_LM] | _LM:
+        if instance is None:
+            return self._link_model_class
+        else:
+            attr = self._link_model_attr
+            linkobj: _LM | None = instance.__dict__.get(attr)
+            if linkobj is None:
+                linkobj = self._link_model_class.__gel_model_construct__({})
+                instance.__dict__[attr] = linkobj
+
+            return linkobj

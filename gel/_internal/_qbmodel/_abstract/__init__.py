@@ -37,6 +37,7 @@ from ._globals import (
 
 from ._objects import (
     GelLinkModel,
+    GelLinkModelDescriptor,
     GelModel,
     GelModelMeta,
     GelSourceModel,
@@ -91,6 +92,7 @@ __all__ = (
     "DateTimeLike",
     "DefaultValue",
     "GelLinkModel",
+    "GelLinkModelDescriptor",
     "GelModel",
     "GelModelMeta",
     "GelPrimitiveType",

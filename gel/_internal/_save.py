@@ -520,7 +520,7 @@ def make_plan(objs: Iterable[GelModel]) -> SavePlan:
                     if link_prop_variant:
                         assert isinstance(val, ProxyModel)
                         # Link with link properties
-                        ptrs = get_pointers(val.__lprops__)
+                        ptrs = get_pointers(type(val).__linkprops__)
 
                         props = {
                             p.name: getattr(
@@ -698,7 +698,7 @@ def make_plan(objs: Iterable[GelModel]) -> SavePlan:
             # set link properties into separate groups.
             link_tp = type(added_proxies[0])
             assert issubclass(link_tp, ProxyModel)
-            props_info = get_pointers(link_tp.__lprops__)
+            props_info = get_pointers(link_tp.__linkprops__)
 
             mch = MultiLinkAdd(
                 name=prop.name,
