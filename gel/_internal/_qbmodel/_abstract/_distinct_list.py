@@ -16,7 +16,7 @@ from collections.abc import Iterable
 from gel._internal import _typing_parametric as parametric
 
 if TYPE_CHECKING:
-    from ._objects import GelSourceModel
+    from ._base import AbstractGelSourceModel
 
 
 from gel._internal._tracked_list import (
@@ -27,7 +27,7 @@ from gel._internal._tracked_list import (
 )
 
 
-_MT_co = TypeVar("_MT_co", bound="GelSourceModel", covariant=True)
+_MT_co = TypeVar("_MT_co", bound="AbstractGelSourceModel", covariant=True)
 _ADL_co = TypeVar("_ADL_co", bound=AbstractTrackedList[Any], covariant=True)
 
 
@@ -68,7 +68,7 @@ class AbstractDistinctList(AbstractTrackedList[_MT_co]):
         if isinstance(value, cls.type):
             return value
 
-        return t.__gel_validate__(value)  # type: ignore [return-value]
+        return t.__gel_validate__(value)
 
     def _ensure_snapshot(self) -> None:
         # "_ensure_snapshot" is called right before any mutation:

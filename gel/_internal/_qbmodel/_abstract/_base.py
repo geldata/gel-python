@@ -11,6 +11,7 @@ from typing import (
     Final,
     TypeGuard,
     TypeVar,
+    cast,
     final,
     overload,
 )
@@ -18,7 +19,9 @@ from typing import (
 from typing_extensions import Self
 
 import dataclasses
+import functools
 import typing
+import weakref
 
 from gel._internal import _edgeql
 from gel._internal import _qb
@@ -26,11 +29,22 @@ from gel._internal._xmethod import hybridmethod
 
 if TYPE_CHECKING:
     import types
+    import uuid
     from collections.abc import Iterator
 
 
 T = TypeVar("T")
 T_co = TypeVar("T_co", covariant=True)
+
+
+@dataclasses.dataclass(kw_only=True, frozen=True)
+class PointerInfo:
+    computed: bool = False
+    readonly: bool = False
+    has_props: bool = False
+    cardinality: _edgeql.Cardinality = _edgeql.Cardinality.One
+    annotation: type[Any] | None = None
+    kind: _edgeql.PointerKind | None = None
 
 
 if TYPE_CHECKING:
@@ -105,32 +119,68 @@ def is_gel_type(t: Any) -> TypeGuard[type[GelType]]:
     return isinstance(t, type) and issubclass(t, GelType)
 
 
-if TYPE_CHECKING:
+class AbstractGelSourceModel(_qb.GelSourceMetadata):
+    """Base class for property-bearing classes."""
 
-    class GelObjectTypeMeta(GelTypeMeta):
-        __gel_pointer_infos__: ClassVar[dict[str, PointerInfo]]
+    @classmethod
+    def __gel_validate__(cls, value: Any) -> Self:
+        raise NotImplementedError
 
+    @classmethod
+    def __gel_model_construct__(cls, __dict__: dict[str, Any] | None) -> Self:
+        raise NotImplementedError
+
+
+class AbstractGelModelMeta(GelTypeMeta):
+    __gel_class_registry__: ClassVar[
+        weakref.WeakValueDictionary[uuid.UUID, type[Any]]
+    ] = weakref.WeakValueDictionary()
+
+    if TYPE_CHECKING:
         # Splat qb protocol
         def __iter__(cls) -> Iterator[_qb.ShapeElement]:  # noqa: N805
             ...
-else:
-    GelObjectTypeMeta = type
+
+    def __new__(  # noqa: PYI034
+        mcls,
+        name: str,
+        bases: tuple[type[Any], ...],
+        namespace: dict[str, Any],
+        *,
+        __gel_type_id__: uuid.UUID | None = None,
+        __gel_variant__: str | None = None,
+        **kwargs: Any,
+    ) -> AbstractGelModelMeta:
+        cls = cast(
+            "type[AbstractGelModel]",
+            super().__new__(mcls, name, bases, namespace, **kwargs),
+        )
+        if __gel_type_id__ is not None:
+            mcls.__gel_class_registry__[__gel_type_id__] = cls
+        cls.__gel_variant__ = __gel_variant__
+        return cls
+
+    @classmethod
+    def get_class_by_id(cls, tid: uuid.UUID) -> type[AbstractGelModel]:
+        try:
+            return cls.__gel_class_registry__[tid]
+        except KeyError:
+            raise LookupError(
+                f"cannot find GelModel for object type id {tid}"
+            ) from None
+
+    @classmethod
+    def register_class(
+        cls, tid: uuid.UUID, type_: type[AbstractGelModel]
+    ) -> None:
+        cls.__gel_class_registry__[tid] = cls
 
 
-@dataclasses.dataclass(kw_only=True, frozen=True)
-class PointerInfo:
-    computed: bool = False
-    readonly: bool = False
-    has_props: bool = False
-    cardinality: _edgeql.Cardinality = _edgeql.Cardinality.One
-    annotation: type[Any] | None = None
-    kind: _edgeql.PointerKind | None = None
-
-
-class GelObjectType(
+class AbstractGelModel(
     GelType,
+    AbstractGelSourceModel,
     _qb.GelObjectTypeMetadata,
-    metaclass=GelObjectTypeMeta,
+    metaclass=AbstractGelModelMeta,
 ):
     __gel_variant__: ClassVar[str | None] = None
     """Auto-reflected model variant marker."""
@@ -139,21 +189,51 @@ class GelObjectType(
         super().__init_subclass__()
         cls.__gel_variant__ = None
 
+    @classmethod
+    def __edgeql_qb_expr__(cls) -> _qb.Expr:  # pyright: ignore [reportIncompatibleMethodOverride]
+        this_type = cls.__gel_reflection__.name
+        return _qb.SchemaSet(type_=this_type)
 
-def is_gel_object_type(t: Any) -> TypeGuard[type[GelObjectType]]:
-    return isinstance(t, type) and issubclass(t, GelObjectType)
+    if TYPE_CHECKING:
+
+        @classmethod
+        def __edgeql__(cls) -> tuple[type[Self], str]: ...  # pyright: ignore [reportIncompatibleMethodOverride]
+
+    else:
+
+        @hybridmethod
+        def __edgeql__(self) -> tuple[type, str]:
+            if isinstance(self, type):
+                return self, _qb.toplevel_edgeql(
+                    self,
+                    splat_cb=functools.partial(
+                        _qb.get_object_type_splat, self
+                    ),
+                )
+            else:
+                raise NotImplementedError(
+                    f"{type(self)} instances are not queryable"
+                )
+
+
+class AbstractGelLinkModel(AbstractGelSourceModel):
+    pass
+
+
+def is_gel_model(t: Any) -> TypeGuard[type[AbstractGelModel]]:
+    return isinstance(t, type) and issubclass(t, AbstractGelModel)
 
 
 def maybe_collapse_object_type_variant_union(
     t: types.UnionType,
-) -> type[GelObjectType] | None:
+) -> type[AbstractGelModel] | None:
     """If *t* is a Union of GelObjectType reflections of the same object
     type, find and return the first union component that is a default
     variant."""
-    default_variant: type[GelObjectType] | None = None
+    default_variant: type[AbstractGelModel] | None = None
     typename = None
     for union_arg in typing.get_args(t):
-        if not is_gel_object_type(union_arg):
+        if not is_gel_model(union_arg):
             # Not an object type reflection union at all!
             return None
         if typename is None:

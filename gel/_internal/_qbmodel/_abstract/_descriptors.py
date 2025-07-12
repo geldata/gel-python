@@ -5,8 +5,9 @@
 """EdgeQL query builder descriptors for attribute magic"""
 
 from __future__ import annotations
-from typing import TYPE_CHECKING, Any, Generic, TypeVar, overload
+from typing import TYPE_CHECKING, Any, ClassVar, Generic, TypeVar, overload
 
+import dataclasses
 import typing
 
 # XXX: get rid of this
@@ -16,10 +17,13 @@ from gel._internal import _qb
 from gel._internal import _namespace
 from gel._internal import _typing_eval
 from gel._internal import _typing_inspect
+from gel._internal import _typing_parametric
 from gel._internal import _utils
 
 from ._base import (
     GelType,
+    AbstractGelModel,
+    AbstractGelLinkModel,
     is_gel_type,
     maybe_collapse_object_type_variant_union,
 )
@@ -342,3 +346,69 @@ class OptionalLinkDescriptor(
             value: BT_co | None,
             /,
         ) -> None: ...
+
+
+_MT_co = TypeVar("_MT_co", bound=AbstractGelModel, covariant=True)
+_LM = TypeVar("_LM", bound=AbstractGelLinkModel)
+
+
+class GelLinkModelDescriptor(
+    _typing_parametric.PickleableClassParametricType,
+    _qb.AbstractFieldDescriptor,
+    Generic[_LM],
+):
+    _link_model_class: ClassVar[type[_LM]]  # type: ignore [misc]
+
+    def __set_name__(self, owner: type[Any], name: str) -> None:
+        self._link_model_attr = name
+
+    @overload
+    def __get__(self, instance: None, owner: type[Any], /) -> type[_LM]: ...
+
+    @overload
+    def __get__(
+        self, instance: Any, owner: type[Any] | None = None, /
+    ) -> _LM: ...
+
+    def __get__(
+        self,
+        instance: Any | None,
+        owner: type[Any] | None = None,
+        /,
+    ) -> type[_LM] | _LM:
+        if instance is None:
+            return self._link_model_class
+        else:
+            attr = self._link_model_attr
+            linkobj: _LM | None = instance.__dict__.get(attr)
+            if linkobj is None:
+                linkobj = self._link_model_class.__gel_model_construct__({})
+                instance.__dict__[attr] = linkobj
+
+            return linkobj
+
+    def get(
+        self,
+        owner: type[AbstractGelProxyModel[AbstractGelModel, _LM]],
+        expr: _qb.BaseAlias | None = None,
+    ) -> Any:
+        source: _qb.Expr
+        if expr is not None:
+            source = expr.__gel_metadata__
+        else:
+            raise AssertionError("missing source for link path")
+
+        if (
+            not isinstance(source, _qb.PathPrefix)
+            or source.source_link is None
+        ):
+            raise AttributeError(
+                "__linkprops__", name="__linkprops__", obj=owner
+            )
+
+        prefix = dataclasses.replace(source, lprop_pivot=True)
+        return _qb.AnnotatedExpr(owner.__linkprops__, prefix)  # pyright: ignore [reportGeneralTypeIssues]
+
+
+class AbstractGelProxyModel(AbstractGelModel, Generic[_MT_co, _LM]):
+    __linkprops__: GelLinkModelDescriptor[_LM]
