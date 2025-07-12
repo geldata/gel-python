@@ -29,9 +29,6 @@ from gel._internal import _typing_parametric as parametric
 
 from ._models import GelModel, ProxyModel
 
-from gel._internal._unsetid import UNSET_UUID
-
-
 _BMT_co = TypeVar("_BMT_co", bound=GelModel, covariant=True)
 """Base model type"""
 
@@ -144,7 +141,7 @@ class ProxyDistinctList(
                         f"a different set of link properties"
                     )
 
-            if obj.id is UNSET_UUID:
+            if obj.__gel_new__:
                 self._unhashables[id(proxy)] = proxy
             else:
                 self._set.add(proxy)

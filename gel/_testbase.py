@@ -772,6 +772,25 @@ class ModelTestCase(SyncQueryTestCase):
             if not cls.orm_debug:
                 cls.tmp_model_dir.cleanup()
 
+    def assertPydanticChangedFields(
+        self,
+        model: pydantic.BaseModel,
+        expected: typing.Set[str],
+        *,
+        expected_gel: typing.Set[str] | None = None,
+    ) -> None:
+        # We don't have a default for GelModel.id so we have to pass it
+        # manually and then remove it right after the model is built.
+        # That's why 'id' is always in changed fields. It doesn't matter
+        # though. The main consumer of __gel_get_changed_fields__ is
+        # `save()`, which just ignores `id` and relies on `__gel_new__`.
+        self.assertEqual(model.__pydantic_fields_set__ - {"id"}, expected)
+        if hasattr(model, "__gel_get_changed_fields__"):
+            self.assertEqual(
+                model.__gel_get_changed_fields__() - {"id"},  # type: ignore
+                expected if expected_gel is None else expected_gel,
+            )
+
     def assertPydanticSerializes(
         self,
         model: pydantic.BaseModel,

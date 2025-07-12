@@ -29,7 +29,6 @@ from gel._internal._qbmodel._abstract._distinct_list import (
     AbstractDistinctList,
     DistinctList,
 )
-from gel._internal._unsetid import UNSET_UUID
 from gel._internal._edgeql import PointerKind, quote_ident
 from gel._internal._qbmodel._pydantic._pdlist import ProxyDistinctList
 
@@ -382,20 +381,20 @@ def get_linked_new_objects(obj: GelModel) -> Iterable[GelModel]:
             if is_proxy_link_list(linked):
                 for pmod in linked._items:
                     unwrapped = unwrap_proxy_no_check(pmod)
-                    if unwrapped.id is UNSET_UUID and unwrapped not in visited:
+                    if unwrapped.__gel_new__ and unwrapped not in visited:
                         visited.track(unwrapped)
                         yield unwrapped
             else:
                 assert is_link_dlist(linked)
                 for mod in linked._items:
-                    if mod.id is UNSET_UUID and mod not in visited:
+                    if mod.__gel_new__ and mod not in visited:
                         visited.track(mod)
                         yield mod
 
         elif linked is not None:
             assert isinstance(linked, GelModel)
             unwrapped = unwrap_proxy(linked)
-            if unwrapped.id is UNSET_UUID and unwrapped not in visited:
+            if unwrapped.__gel_new__ and unwrapped not in visited:
                 visited.track(unwrapped)
                 yield unwrapped
 
@@ -452,7 +451,7 @@ def make_plan(objs: Iterable[GelModel]) -> SavePlan:
 
     for obj in iter_graph(objs):
         pointers = get_pointers(type(obj))
-        is_new = obj.id is UNSET_UUID
+        is_new = obj.__gel_new__
 
         # Capture changes in *properties* and *single links*
         field_changes = obj.__gel_get_changed_fields__()
@@ -469,6 +468,11 @@ def make_plan(objs: Iterable[GelModel]) -> SavePlan:
             if prop.name in field_changes:
                 # Since there was a change and we don't implement `del`,
                 # the attribute must be set
+
+                if prop.name == "id":
+                    # id is special, we don't need to track it
+                    continue
+
                 val = getattr(obj, prop.name)
                 if (
                     prop.kind is PointerKind.Property
@@ -612,7 +616,7 @@ def make_plan(objs: Iterable[GelModel]) -> SavePlan:
                 removed = [
                     m
                     for m in unwrap_dlist(removed)
-                    if ll_attr(m, "id") is not UNSET_UUID
+                    if not ll_attr(m, "__gel_new__")
                 ]
                 if removed:
                     m_rem = MultiLinkRemove(
@@ -927,10 +931,10 @@ class SaveExecutor:
             _traverse(o)
 
     def _get_id(self, obj: GelModel) -> uuid.UUID:
-        if obj.id is not UNSET_UUID:
-            return obj.id
-        else:
+        if obj.__gel_new__:
             return self.object_ids[id(obj)]
+        else:
+            return obj.id
 
     def _compile_change(
         self, change: ModelChange, /, *, for_insert: bool
