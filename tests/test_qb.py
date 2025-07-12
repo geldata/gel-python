@@ -194,7 +194,7 @@ class TestQueryBuilder(tb.ModelTestCase):
         )
         self.assertEqual(res.num, 123)
         self.assertEqual(
-            [(u.name, u.is_tall_enough) for u in res.players],
+            [(u.name, u.__linkprops__.is_tall_enough) for u in res.players],
             [("Alice", False), ("Billie", True)],
         )
 
@@ -363,7 +363,6 @@ class TestQueryBuilder(tb.ModelTestCase):
             [("Alice", False), ("Billie", True)],
         )
 
-    @tb.xfail
     @tb.typecheck
     def test_qb_link_property_02(self):
         from models import default
