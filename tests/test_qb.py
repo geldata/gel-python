@@ -179,7 +179,6 @@ class TestQueryBuilder(tb.ModelTestCase):
             [("Alice", False), ("Billie", True)],
         )
 
-    @tb.xfail
     @tb.typecheck
     def test_qb_order_03(self):
         from models import default
