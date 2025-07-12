@@ -368,7 +368,7 @@ cdef class ObjectCodec(BaseNamedRecordCodec):
         if proxy is not None:
             self.cached_return_type_proxy = return_type
             self.cached_return_type = proxy
-            lprops_type = self.cached_return_type_proxy.__lprops__
+            lprops_type = return_type.__linkprops__
         else:
             self.cached_return_type = return_type
             self.cached_return_type_proxy = None
