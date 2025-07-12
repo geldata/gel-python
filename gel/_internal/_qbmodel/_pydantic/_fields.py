@@ -481,7 +481,17 @@ class _OptionalLink(
     _AnyLink[_MT_co, _BMT_co],
     _abstract.OptionalLinkDescriptor[_MT_co, _BMT_co],
 ):
-    pass
+    @classmethod
+    def __get_pydantic_core_schema__(
+        cls,
+        source_type: Any,
+        handler: pydantic.GetCoreSchemaHandler,
+    ) -> pydantic_core.CoreSchema:
+        # Optional link should allow None as a valid value.
+        # Wrap the AnyLink's schema in a nullable schema to allow that.
+        schema = super().__get_pydantic_core_schema__(source_type, handler)
+        schema = core_schema.nullable_schema(schema)
+        return schema
 
 
 RequiredLinkWithProps = TypeAliasType(
