@@ -2,30 +2,22 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright Gel Data Inc. and the contributors.
 
-"""Base object types used to implement class-based query builders"""
+"""Definitions of query builder methods on models."""
 
 from __future__ import annotations
 from typing import (
     TYPE_CHECKING,
     Any,
-    ClassVar,
-    Generic,
     Literal,
-    TypeVar,
-    cast,
-    overload,
 )
 from typing_extensions import Self
 
-import functools
-import dataclasses
-import weakref
 
 from gel._internal import _qb
-from gel._internal import _typing_parametric
-from gel._internal._xmethod import classonlymethod, hybridmethod
+from gel._internal._xmethod import classonlymethod
 
-from ._base import GelObjectType, GelObjectTypeMeta
+from ._base import AbstractGelModel
+
 from ._expressions import (
     add_filter,
     add_limit,
@@ -40,67 +32,11 @@ from ._functions import (
 )
 
 if TYPE_CHECKING:
-    import uuid
     from collections.abc import Callable
 
 
-class GelModelMeta(GelObjectTypeMeta):
-    __gel_class_registry__: ClassVar[
-        weakref.WeakValueDictionary[uuid.UUID, type[Any]]
-    ] = weakref.WeakValueDictionary()
-
-    def __new__(  # noqa: PYI034
-        mcls,
-        name: str,
-        bases: tuple[type[Any], ...],
-        namespace: dict[str, Any],
-        *,
-        __gel_type_id__: uuid.UUID | None = None,
-        __gel_variant__: str | None = None,
-        **kwargs: Any,
-    ) -> GelModelMeta:
-        cls = cast(
-            "type[GelModel]",
-            super().__new__(mcls, name, bases, namespace, **kwargs),
-        )
-        if __gel_type_id__ is not None:
-            mcls.__gel_class_registry__[__gel_type_id__] = cls
-        cls.__gel_variant__ = __gel_variant__
-        return cls
-
-    @classmethod
-    def get_class_by_id(cls, tid: uuid.UUID) -> type[GelModel]:
-        try:
-            return cls.__gel_class_registry__[tid]
-        except KeyError:
-            raise LookupError(
-                f"cannot find GelModel for object type id {tid}"
-            ) from None
-
-    @classmethod
-    def register_class(cls, tid: uuid.UUID, type_: type[GelModel]) -> None:
-        cls.__gel_class_registry__[tid] = cls
-
-
-class GelSourceModel(_qb.GelSourceMetadata):
-    @classmethod
-    def __gel_validate__(cls, value: Any) -> GelSourceModel:
-        raise NotImplementedError
-
-    @classmethod
-    def __gel_model_construct__(cls, __dict__: dict[str, Any] | None) -> Self:
-        raise NotImplementedError
-
-
-class GelModel(
-    GelSourceModel,
-    GelObjectType,
-    metaclass=GelModelMeta,
-):
+class BaseGelModel(AbstractGelModel):
     if TYPE_CHECKING:
-
-        @classmethod
-        def __edgeql__(cls) -> tuple[type[Self], str]: ...  # pyright: ignore [reportIncompatibleMethodOverride]
 
         @classmethod
         def select(cls, /, **kwargs: Any) -> type[Self]: ...
@@ -260,92 +196,3 @@ class GelModel(
                 cls,
                 assert_single(cls, message=message, __operand__=__operand__),
             )
-
-        @hybridmethod
-        def __edgeql__(self) -> tuple[type, str]:
-            if isinstance(self, type):
-                return self, _qb.toplevel_edgeql(
-                    self,
-                    splat_cb=functools.partial(
-                        _qb.get_object_type_splat, self
-                    ),
-                )
-            else:
-                raise NotImplementedError(
-                    f"{type(self)} instances are not queryable"
-                )
-
-    @classmethod
-    def __edgeql_qb_expr__(cls) -> _qb.Expr:  # pyright: ignore [reportIncompatibleMethodOverride]
-        this_type = cls.__gel_reflection__.name
-        return _qb.SchemaSet(type_=this_type)
-
-
-class GelLinkModel(GelSourceModel):
-    pass
-
-
-_MT_co = TypeVar("_MT_co", bound=GelModel, covariant=True)
-_LM = TypeVar("_LM", bound=GelLinkModel)
-
-
-class GelLinkModelDescriptor(
-    _typing_parametric.PickleableClassParametricType,
-    _qb.AbstractFieldDescriptor,
-    Generic[_LM],
-):
-    _link_model_class: ClassVar[type[_LM]]  # type: ignore [misc]
-
-    def __set_name__(self, owner: type[Any], name: str) -> None:
-        self._link_model_attr = name
-
-    @overload
-    def __get__(self, instance: None, owner: type[Any], /) -> type[_LM]: ...
-
-    @overload
-    def __get__(
-        self, instance: Any, owner: type[Any] | None = None, /
-    ) -> _LM: ...
-
-    def __get__(
-        self,
-        instance: Any | None,
-        owner: type[Any] | None = None,
-        /,
-    ) -> type[_LM] | _LM:
-        if instance is None:
-            return self._link_model_class
-        else:
-            attr = self._link_model_attr
-            linkobj: _LM | None = instance.__dict__.get(attr)
-            if linkobj is None:
-                linkobj = self._link_model_class.__gel_model_construct__({})
-                instance.__dict__[attr] = linkobj
-
-            return linkobj
-
-    def get(
-        self,
-        owner: type[GelProxyModel[GelModel, _LM]],
-        expr: _qb.BaseAlias | None = None,
-    ) -> Any:
-        source: _qb.Expr
-        if expr is not None:
-            source = expr.__gel_metadata__
-        else:
-            raise AssertionError("missing source for link path")
-
-        if (
-            not isinstance(source, _qb.PathPrefix)
-            or source.source_link is None
-        ):
-            raise AttributeError(
-                "__linkprops__", name="__linkprops__", obj=owner
-            )
-
-        prefix = dataclasses.replace(source, lprop_pivot=True)
-        return _qb.AnnotatedExpr(owner.__linkprops__, prefix)  # pyright: ignore [reportGeneralTypeIssues]
-
-
-class GelProxyModel(GelModel, Generic[_MT_co, _LM]):
-    __linkprops__: GelLinkModelDescriptor[_LM]

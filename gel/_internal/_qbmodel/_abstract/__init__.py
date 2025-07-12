@@ -8,6 +8,10 @@ from __future__ import annotations
 
 from ._base import (
     DEFAULT_VALUE,
+    AbstractGelLinkModel,
+    AbstractGelModel,
+    AbstractGelModelMeta,
+    AbstractGelSourceModel,
     DefaultValue,
     GelType,
     GelTypeMeta,
@@ -15,8 +19,10 @@ from ._base import (
 )
 
 from ._descriptors import (
+    AbstractGelProxyModel,
     AnyLinkDescriptor,
     AnyPropertyDescriptor,
+    GelLinkModelDescriptor,
     LinkDescriptor,
     ModelFieldDescriptor,
     OptionalLinkDescriptor,
@@ -35,13 +41,8 @@ from ._globals import (
     Global,
 )
 
-from ._objects import (
-    GelLinkModel,
-    GelLinkModelDescriptor,
-    GelModel,
-    GelModelMeta,
-    GelSourceModel,
-    GelProxyModel,
+from ._methods import (
+    BaseGelModel,
 )
 
 from ._primitive import (
@@ -82,24 +83,25 @@ from ._primitive import (
 __all__ = (
     "DEFAULT_VALUE",
     "MODEL_SUBSTRATE_MODULE",
+    "AbstractGelLinkModel",
+    "AbstractGelModel",
+    "AbstractGelModelMeta",
+    "AbstractGelProxyModel",
+    "AbstractGelSourceModel",
     "AnyEnum",
     "AnyLinkDescriptor",
     "AnyNamedTuple",
     "AnyPropertyDescriptor",
     "AnyTuple",
     "Array",
+    "BaseGelModel",
     "DateImpl",
     "DateTimeImpl",
     "DateTimeLike",
     "DefaultValue",
-    "GelLinkModel",
     "GelLinkModelDescriptor",
-    "GelModel",
-    "GelModelMeta",
     "GelPrimitiveType",
-    "GelProxyModel",
     "GelScalarType",
-    "GelSourceModel",
     "GelType",
     "GelTypeMeta",
     "Global",

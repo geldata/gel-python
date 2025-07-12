@@ -62,7 +62,10 @@ _model_pointers_cache: weakref.WeakKeyDictionary[
 ] = weakref.WeakKeyDictionary()
 
 
-class GelModelMeta(_model_construction.ModelMetaclass, _abstract.GelModelMeta):
+class GelModelMeta(
+    _model_construction.ModelMetaclass,
+    _abstract.AbstractGelModelMeta,
+):
     if TYPE_CHECKING:
         __gel_cached_decorator_fields__: dict[
             str, _decorators.Decorator[pydantic.fields.ComputedFieldInfo]
@@ -514,7 +517,7 @@ DEFAULT_MODEL_CONFIG = pydantic.ConfigDict(
 
 class GelSourceModel(
     pydantic.BaseModel,
-    _abstract.GelSourceModel,
+    _abstract.AbstractGelSourceModel,
     metaclass=GelModelMeta,
     __gel_root_class__=True,
 ):
@@ -872,7 +875,7 @@ def _kwargs_exclude_unset_computeds(
 
 class GelModel(
     GelSourceModel,
-    _abstract.GelModel,
+    _abstract.BaseGelModel,
     __gel_root_class__=True,
 ):
     __slots__ = ()
@@ -1139,7 +1142,7 @@ class GelModel(
 
 class GelLinkModel(
     GelSourceModel,
-    _abstract.GelLinkModel,
+    _abstract.AbstractGelLinkModel,
     __gel_root_class__=True,
 ):
     # Base class for __linkprops__ classes.
@@ -1174,7 +1177,7 @@ class _MergedModelBase(GelModel, metaclass=_MergedModelMeta):
 
 class ProxyModel(
     GelModel,
-    _abstract.GelProxyModel[_MT_co, GelLinkModel],
+    _abstract.AbstractGelProxyModel[_MT_co, GelLinkModel],
     __gel_root_class__=True,
 ):
     __gel_has_id_field__ = False

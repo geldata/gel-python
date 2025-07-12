@@ -15,7 +15,7 @@ from gel._internal import _edgeql
 from gel._internal import _qb
 from gel._internal._utils import Unspecified
 
-from ._base import GelObjectType
+from ._base import AbstractGelModel
 
 from ._primitive import (
     GelPrimitiveType,
@@ -64,7 +64,7 @@ def _select_stmt_context(
     *,
     new_stmt_if: Callable[[_qb.SelectStmt], bool] | None = None,
 ) -> tuple[_qb.SelectStmt, _qb.PathAlias]:
-    if issubclass(cls, GelObjectType):
+    if issubclass(cls, AbstractGelModel):
         splat_cb = functools.partial(_qb.get_object_type_splat, cls)
     else:
         splat_cb = None
@@ -103,7 +103,7 @@ def _const_to_expr(
 
 
 def select(
-    cls: type[GelObjectType],
+    cls: type[AbstractGelModel],
     /,
     *elements: _qb.ShapeElement | Literal["*"],
     __operand__: _qb.ExprAlias | None = None,
@@ -141,7 +141,7 @@ def select(
             ptr, ptr_expr = _get_prefixed_ptr(cls, ptrname, scope=scope)
             if kwarg:
                 target = ptr.__gel_origin__
-                if issubclass(target, GelObjectType):
+                if issubclass(target, AbstractGelModel):
                     ptr_expr = _qb.ShapeOp(
                         iter_expr=ptr_expr,
                         shape=_qb.get_object_type_splat(target),

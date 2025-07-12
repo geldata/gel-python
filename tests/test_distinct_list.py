@@ -4,7 +4,7 @@ import unittest
 
 from gel._internal._tracked_list import Mode
 from gel._internal._qbmodel._abstract._distinct_list import DistinctList
-from gel._internal._qbmodel._abstract._objects import GelSourceModel
+from gel._internal._qbmodel._abstract import AbstractGelSourceModel
 
 
 # A concrete DistinctList that accepts any object
@@ -18,7 +18,7 @@ class AnyList(DistinctList[object]):
             super().__init__(*args, **kwargs)
 
 
-class BoxedInt(GelSourceModel):
+class BoxedInt(AbstractGelSourceModel):
     def __init__(self, value: int):
         self.value = value
 
