@@ -467,19 +467,20 @@ class TestModelGenerator(tb.ModelTestCase):
 
         import pydantic
         from models import default
-        from gel._internal._unsetid import UNSET_UUID
 
         class UserUpdate(pydantic.BaseModel):
             name: str | None = None
             other: int | None = None
 
-        def run_test(user: default.User, upd: UserUpdate) -> None:
+        def run_test(
+            user: default.User, upd: UserUpdate, *, new: bool
+        ) -> None:
             orig_name = user.name
             orig_ch_fields = set(user.__gel_get_changed_fields__())
 
             user_dct = user.model_dump(exclude_unset=True)
 
-            if user.id is not UNSET_UUID:
+            if not user.__gel_new__:
                 self.assertEqual(user.id, user_dct["id"])
                 del user_dct["id"]
 
@@ -495,8 +496,12 @@ class TestModelGenerator(tb.ModelTestCase):
             )
 
             self.assertIsNot(user_upd, user)
-            self.assertEqual(user_upd, user)
-            self.assertEqual(user_upd.id, user.id)
+            if new:
+                self.assertNotEqual(user_upd, user)
+                self.assertEqual(user_upd.__gel_new__, user.__gel_new__)
+            else:
+                self.assertEqual(user_upd, user)
+                self.assertEqual(user_upd.id, user.id)
 
             self.assertEqual(user.name, orig_name)
             self.assertEqual(user_upd.name, upd.name)
@@ -504,15 +509,17 @@ class TestModelGenerator(tb.ModelTestCase):
             self.assertEqual(
                 set(user.__gel_get_changed_fields__()), orig_ch_fields
             )
-            self.assertEqual(user_upd.__gel_get_changed_fields__(), {"name"})
+            self.assertEqual(
+                user_upd.__gel_get_changed_fields__() - {"id"}, {"name"}
+            )
 
         user_loaded = self.client.get(
             default.User.select(name=True).filter(name="Alice").limit(1)
         )
         user_new = default.User(name="Bob")
 
-        run_test(user_loaded, UserUpdate(name="Alice A."))
-        run_test(user_new, UserUpdate(name="Bob B."))
+        run_test(user_loaded, UserUpdate(name="Alice A."), new=False)
+        run_test(user_new, UserUpdate(name="Bob B."), new=True)
 
     @tb.typecheck(["import json"])
     def test_modelgen_pydantic_apis_02(self):
@@ -2531,13 +2538,12 @@ class TestModelGenerator(tb.ModelTestCase):
         from models import default
 
         u = default.User(name="Wat")
-        self.assertEqual(u.__gel_get_changed_fields__(), {"name"})
+        self.assertPydanticChangedFields(u, {"name"})
 
         #########
 
         g = default.GameSession(num=909, public=False)
-        self.assertEqual(g.__gel_get_changed_fields__(), {"num", "public"})
-        self.assertEqual(g.__pydantic_fields_set__, {"num", "public"})
+        self.assertPydanticChangedFields(g, {"num", "public"})
 
         #########
 
@@ -2556,12 +2562,7 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertTrue(g.players.__gel_overwrite_data__)
         self.assertIs(g.players, players)
         self.assertEqual(g.players._mode, Mode.ReadWrite)
-        self.assertEqual(
-            g.__gel_get_changed_fields__(), {"num", "public", "players"}
-        )
-        self.assertEqual(
-            g.__pydantic_fields_set__, {"num", "public", "players"}
-        )
+        self.assertPydanticChangedFields(g, {"num", "public", "players"})
 
         self.client.save(g)
         self.assertFalse(g.players.__gel_overwrite_data__)
@@ -2575,9 +2576,10 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertIs(g.players, players)
         self.assertTrue(g.players.__gel_overwrite_data__)
         self.assertEqual(g.players._mode, Mode.ReadWrite)
-        self.assertEqual(g.__gel_get_changed_fields__(), {"players"})
-        self.assertEqual(
-            g.__pydantic_fields_set__, {"num", "public", "players"}
+        self.assertPydanticChangedFields(
+            g,
+            {"num", "public", "players"},
+            expected_gel={"players"},
         )
 
         #########
@@ -2593,12 +2595,7 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(g.players._mode, Mode.ReadWrite)
         self.assertEqual(g.players, [])
         self.assertTrue(g.players.__gel_overwrite_data__)
-        self.assertEqual(
-            g.__gel_get_changed_fields__(), {"num", "public", "players"}
-        )
-        self.assertEqual(
-            g.__pydantic_fields_set__, {"num", "public", "players"}
-        )
+        self.assertPydanticChangedFields(g, {"num", "public", "players"})
 
         #########
 
@@ -2632,12 +2629,7 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(g.players._mode, Mode.ReadWrite)
         self.assertEqual(g.players, [])
         self.assertTrue(g.players.__gel_overwrite_data__)
-        self.assertEqual(
-            g.__gel_get_changed_fields__(), {"num", "public", "players"}
-        )
-        self.assertEqual(
-            g.__pydantic_fields_set__, {"num", "public", "players"}
-        )
+        self.assertPydanticChangedFields(g, {"num", "public", "players"})
 
         #########
 
@@ -2645,9 +2637,8 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(g.players._mode, Mode.Write)
         self.assertEqual(g.players.unsafe_len(), 0)
         self.assertFalse(g.players.__gel_overwrite_data__)
-        self.assertEqual(g.__gel_get_changed_fields__(), {"num", "public"})
-        self.assertEqual(
-            g.__pydantic_fields_set__, {"num", "public", "players"}
+        self.assertPydanticChangedFields(
+            g, {"num", "public", "players"}, expected_gel={"num", "public"}
         )
 
         #########
@@ -2658,12 +2649,7 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(g.players._mode, Mode.ReadWrite)
         self.assertEqual(g.players, [])
         self.assertTrue(g.players.__gel_overwrite_data__)
-        self.assertEqual(
-            g.__gel_get_changed_fields__(), {"num", "public", "players"}
-        )
-        self.assertEqual(
-            g.__pydantic_fields_set__, {"num", "public", "players"}
-        )
+        self.assertPydanticChangedFields(g, {"num", "public", "players"})
 
         #########
 
@@ -2673,12 +2659,7 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(g.players._mode, Mode.ReadWrite)
         self.assertEqual(g.players, [])
         self.assertTrue(g.players.__gel_overwrite_data__)
-        self.assertEqual(
-            g.__gel_get_changed_fields__(), {"num", "public", "players"}
-        )
-        self.assertEqual(
-            g.__pydantic_fields_set__, {"num", "public", "players"}
-        )
+        self.assertPydanticChangedFields(g, {"num", "public", "players"})
 
         #########
 
@@ -2688,24 +2669,17 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(g.players._mode, Mode.Write)
         self.assertEqual(g.players.unsafe_len(), 0)
         self.assertFalse(g.players.__gel_overwrite_data__)
-        self.assertEqual(g.__gel_get_changed_fields__(), {"num", "public"})
-        self.assertEqual(g.__pydantic_fields_set__, {"num", "public"})
+        self.assertPydanticChangedFields(g, {"num", "public"})
         g.players.append(u)
         self.assertEqual(g.players._mode, Mode.Write)
         self.assertEqual(g.players.unsafe_len(), 1)
         self.assertFalse(g.players.__gel_overwrite_data__)
-        self.assertEqual(g.__gel_get_changed_fields__(), {"num", "public"})
-        self.assertEqual(g.__pydantic_fields_set__, {"num", "public"})
+        self.assertPydanticChangedFields(g, {"num", "public"})
 
         g.players = []
         self.assertEqual(g.players._mode, Mode.ReadWrite)
         self.assertTrue(g.players.__gel_overwrite_data__)
-        self.assertEqual(
-            g.__gel_get_changed_fields__(), {"num", "public", "players"}
-        )
-        self.assertEqual(
-            g.__pydantic_fields_set__, {"num", "public", "players"}
-        )
+        self.assertPydanticChangedFields(g, {"num", "public", "players"})
 
         #########
 
@@ -2715,12 +2689,7 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(g.players._mode, Mode.ReadWrite)
         self.assertEqual(g.players, [u])
         self.assertTrue(g.players.__gel_overwrite_data__)
-        self.assertEqual(
-            g.__gel_get_changed_fields__(), {"num", "public", "players"}
-        )
-        self.assertEqual(
-            g.__pydantic_fields_set__, {"num", "public", "players"}
-        )
+        self.assertPydanticChangedFields(g, {"num", "public", "players"})
 
     @tb.typecheck
     def test_modelgen_save_34(self):

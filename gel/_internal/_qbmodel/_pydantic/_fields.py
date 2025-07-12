@@ -40,8 +40,6 @@ from ._pdlist import ProxyDistinctList
 
 from . import _utils as _pydantic_utils
 
-from gel._internal._unsetid import UNSET_UUID
-
 if TYPE_CHECKING:
     from typing_extensions import Never
     from collections.abc import Sequence
@@ -236,7 +234,7 @@ IdProperty = TypeAliasType(
     "IdProperty",
     Annotated[
         Property[_ST_co, _BT_co],
-        pydantic.Field(default=UNSET_UUID, init=False, frozen=True),
+        pydantic.Field(init=False, frozen=True),
         _abstract.PointerInfo(
             computed=True,
             readonly=True,

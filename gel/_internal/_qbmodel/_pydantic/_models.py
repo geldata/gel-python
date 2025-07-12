@@ -525,7 +525,13 @@ class GelSourceModel(
     # We use slots because PyDantic overrides `__dict__`
     # making state management for "special" properties like
     # these hard.
-    __slots__ = ("__gel_changed_fields__",)
+    __slots__ = ("__gel_changed_fields__", "__gel_new__")
+
+    # Functions like __gel_model_construct__ are performance-critical,
+    # we don't want to add another super() call to them, so we use
+    # this class-level toggle to do some id-related work for GelModel,
+    # and avoid doing it for ProxyModel / link props.
+    __gel_has_id_field__: ClassVar[bool] = False
 
     if TYPE_CHECKING:
         # Set of fields that have been changed since the last commit;
@@ -534,6 +540,10 @@ class GelSourceModel(
 
         # Whether the model uses DEFAULT_MODEL_CONFIG or not.
         __gel_default_model_config__: ClassVar[bool]
+
+        # Whether the model is new (no `.id` set) or it has
+        # an `.id` corresponding to a database object.
+        __gel_new__: bool
 
     @classmethod
     def __gel_model_construct__(cls, __dict__: dict[str, Any] | None) -> Self:
@@ -572,22 +582,32 @@ class GelSourceModel(
             ll_setattr(self, "__pydantic_private__", None)
             ll_setattr(self, "__gel_changed_fields__", None)
 
+        if cls.__gel_has_id_field__:
+            mid = self.__dict__.get("id", _unset)
+            assert mid is not UNSET_UUID
+            ll_setattr(self, "__gel_new__", mid is _unset)
+
         return self
 
     @classmethod
     def model_construct(
-        cls, _fields_set: set[str] | None = None, **values: Any
+        cls,
+        _fields_set: set[str] | None = None,
+        *,
+        id: uuid.UUID = UNSET_UUID,  # noqa: A002
+        **values: Any,
     ) -> Self:
-        vid = values.pop("id", _unset)
-        if vid is not _unset:
-            if not isinstance(vid, uuid.UUID):
-                raise TypeError(f"id must be a UUID, got {type(vid).__name__}")
+        if id is UNSET_UUID:
+            self = super().model_construct(_fields_set, **values)
         else:
-            vid = UNSET_UUID
+            if not isinstance(id, uuid.UUID) and cls.__gel_has_id_field__:
+                raise TypeError(f"id must be a UUID, got {type(id).__name__}")
+            self = super().model_construct(_fields_set, id=id, **values)
 
-        self = super().model_construct(_fields_set, **values)
+        if cls.__gel_has_id_field__:
+            cls.__gel_new__ = id is UNSET_UUID
+
         __dict__ = self.__dict__
-        __dict__["id"] = vid
 
         pointer_ctrs = cls.__gel_pointers__()
         for name, val in __dict__.items():
@@ -798,12 +818,12 @@ class GelSourceModel(
 
 
 def _kwargs_exclude_id(
-    id_: uuid.UUID, kwargs: dict[str, Any], /
+    model: GelModel, kwargs: dict[str, Any], /
 ) -> dict[str, Any]:
     # Helper to exclude unset `id` field from the dump.
     # See model_dump() for more details.
 
-    if id_ is UNSET_UUID:
+    if model.__gel_new__:
         try:
             exclude = kwargs["exclude"]
         except KeyError:
@@ -859,6 +879,8 @@ class GelModel(
 ):
     __slots__ = ()
 
+    __gel_has_id_field__ = True
+
     if TYPE_CHECKING:
         id: uuid.UUID
 
@@ -871,6 +893,8 @@ class GelModel(
         if id is UNSET_UUID:
             # No 'id' argument: new object, just follow the normal
             # __new__ / __init__ machinery.
+            # UNSET_UUID is a transient value that will not be set
+            # on the object.
             new = super().__new__
             if new is object.__new__:
                 return new(cls)
@@ -903,6 +927,7 @@ class GelModel(
 
         self.__gel_changed_fields__ = set(self.__pydantic_fields_set__)
         self.__dict__["id"] = id
+        self.__gel_new__ = False
         return self
 
     def __init__(
@@ -922,7 +947,13 @@ class GelModel(
                 # nothing to do in `__init__`.
                 return
 
-        super().__init__(**kwargs)
+        super().__init__(id=id, **kwargs)
+
+        # UNSET_UUID is a transient value, it must not leak to user code.
+        marker = self.__dict__.pop("id")
+        assert marker is UNSET_UUID
+
+        self.__gel_new__ = True
 
     def __getattr__(self, name: str) -> Any:
         cls = type(self)
@@ -936,7 +967,7 @@ class GelModel(
             # We call `object.__getattribute__` here because we want to
             # the descriptor to be called and raise a proper error or
             # do something else.
-            return object.__getattribute__(self, name)
+            return ll_getattr(self, name)
 
         # We're accesing a field that was not set. Let's check if it's
         # a "multi link". If it is, we have to create an empty list,
@@ -975,23 +1006,22 @@ class GelModel(
         # Delegate to the descriptor.
         return object.__getattribute__(self, name)
 
-    def __gel_is_new__(self) -> bool:
-        return self.id is UNSET_UUID
-
     def __gel_commit__(self, new_id: uuid.UUID | None = None) -> None:
         if new_id is not None:
-            if self.id is not UNSET_UUID:
+            if not self.__gel_new__:
                 raise ValueError(
                     f"cannot set id on {self!r} after it has been set"
                 )
-            object.__setattr__(self, "id", new_id)
+            self.__gel_new__ = False
+            ll_setattr(self, "id", new_id)
 
+        assert not self.__gel_new__
         super().__gel_commit__()
 
     def __eq__(self, other: object) -> bool:
         # We make two models equal to each other if they:
         #
-        #   - both have the same *set* UUID (not UNSET_UUID)
+        #   - both have the same *set* UUID (not __gel_new__)
         #     (ignoring differences in their data attributes)
         #
         #   - if they are both ProxyModels and wrap objects
@@ -1036,13 +1066,15 @@ class GelModel(
         if self is other_obj:
             return True
 
+        if self.__gel_new__ or other_obj.__gel_new__:
+            return False
+
         return self.id == other_obj.id
 
     def __hash__(self) -> int:
-        mid = self.id
-        if mid is UNSET_UUID:
+        if self.__gel_new__:
             raise TypeError("Model instances without id value are unhashable")
-        return hash(mid)
+        return hash(self.id)
 
     def __repr_name__(self) -> str:
         cls = type(self)
@@ -1062,7 +1094,7 @@ class GelModel(
         #   - not include "id" at all
         # the latter seems like the least bad option and easier to deal
         # with for the reciever when they validate the data.
-        kwargs = _kwargs_exclude_id(self.id, kwargs)
+        kwargs = _kwargs_exclude_id(self, kwargs)
         # Pydantic assumes computed fields are always set, but that's
         # not true for GelModel; they might not be fetched. Attempting
         # to getattr them would raise an AttributeError -- that's the
@@ -1075,9 +1107,36 @@ class GelModel(
         pydantic.BaseModel.model_dump_json,
     )
     def model_dump_json(self, /, **kwargs: Any) -> str:
-        kwargs = _kwargs_exclude_id(self.id, kwargs)
+        kwargs = _kwargs_exclude_id(self, kwargs)
         kwargs = _kwargs_exclude_unset_computeds(self, kwargs)
         return super().model_dump_json(**kwargs)
+
+    def __getstate__(self) -> dict[Any, Any]:
+        state = super().__getstate__()
+        state["__gel_new__"] = self.__gel_new__
+        return state
+
+    def __setstate__(self, state: dict[Any, Any]) -> None:
+        super().__setstate__(state)
+        self.__gel_new__ = state["__gel_new__"]
+
+    def __copy__(self) -> Self:
+        cp = super().__copy__()
+        ll_setattr(cp, "__gel_new__", ll_getattr(self, "__gel_new__"))
+        return cp
+
+    def __deepcopy__(self, memo: dict[int, Any] | None = None) -> Self:
+        cp = super().__deepcopy__(memo)
+        ll_setattr(cp, "__gel_new__", ll_getattr(self, "__gel_new__"))
+        return cp
+
+    def model_copy(
+        self, *, update: Mapping[str, Any] | None = None, deep: bool = False
+    ) -> Self:
+        copied = super().model_copy(update=update, deep=deep)
+        if update:
+            ll_setattr(copied, "__gel_new__", ll_getattr(self, "__gel_new__"))
+        return copied
 
 
 _T_co = TypeVar("_T_co", covariant=True)
@@ -1141,6 +1200,8 @@ class ProxyModel(
     Generic[_MT_co],
     __gel_root_class__=True,
 ):
+    __gel_has_id_field__ = False
+
     if TYPE_CHECKING:
         __gel_proxy_merged_model_cache__: ClassVar[type[pydantic.BaseModel]]
 
@@ -1244,6 +1305,10 @@ class ProxyModel(
         if name in model_fields:
             base = ll_getattr(self, "_p__obj__")
             return getattr(base, name)
+
+        # We don't do anything around __gel_new__ or __gel_changed_fields__
+        # because we never use them on proxies, we always unwrap proxy
+        # and reason about the wrapped objects/lprops.
 
         return super().__getattribute__(name)
 
@@ -1388,13 +1453,16 @@ class ProxyModel(
         if self_obj is other_obj:
             return True
 
+        if self_obj.__gel_new__ or other_obj.__gel_new__:
+            return False
+
         return self_obj.id == other_obj.id
 
     def __hash__(self) -> int:
-        mid = ll_getattr(self, "_p__obj__").id
-        if mid is UNSET_UUID:
+        wrapped = ll_getattr(self, "_p__obj__")
+        if wrapped.__gel_new__:
             raise TypeError("Model instances without id value are unhashable")
-        return hash(mid)
+        return hash(wrapped.id)
 
     def __repr_name__(self) -> str:
         cls = type(self)
@@ -1435,19 +1503,13 @@ class ProxyModel(
         pydantic.BaseModel.model_dump,
     )
     def model_dump(self, /, **kwargs: Any) -> dict[str, Any]:
-        kwargs = _kwargs_exclude_id(self.id, kwargs)
+        lp_dump = ll_getattr(self, "__linkprops__").model_dump(**kwargs)
+
         wrapped: GelModel = ll_getattr(self, "_p__obj__")
+        kwargs = _kwargs_exclude_id(wrapped, kwargs)
 
         dump = wrapped.model_dump(**kwargs)
-
-        # TODO: figure out how to pass exlude/include/etc
-        # to the wrapped model. For now we just remove them
-        # from the kwargs so that we don't exclude/include
-        # linkprop with rules aimed at the wrapped model.
-        kwargs.pop("exclude", None)
-        kwargs.pop("include", None)
-
-        dump["__linkprops__"] = self.__linkprops__.model_dump(**kwargs)
+        dump["__linkprops__"] = lp_dump
         return dump
 
     @_utils.inherit_signature(  # type: ignore [arg-type]
@@ -1457,7 +1519,8 @@ class ProxyModel(
         # model_dump_json() is a thin wrapper around model_dump(),
         # so we don't need to repeat the logic of including
         # __linkprops__ here.
-        kwargs = _kwargs_exclude_id(self.id, kwargs)
+        wrapped: GelModel = ll_getattr(self, "_p__obj__")
+        kwargs = _kwargs_exclude_id(wrapped, kwargs)
         return super().model_dump_json(**kwargs)
 
     def __getstate__(self) -> dict[Any, Any]:
