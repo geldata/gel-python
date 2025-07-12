@@ -16,6 +16,7 @@ from typing import (
 
 import dataclasses
 import functools
+import inspect
 import types
 
 from gel._internal import _edgeql
@@ -191,10 +192,8 @@ class BaseAlias(metaclass=BaseAliasMeta):
             or attr in SPECIAL_EXPR_METHODS
         ):
             origin = self.__gel_origin__
-            descriptor = _namespace.maybe_get_descriptor(
-                origin, attr, of_type=AbstractFieldDescriptor
-            )
-            if descriptor is not None:
+            descriptor = inspect.getattr_static(origin, attr, None)
+            if isinstance(descriptor, AbstractFieldDescriptor):
                 return descriptor.get(origin, self)
             else:
                 attrval = getattr(origin, attr)

@@ -3,7 +3,7 @@
 # SPDX-FileCopyrightText: Copyright Gel Data Inc. and the contributors.
 
 from __future__ import annotations
-from typing import Any, TypeVar, overload
+from typing import Any
 
 import functools
 import keyword
@@ -76,38 +76,3 @@ def module_ns_of(obj: object) -> dict[str, Any]:
     """Return the namespace of the module where *obj* is defined."""
     module = module_of(obj)
     return module.__dict__ if module is not None else {}
-
-
-_T = TypeVar("_T")
-
-
-@overload
-def maybe_get_descriptor(
-    cls: type,
-    name: str,
-    of_type: type[_T],
-) -> _T | None: ...
-
-
-@overload
-def maybe_get_descriptor(
-    cls: type,
-    name: str,
-    of_type: None = None,
-) -> Any | None: ...
-
-
-def maybe_get_descriptor(
-    cls: type,
-    name: str,
-    of_type: type | None = None,
-) -> Any | None:
-    if of_type is None:
-        of_type = types.MethodDescriptorType
-
-    for ancestor in cls.__mro__:
-        desc = ancestor.__dict__.get(name)
-        if desc is not None and (of_type is None or isinstance(desc, of_type)):
-            return desc
-
-    return None
