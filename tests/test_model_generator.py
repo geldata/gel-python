@@ -919,12 +919,11 @@ class TestModelGenerator(tb.ModelTestCase):
         # unfetched computeds and does not leak UNSET_UUID.
 
         from models import default
-        from gel._testbase import pop_ids, pop_ids_json
 
         ug = self.client.query_required_single(
             default.UserGroup.select(
                 name=True,
-                users=lambda s: s.users.select(name=True, name_len=True)
+                users=lambda s: s.users.select(name=True)
                 .order_by(name=True)
                 .limit(2),
             )
@@ -940,25 +939,14 @@ class TestModelGenerator(tb.ModelTestCase):
             "users": [
                 {
                     "name": "Alice",
-                    "name_len": 5,
                 },
                 {
                     "name": "Billie",
-                    "name_len": 6,
                 },
                 {"name": "aaa", "nickname": None},
             ],
         }
-
-        self.assertEqual(
-            pop_ids(ug.model_dump()),
-            expected,
-        )
-
-        self.assertEqual(
-            json.loads(pop_ids_json(ug.model_dump_json())),
-            expected,
-        )
+        self.assertPydanticSerializes(ug, expected)
 
     @tb.typecheck(["import typing, json, pydantic"])
     def test_modelgen_pydantic_apis_10(self):
@@ -966,7 +954,6 @@ class TestModelGenerator(tb.ModelTestCase):
         # test *single required* link serialization
 
         from models import default
-        from gel._testbase import pop_ids, pop_ids_json
 
         p = self.client.get(
             default.Post.select(
@@ -987,11 +974,7 @@ class TestModelGenerator(tb.ModelTestCase):
                 "name": "Alice",
             },
         }
-        self.assertEqual(pop_ids(p.model_dump()), expected)
-        self.assertEqual(
-            json.loads(pop_ids_json(p.model_dump_json())),
-            expected,
-        )
+        self.assertPydanticSerializes(p, expected)
 
     @tb.typecheck(["import typing, json, pydantic"])
     def test_modelgen_pydantic_apis_11(self):
@@ -1109,6 +1092,7 @@ class TestModelGenerator(tb.ModelTestCase):
                 "comp_req_friend": common,
                 "comp_req_wprop_friend": common,
             },
+            test_roundtrip=False,
         )
 
         t3 = self.client.get(
@@ -1137,6 +1121,7 @@ class TestModelGenerator(tb.ModelTestCase):
                 "comp_req_friend": common,
                 "comp_req_wprop_friend": common,
             },
+            test_roundtrip=False,
         )
 
         # Smoke test -- when computeds became proper pydantic computeds
@@ -1154,6 +1139,34 @@ class TestModelGenerator(tb.ModelTestCase):
                 "comp_opt_wprop_friend",
                 "comp_req_friend",
                 "comp_req_wprop_friend",
+            },
+        )
+
+        t4 = self.client.get(
+            default.TestSingleLinks.select(
+                req_wprop_friend=lambda t: t.req_wprop_friend.select(
+                    name=True
+                ),
+                req_friend=lambda t: t.req_friend.select(name=True),
+                opt_friend=lambda t: t.opt_friend.select(name=True),
+                opt_wprop_friend=lambda t: t.opt_wprop_friend.select(
+                    name=True
+                ),
+            )
+        )
+        self.assertPydanticSerializes(
+            t4,
+            {
+                "req_wprop_friend": {
+                    **common,
+                    "__linkprops__": {"strength": 123},
+                },
+                "req_friend": common,
+                "opt_friend": common,
+                "opt_wprop_friend": {
+                    **common,
+                    "__linkprops__": {"strength": 456},
+                },
             },
         )
 
@@ -3020,9 +3033,12 @@ class TestModelGenerator(tb.ModelTestCase):
 
         # The ID was random, so we don't expect collisions with real models.
         # We also don't expect any model to have been created.
-        res = self.client.query("""
+        res = self.client.query(
+            """
             select User filter .id = <uuid>$id
-        """, id=obj.id)
+        """,
+            id=obj.id,
+        )
         self.assertEqual(len(res), 0)
 
     def test_modelgen_write_only_dlist_errors(self):

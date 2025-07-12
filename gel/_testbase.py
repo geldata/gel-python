@@ -795,12 +795,38 @@ class ModelTestCase(SyncQueryTestCase):
         self,
         model: pydantic.BaseModel,
         expected: typing.Any,
+        *,
+        test_roundtrip: bool = True,
     ) -> None:
         self.assertEqual(pop_ids(model.model_dump()), expected)
         self.assertEqual(
             json.loads(pop_ids_json(model.model_dump_json())),
             expected,
         )
+
+        # Test that these two don't fail.
+        model.model_json_schema(mode="serialization")
+        model.model_json_schema(mode="validation")
+
+        if test_roundtrip:
+            # Pydantic's model_validate() doesn't support computed fields,
+            # but model_dump() cannot not include them. So sometimes
+            # we have to test without test_roundtrip.
+
+            new = type(model).model_validate(model.model_dump())
+            self.assertEqual(new.model_dump(), model.model_dump())
+            self.assertEqual(pop_ids(new.model_dump()), expected)
+
+            new = type(model)(**model.model_dump())
+            self.assertEqual(new.model_dump(), model.model_dump())
+            self.assertEqual(pop_ids(new.model_dump()), expected)
+
+            new = type(model).model_validate_json(model.model_dump_json())
+            self.assertEqual(
+                json.loads(new.model_dump_json()),
+                json.loads(model.model_dump_json()),
+            )
+            self.assertEqual(pop_ids(new.model_dump()), expected)
 
     def assertPydanticPickles(
         self,
