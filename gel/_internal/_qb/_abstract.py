@@ -139,6 +139,29 @@ class Symbol(IdentLikeExpr):
         return (self,)
 
 
+@dataclass(kw_only=True, frozen=True)
+class PathExpr(AtomicExpr):
+    source: Expr
+    name: str
+    is_lprop: bool = False
+    is_link: bool = False
+
+    def subnodes(self) -> Iterable[Node]:
+        return (self.source,)
+
+    def compute_must_bind_refs(
+        self, subnodes: Iterable[Node | None]
+    ) -> Iterable[Symbol]:
+        if isinstance(self.source, PathPrefix):
+            return ()
+        else:
+            return self.source.visible_must_bind_refs
+
+    @property
+    def precedence(self) -> _edgeql.Precedence:
+        return _edgeql.PRECEDENCE[_edgeql.Operation.PATH]
+
+
 class Scope:
     stmt: weakref.ref[Stmt]
 
@@ -432,6 +455,9 @@ class Stmt(ScopedExpr):
 
 @dataclass(kw_only=True, frozen=True)
 class PathPrefix(Symbol):
+    source_link: str | None = None
+    lprop_pivot: bool = False
+
     def __edgeql_expr__(self, *, ctx: ScopeContext | None) -> str:
         if (
             ctx is not None
@@ -457,10 +483,24 @@ class ImplicitIteratorStmt(IteratorExpr, Stmt):
         return self.iter_expr.type
 
     @property
+    def source_link(self) -> str | None:
+        ix = self.iter_expr
+        if isinstance(ix, IteratorExpr):
+            ix = ix.iter_expr
+        if isinstance(ix, PathExpr) and isinstance(ix.source, PathPrefix):
+            return ix.name
+        else:
+            return None
+
+    @property
     def path_prefix(self) -> PathPrefix:
         prefix = getattr(self, "_path_prefix", None)
         if prefix is None:
-            prefix = PathPrefix(type_=self.type, scope=self.body_scope)
+            prefix = PathPrefix(
+                type_=self.type,
+                scope=self.body_scope,
+                source_link=self.source_link,
+            )
             object.__setattr__(self, "_path_prefix", prefix)  # noqa: PLC2801
 
         return prefix
@@ -471,5 +511,5 @@ class AbstractDescriptor:
 
 
 class AbstractFieldDescriptor(AbstractDescriptor):
-    def get(self, owner: Any, expr: Any | None = None) -> Any:
+    def get(self, owner: type[Any], expr: Any | None = None) -> Any:
         raise NotImplementedError(f"{type(self)}.get")

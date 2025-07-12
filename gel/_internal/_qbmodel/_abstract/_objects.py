@@ -18,6 +18,7 @@ from typing import (
 from typing_extensions import Self
 
 import functools
+import dataclasses
 import weakref
 
 from gel._internal import _qb
@@ -284,11 +285,13 @@ class GelLinkModel(GelSourceModel):
     pass
 
 
+_MT_co = TypeVar("_MT_co", bound=GelModel, covariant=True)
 _LM = TypeVar("_LM", bound=GelLinkModel)
 
 
 class GelLinkModelDescriptor(
     _typing_parametric.PickleableClassParametricType,
+    _qb.AbstractFieldDescriptor,
     Generic[_LM],
 ):
     _link_model_class: ClassVar[type[_LM]]  # type: ignore [misc]
@@ -320,3 +323,29 @@ class GelLinkModelDescriptor(
                 instance.__dict__[attr] = linkobj
 
             return linkobj
+
+    def get(
+        self,
+        owner: type[GelProxyModel[GelModel, _LM]],
+        expr: _qb.BaseAlias | None = None,
+    ) -> Any:
+        source: _qb.Expr
+        if expr is not None:
+            source = expr.__gel_metadata__
+        else:
+            raise AssertionError("missing source for link path")
+
+        if (
+            not isinstance(source, _qb.PathPrefix)
+            or source.source_link is None
+        ):
+            raise AttributeError(
+                "__linkprops__", name="__linkprops__", obj=owner
+            )
+
+        prefix = dataclasses.replace(source, lprop_pivot=True)
+        return _qb.AnnotatedExpr(owner.__linkprops__, prefix)  # pyright: ignore [reportGeneralTypeIssues]
+
+
+class GelProxyModel(GelModel, Generic[_MT_co, _LM]):
+    __linkprops__: GelLinkModelDescriptor[_LM]

@@ -41,6 +41,7 @@ from ._objects import (
     GelModel,
     GelModelMeta,
     GelSourceModel,
+    GelProxyModel,
 )
 
 from ._primitive import (
@@ -96,6 +97,7 @@ __all__ = (
     "GelModel",
     "GelModelMeta",
     "GelPrimitiveType",
+    "GelProxyModel",
     "GelScalarType",
     "GelSourceModel",
     "GelType",

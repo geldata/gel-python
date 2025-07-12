@@ -10,7 +10,6 @@ from typing import (
     TYPE_CHECKING,
     Any,
     ClassVar,
-    Generic,
     TypeVar,
     cast,
 )
@@ -1175,7 +1174,7 @@ class _MergedModelBase(GelModel, metaclass=_MergedModelMeta):
 
 class ProxyModel(
     GelModel,
-    Generic[_MT_co],
+    _abstract.GelProxyModel[_MT_co, GelLinkModel],
     __gel_root_class__=True,
 ):
     __gel_has_id_field__ = False

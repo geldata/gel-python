@@ -29,6 +29,7 @@ from ._abstract import (
     ImplicitIteratorStmt,
     IteratorExpr,
     Node,
+    PathExpr,
     PathPrefix,
     ScopeContext,
     Stmt,
@@ -205,36 +206,22 @@ class SetLiteral(AtomicExpr):
 
 
 @dataclass(kw_only=True, frozen=True)
-class Path(AtomicExpr):
-    source: Expr
-    name: str
-    is_lprop: bool
-
-    def subnodes(self) -> Iterable[Node]:
-        return (self.source,)
-
-    def compute_must_bind_refs(
-        self, subnodes: Iterable[Node | None]
-    ) -> Iterable[Symbol]:
-        if isinstance(self.source, PathPrefix):
-            return ()
-        else:
-            return self.source.visible_must_bind_refs
-
-    @property
-    def precedence(self) -> _edgeql.Precedence:
-        return _edgeql.PRECEDENCE[_edgeql.Operation.PATH]
-
+class Path(PathExpr):
     def __edgeql_expr__(self, *, ctx: ScopeContext | None) -> str:
         steps = []
         current: Expr = self
         while isinstance(current, Path):
-            steps.append(current.name)
-            current = current.source
+            source = current.source
+            if isinstance(source, PathPrefix) and source.lprop_pivot:
+                step = f"@{current.name}"
+            else:
+                step = f".{current.name}"
+            steps.append(step)
+            current = source
 
         steps.append(edgeql(current, ctx=ctx))
 
-        return ".".join(reversed(steps))
+        return "".join(reversed(steps))
 
 
 @dataclass(kw_only=True, frozen=True)
