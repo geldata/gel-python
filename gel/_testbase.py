@@ -798,9 +798,18 @@ class ModelTestCase(SyncQueryTestCase):
         *,
         test_roundtrip: bool = True,
     ) -> None:
-        self.assertEqual(pop_ids(model.model_dump()), expected)
+        context = {}
+        try:
+            model.model_dump()
+        except ValueError as e:
+            if "If you have to dump an unsaved model" in str(e):
+                context["gel_allow_unsaved"] = True
+            else:
+                raise
+
+        self.assertEqual(pop_ids(model.model_dump(context=context)), expected)
         self.assertEqual(
-            json.loads(pop_ids_json(model.model_dump_json())),
+            json.loads(pop_ids_json(model.model_dump_json(context=context))),
             expected,
         )
 
@@ -808,35 +817,54 @@ class ModelTestCase(SyncQueryTestCase):
         model.model_json_schema(mode="serialization")
         model.model_json_schema(mode="validation")
 
-        if test_roundtrip:
-            # Pydantic's model_validate() doesn't support computed fields,
-            # but model_dump() cannot not include them. So sometimes
-            # we have to test without test_roundtrip.
+        # Pydantic's model_validate() doesn't support computed fields,
+        # but model_dump() cannot not include them by default.
+        context["gel_exclude_computeds"] = True
+        new_context = context.copy()
+        new_context["gel_allow_unsaved"] = True
 
-            new = type(model).model_validate(model.model_dump())
-            self.assertEqual(new.model_dump(), model.model_dump())
-            self.assertEqual(pop_ids(new.model_dump()), expected)
-
-            new = type(model)(**model.model_dump())
-            self.assertEqual(new.model_dump(), model.model_dump())
-            self.assertEqual(pop_ids(new.model_dump()), expected)
-
-            new = type(model).model_validate_json(model.model_dump_json())
-            self.assertEqual(
-                json.loads(new.model_dump_json()),
-                json.loads(model.model_dump_json()),
+        new = type(model).model_validate(
+            model.model_dump(
+                context=context,
             )
-            self.assertEqual(pop_ids(new.model_dump()), expected)
+        )
+        self.assertEqual(
+            new.model_dump(context=new_context),
+            model.model_dump(context=context),
+        )
+
+        new = type(model)(**model.model_dump(context=context))
+        self.assertEqual(
+            new.model_dump(context=new_context),
+            model.model_dump(context=context),
+        )
+
+        new = type(model).model_validate_json(
+            model.model_dump_json(context=new_context)
+        )
+        self.assertEqual(
+            json.loads(new.model_dump_json(context=new_context)),
+            json.loads(model.model_dump_json(context=context)),
+        )
 
     def assertPydanticPickles(
         self,
         model: pydantic.BaseModel,
     ) -> None:
-        dump = model.model_dump()
-        dump_json = model.model_dump_json()
+        context = {}
+        try:
+            model.model_dump()
+        except ValueError as e:
+            if "If you have to dump an unsaved model" in str(e):
+                context["gel_allow_unsaved"] = True
+            else:
+                raise
+
+        dump = model.model_dump(context=context)
+        dump_json = model.model_dump_json(context=context)
         model2 = repickle(model)
-        self.assertEqual(dump, model2.model_dump())
-        self.assertEqual(dump_json, model2.model_dump_json())
+        self.assertEqual(dump, model2.model_dump(context=context))
+        self.assertEqual(dump_json, model2.model_dump_json(context=context))
         self.assertEqual(
             model.__pydantic_fields_set__,
             model2.__pydantic_fields_set__,

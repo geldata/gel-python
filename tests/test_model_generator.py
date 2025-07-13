@@ -478,7 +478,19 @@ class TestModelGenerator(tb.ModelTestCase):
             orig_name = user.name
             orig_ch_fields = set(user.__gel_get_changed_fields__())
 
-            user_dct = user.model_dump(exclude_unset=True)
+            if new:
+                with self.assertRaisesRegex(
+                    ValueError,
+                    r".*If you have to dump an unsaved model.*",
+                ):
+                    user_dct = user.model_dump(exclude_unset=True)
+
+                user_dct = user.model_dump(
+                    exclude_unset=True,
+                    context={"gel_allow_unsaved": True},
+                )
+            else:
+                user_dct = user.model_dump(exclude_unset=True)
 
             if not user.__gel_new__:
                 self.assertEqual(user.id, user_dct["id"])
@@ -535,28 +547,49 @@ class TestModelGenerator(tb.ModelTestCase):
             {"id": user_loaded.id, "name": "Alice"},
         )
 
+        with self.assertRaisesRegex(
+            ValueError,
+            r".*If you have to dump an unsaved model.*",
+        ):
+            user_new.model_dump(exclude_unset=True)
+
         self.assertEqual(
-            user_new.model_dump(exclude_unset=True),
+            user_new.model_dump(
+                exclude_unset=True,
+                context={"gel_allow_unsaved": True},
+            ),
             {"name": "Bob"},
         )
 
         self.assertEqual(
-            user_new.model_dump(exclude_unset=True, include={"id", "name"}),
+            user_new.model_dump(
+                exclude_unset=True,
+                include={"id", "name"},
+                context={"gel_allow_unsaved": True},
+            ),
             {"name": "Bob"},
         )
 
         self.assertEqual(
-            user_new.model_dump(),
+            user_new.model_dump(
+                context={"gel_allow_unsaved": True},
+            ),
             {"name": "Bob", "nickname": None},
         )
 
         self.assertEqual(
-            user_new.model_dump(exclude={"nickname"}),
+            user_new.model_dump(
+                exclude={"nickname"},
+                context={"gel_allow_unsaved": True},
+            ),
             {"name": "Bob"},
         )
 
         self.assertEqual(
-            user_new.model_dump(exclude={"nickname": True}),
+            user_new.model_dump(
+                exclude={"nickname": True},
+                context={"gel_allow_unsaved": True},
+            ),
             {"name": "Bob"},
         )
 
@@ -569,9 +602,29 @@ class TestModelGenerator(tb.ModelTestCase):
         )
 
         self.assertEqual(
-            user_new.model_dump_json(exclude_unset=True),
+            user_new.model_dump_json(
+                exclude_unset=True,
+                context={"gel_allow_unsaved": True},
+            ),
             json.dumps(
                 {"name": "Bob"},
+                separators=(",", ":"),
+            ),
+        )
+
+        user_loaded.name += "..."
+        with self.assertRaisesRegex(
+            ValueError,
+            r".*If you have to dump an unsaved model.*",
+        ):
+            user_loaded.model_dump()
+
+        self.assertEqual(
+            user_loaded.model_dump_json(
+                context={"gel_allow_unsaved": True},
+            ),
+            json.dumps(
+                {"id": str(user_loaded.id), "name": "Alice..."},
                 separators=(",", ":"),
             ),
         )
@@ -634,6 +687,22 @@ class TestModelGenerator(tb.ModelTestCase):
                 "owner": {
                     "name": "Billie",
                     "__linkprops__": {"bonus": True, "count": 34},
+                },
+            },
+        )
+
+        self.assertEqual(
+            pop_ids(
+                sl.model_dump(
+                    exclude_none=True,
+                    exclude={"owner": {"__linkprops__": {"count"}}},
+                )
+            ),
+            {
+                "name": "Gold Coin",
+                "owner": {
+                    "name": "Billie",
+                    "__linkprops__": {"bonus": True},
                 },
             },
         )
@@ -757,12 +826,21 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(sl.model_dump(), sl2.model_dump())
 
         sl.num += 1
-        pl = sl.players[0]
-        pl.name += "Alice the 2nd"
-        pl.__linkprops__.is_tall_enough = not pl.__linkprops__.is_tall_enough
+        _pl = sl.players[0]
+        _pl.name += "Alice the 2nd"
+        _pl.__linkprops__.is_tall_enough = not _pl.__linkprops__.is_tall_enough
 
         sl2 = repickle(sl)
-        self.assertEqual(sl.model_dump(), sl2.model_dump())
+        for m in (sl, sl2):
+            with self.assertRaisesRegex(
+                ValueError,
+                r".*If you have to dump an unsaved model.*",
+            ):
+                m.model_dump()
+        self.assertEqual(
+            sl.model_dump(context={"gel_allow_unsaved": True}),
+            sl2.model_dump(context={"gel_allow_unsaved": True}),
+        )
 
         self.assertEqual(
             sl.__gel_get_changed_fields__(),
@@ -807,7 +885,16 @@ class TestModelGenerator(tb.ModelTestCase):
         sl.owner.__linkprops__.bonus = not sl.owner.__linkprops__.bonus
 
         sl2 = repickle(sl)
-        self.assertEqual(sl.model_dump(), sl2.model_dump())
+        for m in (sl, sl2):
+            with self.assertRaisesRegex(
+                ValueError,
+                r".*If you have to dump an unsaved model.*",
+            ):
+                m.model_dump()
+        self.assertEqual(
+            sl.model_dump(context={"gel_allow_unsaved": True}),
+            sl2.model_dump(context={"gel_allow_unsaved": True}),
+        )
 
         assert sl2.owner is not None
 
@@ -852,7 +939,16 @@ class TestModelGenerator(tb.ModelTestCase):
         pl.name += "Alice the 2nd"
 
         sl2 = repickle(sl)
-        self.assertEqual(sl.model_dump(), sl2.model_dump())
+        for m in (sl, sl2):
+            with self.assertRaisesRegex(
+                ValueError,
+                r".*If you have to dump an unsaved model.*",
+            ):
+                m.model_dump()
+        self.assertEqual(
+            sl.model_dump(context={"gel_allow_unsaved": True}),
+            sl2.model_dump(context={"gel_allow_unsaved": True}),
+        )
 
         self.assertEqual(
             sl.__gel_get_changed_fields__(),
@@ -1092,7 +1188,6 @@ class TestModelGenerator(tb.ModelTestCase):
                 "comp_req_friend": common,
                 "comp_req_wprop_friend": common,
             },
-            test_roundtrip=False,
         )
 
         t3 = self.client.get(
@@ -1121,7 +1216,6 @@ class TestModelGenerator(tb.ModelTestCase):
                 "comp_req_friend": common,
                 "comp_req_wprop_friend": common,
             },
-            test_roundtrip=False,
         )
 
         # Smoke test -- when computeds became proper pydantic computeds

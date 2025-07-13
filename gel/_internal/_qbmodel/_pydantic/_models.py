@@ -32,7 +32,7 @@ from pydantic_core import core_schema
 
 from pydantic._internal import _model_construction  # noqa: PLC2701
 from pydantic._internal import _decorators  # noqa: PLC2701
-from pydantic._internal._core_utils import get_type_ref  # noqa: PLC2701
+from pydantic._internal import _core_utils as _pydantic_core_utils  # noqa: PLC2701
 
 from gel._internal import _qb
 from gel._internal import _tracked_list
@@ -480,7 +480,7 @@ def _process_pydantic_fields(
         for field_name, comp_field_info in computeds.items():
             func = comp_field_info.wrapped_property.fget
             dec = _decorators.Decorator(
-                get_type_ref(cls),
+                _pydantic_core_utils.get_type_ref(cls),
                 cls_var_name=field_name,
                 shim=None,
                 info=comp_field_info,
@@ -523,9 +523,10 @@ class GelSourceModel(
 ):
     model_config = DEFAULT_MODEL_CONFIG
 
-    # We use slots because PyDantic overrides `__dict__`
+    # We use slots because Pydantic overrides `__dict__`
     # making state management for "special" properties like
-    # these hard.
+    # these hard. We also mess with `__dict__` so we want
+    # these fields to be outside of it.
     __slots__ = ("__gel_changed_fields__", "__gel_new__")
 
     # Functions like __gel_model_construct__ are performance-critical,
@@ -818,61 +819,6 @@ class GelSourceModel(
         return cls.model_validate(value)
 
 
-def _kwargs_exclude_id(
-    model: GelModel, kwargs: dict[str, Any], /
-) -> dict[str, Any]:
-    # Helper to exclude unset `id` field from the dump.
-    # See model_dump() for more details.
-
-    if model.__gel_new__:
-        try:
-            exclude = kwargs["exclude"]
-        except KeyError:
-            kwargs["exclude"] = {"id"}
-        else:
-            if isinstance(exclude, set):
-                exclude.add("id")
-            else:
-                assert isinstance(exclude, dict)
-                exclude["id"] = True
-
-    return kwargs
-
-
-def _kwargs_exclude_unset_computeds(
-    model: GelModel, kwargs: dict[str, Any], /
-) -> dict[str, Any]:
-    # Helper to exclude unset computed fields from the dump.
-    # See model_dump() for more details.
-
-    model.model_rebuild()
-
-    if not model.__pydantic_computed_fields__:
-        return kwargs
-
-    to_exclude: set[str] = set()
-    for fn in model.__pydantic_computed_fields__:
-        if fn not in model.__dict__:
-            to_exclude.add(fn)
-
-    if not to_exclude:
-        return kwargs
-
-    try:
-        exclude = kwargs["exclude"]
-    except KeyError:
-        kwargs["exclude"] = to_exclude
-    else:
-        if isinstance(exclude, set):
-            exclude.update(to_exclude)
-        else:
-            assert isinstance(exclude, dict)
-            for fn in to_exclude:
-                exclude[fn] = True
-
-    return kwargs
-
-
 class GelModel(
     GelSourceModel,
     _abstract.BaseGelModel,
@@ -1082,35 +1028,40 @@ class GelModel(
         return f"{cls.__module__}.{cls.__qualname__} <{id(self)}>"
 
     @_utils.inherit_signature(  # type: ignore [arg-type]
-        pydantic.BaseModel.model_dump,
+        _pydantic_utils.model_dump_signature,
     )
-    def model_dump(self, /, **kwargs: Any) -> dict[str, Any]:
-        # We omit "id" from *unsaved* new objects when serialized.
-        # While this isn't ideal (the field is "required") it's our best
-        # defense against passing an unsaved object through an API boundary.
-        # Out of all options:
-        #   - return string "unset"
-        #   - return invalid UUID or UUID with all-zero bytes
-        #   - return "null"
-        #   - not include "id" at all
-        # the latter seems like the least bad option and easier to deal
-        # with for the reciever when they validate the data.
-        kwargs = _kwargs_exclude_id(self, kwargs)
-        # Pydantic assumes computed fields are always set, but that's
-        # not true for GelModel; they might not be fetched. Attempting
-        # to getattr them would raise an AttributeError -- that's the
-        # desired behavior. But we don't want them to crash `model_dump()`
-        # so we exclude them explicitly.
-        kwargs = _kwargs_exclude_unset_computeds(self, kwargs)
-        return super().model_dump(**kwargs)
+    def model_dump(
+        self,
+        /,
+        *,
+        context: _pydantic_utils.GelDumpContext | None = None,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        _pydantic_utils.massage_model_dump_kwargs(
+            self,
+            caller="model_dump",
+            kwargs=kwargs,
+            context=context,
+        )
+        return super().model_dump(context=context, **kwargs)
 
     @_utils.inherit_signature(  # type: ignore [arg-type]
-        pydantic.BaseModel.model_dump_json,
+        _pydantic_utils.model_dump_json_signature,
     )
-    def model_dump_json(self, /, **kwargs: Any) -> str:
-        kwargs = _kwargs_exclude_id(self, kwargs)
-        kwargs = _kwargs_exclude_unset_computeds(self, kwargs)
-        return super().model_dump_json(**kwargs)
+    def model_dump_json(
+        self,
+        /,
+        *,
+        context: _pydantic_utils.GelDumpContext | None = None,
+        **kwargs: Any,
+    ) -> str:
+        _pydantic_utils.massage_model_dump_kwargs(
+            self,
+            caller="model_dump_json",
+            kwargs=kwargs,
+            context=context,
+        )
+        return super().model_dump_json(context=context, **kwargs)
 
     def __getstate__(self) -> dict[Any, Any]:
         state = super().__getstate__()
@@ -1172,7 +1123,9 @@ class _MergedModelMeta(GelModelMeta):
 
 class _MergedModelBase(GelModel, metaclass=_MergedModelMeta):
     # Used exclusively by ProxyModel.__gel_proxy_make_merged_model__.
-    pass
+    if TYPE_CHECKING:
+        __gel_new__: bool
+        __gel_changed_fields__: set[str] | None
 
 
 class ProxyModel(
@@ -1183,7 +1136,7 @@ class ProxyModel(
     __gel_has_id_field__ = False
 
     if TYPE_CHECKING:
-        __gel_proxy_merged_model_cache__: ClassVar[type[pydantic.BaseModel]]
+        __gel_proxy_merged_model_cache__: ClassVar[type[_MergedModelBase]]
 
     # NB: __linkprops__ is not in slots because it is managed by
     #     GelLinkModelDescriptor.
@@ -1311,14 +1264,15 @@ class ProxyModel(
             cls.__proxy_of__ = generic_meta["args"][0]
 
     @classmethod
-    def __gel_proxy_make_merged_model__(cls) -> type[pydantic.BaseModel]:
+    def __gel_proxy_make_merged_model__(cls) -> type[_MergedModelBase]:
         # Build a model that has all fields of the proxied model +
         # the `__linkprops__` field. This is by far the most robust way
         # (albeit maybe a resource demanding one) to implement
         # validation schema for ProxyModel.
         try:
+            # Make sure we get the cached model for *this* class.
             return cast(
-                "type[pydantic.BaseModel]",
+                "type[_MergedModelBase]",
                 cls.__dict__["__gel_proxy_merged_model_cache__"],
             )
         except KeyError:
@@ -1327,16 +1281,19 @@ class ProxyModel(
         if cls.__proxy_of__ is None or cls.__linkprops__ is None:
             raise TypeError("Subclass must set __proxy_of__ and __linkprops__")
 
-        merged = pydantic.create_model(
-            cls.__name__,
-            __base__=(
-                _MergedModelBase,
-                cls.__proxy_of__,
-            ),  # inherit all wrapped fields
-            __config__=DEFAULT_MODEL_CONFIG,
-            linkprops____=(
-                cls.__linkprops__,
-                pydantic.Field(None, alias="__linkprops__"),
+        merged = cast(
+            "type[_MergedModelBase]",
+            pydantic.create_model(
+                cls.__name__,
+                __base__=(
+                    _MergedModelBase,
+                    cls.__proxy_of__,
+                ),  # inherit all wrapped fields
+                __config__=DEFAULT_MODEL_CONFIG,
+                linkprops____=(
+                    cls.__linkprops__,
+                    pydantic.Field(None, alias="__linkprops__"),
+                ),
             ),
         )
 
@@ -1349,9 +1306,7 @@ class ProxyModel(
         source_type: Any,
         handler: pydantic.GetCoreSchemaHandler,
     ) -> pydantic_core.CoreSchema:
-        if cls.__name__ == "ProxyModel" or cls.__name__.startswith(
-            "ProxyModel[",
-        ):
+        if cls is ProxyModel:
             return handler(source_type)
         else:
 
@@ -1475,29 +1430,88 @@ class ProxyModel(
         if hasattr(self, "_p__obj__"):
             yield from self._p__obj__.__repr_args__()
 
-    @_utils.inherit_signature(  # type: ignore [arg-type]
-        pydantic.BaseModel.model_dump,
-    )
-    def model_dump(self, /, **kwargs: Any) -> dict[str, Any]:
-        lp_dump = ll_getattr(self, "__linkprops__").model_dump(**kwargs)
-
+    def __proxy_model_dump(
+        self,
+        to_json: bool,  # noqa: FBT001
+        /,
+        *,
+        context: _pydantic_utils.GelDumpContext | None = None,
+        **kwargs: Any,
+    ) -> dict[str, Any] | str:
         wrapped: GelModel = ll_getattr(self, "_p__obj__")
-        kwargs = _kwargs_exclude_id(wrapped, kwargs)
 
-        dump = wrapped.model_dump(**kwargs)
-        dump["__linkprops__"] = lp_dump
+        _pydantic_utils.massage_model_dump_kwargs(
+            wrapped,
+            caller="model_dump_json" if to_json else "model_dump",
+            kwargs=kwargs,
+            context=context,
+        )
+
+        # We should find a better way to do dumps of ProxyModel instances.
+        # But in the interim, this is the most straightforward and robust
+        # way to get everything working:
+        #
+        # - 'exclude' on __linkprops__ works fully
+        # - model_dump_json() is properly supported without risking breakage
+        # - let pydantic care about the appropriate context for __linkprops__
+
+        merged_model_cls = type(self).__gel_proxy_make_merged_model__()
+        merged = object.__new__(merged_model_cls)
+        for attr in (
+            "__pydantic_fields_set__",
+            "__pydantic_extra__",
+            "__pydantic_private__",
+            "__dict__",
+            "__gel_new__",
+            "__gel_changed_fields__",
+        ):
+            ll_setattr(merged, attr, ll_getattr(wrapped, attr))
+
+        assert "__linkprops__" not in merged.__dict__
+        merged.__dict__["__linkprops__"] = ll_getattr(self, "__linkprops__")
+        try:
+            if to_json:
+                return merged.model_dump_json(context=context, **kwargs)
+            else:
+                return merged.model_dump(context=context, **kwargs)
+        finally:
+            del merged.__dict__["__linkprops__"]
+
+    @_utils.inherit_signature(  # type: ignore [arg-type]
+        _pydantic_utils.model_dump_signature,
+    )
+    def model_dump(
+        self,
+        /,
+        *,
+        context: _pydantic_utils.GelDumpContext | None = None,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        dump = self.__proxy_model_dump(
+            False,  # noqa: FBT003
+            context=context,
+            **kwargs,
+        )
+        assert type(dump) is dict
         return dump
 
     @_utils.inherit_signature(  # type: ignore [arg-type]
-        pydantic.BaseModel.model_dump_json,
+        _pydantic_utils.model_dump_json_signature,
     )
-    def model_dump_json(self, /, **kwargs: Any) -> str:
-        # model_dump_json() is a thin wrapper around model_dump(),
-        # so we don't need to repeat the logic of including
-        # __linkprops__ here.
-        wrapped: GelModel = ll_getattr(self, "_p__obj__")
-        kwargs = _kwargs_exclude_id(wrapped, kwargs)
-        return super().model_dump_json(**kwargs)
+    def model_dump_json(
+        self,
+        /,
+        *,
+        context: _pydantic_utils.GelDumpContext | None = None,
+        **kwargs: Any,
+    ) -> str:
+        dump = self.__proxy_model_dump(
+            True,  # noqa: FBT003
+            context=context,
+            **kwargs,
+        )
+        assert type(dump) is str
+        return dump
 
     def __getstate__(self) -> dict[Any, Any]:
         return {
