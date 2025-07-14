@@ -673,7 +673,7 @@ class BasePoolImpl(abc.ABC, Generic[_T_Conn, _T_Event]):
                 f"{connection!r} is not a member of this pool"
             )
 
-        return await self._release(ch)  # type: ignore [arg-type]
+        return await self._release(ch)  # pyright: ignore [reportArgumentType]
 
     def terminate(self) -> None:
         """Terminate all connections in the pool."""
