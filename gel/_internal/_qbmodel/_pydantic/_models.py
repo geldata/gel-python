@@ -711,17 +711,13 @@ class GelSourceModel(
 
         copied = self.__deepcopy__() if deep else self.__copy__()  # noqa: PLC2801
         if update:
-            copied.__dict__.update(update)
-
-            keys = update.keys()
-            ll_getattr(copied, "__pydantic_fields_set__").update(keys)
-
-            ch_fields = ll_getattr(copied, "__gel_changed_fields__")
-            if ch_fields is not None:
-                ch_fields.update(keys)
-            else:
-                ll_setattr(copied, "__gel_changed_fields__", set(keys))
-
+            # `model_copy()` is supposed to be non-validating, but we can't
+            # have that for GelModel, as things liks exact types of collections
+            # of linked objects are very important for the API to function.
+            # So we go the slow way and set every attribute, which will trigger
+            # validation. There's no other way.
+            for k, v in update.items():
+                setattr(copied, k, v)
         return copied
 
     def __init__(self, /, **kwargs: Any) -> None:

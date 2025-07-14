@@ -3246,7 +3246,6 @@ class TestModelGenerator(tb.ModelTestCase):
         session = self.client.get(default.GameSession.filter(num=9001))
         self.assertEqual(session.time_limit, None)
 
-    @tb.xfail
     @tb.typecheck
     def test_modelgen_save_40(self):
         from models import default
@@ -3279,7 +3278,9 @@ class TestModelGenerator(tb.ModelTestCase):
 
         # Use the custom object to update the existing group
         updated = gr.model_copy(
-            update=mygroup.model_dump(exclude_none=True),
+            update=mygroup.model_dump(
+                exclude_none=True, context={"gel_exclude_computeds": True}
+            ),
             deep=True,
         )
         self.client.save(updated)
