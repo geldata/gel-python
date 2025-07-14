@@ -25,6 +25,8 @@ import warnings
 import weakref
 import uuid
 
+from collections.abc import Iterable
+
 import pydantic
 import pydantic.fields
 import pydantic_core
@@ -50,7 +52,6 @@ if TYPE_CHECKING:
 
     from collections.abc import (
         Iterator,
-        Iterable,
         Mapping,
         Set as AbstractSet,
     )
@@ -772,17 +773,21 @@ class GelSourceModel(
                 # to be called, in which case we just silently return.
                 return
 
-            if not isinstance(value, list):
+            if not isinstance(value, Iterable):
                 raise TypeError(
                     f"cannot assign values of type {type(value).__name__!r} "
-                    f"to {type(self).__name__}.{name}; a list is expected"
+                    f"to {type(self).__name__}.{name}; an iterable is expected"
                 )
 
             assert isinstance(current_value, _tracked_list.AbstractTrackedList)
             current_value.clear()
             current_value.__gel_reset_snapshot__()
             if value:
-                current_value.extend(value)
+                current_value.extend(
+                    value.__gel_basetype_iter__()
+                    if isinstance(value, _tracked_list.AbstractTrackedList)
+                    else value
+                )
 
             # Ensure compatibility with pydantic's __setattr__
             self.__pydantic_fields_set__.add(name)
@@ -1338,9 +1343,15 @@ class ProxyModel(
             merged_schema = handler.generate_schema(
                 cls.__gel_proxy_make_merged_model__()
             )
+            inner_schema = core_schema.union_schema(
+                [
+                    merged_schema,
+                    handler.generate_schema(cls.__proxy_of__),
+                ]
+            )
             return core_schema.no_info_after_validator_function(
                 _validate,
-                schema=merged_schema,
+                schema=inner_schema,
                 serialization=core_schema.wrap_serializer_function_ser_schema(
                     lambda obj, _ser, info: obj.model_dump(
                         **_pydantic_utils.serialization_info_to_dump_kwargs(
@@ -1522,6 +1533,9 @@ class ProxyModel(
     def __setstate__(self, state: dict[Any, Any]) -> None:
         ll_setattr(self, "_p__obj__", state["obj"])
         ll_setattr(self, "__linkprops__", state["linkprops"])
+
+    def __gel_unwrap_proxy__(self) -> GelModel:
+        return self._p__obj__
 
 
 #

@@ -131,6 +131,7 @@ class AbstractTrackedList(
         else:
             self._initial_items = []
             self._items = []
+
             # 'extend' is optimized in ProxyDistinctList
             # for use in __init__
             self.extend(iterable)
@@ -217,6 +218,8 @@ class AbstractTrackedList(
 
     def _check_values(self, values: Iterable[Any]) -> list[_T_co]:
         """Ensure `values` is an iterable of type T and return it as a list."""
+        if isinstance(values, AbstractTrackedList):
+            values = values.__gel_basetype_iter__()
         return [self._check_value(value) for value in values]
 
     @requires_read("get the length of", unsafe="unsafe_len()")
@@ -269,6 +272,8 @@ class AbstractTrackedList(
         self._items.insert(index, value)
 
     def extend(self, values: Iterable[_T_co]) -> None:
+        if values is self:
+            values = list(self)
         values = self._check_values(values)
         self._ensure_snapshot()
         self._items.extend(values)
@@ -353,6 +358,9 @@ class AbstractTrackedList(
         for item in other:
             self.remove(item)
         return self
+
+    def __gel_basetype_iter__(self) -> Iterator[_T_co]:
+        return iter(self._items)
 
     def unsafe_iter(self) -> Iterator[_T_co]:
         """Iterate over the list disregarding the access mode."""

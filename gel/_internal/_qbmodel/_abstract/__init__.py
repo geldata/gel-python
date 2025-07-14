@@ -45,6 +45,7 @@ from ._methods import (
     BaseGelModel,
 )
 
+
 from ._primitive import (
     MODEL_SUBSTRATE_MODULE,
     AnyEnum,
