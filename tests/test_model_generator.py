@@ -5155,7 +5155,7 @@ class TestModelGeneratorOther(tb.ModelTestCase):
 
     ISOLATED_TEST_BRANCHES = True
 
-    @tb.xfail
+    @tb.typecheck
     def test_modelgen_escape_01(self):
         from models import default
         # insert an object that needs a lot of escaping
@@ -5180,12 +5180,13 @@ class TestModelGeneratorOther(tb.ModelTestCase):
         )
         self.assertEqual(res.alter, False)
         self.assertEqual(res.like, "like this")
+        assert res.commit is not None
         self.assertEqual(res.commit.name, "Alice")
         self.assertEqual(len(res.configure), 1)
         self.assertEqual(res.configure[0].name, "Alice")
         self.assertEqual(res.configure[0].__linkprops__.create, True)
 
-    @tb.xfail
+    @tb.typecheck
     def test_modelgen_escape_02(self):
         from models import default
         # insert and update an object that needs a lot of escaping
@@ -5213,6 +5214,7 @@ class TestModelGeneratorOther(tb.ModelTestCase):
         )
         self.assertEqual(res.alter, False)
         self.assertEqual(res.like, "like this")
+        assert res.commit is not None
         self.assertEqual(res.commit.name, "Alice")
         self.assertEqual(len(res.configure), 1)
         self.assertEqual(res.configure[0].name, "Alice")

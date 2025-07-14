@@ -1147,7 +1147,8 @@ class SaveExecutor:
                     )
 
                     lp_assign = ", ".join(
-                        f"@{p} := {arg_casts[p][1](f'__tup.{i + 1}')}"
+                        f"@{quote_ident(p)} := "
+                        f"{arg_casts[p][1](f'__tup.{i + 1}')}"
                         for i, p in enumerate(ch.props_info)
                     )
 

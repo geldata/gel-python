@@ -213,9 +213,9 @@ class Path(PathExpr):
         while isinstance(current, Path):
             source = current.source
             if isinstance(source, PathPrefix) and source.lprop_pivot:
-                step = f"@{current.name}"
+                step = f"@{_edgeql.quote_ident(current.name)}"
             else:
-                step = f".{current.name}"
+                step = f".{_edgeql.quote_ident(current.name)}"
             steps.append(step)
             current = source
 
