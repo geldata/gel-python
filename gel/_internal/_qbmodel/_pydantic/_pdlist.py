@@ -15,13 +15,14 @@ from typing import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable
+    from collections.abc import Iterable, Iterator
     from gel._internal._tracked_list import Mode
 
 from typing_extensions import (
     Self,
 )
 
+from gel._internal._tracked_list import AbstractTrackedList
 from gel._internal._qbmodel._abstract._distinct_list import (
     AbstractDistinctList,
 )
@@ -96,6 +97,8 @@ class ProxyDistinctList(
 
         if values is self:
             values = list(values)
+        if isinstance(values, AbstractTrackedList):
+            values = list(values.__gel_basetype_iter__())
 
         self._ensure_snapshot()
 
@@ -182,11 +185,19 @@ class ProxyDistinctList(
                 value,
             )
 
+        if isinstance(value, ProxyModel):
+            # We unwrap different kinds of proxies - we can't inherit their
+            # linkprops
+            value = ll_getattr(value, "_p__obj__")
+
         proxy = t.model_validate(value)
         return (
             proxy,
             ll_getattr(proxy, "_p__obj__"),
         )
+
+    def _check_values(self, values: Iterable[Any]) -> list[_PT_co]:
+        return [self._check_value(value) for value in values]
 
     def _check_value(self, value: Any) -> _PT_co:
         proxy, obj = self._cast_value(value)
@@ -226,6 +237,10 @@ class ProxyDistinctList(
     def clear(self) -> None:
         super().clear()
         self._wrapped_index = None
+
+    def __gel_basetype_iter__(self) -> Iterator[_BMT_co]:  # type: ignore [override]
+        for item in self._items:
+            yield item._p__obj__  # type: ignore [misc]
 
     def __reduce__(self) -> tuple[Any, ...]:
         cls = type(self)

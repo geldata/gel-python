@@ -1306,6 +1306,75 @@ class TestModelGenerator(tb.ModelTestCase):
             {"id": p.id, "label": "singleton", "next": {"id": p.id}},
         )
 
+    def test_modelgen_pydantic_apis_14(self):
+        # Test that proxies can't leak into a link with no props
+        # and that one list with proxies can't leak wrong proxies
+        # into anoher list
+
+        from models import default
+
+        # case 1: append a proxy
+
+        u1 = default.User(name="aaa")
+        ug = default.UserGroup(name="aaa")
+        ug.users.append(
+            default.GameSession.players.link(
+                u1,
+                is_tall_enough=True,
+            )
+        )
+        self.assertFalse(hasattr(ug.users[0], "__linkprops__"))
+
+        # case 2: initialize with a list of proxies
+
+        gs = default.GameSession(
+            num=123,
+            players=[
+                default.GameSession.players.link(u1, is_tall_enough=True)
+            ],
+        )
+
+        ug = default.UserGroup(name="aaa", users=gs.players)
+
+        self.assertFalse(hasattr(ug.users[0], "__linkprops__"))
+
+        # case 3: setattr to a list of proxies
+
+        ug = default.UserGroup(name="aaa")
+        ug.users = gs.players
+        self.assertFalse(hasattr(ug.users[0], "__linkprops__"))
+
+        # case 4: a list with wrong list props into a list with link props
+
+        r = default.Raid(name="r", members=gs.players)
+        self.assertFalse(
+            hasattr(r.members[0].__linkprops__, "is_tall_enough"),
+        )
+
+        # case 5: appending a wrong proxy to a list of proxies
+
+        r = default.Raid(name="r", members=gs.players)
+        r.members.append(gs.players[0])
+        self.assertFalse(
+            hasattr(r.members[0].__linkprops__, "is_tall_enough"),
+        )
+        self.assertIsInstance(
+            r.members[0],
+            default.Raid.__links__.members,
+        )
+
+        # case 6: sanity check
+
+        r = default.Raid(
+            name="r", members=[default.Raid.members.link(u1, role="tank")]
+        )
+        self.assertIsInstance(
+            r.members[0],
+            default.Raid.__links__.members,
+        )
+        self.assertEqual(r.members[0].__linkprops__.role, "tank")
+        self.assertEqual(r.members[0].name, u1.name)
+
     @tb.typecheck
     def test_modelgen_data_unpack_polymorphic(self):
         from models import default
@@ -2756,7 +2825,7 @@ class TestModelGenerator(tb.ModelTestCase):
         #########
 
         with self.assertRaisesRegex(
-            TypeError, "cannot assign.*list is expected"
+            TypeError, "cannot assign.*iterable is expected"
         ):
             g.players = None  # type: ignore [assignment]
 

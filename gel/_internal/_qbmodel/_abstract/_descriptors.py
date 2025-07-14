@@ -412,3 +412,6 @@ class GelLinkModelDescriptor(
 
 class AbstractGelProxyModel(AbstractGelModel, Generic[_MT_co, _LM]):
     __linkprops__: GelLinkModelDescriptor[_LM]
+
+    def __gel_unwrap_proxy__(self) -> AbstractGelModel:
+        raise NotImplementedError

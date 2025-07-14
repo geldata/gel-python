@@ -196,3 +196,8 @@ class BaseGelModel(AbstractGelModel):
                 cls,
                 assert_single(cls, message=message, __operand__=__operand__),
             )
+
+    @classmethod
+    def __edgeql_qb_expr__(cls) -> _qb.Expr:  # pyright: ignore [reportIncompatibleMethodOverride]
+        this_type = cls.__gel_reflection__.name
+        return _qb.SchemaSet(type_=this_type)

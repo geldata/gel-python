@@ -18,7 +18,7 @@ from gel._internal import _typing_parametric as parametric
 if TYPE_CHECKING:
     from ._base import AbstractGelSourceModel
 
-
+from ._descriptors import AbstractGelProxyModel
 from gel._internal._tracked_list import (
     AbstractTrackedList,
     DefaultList,
@@ -63,9 +63,12 @@ class AbstractDistinctList(AbstractTrackedList[_MT_co]):
 
     def _check_value(self, value: Any) -> _MT_co:
         cls = type(self)
-
         t = cls.type
-        if isinstance(value, cls.type):
+
+        if isinstance(value, AbstractGelProxyModel):
+            value = value.__gel_unwrap_proxy__()
+
+        if isinstance(value, t):
             return value
 
         return t.__gel_validate__(value)
@@ -221,6 +224,8 @@ class AbstractDistinctList(AbstractTrackedList[_MT_co]):
     def extend(self, values: Iterable[_MT_co]) -> None:
         if values is self:
             values = list(values)
+        if isinstance(values, AbstractTrackedList):
+            values = values.__gel_basetype_iter__()
         for v in values:
             self.append(v)
 
