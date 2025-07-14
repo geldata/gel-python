@@ -767,9 +767,9 @@ def make_plan(objs: Iterable[GelModel]) -> SavePlan:
             if all(dep in inserted for dep in get_linked_new_objects(o))
         ]
         if not ready:
+            # TODO: improve this error message by rendering a graph
             raise RuntimeError(
-                f"Cannot resolve dependencies "
-                f"among objects: {remaining_to_make}"
+                "Cannot resolve recursive dependencies among objects"
             )
 
         insert_batches.append(

@@ -2550,7 +2550,6 @@ class TestModelGenerator(tb.ModelTestCase):
         )
         self.assertEqual(g2.mascot, "iguana")
 
-    @tb.xfail
     @tb.typecheck
     def test_modelgen_save_26(self):
         from models import default
@@ -2567,8 +2566,11 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(l0.il1.val, "2nd")
         self.assertEqual(l0.il1.il0.val, "1st")
 
-        # this should now be an impossible to save loop
-        self.client.save(l0, l1)
+        with self.assertRaisesRegex(
+            RuntimeError,
+            r"Cannot resolve recursive dependencies",
+        ):
+            self.client.save(l0, l1)
 
     @tb.typecheck
     def test_modelgen_save_27(self):
