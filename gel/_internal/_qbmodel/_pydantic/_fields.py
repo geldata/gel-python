@@ -423,21 +423,14 @@ class _AnyLink(Generic[_MT_co, _BMT_co]):
     ) -> pydantic_core.CoreSchema:
         if _typing_inspect.is_generic_alias(source_type):
             args = typing.get_args(source_type)
-
-            if issubclass(args[0], ProxyModel):
-                inner_schema = handler.generate_schema(args[0])
-                return core_schema.json_or_python_schema(
-                    json_schema=inner_schema,
-                    python_schema=core_schema.no_info_plain_validator_function(
-                        functools.partial(cls._validate, generic_args=args),
-                    ),
-                    serialization=cls._build_serialize(),
-                )
-            else:
-                base_schema = handler.generate_schema(args[0])
-                ser = cls._build_serialize()
-                base_schema["serialization"] = ser  # type: ignore [index]
-                return base_schema
+            inner_schema = handler.generate_schema(args[0])
+            return core_schema.json_or_python_schema(
+                json_schema=inner_schema,
+                python_schema=core_schema.no_info_plain_validator_function(
+                    functools.partial(cls._validate, generic_args=args),
+                ),
+                serialization=cls._build_serialize(),
+            )
         else:
             return handler.generate_schema(source_type)
 
@@ -448,10 +441,38 @@ class _AnyLink(Generic[_MT_co, _BMT_co]):
         generic_args: tuple[type[Any], type[Any]],
     ) -> _MT_co | None:
         mt, bmt = generic_args
-        if value is None or isinstance(value, mt):
-            return value
-        elif isinstance(value, bmt):
-            return mt.link(value)  # type: ignore [no-any-return]
+
+        if value is None:
+            raise ValueError("cannot set a required link to None")
+
+        if mt is bmt:
+            # link or optional link *without* props
+
+            if isinstance(value, ProxyModel):
+                # A proxied model -- let's just unwrap it.
+                # Scenario: a user had code line `o1.link = o2.link`
+                # which worked, and so it should continue working
+                # if the user added a property to `o2.link`.
+                value = value._p__obj__
+
+            if isinstance(value, mt):
+                return value  # type: ignore [no-any-return]
+        else:
+            # link or optional link *with* props
+            if isinstance(value, mt):
+                # Same proxy type -- we can't do anything but to return
+                # the value as is; otherwise `obj.link = LinkWithProps.link()`
+                # wouldn't work.
+                return value  # type: ignore [no-any-return]
+
+            if isinstance(value, ProxyModel):
+                # A proxied model of different type:
+                # let's just unwrap it. Same motivation as in
+                # the other branch.
+                value = value._p__obj__
+
+            if isinstance(value, bmt):
+                return mt.link(value)  # type: ignore [no-any-return]
 
         # defer to Pydantic
         return mt.model_validate(value)  # type: ignore [no-any-return]
@@ -492,6 +513,16 @@ class _OptionalLink(
         schema = super().__get_pydantic_core_schema__(source_type, handler)
         schema = core_schema.nullable_schema(schema)
         return schema
+
+    @classmethod
+    def _validate(
+        cls,
+        value: Any,
+        generic_args: tuple[type[Any], type[Any]],
+    ) -> _MT_co | None:
+        if value is None:
+            return None
+        return super()._validate(value, generic_args)
 
 
 RequiredLinkWithProps = TypeAliasType(
