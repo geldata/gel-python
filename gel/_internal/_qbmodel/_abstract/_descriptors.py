@@ -5,8 +5,15 @@
 """EdgeQL query builder descriptors for attribute magic"""
 
 from __future__ import annotations
-from typing import TYPE_CHECKING, Any, ClassVar, Generic, TypeVar, overload
-from typing_extensions import Self
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    ClassVar,
+    Generic,
+    TypeVar,
+    overload,
+)
+from typing_extensions import Self, Never
 
 import dataclasses
 import typing
@@ -16,6 +23,7 @@ from pydantic._internal import _namespace_utils  # noqa: PLC2701
 
 from gel._internal import _qb
 from gel._internal import _namespace
+from gel._internal import _tracked_list
 from gel._internal import _typing_eval
 from gel._internal import _typing_inspect
 from gel._internal import _typing_parametric
@@ -32,6 +40,8 @@ from ._base import (
 
 if TYPE_CHECKING:
     import types
+    from collections.abc import Sequence
+    from ._distinct_list import AbstractDistinctList, ProxyDistinctList
 
 
 class ModelFieldDescriptor(_qb.AbstractFieldDescriptor):
@@ -191,12 +201,25 @@ def field_descriptor(
 T_co = TypeVar("T_co", bound=GelType, covariant=True)
 BT_co = TypeVar("BT_co", covariant=True)
 
+_MT_co = TypeVar("_MT_co", bound=AbstractGelModel, covariant=True)
+"""Derived model type"""
+
+_BMT_co = TypeVar("_BMT_co", bound=AbstractGelModel, covariant=True)
+"""Base model type (which _MT_co is directly derived from)"""
+
+_LM_co = TypeVar("_LM_co", bound=AbstractGelLinkModel, covariant=True)
+"""Link model (defines link properties)."""
+
 
 class PointerDescriptor(_qb.AbstractDescriptor, Generic[T_co, BT_co]):
     pass
 
 
 class OptionalPointerDescriptor(PointerDescriptor[T_co, BT_co]):
+    pass
+
+
+class ComputedPointerDescriptor(PointerDescriptor[T_co, BT_co]):
     pass
 
 
@@ -236,6 +259,104 @@ class PropertyDescriptor(AnyPropertyDescriptor[T_co, BT_co]):
             value: T_co | BT_co,
             /,
         ) -> None: ...
+
+
+class ComputedPropertyDescriptor(AnyPropertyDescriptor[T_co, BT_co]):
+    if TYPE_CHECKING:
+
+        @overload
+        def __get__(
+            self,
+            instance: None,
+            owner: type[Any],
+            /,
+        ) -> type[T_co]: ...
+
+        @overload
+        def __get__(
+            self,
+            instance: Any,
+            objtype: type[Any] | None = None,
+            /,
+        ) -> BT_co: ...
+
+        def __get__(
+            self,
+            instance: Any,
+            owner: type[Any] | None = None,
+            /,
+        ) -> type[T_co] | BT_co: ...
+
+        def __set__(
+            self,
+            instance: Any,
+            value: Never,
+            /,
+        ) -> None: ...
+
+
+class MultiPropertyDescriptor(AnyPropertyDescriptor[T_co, BT_co]):
+    if TYPE_CHECKING:
+
+        @overload
+        def __get__(
+            self,
+            instance: None,
+            owner: type[Any],
+            /,
+        ) -> type[T_co]: ...
+
+        @overload
+        def __get__(
+            self,
+            instance: Any,
+            owner: type[Any] | None = None,
+            /,
+        ) -> _tracked_list.DowncastingTrackedList[T_co, BT_co]: ...
+
+        def __get__(
+            self,
+            instance: Any,
+            owner: type[Any] | None = None,
+            /,
+        ) -> (
+            type[T_co]
+            | _tracked_list.DowncastingTrackedList[T_co, BT_co]
+            | None
+        ): ...
+
+        def __set__(
+            self,
+            instance: Any,
+            value: Sequence[T_co | BT_co],
+            /,
+        ) -> None: ...
+
+
+class ComputedMultiPropertyDescriptor(
+    ComputedPointerDescriptor[T_co, BT_co],
+    AnyPropertyDescriptor[T_co, BT_co],
+):
+    if TYPE_CHECKING:
+
+        @overload
+        def __get__(
+            self, instance: None, owner: type[Any], /
+        ) -> type[T_co]: ...
+
+        @overload
+        def __get__(
+            self,
+            instance: Any,
+            owner: type[Any] | None = None,
+            /,
+        ) -> tuple[T_co, ...]: ...
+
+        def __get__(
+            self,
+            instance: Any,
+            owner: type[Any] | None = None,
+        ) -> type[T_co] | tuple[T_co, ...]: ...
 
 
 class OptionalPropertyDescriptor(
@@ -312,6 +433,66 @@ class LinkDescriptor(AnyLinkDescriptor[T_co, BT_co]):
         ) -> None: ...
 
 
+class MultiLinkDescriptor(AnyLinkDescriptor[_MT_co, _BMT_co]):
+    if TYPE_CHECKING:
+
+        @overload
+        def __get__(
+            self,
+            instance: None,
+            owner: type[Any],
+            /,
+        ) -> type[_MT_co]: ...
+
+        @overload
+        def __get__(
+            self,
+            instance: Any,
+            owner: type[Any] | None = None,
+            /,
+        ) -> AbstractDistinctList[_MT_co]: ...
+
+        def __get__(
+            self,
+            instance: Any,
+            owner: type[Any] | None = None,
+            /,
+        ) -> type[_MT_co] | AbstractDistinctList[_MT_co] | None: ...
+
+        def __set__(
+            self,
+            instance: Any,
+            value: Sequence[_MT_co | _BMT_co],
+            /,
+        ) -> None: ...
+
+
+class ComputedMultiLinkDescriptor(
+    ComputedPointerDescriptor[_MT_co, _BMT_co],
+    AnyLinkDescriptor[_MT_co, _BMT_co],
+):
+    if TYPE_CHECKING:
+
+        @overload
+        def __get__(
+            self, instance: None, owner: type[Any], /
+        ) -> type[_MT_co]: ...
+
+        @overload
+        def __get__(
+            self,
+            instance: Any,
+            owner: type[Any] | None = None,
+            /,
+        ) -> tuple[_MT_co, ...]: ...
+
+        def __get__(
+            self,
+            instance: Any,
+            owner: type[Any] | None = None,
+        ) -> type[_MT_co] | tuple[_MT_co, ...]: ...
+
+
 class OptionalLinkDescriptor(
     OptionalPointerDescriptor[T_co, BT_co],
     AnyLinkDescriptor[T_co, BT_co],
@@ -347,10 +528,6 @@ class OptionalLinkDescriptor(
             value: BT_co | None,
             /,
         ) -> None: ...
-
-
-_MT_co = TypeVar("_MT_co", bound=AbstractGelModel, covariant=True)
-_LM_co = TypeVar("_LM_co", bound=AbstractGelLinkModel, covariant=True)
 
 
 class GelLinkModelDescriptor(
@@ -418,9 +595,6 @@ class AbstractGelProxyModel(AbstractGelModel, Generic[_MT_co, _LM_co]):
         _p__obj__: _MT_co
         __proxy_of__: ClassVar[type[_MT_co]]  # type: ignore [misc]
 
-    def __gel_unwrap_proxy__(self) -> AbstractGelModel:
-        raise NotImplementedError
-
     @classmethod
     def __gel_proxy_construct__(
         cls,
@@ -428,3 +602,48 @@ class AbstractGelProxyModel(AbstractGelModel, Generic[_MT_co, _LM_co]):
         lprops: dict[str, Any],
     ) -> Self:
         raise NotImplementedError
+
+    def __gel_unwrap_proxy__(self) -> AbstractGelModel:
+        raise NotImplementedError
+
+
+_PT_co = TypeVar(
+    "_PT_co",
+    bound=AbstractGelProxyModel[AbstractGelModel, AbstractGelLinkModel],
+    covariant=True,
+)
+"""Proxy model"""
+
+
+class MultiLinkWithPropsDescriptor(MultiLinkDescriptor[_PT_co, _BMT_co]):
+    if TYPE_CHECKING:
+
+        @overload
+        def __get__(
+            self,
+            instance: None,
+            owner: type[Any],
+            /,
+        ) -> type[_PT_co]: ...
+
+        @overload
+        def __get__(
+            self,
+            instance: Any,
+            owner: type[Any] | None = None,
+            /,
+        ) -> ProxyDistinctList[_PT_co, _BMT_co]: ...
+
+        def __get__(
+            self,
+            instance: Any,
+            owner: type[Any] | None = None,
+            /,
+        ) -> type[_PT_co] | ProxyDistinctList[_PT_co, _BMT_co] | None: ...
+
+        def __set__(
+            self,
+            instance: Any,
+            value: Sequence[_PT_co | _BMT_co],
+            /,
+        ) -> None: ...

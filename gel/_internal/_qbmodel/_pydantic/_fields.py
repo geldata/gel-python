@@ -7,13 +7,11 @@
 from __future__ import annotations
 
 from typing import (
-    TYPE_CHECKING,
     Annotated,
     Any,
     ClassVar,
     Generic,
     TypeVar,
-    overload,
 )
 
 from typing_extensions import (
@@ -38,10 +36,6 @@ from gel._internal._qbmodel._abstract import DistinctList, ProxyDistinctList
 from ._models import GelModel, ProxyModel
 
 from . import _utils as _pydantic_utils
-
-if TYPE_CHECKING:
-    from typing_extensions import Never
-    from collections.abc import Sequence
 
 
 _T_co = TypeVar("_T_co", bound=_abstract.GelType, covariant=True)
@@ -136,43 +130,6 @@ class _BaseMultiLink(_MultiPointer[_T_co, _BT_co]):
             return handler.generate_schema(source_type)
 
 
-class _BaseComputedMultiPointer(_MultiPointer[_T_co, _BT_co]):
-    if TYPE_CHECKING:
-
-        @overload
-        def __get__(self, obj: None, objtype: type[Any]) -> type[_T_co]: ...
-
-        @overload
-        def __get__(
-            self, obj: object, objtype: Any = None
-        ) -> tuple[_T_co, ...]: ...
-
-        def __get__(
-            self,
-            obj: Any,
-            objtype: Any = None,
-        ) -> type[_T_co] | tuple[_T_co, ...]: ...
-
-    @classmethod
-    def __gel_resolve_dlist__(  # type: ignore [override]
-        cls,
-        type_args: tuple[type[Any]] | tuple[type[Any], type[Any]],
-    ) -> tuple[_BT_co, ...]:
-        return tuple[type_args[0], ...]  # type: ignore [return-value, valid-type]
-
-
-class _BaseComputedMultiLink(
-    _BaseComputedMultiPointer[_T_co, _BT_co], _BaseMultiLink[_T_co, _BT_co]
-):
-    constructor = tuple
-
-
-class _BaseComputedMultiProperty(
-    _BaseComputedMultiPointer[_T_co, _BT_co], _BaseMultiProperty[_T_co, _BT_co]
-):
-    constructor = tuple
-
-
 class Property(_abstract.PropertyDescriptor[_ST_co, _BT_co]):
     @classmethod
     def __get_pydantic_core_schema__(
@@ -187,17 +144,7 @@ class Property(_abstract.PropertyDescriptor[_ST_co, _BT_co]):
             return handler.generate_schema(source_type)
 
 
-class _ComputedProperty(_abstract.PropertyDescriptor[_ST_co, _BT_co]):
-    if TYPE_CHECKING:
-        # XXX -- using Final[] would probably be better, but it's not clear
-        # how to wrap it in our aliases.
-        def __set__(  # type: ignore [override]
-            self,
-            instance: Any,
-            value: Never,
-            /,
-        ) -> None: ...
-
+class _ComputedProperty(_abstract.ComputedPropertyDescriptor[_ST_co, _BT_co]):
     @classmethod
     def __get_pydantic_core_schema__(
         cls,
@@ -293,44 +240,8 @@ OptionalComputedProperty = TypeAliasType(
 
 class _MultiProperty(
     _BaseMultiProperty[_ST_co, _BT_co],
-    _abstract.AnyPropertyDescriptor[_ST_co, _BT_co],
+    _abstract.MultiPropertyDescriptor[_ST_co, _BT_co],
 ):
-    if TYPE_CHECKING:
-
-        @overload
-        def __get__(
-            self,
-            instance: None,
-            owner: type[Any],
-            /,
-        ) -> type[_ST_co]: ...
-
-        @overload
-        def __get__(
-            self,
-            instance: Any,
-            owner: type[Any] | None = None,
-            /,
-        ) -> _tracked_list.DowncastingTrackedList[_ST_co, _BT_co]: ...
-
-        def __get__(
-            self,
-            instance: Any,
-            owner: type[Any] | None = None,
-            /,
-        ) -> (
-            type[_ST_co]
-            | _tracked_list.DowncastingTrackedList[_ST_co, _BT_co]
-            | None
-        ): ...
-
-        def __set__(
-            self,
-            instance: Any,
-            value: Sequence[_ST_co | _BT_co],
-            /,
-        ) -> None: ...
-
     @classmethod
     def __gel_resolve_dlist__(  # type: ignore [override]
         cls,
@@ -354,10 +265,17 @@ class _MultiProperty(
 
 
 class _ComputedMultiProperty(
-    _BaseComputedMultiProperty[_ST_co, _BT_co],
-    _abstract.AnyPropertyDescriptor[_ST_co, _BT_co],
+    _abstract.ComputedMultiPropertyDescriptor[_T_co, _BT_co],
+    _BaseMultiProperty[_T_co, _BT_co],
 ):
-    pass
+    constructor = tuple
+
+    @classmethod
+    def __gel_resolve_dlist__(  # type: ignore [override]
+        cls,
+        type_args: tuple[type[Any]] | tuple[type[Any], type[Any]],
+    ) -> tuple[_BT_co, ...]:
+        return tuple[type_args[0], ...]  # type: ignore [return-value, valid-type]
 
 
 MultiProperty = TypeAliasType(
@@ -478,23 +396,10 @@ class _AnyLink(Generic[_MT_co, _BMT_co]):
 
 
 class _Link(
-    _AnyLink[_MT_co, _BMT_co], _abstract.LinkDescriptor[_MT_co, _BMT_co]
+    _AnyLink[_MT_co, _BMT_co],
+    _abstract.LinkDescriptor[_MT_co, _BMT_co],
 ):
-    if TYPE_CHECKING:
-
-        @overload
-        def __get__(self, obj: None, objtype: type[Any]) -> type[_MT_co]: ...
-
-        @overload
-        def __get__(self, obj: object, objtype: Any = None) -> _MT_co: ...
-
-        def __get__(
-            self,
-            obj: Any,
-            objtype: Any = None,
-        ) -> type[_MT_co] | _MT_co: ...
-
-        def __set__(self, obj: Any, value: _MT_co | _BMT_co) -> None: ...
+    pass
 
 
 class _OptionalLink(
@@ -644,36 +549,23 @@ OptionalComputedLinkWithProps = TypeAliasType(
 
 
 class _ComputedMultiLink(
-    _BaseComputedMultiLink[_MT_co, _BMT_co],
-    _abstract.AnyLinkDescriptor[_MT_co, _BMT_co],
+    _abstract.ComputedMultiLinkDescriptor[_MT_co, _BMT_co],
+    _BaseMultiLink[_MT_co, _BMT_co],
 ):
-    pass
+    constructor = tuple
+
+    @classmethod
+    def __gel_resolve_dlist__(  # type: ignore [override]
+        cls,
+        type_args: tuple[type[Any]] | tuple[type[Any], type[Any]],
+    ) -> tuple[_BMT_co, ...]:
+        return tuple[type_args[0], ...]  # type: ignore [return-value, valid-type]
 
 
 class _MultiLink(
     _BaseMultiLink[_MT_co, _BMT_co],
-    _abstract.AnyLinkDescriptor[_MT_co, _BMT_co],
+    _abstract.MultiLinkDescriptor[_MT_co, _BMT_co],
 ):
-    if TYPE_CHECKING:
-
-        @overload
-        def __get__(self, obj: None, objtype: type[Any]) -> type[_MT_co]: ...
-
-        @overload
-        def __get__(
-            self, obj: object, objtype: Any = None
-        ) -> DistinctList[_MT_co]: ...
-
-        def __get__(
-            self,
-            obj: Any,
-            objtype: Any = None,
-        ) -> type[_MT_co] | DistinctList[_MT_co] | None: ...
-
-        def __set__(
-            self, obj: Any, value: Sequence[_MT_co | _BMT_co]
-        ) -> None: ...
-
     @classmethod
     def __gel_resolve_dlist__(  # type: ignore [override]
         cls,
@@ -695,28 +587,8 @@ class _MultiLink(
 
 class _MultiLinkWithProps(
     _BaseMultiLink[_PT_co, _BMT_co],
-    _abstract.AnyLinkDescriptor[_PT_co, _BMT_co],
+    _abstract.MultiLinkWithPropsDescriptor[_PT_co, _BMT_co],
 ):
-    if TYPE_CHECKING:
-
-        @overload
-        def __get__(self, obj: None, objtype: type[Any]) -> type[_PT_co]: ...
-
-        @overload
-        def __get__(
-            self, obj: object, objtype: Any = None
-        ) -> ProxyDistinctList[_PT_co, _BMT_co]: ...
-
-        def __get__(
-            self,
-            obj: Any,
-            objtype: Any = None,
-        ) -> type[_PT_co] | ProxyDistinctList[_PT_co, _BMT_co] | None: ...
-
-        def __set__(
-            self, obj: Any, value: Sequence[_PT_co | _BMT_co]
-        ) -> None: ...
-
     @classmethod
     def __gel_resolve_dlist__(  # type: ignore [override]
         cls,
