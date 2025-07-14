@@ -59,18 +59,18 @@ class ProxyDistinctList(
             for item in self._items:
                 assert isinstance(item, ProxyModel)
                 wrapped = ll_getattr(item, "_p__obj__")
-                self._wrapped_index[id(wrapped)] = cast("_PT_co", item)
+                self._wrapped_index[id(wrapped)] = item
 
     def _track_item(self, item: _PT_co) -> None:  # type: ignore [misc]
         assert isinstance(item, ProxyModel)
-        super()._track_item(cast("_PT_co", item))
+        super()._track_item(item)
         assert self._wrapped_index is not None
         wrapped = ll_getattr(item, "_p__obj__")
-        self._wrapped_index[id(wrapped)] = cast("_PT_co", item)
+        self._wrapped_index[id(wrapped)] = item
 
     def _untrack_item(self, item: _PT_co) -> None:  # type: ignore [misc]
         assert isinstance(item, ProxyModel)
-        super()._untrack_item(cast("_PT_co", item))
+        super()._untrack_item(item)
         assert self._wrapped_index is not None
         wrapped = ll_getattr(item, "_p__obj__")
         self._wrapped_index.pop(id(wrapped), None)
@@ -223,7 +223,7 @@ class ProxyDistinctList(
             )
         # Return the already present identical proxy instead of inserting
         # another one
-        return existing_proxy  # type: ignore [return-value]
+        return existing_proxy
 
     def _find_proxied_obj(self, item: _PT_co | _BMT_co) -> _PT_co | None:
         self._init_tracking()

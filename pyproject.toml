@@ -35,9 +35,9 @@ dependencies = [
 
 [project.optional-dependencies]
 test = [
-    'mypy>=1.16.0',
+    'mypy>=1.17.0',
     'pytest>=3.6.0',
-    'pyright>=1.1.100',
+    'pyright>=1.1.400',
     'ruff>=0.12.0',
     'uvloop>=0.15.1; platform_system != "Windows"',
     'fastapi',

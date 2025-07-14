@@ -1565,10 +1565,10 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(
             reveal_type(default.User.update),
             "def (*, "
-            "name: Union[builtins.str, type[models.__variants__.std.str], "
-            "gel._internal._utils.UnspecifiedType] =, "
-            "nickname: Union[builtins.str, type[models.__variants__.std.str], "
-            "gel._internal._utils.UnspecifiedType] =)"
+            "name: builtins.str | type[models.__variants__.std.str] "
+            "| gel._internal._utils.UnspecifiedType =, "
+            "nickname: builtins.str | type[models.__variants__.std.str] "
+            "| gel._internal._utils.UnspecifiedType =)"
             " -> type[models.default.User]",
         )
 
@@ -1584,7 +1584,7 @@ class TestModelGenerator(tb.ModelTestCase):
 
         self.assertEqual(
             reveal_type(u.nickname),
-            "Union[builtins.str, None]",
+            "builtins.str | None",
         )
 
         self.assertEqual(
@@ -1594,7 +1594,7 @@ class TestModelGenerator(tb.ModelTestCase):
 
         self.assertEqual(
             reveal_type(u.nickname_len),
-            "Union[builtins.int, None]",
+            "builtins.int | None",
         )
 
         # Let's test computed link as an arg
