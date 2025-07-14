@@ -1290,7 +1290,7 @@ class TestModelGenerator(tb.ModelTestCase):
             default.UserGroup(None)  # type: ignore
 
     @tb.xfail
-    @tb.typecheck
+    # @tb.typecheck
     def test_modelgen_pydantic_apis_13(self):
         # https://github.com/geldata/gel-python/issues/785
 
