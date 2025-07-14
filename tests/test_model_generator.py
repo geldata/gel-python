@@ -1060,7 +1060,7 @@ class TestModelGenerator(tb.ModelTestCase):
 
         with self.assertRaisesRegex(
             pydantic.ValidationError,
-            r"(?s)author\n.*Input should be a valid dictionary or.*\bUser\b",
+            r"(?s)author\n.*cannot set a required link to None",
         ):
             p.author = None  # type: ignore
 
@@ -1104,13 +1104,16 @@ class TestModelGenerator(tb.ModelTestCase):
 
         t.opt_friend = u
 
-        with self.assertRaisesRegex(
-            TypeError,
-            r".*\bopt_wprop_friend\b cannot wrap.*\breq_wprop_friend\b",
-        ):
-            t.opt_wprop_friend = default.TestSingleLinks.req_wprop_friend.link(
-                u, strength=123
-            )
+        # Assignment of a different ProxyModel would succeed, but linkprops
+        # wlll be reset
+        t.opt_wprop_friend = default.TestSingleLinks.req_wprop_friend.link(
+            u, strength=123
+        )
+        assert t.opt_wprop_friend is not None
+        self.assertEqual(
+            t.opt_wprop_friend.__linkprops__.strength,
+            None,
+        )
 
         t.opt_wprop_friend = default.TestSingleLinks.opt_wprop_friend.link(
             u, strength=456
@@ -1285,6 +1288,23 @@ class TestModelGenerator(tb.ModelTestCase):
             default.UserGroup(id=123)  # type: ignore
         with self.assertRaisesRegex(ValueError, "id argument"):
             default.UserGroup(None)  # type: ignore
+
+    @tb.xfail
+    @tb.typecheck
+    def test_modelgen_pydantic_apis_13(self):
+        # https://github.com/geldata/gel-python/issues/785
+
+        from models import default
+        # insert an object with an optional link to self set to self
+
+        p = default.LinearPath(label="singleton")
+        p.next = p
+        self.client.save(p)
+
+        self.assertEqual(
+            p.model_dump(),
+            {"id": p.id, "label": "singleton", "next": {"id": p.id}},
+        )
 
     @tb.typecheck
     def test_modelgen_data_unpack_polymorphic(self):
@@ -1492,6 +1512,54 @@ class TestModelGenerator(tb.ModelTestCase):
             r"cannot set attribute on a computed field .name_len.",
         ):
             u.name_len = cast(std.int64, 123)  # type: ignore[assignment]
+
+    @tb.typecheck
+    def test_modelgen_data_model_validation_2(self):
+        from models import default
+
+        T = default.TestSingleLinks
+
+        u1 = default.User(name="aaa")
+        u2 = default.User(name="bbb")
+        t = T(
+            req_wprop_friend=T.req_wprop_friend.link(u1, strength=123),
+            req_friend=u1,
+            opt_friend=u1,
+            opt_wprop_friend=T.opt_wprop_friend.link(u1, strength=456),
+        )
+
+        with self.assertRaisesRegex(
+            ValueError,
+            r"cannot set a required link to None",
+        ):
+            t.req_friend = None  # type: ignore
+
+        with self.assertRaisesRegex(
+            ValueError,
+            r"cannot set a required link to None",
+        ):
+            t.req_wprop_friend = None  # type: ignore
+
+        t.opt_friend = None
+        t.opt_wprop_friend = None
+
+        t.opt_friend = u2
+        t.opt_wprop_friend = T.opt_wprop_friend.link(u2, strength=456)
+
+        self.assertEqual(t.opt_friend.name, "bbb")
+        self.assertEqual(t.opt_wprop_friend.name, "bbb")
+
+        t.req_friend = t.opt_wprop_friend
+        self.assertEqual(t.req_friend.name, "bbb")
+        self.assertFalse(hasattr(t.req_friend, "__linkprops__"))
+
+        t.req_wprop_friend = t.opt_wprop_friend
+        self.assertEqual(t.req_wprop_friend.name, "bbb")
+        self.assertEqual(t.req_wprop_friend.__linkprops__.strength, None)
+
+        t.opt_wprop_friend = u1
+        self.assertEqual(t.opt_wprop_friend.name, "aaa")
+        self.assertEqual(t.opt_wprop_friend.__linkprops__.strength, None)
 
     @tb.typecheck
     def test_modelgen_save_01(self):
@@ -2254,12 +2322,8 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(loot.owner.__linkprops__.count, 5)
         self.assertEqual(loot.owner.__linkprops__.bonus, False)
 
-    @tb.xfail
     @tb.typecheck
     def test_modelgen_save_19(self):
-        # FIXME: pydantic might never be happy with the loops that are made by
-        # the literally identical object, so this may be invalid, see next
-        # test for a workaround
         from models import default
         # insert an object with an optional link to self set to self
 
