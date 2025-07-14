@@ -1289,6 +1289,7 @@ class TestModelGenerator(tb.ModelTestCase):
         with self.assertRaisesRegex(ValueError, "id argument"):
             default.UserGroup(None)  # type: ignore
 
+    @unittest.skipIf(sys.platform == "win32", "crashes")
     @tb.xfail
     # @tb.typecheck
     def test_modelgen_pydantic_apis_13(self):
