@@ -1185,6 +1185,9 @@ class ProxyModel(
     if TYPE_CHECKING:
         __gel_proxy_merged_model_cache__: ClassVar[type[pydantic.BaseModel]]
 
+    # NB: __linkprops__ is not in slots because it is managed by
+    #     GelLinkModelDescriptor.
+
     __slots__ = ("_p__obj__",)
 
     __gel_proxied_dunders__: ClassVar[frozenset[str]] = frozenset(
@@ -1218,6 +1221,7 @@ class ProxyModel(
         # forward the constructor arguments to the wrapped object.
         wrapped = self.__proxy_of__(id, **kwargs)
         ll_setattr(self, "_p__obj__", wrapped)
+        # __linkprops__ is written into __dict__ by GelLinkModelDescriptor
 
     @classmethod
     def link(cls, obj: _MT_co, /, **link_props: Any) -> Self:  # type: ignore [misc]
