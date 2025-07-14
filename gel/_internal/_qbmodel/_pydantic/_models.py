@@ -835,6 +835,7 @@ class GelModel(
 
     if TYPE_CHECKING:
         id: uuid.UUID
+        __gel_custom_serializer__: ClassVar[pydantic_core.SchemaSerializer]
 
     def __new__(
         cls,
@@ -1032,6 +1033,102 @@ class GelModel(
         cls = type(self)
         return f"{cls.__module__}.{cls.__qualname__} <{id(self)}>"
 
+    @classmethod
+    def __get_pydantic_core_schema__(
+        cls,
+        source_type: Any,
+        handler: pydantic.GetCoreSchemaHandler,
+    ) -> pydantic_core.CoreSchema:
+        # We want GelModel's custom model_dump() to be always called,
+        # no matter how the dump is happening:
+        #
+        # - when caled directly
+        # - when called via another GelModel's model_dump()
+        # - when called via a generic pydantic.BaseModel's
+        #   model_dump().
+        #
+        # The latter turns out to be a very tricky scenario.
+        # Pydantic's `__get_pydantic_core_schema__` is intended to
+        # be defined on non-pydantic types to customize their
+        # serialization and validation. When defined on a model
+        # it can work, as long as the schema isn't built for the
+        # model itself but one of its nested attributes. If one
+        # attempts to customize the schema or rendering of the
+        # model itself pydantic crashes with RecursionError.
+        #
+        # Moreover, pydantic_core does not call overloaded
+        # model_dump() methods, it instead proceeds to serialize
+        # model's __dict__ according to its schema. I guess to
+        # make things faster.
+        #
+        # E.g. if we just have a vanilla model_dump() implementation,
+        # the serialization strategy we define here would unfold as
+        # follows:
+        #
+        #  (a) model_dump() is called -> it runs
+        #      __pydantic_serializer__.to_python
+        #  (b) the serializer looks into the schema, finds the
+        #      custom serializer we defined - calls it
+        #  (c) we're back to where we started -- the loop.
+        #
+        # Using the `@model_serializer(mode="wrap")` decorator
+        # leads to the exactly same rabbit hole.
+        #
+        # It all would be much simpler if pydantic_core exposed
+        # the default "dump" implementation -- we'd simply call it
+        # from our custom model_dump().
+        #
+        # There simply appears to be no "official" way to customize
+        # the model's model_dump() behavior.
+        #
+        # So we cheat. In `GelModel.model_dump()` we create an
+        # ad-hoc model subtype (see `__build_custom_serializer`)
+        # of the current `type(self)` and **replace** this
+        # very implementation of `__get_pydantic_core_schema__`
+        # with a vanilla one. We then get its __pydantic_serializer__
+        # and use it as a "default" serializer.
+        #
+        # This way we can customize our dump (ignoring missing
+        # computeds, handling missing `.id` for unsaved models,
+        # etc etc.)
+
+        schema = handler(source_type)
+        schema["serialization"] = (  # type: ignore [index]
+            core_schema.wrap_serializer_function_ser_schema(
+                lambda obj, _ser, info: obj.model_dump(
+                    **_pydantic_utils.serialization_info_to_dump_kwargs(info)
+                ),
+                info_arg=True,
+                when_used="always",
+            )
+        )
+        return schema
+
+    @classmethod
+    def __build_custom_serializer(
+        cls,
+    ) -> pydantic_core.SchemaSerializer:
+        # See the comment in __get_pydantic_core_schema__
+
+        try:
+            return cls.__dict__["__gel_custom_serializer__"]  # type: ignore [no-any-return]
+        except KeyError:
+            pass
+
+        new_cls: type[GelModel] = type(
+            cls.__name__,
+            (cls,),
+            {
+                "__get_pydantic_core_schema__": classmethod(
+                    lambda cls, source_type, handler: handler(source_type)
+                ),
+            },
+        )
+
+        ser = new_cls.__pydantic_serializer__
+        cls.__gel_custom_serializer__ = ser
+        return ser
+
     @_utils.inherit_signature(  # type: ignore [arg-type]
         _pydantic_utils.model_dump_signature,
     )
@@ -1048,7 +1145,11 @@ class GelModel(
             kwargs=kwargs,
             context=context,
         )
-        return super().model_dump(context=context, **kwargs)
+
+        # See the comment in __get_pydantic_core_schema__
+        ser = self.__build_custom_serializer()
+        dump = ser.to_python(self, context=context, **kwargs)
+        return dump  # type: ignore [no-any-return]
 
     @_utils.inherit_signature(  # type: ignore [arg-type]
         _pydantic_utils.model_dump_json_signature,
@@ -1131,6 +1232,26 @@ class _MergedModelBase(GelModel, metaclass=_MergedModelMeta):
     if TYPE_CHECKING:
         __gel_new__: bool
         __gel_changed_fields__: set[str] | None
+
+    # This is tricky: we have custom __get_pydantic_core_schema__ &
+    # model_dump() in this class to shadow GelModel's respective
+    # implementations. If we don't do this, GelModel would build
+    # a subclass of this class to get a custom serializer and
+    # our `__linkprops__` attribute will disappear (it's not
+    # a valid pydantic name). Good news is that nobody will
+    # ever be able to call this class' model_dump() implementation
+    # directly so we're good.
+
+    @classmethod
+    def __get_pydantic_core_schema__(
+        cls,
+        source_type: Any,
+        handler: pydantic.GetCoreSchemaHandler,
+    ) -> pydantic_core.CoreSchema:
+        return handler(source_type)
+
+    def model_dump(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        return pydantic.BaseModel.model_dump(self, *args, **kwargs)
 
 
 class ProxyModel(
@@ -1269,7 +1390,7 @@ class ProxyModel(
             cls.__proxy_of__ = generic_meta["args"][0]
 
     @classmethod
-    def __gel_proxy_make_merged_model__(cls) -> type[_MergedModelBase]:
+    def __make_merged_model(cls) -> type[_MergedModelBase]:
         # Build a model that has all fields of the proxied model +
         # the `__linkprops__` field. This is by far the most robust way
         # (albeit maybe a resource demanding one) to implement
@@ -1340,9 +1461,7 @@ class ProxyModel(
                     f"{type(value)}"
                 )
 
-            merged_schema = handler.generate_schema(
-                cls.__gel_proxy_make_merged_model__()
-            )
+            merged_schema = handler.generate_schema(cls.__make_merged_model())
             inner_schema = core_schema.union_schema(
                 [
                     merged_schema,
@@ -1466,7 +1585,7 @@ class ProxyModel(
         # - model_dump_json() is properly supported without risking breakage
         # - let pydantic care about the appropriate context for __linkprops__
 
-        merged_model_cls = type(self).__gel_proxy_make_merged_model__()
+        merged_model_cls = type(self).__make_merged_model()
         merged = object.__new__(merged_model_cls)
         for attr in (
             "__pydantic_fields_set__",

@@ -1375,6 +1375,48 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(r.members[0].__linkprops__.role, "tank")
         self.assertEqual(r.members[0].name, u1.name)
 
+    def test_modelgen_pydantic_apis_15(self):
+        # Test that GelModel's custom dump is working even
+        # when the actual model_dump() is called on a non-GelModel
+        # pydantic model.
+
+        import pydantic
+        from models import default
+        from gel._testbase import pop_ids, pop_ids_json
+
+        class MyGroup(pydantic.BaseModel):
+            users: list[default.User]
+
+        a = default.User(name="aaa")
+        b = self.client.get(
+            default.User.select(name=True).filter(name="Cameron")
+        )
+        g = MyGroup(users=[a, b])
+
+        self.assertEqual(
+            pop_ids(g.model_dump(context={"gel_allow_unsaved": True})),
+            {
+                "users": [
+                    {"name": "aaa", "nickname": None},
+                    {"name": "Cameron"},
+                ]
+            },
+        )
+
+        self.assertEqual(
+            pop_ids_json(
+                g.model_dump_json(context={"gel_allow_unsaved": True})
+            ),
+            json.dumps(
+                {
+                    "users": [
+                        {"name": "aaa", "nickname": None},
+                        {"name": "Cameron"},
+                    ]
+                },
+            ),
+        )
+
     @tb.typecheck
     def test_modelgen_data_unpack_polymorphic(self):
         from models import default
