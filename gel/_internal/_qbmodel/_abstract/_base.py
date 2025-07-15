@@ -28,6 +28,7 @@ from gel._internal import _qb
 from gel._internal._xmethod import hybridmethod
 
 if TYPE_CHECKING:
+    import abc
     import types
     import uuid
     from collections.abc import Iterator
@@ -49,7 +50,7 @@ class PointerInfo:
 
 if TYPE_CHECKING:
 
-    class GelTypeMeta(type):
+    class GelTypeMeta(abc.ABCMeta):
         def __edgeql_qb_expr__(cls) -> _qb.Expr: ...
 
     class GelType(

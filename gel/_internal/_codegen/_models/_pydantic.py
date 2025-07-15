@@ -931,6 +931,9 @@ class BaseGeneratedModule:
         ):
             self.write(f"id = {uuid_}(int={objtype.uuid.int})")
             self.write(f"name = {objtype.schemapath.as_code(sp)}")
+            # Need a cheap at runtime way to check if the type is abstract
+            # in GelModel.__new__
+            self.write(f"abstract = {objtype.abstract!r}")
             self._write_pointers_reflection(objtype.pointers, base_types)
 
             with self._classmethod_def(
@@ -3318,6 +3321,13 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         assert objecttype_import is not None
         uuid = self.import_name("uuid", "UUID")
         with self._class_def(typeof_base_class, typeof_base_bases):
+            if not objtype.abstract:
+                with self.type_checking():
+                    with self._func_def(
+                        "__gel_not_abstract__", ["self"], "None"
+                    ):
+                        self.write("...")
+
             self.write_object_type_reflection(objtype, reflection_bases)
 
         def _mangle_typeof(name: str) -> str:

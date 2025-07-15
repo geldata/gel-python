@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, ClassVar, Protocol
 import dataclasses
 
 if TYPE_CHECKING:
+    import abc
     import uuid
     from gel._internal import _edgeql
     from gel._internal._schemapath import SchemaPath
@@ -46,12 +47,33 @@ class GelTypeMetadata(GelSchemaMetadata):
     pass
 
 
-class GelObjectTypeMetadata(GelSourceMetadata, GelTypeMetadata):
-    class __gel_reflection__(  # noqa: N801
-        GelSourceMetadata.__gel_reflection__,
-        GelTypeMetadata.__gel_reflection__,
-    ):
-        pass
+if TYPE_CHECKING:
+
+    class GelObjectTypeMetadata(abc.ABC, GelSourceMetadata, GelTypeMetadata):
+        class __gel_reflection__(  # noqa: N801
+            GelSourceMetadata.__gel_reflection__,
+            GelTypeMetadata.__gel_reflection__,
+        ):
+            abstract: ClassVar[bool]
+
+        # A marker to indicate that the type is not abstract.
+        # This is to make type checkers complain if you attempt
+        # to instantiate an abstract type.
+        # This might not be the most natural place to stick this into,
+        # but it's very low profile and not in the user's face unlike
+        # having types like "Abstract" and "Concrete" and using them
+        # everywhere.
+        @abc.abstractmethod
+        def __gel_not_abstract__(self) -> None: ...
+
+else:
+
+    class GelObjectTypeMetadata(GelSourceMetadata, GelTypeMetadata):
+        class __gel_reflection__(  # noqa: N801
+            GelSourceMetadata.__gel_reflection__,
+            GelTypeMetadata.__gel_reflection__,
+        ):
+            abstract: ClassVar[bool]
 
 
 class GelLinkMetadata(GelSourceMetadata):
