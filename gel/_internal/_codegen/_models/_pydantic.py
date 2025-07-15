@@ -3681,6 +3681,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                 if reflection.is_non_enum_scalar_type(target_t):
                     broad_ptr_t = self._get_pytype_for_scalar(target_t)
                     union.extend(broad_ptr_t)
+                    select_union.extend(broad_ptr_t)
                 union.extend((f"type[{narrow_ptr_t}]", unspec_t))
                 select_union.extend((f"type[{narrow_ptr_t}]", unspec_t))
                 ptr_t = f"{' | '.join(union)} = {unspec}"

@@ -10,12 +10,16 @@ from typing_extensions import TypeAliasType
 
 import dataclasses
 import functools
+import inspect
 
 from gel._internal import _qb
 from gel._internal._utils import Unspecified
 
 from ._base import AbstractGelModel
-from ._descriptors import AbstractGelProxyModel
+from ._descriptors import (
+    AbstractGelProxyModel,
+    ModelFieldDescriptor,
+)
 
 from ._primitive import (
     GelPrimitiveType,
@@ -95,11 +99,19 @@ def _const_to_expr(
     pname: str,
     val: Any,
 ) -> _qb.Literal | _qb.CastOp:
-    ptype: type[PyTypeScalar[PyConstType]] | None = getattr(cls, pname, None)
-    if ptype is None:
+    attr = inspect.getattr_static(cls, pname, Unspecified)
+    if attr is None:
         return get_literal_for_value(val)
-    else:
-        return get_literal_for_scalar(ptype, val)
+
+    if isinstance(attr, ModelFieldDescriptor) and (
+        tp := attr.get_resolved_type()
+    ):
+        if issubclass(tp, PyTypeScalar):
+            return get_literal_for_scalar(tp, val)
+
+        raise TypeError(f"unsupported const variant for {cls!r}.{pname!r}")
+
+    return get_literal_for_value(val)
 
 
 def select(

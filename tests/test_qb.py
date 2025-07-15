@@ -30,7 +30,6 @@ class TestQueryBuilder(tb.ModelTestCase):
 
     ISOLATED_TEST_BRANCHES = False
 
-    @tb.xfail
     @tb.typecheck
     def test_qb_computed_01(self):
         """Replace an existing field with a computed literal value"""
@@ -81,7 +80,6 @@ class TestQueryBuilder(tb.ModelTestCase):
         self.assertEqual(res.name, "Alice")
         self.assertEqual(res.nickname, "Alice5")
 
-    @tb.xfail
     @tb.typecheck
     def test_qb_computed_04(self):
         from models import default, std
@@ -468,7 +466,6 @@ class TestQueryBuilderModify(tb.ModelTestCase):
 
     ISOLATED_TEST_BRANCHES = True
 
-    @tb.xfail
     @tb.typecheck
     def test_qb_update_01(self):
         from models import default
