@@ -30,7 +30,9 @@ import datetime
 import decimal
 import functools
 import numbers
+import sys
 import typing
+import warnings
 import uuid
 
 from gel.datatypes import datatypes as _datatypes
@@ -49,7 +51,7 @@ from ._functions import assert_single
 
 if TYPE_CHECKING:
     import enum
-    from collections.abc import Iterable, Mapping, Sequence
+    from collections.abc import Iterable, Mapping, MutableMapping, Sequence
 
 
 _T = TypeVar("_T", bound=GelType)
@@ -114,7 +116,39 @@ if TYPE_CHECKING:
     class AnyEnumMeta(enum.EnumMeta, GelTypeMeta):
         pass
 else:
-    AnyEnumMeta = type(StrEnum)
+    if sys.version_info >= (3, 13):
+
+        class AnyEnumMeta(type(StrEnum), GelTypeMeta):
+            pass
+    else:
+
+        class AnyEnumMeta(type(StrEnum), GelTypeMeta):
+            @classmethod
+            def __prepare__(
+                mcls,  # noqa: N804
+                name: str,
+                bases: tuple[type, ...],
+                /,
+                **kwargs: Any,
+            ) -> MutableMapping[str, object]:
+                ns = super().__prepare__(name, bases, **kwargs)
+
+                class _NoWarningEnumDict(type(ns)):
+                    def __setitem__(self, key: str, value: Any) -> None:
+                        with warnings.catch_warnings():
+                            # Suppress bogus DeprecationWarning from enum
+                            # regarding member classes.
+                            warnings.filterwarnings(
+                                "ignore",
+                                category=DeprecationWarning,
+                            )
+                            super().__setitem__(key, value)
+
+                enum_dict = _NoWarningEnumDict()
+                for k, v in ns.items():
+                    dict.__setitem__(enum_dict, k, v)
+                enum_dict._cls_name = name
+                return enum_dict
 
 
 class AnyEnum(GelScalarType, StrEnum, metaclass=AnyEnumMeta):
@@ -163,20 +197,22 @@ class HomogeneousCollection(
 
 if TYPE_CHECKING:
 
-    class _ArrayMeta(
+    class ArrayMeta(
         HomogeneousCollectionMeta,
         GelTypeMeta,
         typing._ProtocolMeta,
     ):
         pass
 else:
-    _ArrayMeta = type(HomogeneousCollection)
+
+    class ArrayMeta(type(HomogeneousCollection), GelTypeMeta):
+        pass
 
 
 class Array(  # type: ignore [misc]
     HomogeneousCollection[_T],
     list[_T],
-    metaclass=_ArrayMeta,
+    metaclass=ArrayMeta,
 ):
     if TYPE_CHECKING:
 
@@ -246,21 +282,23 @@ class HeterogeneousCollection(
 
 if TYPE_CHECKING:
 
-    class _TupleMeta(
+    class TupleMeta(
         _typing_parametric.PickleableClassParametricTypeMeta,
         GelTypeMeta,
         typing._ProtocolMeta,
     ):
         pass
 else:
-    _TupleMeta = type(HeterogeneousCollection)
+
+    class TupleMeta(type(HeterogeneousCollection), GelTypeMeta):
+        pass
 
 
 class Tuple(  # type: ignore[misc]
     HeterogeneousCollection[Unpack[_Ts]],
     AnyTuple,
     tuple[Unpack[_Ts]],
-    metaclass=_TupleMeta,
+    metaclass=TupleMeta,
 ):
     __slots__ = ()
 
@@ -293,16 +331,18 @@ class Tuple(  # type: ignore[misc]
 
 if TYPE_CHECKING:
 
-    class _RangeMeta(HomogeneousCollectionMeta, GelTypeMeta):
+    class RangeMeta(HomogeneousCollectionMeta, GelTypeMeta):
         pass
 else:
-    _RangeMeta = type(HomogeneousCollection)
+
+    class RangeMeta(type(HomogeneousCollection), GelTypeMeta):
+        pass
 
 
 class Range(
     HomogeneousCollection[_T],
     _range.Range[_T],
-    metaclass=_RangeMeta,
+    metaclass=RangeMeta,
 ):
     if TYPE_CHECKING:
 
@@ -329,15 +369,17 @@ class Range(
 
 if TYPE_CHECKING:
 
-    class _MultiRangeMeta(HomogeneousCollectionMeta, GelTypeMeta):
+    class MultiRangeMeta(HomogeneousCollectionMeta, GelTypeMeta):
         pass
 else:
-    _MultiRangeMeta = type(HomogeneousCollection)
+
+    class MultiRangeMeta(type(HomogeneousCollection), GelTypeMeta):
+        pass
 
 
 class MultiRange(
     HomogeneousCollection[_T],
-    metaclass=_MultiRangeMeta,
+    metaclass=MultiRangeMeta,
 ):
     if TYPE_CHECKING:
 
