@@ -835,6 +835,12 @@ class GelModel(
         id: uuid.UUID = UNSET_UUID,  # noqa: A002
         **kwargs: Any,
     ) -> Self:
+        if cls.__gel_reflection__.abstract:
+            raise TypeError(
+                f"cannot instantiate abstract type "
+                f"{cls.__module__}.{cls.__qualname__}"
+            )
+
         if id is UNSET_UUID:
             # No 'id' argument: new object, just follow the normal
             # __new__ / __init__ machinery.

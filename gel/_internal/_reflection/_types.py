@@ -625,6 +625,10 @@ def is_object_type(t: Type) -> TypeGuard[ObjectType]:
     return isinstance(t, ObjectType)
 
 
+def is_abstract_type(t: Type) -> TypeGuard[InheritingType]:
+    return isinstance(t, InheritingType) and t.abstract
+
+
 def is_scalar_type(t: Type) -> TypeGuard[ScalarType]:
     return isinstance(t, ScalarType)
 

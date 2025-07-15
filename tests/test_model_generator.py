@@ -5111,6 +5111,15 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(reveal_type(c), "builtins.int")
         self.assertEqual(c, 1)
 
+    @tb.typecheck
+    def test_modelgen_abstract_type_no_init(self):
+        from models import default
+
+        # Try instantiating an abstract type
+        with self.assertRaisesRegex(TypeError, r"cannot instantiate abstract"):
+            # (mypy will also error out if "type: ignore" is not used)
+            default.Named(name="aaa")  # type: ignore
+
 
 class TestEmptyModelGenerator(tb.ModelTestCase):
     DEFAULT_MODULE = "default"
