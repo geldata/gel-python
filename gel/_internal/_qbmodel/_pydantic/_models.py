@@ -544,10 +544,6 @@ class GelSourceModel(
         # Whether the model uses DEFAULT_MODEL_CONFIG or not.
         __gel_default_model_config__: ClassVar[bool]
 
-        # Whether the model is new (no `.id` set) or it has
-        # an `.id` corresponding to a database object.
-        __gel_new__: bool
-
     @classmethod
     def __gel_model_construct__(cls, __dict__: dict[str, Any] | None) -> Self:
         if (
@@ -1272,9 +1268,6 @@ class ProxyModel(
     )
 
     if TYPE_CHECKING:
-        _p__obj__: _MT_co
-
-        __proxy_of__: ClassVar[type[_MT_co]]  # type: ignore [misc]
         __linkprops__: _abstract.GelLinkModelDescriptor[GelLinkModel]
 
     def __new__(cls, *args: Any, **kwargs: Any) -> Self:

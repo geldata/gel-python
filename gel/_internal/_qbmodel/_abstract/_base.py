@@ -122,6 +122,11 @@ def is_gel_type(t: Any) -> TypeGuard[type[GelType]]:
 class AbstractGelSourceModel(_qb.GelSourceMetadata):
     """Base class for property-bearing classes."""
 
+    if TYPE_CHECKING:
+        # Whether the model is new (no `.id` set) or it has
+        # an `.id` corresponding to a database object.
+        __gel_new__: bool
+
     @classmethod
     def __gel_validate__(cls, value: Any) -> Self:
         raise NotImplementedError

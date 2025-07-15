@@ -25,12 +25,12 @@ from gel._internal._tracked_list import (
     TrackedList,
     DowncastingTrackedList,
 )
-from gel._internal._qbmodel._abstract._distinct_list import (
+from gel._internal._qbmodel._abstract import (
     AbstractDistinctList,
     DistinctList,
+    ProxyDistinctList,
 )
 from gel._internal._edgeql import PointerKind, quote_ident
-from gel._internal._qbmodel._pydantic._pdlist import ProxyDistinctList
 
 if TYPE_CHECKING:
     import uuid

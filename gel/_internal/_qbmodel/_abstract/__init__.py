@@ -33,6 +33,12 @@ from ._descriptors import (
     field_descriptor,
 )
 
+from ._distinct_list import (
+    AbstractDistinctList,
+    DistinctList,
+    ProxyDistinctList,
+)
+
 from ._expressions import (
     empty_set_if_none,
 )
@@ -84,6 +90,7 @@ from ._primitive import (
 __all__ = (
     "DEFAULT_VALUE",
     "MODEL_SUBSTRATE_MODULE",
+    "AbstractDistinctList",
     "AbstractGelLinkModel",
     "AbstractGelModel",
     "AbstractGelModelMeta",
@@ -100,6 +107,7 @@ __all__ = (
     "DateTimeImpl",
     "DateTimeLike",
     "DefaultValue",
+    "DistinctList",
     "GelLinkModelDescriptor",
     "GelPrimitiveType",
     "GelScalarType",
@@ -116,6 +124,7 @@ __all__ = (
     "PointerDescriptor",
     "PointerInfo",
     "PropertyDescriptor",
+    "ProxyDistinctList",
     "PyConstType",
     "PyTypeScalar",
     "PyTypeScalarConstraint",
