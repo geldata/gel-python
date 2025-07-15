@@ -1642,7 +1642,7 @@ class ProxyModel(
         ll_setattr(self, "_p__obj__", state["obj"])
         ll_setattr(self, "__linkprops__", state["linkprops"])
 
-    def __gel_unwrap_proxy__(self) -> GelModel:
+    def without_linkprops(self) -> _MT_co:
         return self._p__obj__
 
 

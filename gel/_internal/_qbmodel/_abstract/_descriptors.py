@@ -603,7 +603,7 @@ class AbstractGelProxyModel(AbstractGelModel, Generic[_MT_co, _LM_co]):
     ) -> Self:
         raise NotImplementedError
 
-    def __gel_unwrap_proxy__(self) -> AbstractGelModel:
+    def without_linkprops(self) -> _MT_co:
         raise NotImplementedError
 
 

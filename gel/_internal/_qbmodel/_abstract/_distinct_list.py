@@ -73,7 +73,7 @@ class AbstractDistinctList(AbstractTrackedList[_MT_co]):
         t = cls.type
 
         if isinstance(value, AbstractGelProxyModel):
-            value = value.__gel_unwrap_proxy__()
+            value = value.without_linkprops()
 
         if isinstance(value, t):
             return value
