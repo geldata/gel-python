@@ -608,12 +608,18 @@ CORE_OBJECTS = frozenset(
 )
 GENERIC_TYPES = frozenset(
     {
+        SchemaPath("std", "anytype"),
+        SchemaPath("std", "anyobject"),
+        SchemaPath("std", "anytuple"),
+        SchemaPath("std", "anynamedtuple"),
         SchemaPath("std", "array"),
         SchemaPath("std", "tuple"),
         SchemaPath("std", "range"),
         SchemaPath("std", "multirange"),
     }
 )
+
+PSEUDO_TYPES = frozenset(("anytuple", "anyobject", "anytype"))
 
 # Deprecated Pydantic attributes, allow shadowing
 SHADOWED_PYDANTIC_ATTRIBUTES = frozenset(
@@ -876,27 +882,33 @@ class BaseGeneratedModule:
         self,
         stype: reflection.Type,
         *,
+        base_types: Iterable[str] = (),
         base_metadata_class: str = "GelTypeMetadata",
     ) -> None:
         return self.write_schema_reflection(
-            stype, base_metadata_class=base_metadata_class
+            stype,
+            base_types=base_types,
+            base_metadata_class=base_metadata_class,
         )
 
     def write_schema_reflection(
         self,
         sobj: reflection.SchemaObject,
         *,
+        base_types: Iterable[str] = (),
         base_metadata_class: str = "GelSchemaMetadata",
     ) -> None:
         uuid = self.import_name("uuid", "UUID")
         schemapath = self.import_name(BASE_IMPL, "SchemaPath")
-        if isinstance(sobj, reflection.InheritingType):
-            base_types = [
-                self.get_type(self._types[base.id]) for base in sobj.bases
-            ]
-        else:
-            gmm = self.import_name(BASE_IMPL, base_metadata_class)
-            base_types = [gmm]
+        base_types = list(base_types)
+        if not base_types:
+            if isinstance(sobj, reflection.InheritingType):
+                base_types = [
+                    self.get_type(self._types[base.id]) for base in sobj.bases
+                ]
+            else:
+                gmm = self.import_name(BASE_IMPL, base_metadata_class)
+                base_types = [gmm]
         with self._class_def(
             "__gel_reflection__",
             _map_name(
@@ -926,11 +938,17 @@ class BaseGeneratedModule:
         assert objecttype_import is not None
         uuid_ = self.import_name("uuid", "UUID")
 
-        if base_types:
+        anyobject = SchemaPath("std", "anyobject")
+        if objtype.schemapath == anyobject:
+            class_bases = [
+                *base_types,
+                self.import_name(BASE_IMPL, "GelObjectTypeMetadata"),
+            ]
+        elif base_types:
             class_bases = base_types
         else:
             class_bases = [
-                self.import_name(BASE_IMPL, "GelObjectTypeMetadata")
+                self.get_object(anyobject, aspect=ModuleAspect.VARIANTS),
             ]
 
         with self._class_def(
@@ -1348,20 +1366,7 @@ class BaseGeneratedModule:
             return f"{rang}[{elem_type}]"
 
         elif reflection.is_pseudo_type(stype):
-            if stype.name == "anyobject":
-                return self.import_name(
-                    BASE_IMPL, "GelModel", import_time=foreign_import_time
-                )
-            elif stype.name == "anytuple":
-                return self.import_name(
-                    BASE_IMPL, "AnyTuple", import_time=foreign_import_time
-                )
-            elif stype.name == "anytype":
-                return self.import_name(
-                    BASE_IMPL, "GelType", import_time=foreign_import_time
-                )
-            else:
-                raise AssertionError(f"unsupported pseudo-type: {stype.name}")
+            type_path = SchemaPath("std", stype.name)
 
         elif reflection.is_named_tuple_type(stype):
             mod = "__types__"
@@ -1375,9 +1380,9 @@ class BaseGeneratedModule:
         else:
             type_path = stype.schemapath
 
-        if (
-            self._schema_part is reflection.SchemaPart.STD
-            and reflection.is_scalar_type(stype)
+        if self._schema_part is reflection.SchemaPart.STD and (
+            reflection.is_scalar_type(stype)
+            or reflection.is_pseudo_type(stype)
         ):
             # std modules have complex cyclic deps,
             # especially where scalars are involved.
@@ -1536,8 +1541,16 @@ class BaseGeneratedModule:
         base_types: Iterable[str],
         *,
         class_kwargs: dict[str, str] | None = None,
+        type_ignore: Iterable[str] = (),
         line_comment: str | None = None,
     ) -> Iterator[None]:
+        if ti := list(type_ignore):
+            type_ignore_comment = f"type: ignore [{', '.join(ti)}]"
+            if line_comment:
+                line_comment = f"{type_ignore_comment}  # {line_comment}"
+            else:
+                line_comment = type_ignore_comment
+
         class_line = self._format_class_line(
             class_name,
             base_types,
@@ -1701,8 +1714,8 @@ class GeneratedSchemaModule(BaseGeneratedModule):
 
     def process(self, mod: IntrospectedModule) -> None:
         self.prepare_namespace(mod)
-        self.write_scalar_types(mod["scalar_types"])
         self.write_generic_types(mod)
+        self.write_scalar_types(mod["scalar_types"])
         self.write_object_types(mod["object_types"])
         # Write functions, but omit generic type constructors
         # (those would have already been written by write_generic_types())
@@ -2030,19 +2043,22 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         self.write()
 
     def prepare_namespace(self, mod: IntrospectedModule) -> None:
-        with self.aspect(ModuleAspect.VARIANTS):
-            if self.canonical_modpath == SchemaPath("std"):
-                # Only std "defines" generic types at the moment.
-                self.py_file.update_globals(gt.name for gt in GENERIC_TYPES)
+        for aspect in (ModuleAspect.VARIANTS, ModuleAspect.MAIN):
+            with self.aspect(aspect):
+                if self.canonical_modpath == SchemaPath("std"):
+                    # Only std "defines" generic types at the moment.
+                    self.py_file.update_globals(
+                        gt.name for gt in GENERIC_TYPES
+                    )
 
-        self.py_file.update_globals(
-            ident(t.schemapath.name)
-            for t in itertools.chain(
-                mod["scalar_types"].values(),
-                mod["object_types"].values(),
-                mod["globals"],
-            )
-        )
+                self.py_file.update_globals(
+                    ident(t.schemapath.name)
+                    for t in itertools.chain(
+                        mod["scalar_types"].values(),
+                        mod["object_types"].values(),
+                        mod["globals"],
+                    )
+                )
 
     def write_generic_types(
         self,
@@ -2054,33 +2070,166 @@ class GeneratedSchemaModule(BaseGeneratedModule):
 
         funcs = mod["functions"]
         with self.aspect(ModuleAspect.VARIANTS):
-            anytype = self.get_type(
-                self._types_by_name["anytype"],
-                import_time=ImportTime.typecheck,
-            )
             anypoint = self.get_type(
                 self._types_by_name["std::anypoint"],
                 import_time=ImportTime.typecheck,
             )
+            classvar = self.import_name(
+                "typing", "ClassVar", import_time=ImportTime.typecheck
+            )
             typevartup = self.import_name("typing_extensions", "TypeVarTuple")
             unpack = self.import_name("typing_extensions", "Unpack")
+            geltype = self.import_name(BASE_IMPL, "GelType")
+            geltypemeta = self.import_name(BASE_IMPL, "GelTypeMeta")
+            gelmodel = self.import_name(BASE_IMPL, "GelModel")
+            gelmodelmeta = self.import_name(BASE_IMPL, "GelModelMeta")
+            anytuple = self.import_name(BASE_IMPL, "AnyTuple")
+            anynamedtuple = self.import_name(BASE_IMPL, "AnyNamedTuple")
+            anynamedtuplemeta = self.import_name(
+                BASE_IMPL, "AnyNamedTupleMeta"
+            )
             tup = self.import_name(BASE_IMPL, "Tuple")
+            tuplemeta = self.import_name(BASE_IMPL, "TupleMeta")
             arr = self.import_name(BASE_IMPL, "Array")
+            arraymeta = self.import_name(BASE_IMPL, "ArrayMeta")
             rang = self.import_name(BASE_IMPL, "Range")
+            rangemeta = self.import_name(BASE_IMPL, "RangeMeta")
             mrang = self.import_name(BASE_IMPL, "MultiRange")
+            multirangemeta = self.import_name(BASE_IMPL, "MultiRangeMeta")
 
-            t_anytype = self.declare_typevar("_T_anytype", bound=anytype)
+            t_anytype = self.declare_typevar("_T_anytype", bound="anytype")
             t_anypt = self.declare_typevar("_T_anypoint", bound=anypoint)
             self.write(f'_Tt = {typevartup}("_Tt")')
 
             generics = {
-                SchemaPath("std", "tuple"): f"{tup}[{unpack}[_Tt]]",
-                SchemaPath("std", "array"): f"{arr}[{t_anytype}]",
-                SchemaPath("std", "range"): f"{rang}[{t_anypt}]",
-                SchemaPath("std", "multirange"): f"{mrang}[{t_anypt}]",
+                SchemaPath("std", "anytype"): [
+                    geltype,
+                ],
+                SchemaPath("std", "anyobject"): [
+                    "anytype",
+                    gelmodel,
+                ],
+                SchemaPath("std", "anytuple"): [
+                    "anytype",
+                    anytuple,
+                ],
+                SchemaPath("std", "anynamedtuple"): [
+                    "anytuple",
+                    anynamedtuple,
+                ],
+                SchemaPath("std", "tuple"): [
+                    "anytuple",
+                    f"{tup}[{unpack}[_Tt]]",
+                ],
+                SchemaPath("std", "array"): [
+                    "anytype",
+                    f"{arr}[{t_anytype}]",
+                ],
+                SchemaPath("std", "range"): [
+                    "anytype",
+                    f"{rang}[{t_anypt}]",
+                ],
+                SchemaPath("std", "multirange"): [
+                    "anytype",
+                    f"{mrang}[{t_anypt}]",
+                ],
             }
-            for gt, base in generics.items():
-                with self._class_def(gt.name, [base]):
+
+            metaclass_bases = {
+                SchemaPath("std", "anytype"): [
+                    geltypemeta,
+                ],
+                SchemaPath("std", "anyobject"): [
+                    "__anytype_meta__",
+                    gelmodelmeta,
+                ],
+                SchemaPath("std", "anytuple"): [
+                    "__anytype_meta__",
+                ],
+                SchemaPath("std", "anynamedtuple"): [
+                    "__anytuple_meta__",
+                    anynamedtuplemeta,
+                ],
+                SchemaPath("std", "tuple"): [
+                    "__anytuple_meta__",
+                    tuplemeta,
+                ],
+                SchemaPath("std", "array"): [
+                    "__anytype_meta__",
+                    arraymeta,
+                ],
+                SchemaPath("std", "range"): [
+                    "__anytype_meta__",
+                    rangemeta,
+                ],
+                SchemaPath("std", "multirange"): [
+                    "__anytype_meta__",
+                    multirangemeta,
+                ],
+            }
+
+            type_ignores = {
+                SchemaPath("std", "tuple"): ["misc", "unused-ignore"],
+                SchemaPath("std", "array"): ["misc", "unused-ignore"],
+            }
+
+            for gt, bases in generics.items():
+                class_kwargs: dict[str, str] = {}
+                if gt.name not in PSEUDO_TYPES:
+                    continue
+
+                ptype = self._types_by_name[gt.name]
+                meta_bases = metaclass_bases[gt]
+
+                tname = gt.name
+                tmeta = f"__{tname}_meta__"
+                with self._class_def(tmeta, meta_bases):
+                    self.write("pass")
+
+                class_kwargs["metaclass"] = tmeta
+
+                with self.type_checking():
+                    with self._class_def(
+                        tname,
+                        bases,
+                        class_kwargs=class_kwargs,
+                    ):
+                        if gt.name == "anyobject":
+                            rbases = ["anytype", "GelObjectTypeMetadata"]
+                        else:
+                            rbases = []
+                        self.write_type_reflection(ptype, base_types=rbases)
+
+                self.write()
+
+                with self.not_type_checking():
+                    with self._class_def(tname, bases):
+                        if tmeta:
+                            self.write(
+                                f"__gel_type_class__: "
+                                f"{classvar}[type] = {tmeta}"
+                            )
+                            self.write()
+                        self.write_type_reflection(ptype)
+
+            for gt, bases in generics.items():
+                if gt.name in PSEUDO_TYPES:
+                    continue
+
+                tname = gt.name
+                tmeta = f"__{tname}_meta__"
+                meta_bases = metaclass_bases[gt]
+                with self._class_def(tmeta, meta_bases):
+                    self.write("pass")
+
+                class_kwargs = {"metaclass": tmeta}
+                ti = type_ignores.get(gt, ())
+                with self._class_def(
+                    gt.name,
+                    bases,
+                    type_ignore=ti,
+                    class_kwargs=class_kwargs,
+                ):
                     ctors = [f for f in funcs if f.schemapath == gt]
                     if ctors:
                         self.write_functions(
@@ -2198,9 +2347,18 @@ class GeneratedSchemaModule(BaseGeneratedModule):
 
         typecheck_parents.extend(scalar_bases)
         runtime_parents.extend(scalar_bases)
+        typecheck_meta_ignores = []
+
+        if type_name == SchemaPath("std", "anyenum"):
+            anyenum_ = self.import_name(BASE_IMPL, "AnyEnum")
+            anyenummeta_ = self.import_name(BASE_IMPL, "AnyEnumMeta")
+            typecheck_parents.append(anyenum_)
+            runtime_parents.append(anyenum_)
+            typecheck_meta_parents.append(anyenummeta_)
+            typecheck_meta_ignores = ["misc", "unused-ignore"]
 
         if not runtime_parents:
-            typecheck_parents = [self.import_name(BASE_IMPL, "GelScalarType")]
+            typecheck_parents = [self.get_type(self._types_by_name["anytype"])]
             runtime_parents = typecheck_parents
 
         self.write()
@@ -2215,8 +2373,11 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                     scalar_bases,
                 )
             else:
-                gel_type_meta = self.import_name(BASE_IMPL, "GelTypeMeta")
-                meta_bases = [gel_type_meta]
+                anytype_meta = self.get_object(
+                    SchemaPath("std", "__anytype_meta__"),
+                    aspect=ModuleAspect.VARIANTS,
+                )
+                meta_bases = [anytype_meta]
 
             if typecheck_meta_parents:
                 with self.type_checking():
@@ -2236,7 +2397,11 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                 meta_bases.append(f"__{tname}_meta_base__")
 
             tmeta = f"__{tname}_meta__"
-            with self._class_def(tmeta, meta_bases):
+            with self._class_def(
+                tmeta,
+                meta_bases,
+                type_ignore=typecheck_meta_ignores,
+            ):
                 un_ops = self._write_prefix_operator_methods(stype)
                 bin_ops = self._write_infix_operator_methods(stype)
                 if not un_ops and not bin_ops:
@@ -3415,11 +3580,17 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         if proplinks:
             self.write_object_type_link_models(objtype)
 
-        gel_model_meta = self.import_name(BASE_IMPL, "GelModelMeta")
+        anyobject_meta = self.get_object(
+            SchemaPath("std", "__anyobject_meta__"),
+            aspect=ModuleAspect.VARIANTS,
+        )
         if not base_types:
-            gel_model = self.import_name(BASE_IMPL, "GelModel")
-            meta_base_types = [gel_model_meta]
-            vbase_types = [gel_model]
+            anyobject = self.get_object(
+                SchemaPath("std", "anyobject"),
+                aspect=ModuleAspect.VARIANTS,
+            )
+            meta_base_types = [anyobject_meta]
+            vbase_types = [anyobject]
         else:
             meta_base_types = _map_name(lambda s: f"__{s}_ops__", base_types)
             vbase_types = base_types
@@ -3437,7 +3608,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             with self.type_checking():
                 self.write(f"__{name}_meta__ = __{name}_ops__")
             with self.not_type_checking():
-                self.write(f"__{name}_meta__ = {gel_model_meta}")
+                self.write(f"__{name}_meta__ = {anyobject_meta}")
 
             class_kwargs["metaclass"] = f"__{name}_meta__"
 
@@ -5367,7 +5538,10 @@ class GeneratedGlobalModule(BaseGeneratedModule):
         t: reflection.NamedTupleType,
     ) -> None:
         namedtuple = self.import_name("typing", "NamedTuple")
-        anytuple = self.import_name(BASE_IMPL, "AnyNamedTuple")
+        anytuple = self.get_object(
+            SchemaPath("std", "anynamedtuple"),
+            aspect=ModuleAspect.VARIANTS,
+        )
 
         self.write("#")
         self.write(f"# tuple type {t.schemapath}")

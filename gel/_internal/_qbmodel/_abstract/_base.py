@@ -86,9 +86,15 @@ if TYPE_CHECKING:
         ) -> type[Self] | Self: ...
 
 else:
-    GelTypeMeta = type
 
-    class GelType(_qb.AbstractDescriptor, _qb.GelTypeMetadata):
+    class GelTypeMeta(type):
+        pass
+
+    class GelType(
+        _qb.AbstractDescriptor,
+        _qb.GelTypeMetadata,
+        metaclass=GelTypeMeta,
+    ):
         @hybridmethod
         def __edgeql_qb_expr__(self) -> _qb.Expr:
             if isinstance(self, type):
@@ -144,10 +150,10 @@ class AbstractGelModelMeta(GelTypeMeta):
 
     if TYPE_CHECKING:
         # Splat qb protocol
-        def __iter__(cls) -> Iterator[_qb.ShapeElement]:  # noqa: N805
+        def __iter__(cls) -> Iterator[_qb.ShapeElement]:
             ...
 
-    def __new__(  # noqa: PYI034
+    def __new__(
         mcls,
         name: str,
         bases: tuple[type[Any], ...],

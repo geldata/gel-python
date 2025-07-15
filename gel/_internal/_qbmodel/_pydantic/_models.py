@@ -20,6 +20,7 @@ from typing_extensions import (
 
 import inspect
 import itertools
+import types
 import typing
 import warnings
 import weakref
@@ -49,8 +50,6 @@ from . import _utils as _pydantic_utils
 from . import _fields
 
 if TYPE_CHECKING:
-    import types
-
     from collections.abc import (
         Iterator,
         Mapping,
@@ -1430,6 +1429,14 @@ class ProxyModel(
         if cls.__proxy_of__ is None or cls.__linkprops__ is None:
             raise TypeError("Subclass must set __proxy_of__ and __linkprops__")
 
+        # _MergedModelBase has a custom metaclass, so we must
+        # create a common subclass of that and whatever the
+        # metaclass of the real type is.
+        metaclass = types.new_class(
+            f"{cls.__name__}Meta",
+            (_MergedModelMeta, type(cls.__proxy_of__)),
+        )
+
         merged = cast(
             "type[_MergedModelBase]",
             pydantic.create_model(
@@ -1439,6 +1446,7 @@ class ProxyModel(
                     cls.__proxy_of__,
                 ),  # inherit all wrapped fields
                 __config__=DEFAULT_MODEL_CONFIG,
+                __cls_kwargs__={"metaclass": metaclass},
                 linkprops____=(
                     cls.__linkprops__,
                     pydantic.Field(None, alias="__linkprops__"),
