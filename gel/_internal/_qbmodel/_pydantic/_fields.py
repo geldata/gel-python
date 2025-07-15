@@ -381,15 +381,12 @@ class _AnyLink(Generic[_MT_co, _BMT_co]):
                 # the value as is; otherwise `obj.link = LinkWithProps.link()`
                 # wouldn't work.
                 return value  # type: ignore [no-any-return]
-
-            if isinstance(value, ProxyModel):
-                # A proxied model of different type:
-                # let's just unwrap it. Same motivation as in
-                # the other branch.
-                value = value._p__obj__
-
-            if isinstance(value, bmt):
-                return mt.link(value)  # type: ignore [no-any-return]
+            elif isinstance(value, (bmt, ProxyModel)):
+                # Naked target type or another proxy model are not accepted
+                raise ValueError(
+                    f"cannot assign a value of type {type(value).__name__} "
+                    f"to a field of type {mt.__name__}"
+                )
 
         # defer to Pydantic
         return mt.model_validate(value)  # type: ignore [no-any-return]

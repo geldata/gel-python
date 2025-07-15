@@ -428,7 +428,7 @@ class LinkDescriptor(AnyLinkDescriptor[T_co, BT_co]):
         def __set__(
             self,
             instance: Any,
-            value: BT_co,  # type: ignore [misc]
+            value: T_co,  # type: ignore [misc]
             /,
         ) -> None: ...
 
@@ -457,12 +457,12 @@ class MultiLinkDescriptor(AnyLinkDescriptor[_MT_co, _BMT_co]):
             instance: Any,
             owner: type[Any] | None = None,
             /,
-        ) -> type[_MT_co] | AbstractDistinctList[_MT_co] | None: ...
+        ) -> type[_MT_co] | AbstractDistinctList[_MT_co]: ...
 
         def __set__(
             self,
             instance: Any,
-            value: Sequence[_MT_co | _BMT_co],
+            value: Sequence[_MT_co],
             /,
         ) -> None: ...
 
@@ -525,7 +525,7 @@ class OptionalLinkDescriptor(
         def __set__(
             self,
             instance: Any,
-            value: BT_co | None,
+            value: T_co | None,
             /,
         ) -> None: ...
 
@@ -639,11 +639,11 @@ class MultiLinkWithPropsDescriptor(MultiLinkDescriptor[_PT_co, _BMT_co]):
             instance: Any,
             owner: type[Any] | None = None,
             /,
-        ) -> type[_PT_co] | ProxyDistinctList[_PT_co, _BMT_co] | None: ...
+        ) -> type[_PT_co] | ProxyDistinctList[_PT_co, _BMT_co]: ...
 
         def __set__(
             self,
             instance: Any,
-            value: Sequence[_PT_co | _BMT_co],
+            value: Sequence[_PT_co],
             /,
         ) -> None: ...

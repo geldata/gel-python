@@ -1101,16 +1101,11 @@ class TestModelGenerator(tb.ModelTestCase):
 
         t.opt_friend = u
 
-        # Assignment of a different ProxyModel would succeed, but linkprops
-        # wlll be reset
-        t.opt_wprop_friend = default.TestSingleLinks.req_wprop_friend.link(
-            u, strength=123
-        )
-        assert t.opt_wprop_friend is not None
-        self.assertEqual(
-            t.opt_wprop_friend.__linkprops__.strength,
-            None,
-        )
+        # Assignment of a different ProxyModel is an error
+        with self.assertRaisesRegex(ValueError, "cannot assign"):
+            t.opt_wprop_friend = default.TestSingleLinks.req_wprop_friend.link(  # type: ignore [assignment]
+                u, strength=123
+            )
 
         t.opt_wprop_friend = default.TestSingleLinks.opt_wprop_friend.link(
             u, strength=456
@@ -1662,13 +1657,17 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(t.req_friend.name, "bbb")
         self.assertFalse(hasattr(t.req_friend, "__linkprops__"))
 
-        t.req_wprop_friend = t.opt_wprop_friend
+        t.req_wprop_friend = T.req_wprop_friend.link(
+            t.opt_wprop_friend.without_linkprops()
+        )
         self.assertEqual(t.req_wprop_friend.name, "bbb")
         self.assertEqual(t.req_wprop_friend.__linkprops__.strength, None)
 
-        t.opt_wprop_friend = u1
-        self.assertEqual(t.opt_wprop_friend.name, "aaa")
-        self.assertEqual(t.opt_wprop_friend.__linkprops__.strength, None)
+        with self.assertRaisesRegex(
+            ValueError,
+            r"cannot assign",
+        ):
+            t.opt_wprop_friend = u1  # type: ignore [assignment]
 
     @tb.typecheck
     def test_modelgen_save_01(self):
@@ -2223,7 +2222,7 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(img.author.__linkprops__.caption, "kitty!")
         self.assertEqual(img.author.__linkprops__.year, None)
 
-        img.author = a
+        img.author = default.Image.author.link(a)
         self.client.save(img)
 
         # Re-fetch and verify
@@ -2303,7 +2302,7 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(loot.owner.__linkprops__.count, 12)
         self.assertEqual(loot.owner.__linkprops__.bonus, None)
 
-        loot.owner = a
+        loot.owner = default.StackableLoot.owner.link(a)
         self.client.save(loot)
 
         # Re-fetch and verify
@@ -2839,8 +2838,9 @@ class TestModelGenerator(tb.ModelTestCase):
 
         #########
 
-        g.players = [u]
-        self.assertEqual(g.players, [u])
+        player = default.GameSession.players.link(u)
+        g.players = [player]
+        self.assertEqual(g.players, [player])
         self.assertTrue(g.players.__gel_overwrite_data__)
         self.assertIs(g.players, players)
         self.assertEqual(g.players._mode, Mode.ReadWrite)
@@ -2995,8 +2995,9 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(g.players._mode, Mode.ReadWrite)
 
         # Assign players
-        g.players = [u1, u2]
-        self.assertEqual(g.players, [u1, u2])
+        players = [default.GameSession.players.link(u) for u in [u1, u2]]
+        g.players = players
+        self.assertEqual(g.players, players)
         self.assertTrue(g.players.__gel_overwrite_data__)
         self.assertEqual(g.players._mode, Mode.ReadWrite)
 
@@ -3017,7 +3018,8 @@ class TestModelGenerator(tb.ModelTestCase):
         )
 
         # Modify by removing one player
-        g_fetched.players = [u1]
+        players = [default.GameSession.players.link(u) for u in [u1]]
+        g_fetched.players = players
         self.assertTrue(g_fetched.players.__gel_overwrite_data__)
         self.client.save(g_fetched)
 
