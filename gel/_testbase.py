@@ -1098,6 +1098,11 @@ class TestModel(ModelTestCase):
                 follow_imports = normal
                 show_error_codes = True
                 local_partial_types = True
+
+                # This is very intentional as it allows us to type check things
+                # that must be flagged as an error by the type checker.
+                # Don't "type: ignore" unless it's part of the test.
+                warn_unused_ignores = True
             """)
             )
 
