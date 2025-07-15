@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 from typing import TYPE_CHECKING, Any, ClassVar, Generic, TypeVar, overload
+from typing_extensions import Self
 
 import dataclasses
 import typing
@@ -349,38 +350,38 @@ class OptionalLinkDescriptor(
 
 
 _MT_co = TypeVar("_MT_co", bound=AbstractGelModel, covariant=True)
-_LM = TypeVar("_LM", bound=AbstractGelLinkModel)
+_LM_co = TypeVar("_LM_co", bound=AbstractGelLinkModel, covariant=True)
 
 
 class GelLinkModelDescriptor(
     _typing_parametric.PickleableClassParametricType,
     _qb.AbstractFieldDescriptor,
-    Generic[_LM],
+    Generic[_LM_co],
 ):
-    _link_model_class: ClassVar[type[_LM]]  # type: ignore [misc]
+    _link_model_class: ClassVar[type[_LM_co]]  # type: ignore [misc]
 
     def __set_name__(self, owner: type[Any], name: str) -> None:
         self._link_model_attr = name
 
     @overload
-    def __get__(self, instance: None, owner: type[Any], /) -> type[_LM]: ...
+    def __get__(self, instance: None, owner: type[Any], /) -> type[_LM_co]: ...
 
     @overload
     def __get__(
         self, instance: Any, owner: type[Any] | None = None, /
-    ) -> _LM: ...
+    ) -> _LM_co: ...
 
     def __get__(
         self,
         instance: Any | None,
         owner: type[Any] | None = None,
         /,
-    ) -> type[_LM] | _LM:
+    ) -> type[_LM_co] | _LM_co:
         if instance is None:
             return self._link_model_class
         else:
             attr = self._link_model_attr
-            linkobj: _LM | None = instance.__dict__.get(attr)
+            linkobj: _LM_co | None = instance.__dict__.get(attr)
             if linkobj is None:
                 linkobj = self._link_model_class.__gel_model_construct__({})
                 instance.__dict__[attr] = linkobj
@@ -389,7 +390,7 @@ class GelLinkModelDescriptor(
 
     def get(
         self,
-        owner: type[AbstractGelProxyModel[AbstractGelModel, _LM]],
+        owner: type[AbstractGelProxyModel[AbstractGelModel, _LM_co]],
         expr: _qb.BaseAlias | None = None,
     ) -> Any:
         source: _qb.Expr
@@ -410,8 +411,20 @@ class GelLinkModelDescriptor(
         return _qb.AnnotatedExpr(owner.__linkprops__, prefix)  # pyright: ignore [reportGeneralTypeIssues]
 
 
-class AbstractGelProxyModel(AbstractGelModel, Generic[_MT_co, _LM]):
-    __linkprops__: GelLinkModelDescriptor[_LM]
+class AbstractGelProxyModel(AbstractGelModel, Generic[_MT_co, _LM_co]):
+    __linkprops__: GelLinkModelDescriptor[_LM_co]
+
+    if TYPE_CHECKING:
+        _p__obj__: _MT_co
+        __proxy_of__: ClassVar[type[_MT_co]]  # type: ignore [misc]
 
     def __gel_unwrap_proxy__(self) -> AbstractGelModel:
+        raise NotImplementedError
+
+    @classmethod
+    def __gel_proxy_construct__(
+        cls,
+        obj: _MT_co,  # type: ignore [misc]
+        lprops: dict[str, Any],
+    ) -> Self:
         raise NotImplementedError

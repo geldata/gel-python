@@ -38,12 +38,9 @@ from gel import MultiRange, Range, errors
 from gel import _testbase as tb
 from gel._internal import _dirdiff
 from gel._internal import _typing_inspect
-from gel._internal._qbmodel._abstract._distinct_list import DistinctList
+from gel._internal._qbmodel._abstract import DistinctList, ProxyDistinctList
 from gel._internal._edgeql import Cardinality, PointerKind
 from gel._internal._qbmodel._pydantic._models import GelModel
-from gel._internal._qbmodel._pydantic._pdlist import (
-    ProxyDistinctList,
-)
 from gel._internal._schemapath import SchemaPath
 
 
@@ -359,7 +356,7 @@ class TestModelGenerator(tb.ModelTestCase):
     def test_modelgen_data_unpack_3(self):
         from models import default
 
-        from gel._internal._qbmodel._pydantic._pdlist import ProxyDistinctList
+        from gel._internal._qbmodel._abstract import ProxyDistinctList
 
         q = (
             default.GameSession.select(
@@ -421,7 +418,7 @@ class TestModelGenerator(tb.ModelTestCase):
     @tb.typecheck
     def test_modelgen_pdlist_parametrized(self):
         from models import default
-        from gel._internal._qbmodel._pydantic._pdlist import (
+        from gel._internal._qbmodel._abstract import (
             ProxyDistinctList,
         )
 
@@ -434,7 +431,7 @@ class TestModelGenerator(tb.ModelTestCase):
 
     @tb.typecheck
     def test_modelgen_data_init_unfetched_link(self):
-        from gel._internal._qbmodel._abstract._distinct_list import (
+        from gel._internal._qbmodel._abstract import (
             AbstractDistinctList,
         )
         import models as m
@@ -1519,7 +1516,7 @@ class TestModelGenerator(tb.ModelTestCase):
 
         from models import default, std
 
-        from gel._internal._qbmodel._pydantic._pdlist import ProxyDistinctList
+        from gel._internal._qbmodel._abstract import ProxyDistinctList
 
         gs = default.GameSession(num=7)
         self.assertIsInstance(gs.players, ProxyDistinctList)

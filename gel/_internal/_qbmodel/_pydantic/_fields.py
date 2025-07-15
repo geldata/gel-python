@@ -29,14 +29,13 @@ from pydantic_core import core_schema
 
 
 from gel._internal import _tracked_list
-from gel._internal._qbmodel._abstract._distinct_list import DistinctList
 from gel._internal import _edgeql
 from gel._internal import _typing_inspect
 
 from gel._internal._qbmodel import _abstract
+from gel._internal._qbmodel._abstract import DistinctList, ProxyDistinctList
 
 from ._models import GelModel, ProxyModel
-from ._pdlist import ProxyDistinctList
 
 from . import _utils as _pydantic_utils
 
