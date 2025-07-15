@@ -21,7 +21,6 @@ import inspect
 import typing
 
 from gel.datatypes import datatypes
-from gel._internal import _tracked_list
 
 
 cdef dict CARDS_MAP = {
@@ -31,8 +30,6 @@ cdef dict CARDS_MAP = {
     datatypes.EdgeFieldCardinality.MANY: enums.Cardinality.MANY,
     datatypes.EdgeFieldCardinality.AT_LEAST_ONE: enums.Cardinality.AT_LEAST_ONE,
 }
-
-cdef DLIST_READ_WRITE = _tracked_list.Mode.ReadWrite
 
 
 @cython.final
@@ -333,19 +330,21 @@ cdef class ObjectCodec(BaseNamedRecordCodec):
             Py_ssize_t fields_codecs_len = len(fields_codecs)
             Py_ssize_t i
 
+        if return_type is self.cached_orig_return_type:
+            # return_type should always be the same in the overwhelming
+            # number of scenarios, so we should only do the expensive task
+            # of introspecting the return_type and tailoring to it once
+            # per Object codec's entire lifespan.
+            return
+
         if return_type is None:
             self.cached_tid_map = None
             self.cached_return_type = None
             self.cached_return_type_subcodecs = (None,) * fields_codecs_len
             self.cached_return_type_dlists = (None,) * fields_codecs_len
             self.cached_return_type_proxy = None
-            return
-
-        if return_type is self.cached_orig_return_type:
-            # return_type should always be the same in the overwhelming
-            # number of scenarios, so we should only do the expensive task
-            # of introspecting the return_type and tailoring to it once
-            # per Object codec's entire lifespan.
+            self.cached_orig_return_type = None
+            self.cached_field_origins = None
             return
 
         refl = getattr(return_type, "__gel_reflection__", None)
@@ -418,8 +417,8 @@ cdef class ObjectCodec(BaseNamedRecordCodec):
 
                 origins.append(origin)
 
-                sub = getattr(origin, name)
-                subs.append(sub.__gel_origin__)
+                sub = inspect.getattr_static(origin, name)
+                subs.append(sub.get_resolved_type())
 
                 dlist_factory = None
 

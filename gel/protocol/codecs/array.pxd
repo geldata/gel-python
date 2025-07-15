@@ -23,7 +23,15 @@ cdef class BaseArrayCodec(BaseCodec):
         BaseCodec sub_codec
         int32_t cardinality
 
-    cdef _decode_array(self, bint is_set, object return_type, FRBuffer *buf)
+        object cached_return_type
+        object cached_element_type
+        object cached_dlist_type
+
+    cdef _decode_array(
+        self, bint is_set, object return_type, FRBuffer *buf,
+        bint array_mode)
+
+    cdef adapt_to_return_type(self, object return_type)
 
 
 @cython.final

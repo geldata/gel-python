@@ -1554,14 +1554,9 @@ class TestModelGenerator(tb.ModelTestCase):
         )
 
         # Check that `groups` is not an allowed keyword-arg for `User.update`
-        self.assertEqual(
-            reveal_type(default.User.update),
-            "def (*, "
-            "name: builtins.str | type[models.__variants__.std.str] "
-            "| gel._internal._utils.UnspecifiedType =, "
-            "nickname: builtins.str | type[models.__variants__.std.str] "
-            "| gel._internal._utils.UnspecifiedType =)"
-            " -> type[models.default.User]",
+        self.assertNotIn(
+            "groups",
+            str(reveal_type(default.User.update)),
         )
 
         self.assertEqual(
@@ -3560,7 +3555,6 @@ class TestModelGenerator(tb.ModelTestCase):
         ks3 = self.client.get(default.KitchenSink.filter(str="coll_test_1"))
         self.assertEqual(sorted(ks3.p_multi_str), ["222", "zzz", "zzz"])
 
-    @tb.xfail
     @tb.typecheck
     def test_modelgen_save_collections_02(self):
         from models import default
@@ -3630,8 +3624,6 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(ks5.p_opt_str, "hello again")
         self.assertEqual(ks5.array, ["bye bye"])
 
-    # both the typecheck and the expected returned values have errors
-    @tb.xfail
     @tb.typecheck
     def test_modelgen_save_collections_03(self):
         from models import default

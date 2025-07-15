@@ -17,6 +17,9 @@
 #
 
 
+from gel._internal import _tracked_list
+
+
 @cython.final
 cdef class SetCodec(BaseArrayCodec):
 
@@ -40,7 +43,7 @@ cdef class SetCodec(BaseArrayCodec):
             return self._decode_array_set(return_type, buf)
         else:
             # Set of non-arrays.
-            return self._decode_array(True, return_type, buf)
+            return self._decode_array(True, return_type, buf, False)
 
     cdef inline _decode_array_set(self, object return_type, FRBuffer *buf):
         cdef:

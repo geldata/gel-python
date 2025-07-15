@@ -105,9 +105,27 @@ cdef class BaseArrayCodec(BaseCodec):
         buf.write_buffer(elem_data)
 
     cdef decode(self, object return_type, FRBuffer *buf):
-        return self._decode_array(False, return_type, buf)
+        return self._decode_array(False, return_type, buf, True)
 
-    cdef inline _decode_array(self, bint is_set, object return_type, FRBuffer *buf):
+    cdef adapt_to_return_type(self, object return_type):
+        if return_type is self.cached_return_type:
+            # return_type should always be the same in the overwhelming
+            # number of scenarios, so we should only do the expensive task
+            # of introspecting the return_type and tailoring to it once
+            # per Object codec's entire lifespan.
+            return
+
+        if return_type is None:
+            self.cached_return_type = None
+            self.cached_element_type = None
+            self.cached_dlist_type = None
+            return
+
+        self.cached_return_type = return_type
+        self.cached_dlist_type = return_type.__gel_resolve_dlist__()
+        self.cached_element_type = return_type.__element_type__
+
+    cdef inline _decode_array(self, bint is_set, object return_type, FRBuffer *buf, bint decoding_array):
         cdef:
             Py_ssize_t elem_count
             int32_t ndims = hton.unpack_int32(frb_read(buf, 4))
@@ -116,6 +134,17 @@ cdef class BaseArrayCodec(BaseCodec):
             int32_t elem_len
             FRBuffer elem_buf
 
+            object element_type
+            object dlist_type
+
+        if decoding_array:
+            self.adapt_to_return_type(return_type)
+            element_type = self.cached_element_type
+            dlist_type = self.cached_dlist_type
+        else:
+            element_type = return_type
+            dlist_type = None
+
         frb_read(buf, 4)  # ignore flags
         frb_read(buf, 4)  # reserved
 
@@ -123,7 +152,16 @@ cdef class BaseArrayCodec(BaseCodec):
             raise RuntimeError('only 1-dimensional arrays are supported')
 
         if ndims == 0:
-            return []
+            if dlist_type is None:
+                return []
+            else:
+                return dlist_type(
+                    __mode__=DLIST_READ_WRITE,
+                    # this is a scalar field, we currently
+                    # can't do partial update (we'll have to eventually?
+                    # even an array can be fetched partially?)
+                    __overwrite_data__=True,
+                )
 
         assert ndims == 1
 
@@ -137,16 +175,14 @@ cdef class BaseArrayCodec(BaseCodec):
         frb_read(buf, 4)  # Ignore the lower bound information
 
         result = cpython.PyList_New(elem_count)
-        for i in range(elem_count):
-            elem_len = hton.unpack_int32(frb_read(buf, 4))
-            if elem_len == -1:
-                elem = None
-            else:
-
-                if isinstance(self.sub_codec, ArrayCodec):
-                    # This is an array of array
-                    # Unwrap the tuple from the inner array.
-                    tuple_elem_count = <Py_ssize_t><uint32_t>hton.unpack_int32(frb_read(buf, 4))
+        if isinstance(self.sub_codec, ArrayCodec):
+            for i in range(elem_count):
+                elem_len = hton.unpack_int32(frb_read(buf, 4))
+                if elem_len == -1:
+                    elem = None
+                else:
+                    tuple_elem_count = <Py_ssize_t><uint32_t>hton.unpack_int32(
+                        frb_read(buf, 4))
                     if tuple_elem_count != 1:
                         raise RuntimeError(
                             f'cannot decode inner array: expected 1 '
@@ -156,24 +192,45 @@ cdef class BaseArrayCodec(BaseCodec):
                     tuple_elem_len = hton.unpack_int32(frb_read(buf, 4))
 
                     elem = self.sub_codec.decode(
-                        return_type,
+                        element_type,
                         frb_slice_from(&elem_buf, buf, tuple_elem_len)
                     )
+                if frb_get_len(&elem_buf):
+                    raise RuntimeError(
+                        f'unexpected trailing data in buffer after '
+                        f'array element decoding: {frb_get_len(&elem_buf)}')
+                cpython.Py_INCREF(elem)
+                cpython.PyList_SET_ITEM(result, i, elem)
 
+        else:
+            for i in range(elem_count):
+                elem_len = hton.unpack_int32(frb_read(buf, 4))
+                if elem_len == -1:
+                    elem = None
                 else:
                     frb_slice_from(&elem_buf, buf, elem_len)
                     elem = self.sub_codec.decode(
-                        return_type,
+                        element_type,
                         &elem_buf
                     )
-
                 if frb_get_len(&elem_buf):
                     raise RuntimeError(
                         f'unexpected trailing data in buffer after '
                         f'array element decoding: {frb_get_len(&elem_buf)}')
 
-            cpython.Py_INCREF(elem)
-            cpython.PyList_SET_ITEM(result, i, elem)
+                cpython.Py_INCREF(elem)
+                cpython.PyList_SET_ITEM(result, i, elem)
+
+        if dlist_type is not None:
+            result = dlist_type(
+                result,
+                __wrap_list__=True,
+                __mode__=DLIST_READ_WRITE,
+                # this is a scalar field, we currently
+                # can't do partial update (we'll have to eventually?
+                # even an array can be fetched partially?)
+                __overwrite_data__=True,
+            )
 
         return result
 

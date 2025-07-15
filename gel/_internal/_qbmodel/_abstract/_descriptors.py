@@ -23,7 +23,6 @@ from pydantic._internal import _namespace_utils  # noqa: PLC2701
 
 from gel._internal import _qb
 from gel._internal import _namespace
-from gel._internal import _tracked_list
 from gel._internal import _typing_eval
 from gel._internal import _typing_inspect
 from gel._internal import _typing_parametric
@@ -312,18 +311,14 @@ class MultiPropertyDescriptor(AnyPropertyDescriptor[T_co, BT_co]):
             instance: Any,
             owner: type[Any] | None = None,
             /,
-        ) -> _tracked_list.DowncastingTrackedList[T_co, BT_co]: ...
+        ) -> list[BT_co]: ...
 
         def __get__(
             self,
             instance: Any,
             owner: type[Any] | None = None,
             /,
-        ) -> (
-            type[T_co]
-            | _tracked_list.DowncastingTrackedList[T_co, BT_co]
-            | None
-        ): ...
+        ) -> type[T_co] | list[BT_co]: ...
 
         def __set__(
             self,
