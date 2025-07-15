@@ -137,9 +137,16 @@ else:
         pass
 
 
+class BaseCollection:
+    @classmethod
+    def __gel_get_py_type__(cls) -> type:
+        raise NotImplementedError
+
+
 class HomogeneousCollection(
     _typing_parametric.PickleableClassParametricType,
     GelPrimitiveType,
+    BaseCollection,
     Generic[_T],
     metaclass=HomogeneousCollectionMeta,
 ):
@@ -216,12 +223,17 @@ class Array(  # type: ignore [misc]
         )
         return cls(items)
 
+    @classmethod
+    def __gel_get_py_type__(cls) -> type:
+        return list
+
 
 _Ts = TypeVarTuple("_Ts")
 
 
 class HeterogeneousCollection(
     _typing_parametric.PickleableClassParametricType,
+    BaseCollection,
     Generic[Unpack[_Ts]],
 ):
     __element_types__: ClassVar[
@@ -273,6 +285,10 @@ class Tuple(  # type: ignore[misc]
             name = SchemaPath(tname)
 
         return __gel_reflection__
+
+    @classmethod
+    def __gel_get_py_type__(cls) -> type:
+        return tuple
 
 
 if TYPE_CHECKING:
@@ -369,6 +385,31 @@ class TimeDeltaLike(Protocol):
 class DateTimeLike(Protocol):
     def astimezone(self, tz: datetime.tzinfo) -> Self: ...
     def __sub__(self, other: datetime.datetime) -> TimeDeltaLike: ...
+
+
+def get_py_type_from_gel_type(tp: type[GelType]) -> Any:
+    match tp:
+        case t if issubclass(t, Array):
+            base = t.__gel_get_py_type__()
+            assert issubclass(base, list)
+            return base.__class_getitem__(
+                get_py_type_from_gel_type(t.__element_type__)
+            )
+        case t if issubclass(t, Tuple):
+            base = t.__gel_get_py_type__()
+            assert issubclass(base, tuple)
+            return base.__class_getitem__(
+                tuple(
+                    get_py_type_from_gel_type(el) for el in t.__element_types__
+                )
+            )
+        case t if issubclass(t, PyTypeScalar):
+            return t.__gel_py_type__
+
+        case t:
+            raise NotImplementedError(
+                f"get_py_type({t.__name__}) is not implemented"
+            )
 
 
 _scalar_type_to_py_type: dict[str, tuple[str, str]] = {

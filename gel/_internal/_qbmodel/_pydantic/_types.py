@@ -28,6 +28,7 @@ from pydantic_core import core_schema
 
 from gel.datatypes.datatypes import CustomType
 from gel._internal._qbmodel import _abstract
+from gel._internal import _tracked_list
 
 
 if TYPE_CHECKING:
@@ -41,13 +42,31 @@ _T = TypeVar("_T", bound=_abstract.GelType)
 
 class Array(_abstract.Array[_T]):
     @classmethod
+    def _validate(
+        cls,
+        value: Any,
+    ) -> _tracked_list.DowncastingTrackedList[_T, _T]:  # XXX
+        tp = cls.__gel_resolve_dlist__()
+        if isinstance(value, tp):
+            return value
+        else:
+            return tp(value, __mode__=_tracked_list.Mode.ReadWrite)
+
+    @classmethod
+    def __gel_resolve_dlist__(
+        cls,
+    ) -> type[_tracked_list.DowncastingTrackedList[_T, _T]]:  # XXX
+        down = _abstract.get_py_type_from_gel_type(cls.__element_type__)
+        return _tracked_list.DowncastingTrackedList[cls.__element_type__, down]  # type: ignore [name-defined, valid-type]
+
+    @classmethod
     def __get_pydantic_core_schema__(
         cls,
         source_type: Any,
         handler: pydantic.GetCoreSchemaHandler,
     ) -> pydantic_core.CoreSchema:
-        return core_schema.list_schema(
-            items_schema=handler.generate_schema(cls.__element_type__),
+        return core_schema.no_info_plain_validator_function(
+            cls._validate,
             serialization=core_schema.plain_serializer_function_ser_schema(
                 list,
             ),

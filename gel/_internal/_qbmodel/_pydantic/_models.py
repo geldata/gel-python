@@ -417,6 +417,13 @@ def _process_pydantic_fields(
             cls.__annotations__[fn] = field_anno
             overrides["annotation"] = field_anno
 
+        elif isinstance(field_anno, type) and issubclass(
+            field_anno, _abstract.GelPrimitiveType
+        ):
+            field_anno = _fields.Property[field_anno, field_anno]
+            cls.__annotations__[fn] = field_anno
+            overrides["annotation"] = field_anno
+
         anno = _typing_inspect.inspect_annotation(
             field_anno,
             annotation_source=_typing_inspect.AnnotationSource.CLASS,
@@ -487,7 +494,6 @@ def _process_pydantic_fields(
                     **field_attrs,  # type: ignore [arg-type]
                     **overrides,
                 )
-
             new_fields[fn] = merged
         else:
             new_fields[fn] = field

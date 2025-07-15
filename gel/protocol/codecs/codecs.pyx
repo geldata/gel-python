@@ -18,6 +18,7 @@
 
 
 import array
+import inspect
 import decimal
 import uuid
 import datetime
@@ -27,6 +28,9 @@ from gel.datatypes import datatypes
 
 from libc.string cimport memcpy
 from cpython.bytes cimport PyBytes_FromStringAndSize
+
+from gel._internal import _tracked_list
+cdef DLIST_READ_WRITE = _tracked_list.Mode.ReadWrite
 
 include "./edb_types.pxi"
 

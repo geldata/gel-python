@@ -106,6 +106,7 @@ class AbstractTrackedList(
         *,
         __wrap_list__: bool = False,
         __mode__: Mode,
+        __overwrite_data__: bool | None = None,
     ) -> None:
         self._initial_items = None
 
@@ -125,7 +126,9 @@ class AbstractTrackedList(
             # This collection was loaded from the database, we don't
             # want to override its link/prop on save with new data,
             # we want to track changes instead.
-            self.__gel_overwrite_data__ = False
+            self.__gel_overwrite_data__ = (
+                False if __overwrite_data__ is None else __overwrite_data__
+            )
             assert __mode__ is Mode.ReadWrite
             self._mode = Mode.ReadWrite
         else:
@@ -140,7 +143,9 @@ class AbstractTrackedList(
             # we want to override the link/prop with this new data
             # on save. That said, this could be set to "False" by
             # GelModel.__getattr__.
-            self.__gel_overwrite_data__ = True
+            self.__gel_overwrite_data__ = (
+                True if __overwrite_data__ is None else __overwrite_data__
+            )
 
             self._mode = __mode__
 
@@ -193,6 +198,11 @@ class AbstractTrackedList(
         return [
             item for item in self._initial_items if item not in self._items
         ]
+
+    def __gel_has_changes__(self) -> bool:
+        if self._initial_items is None:
+            return False
+        return self._items != self._initial_items
 
     def __gel_commit__(self) -> None:
         self._initial_items = None

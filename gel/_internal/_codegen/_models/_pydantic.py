@@ -5145,7 +5145,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                 case _:
                     raise RuntimeError(
                         f"no handler for the combination of flags for "
-                        f"the {prop.name!r} property: "
+                        f"the {prop.name!r} link: "
                         f"is_multi={is_multi} / "
                         f"is_optional={is_optional} / "
                         f"has_props={bool(prop.pointers)} / "
@@ -5175,7 +5175,11 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                     desc = self.import_name(BASE_IMPL, "ComputedProperty")
                     pytype = f"{desc}[{narrow_type}, {broad_type}]"
                 case False, False, False:
-                    pytype = narrow_type
+                    if prop.name == "id":
+                        # short circuit id -- it's wrapped in IdProperty
+                        return narrow_type
+                    desc = self.import_name(BASE_IMPL, "Property")
+                    pytype = f"{desc}[{narrow_type}, {broad_type}]"
                 case _:
                     raise RuntimeError(
                         f"no handler for the combination of flags for "

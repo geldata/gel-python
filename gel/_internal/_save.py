@@ -22,6 +22,7 @@ from gel._internal._qbmodel._pydantic._models import (
     ProxyModel,
 )
 from gel._internal._tracked_list import (
+    AbstractTrackedList,
     TrackedList,
     DowncastingTrackedList,
 )
@@ -445,6 +446,31 @@ def push_change(
     sched[change.name].append(change)
 
 
+def has_changes_recursive(
+    val: list[Any] | tuple[Any, ...] | AbstractTrackedList[Any],
+) -> bool:
+    # We have to traverse the entire collection graph to check if
+    # there are any changes in it. We can't just check the topmost
+    # collection; e.g. consider you have a tuple of arrays -- the tuple
+    # can't have changes on it's own, but one of the nested arrays can.
+
+    def walk(collection: Sequence[Any]) -> bool:
+        if isinstance(collection, AbstractTrackedList):
+            if collection.__gel_has_changes__():
+                return True
+
+        for item in collection:
+            if isinstance(item, AbstractTrackedList):
+                if item.__gel_has_changes__():
+                    return True
+            elif isinstance(item, (list, tuple)):
+                if walk(item):
+                    return True
+        return False
+
+    return walk(val)
+
+
 def make_plan(objs: Iterable[GelModel]) -> SavePlan:
     insert_ops: ChangeBatch = []
     update_ops: ChangeBatch = []
@@ -580,6 +606,26 @@ def make_plan(objs: Iterable[GelModel]) -> SavePlan:
                     )
 
                 continue
+
+            if prop.kind is PointerKind.Property:
+                # Changes of properties with collection types (e.g. Array)
+                # will not be picked up by `__gel_get_changed_fields__()`
+                # as modifying them does not require touching their host
+                # GelModel instance. Check them for changes manually.
+                val = getattr(obj, prop.name, _unset)
+                if isinstance(
+                    val, (tuple, list, AbstractTrackedList)
+                ) and has_changes_recursive(val):
+                    push_change(
+                        requireds,
+                        sched,
+                        PropertyChange(
+                            name=prop.name,
+                            value=val,
+                            info=prop,
+                        ),
+                    )
+                    continue
 
             if (
                 prop.kind is not PointerKind.Link
