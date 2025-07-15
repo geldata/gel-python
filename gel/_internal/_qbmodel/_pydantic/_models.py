@@ -24,6 +24,7 @@ import typing
 import warnings
 import weakref
 import uuid
+import sys
 
 from collections.abc import Iterable
 
@@ -83,6 +84,27 @@ class GelModelMeta(
         __gel_root_class__: bool = False,
         **kwargs: Any,
     ) -> GelModelMeta:
+        if __gel_variant__ is None:
+            # This is to make the top-level reflection of user-defined
+            # types look less noisy. `__gel_variant__` is inferred from
+            # the top-level __gel_default_variant__ attribute of the module
+            # where the class is defined.
+            #
+            # This adds a negligible overhead to class creation, but:
+            # we only do this for user-defined schema (std has explicit
+            # __gel_variant__ class argument everywhere), and there shouldn't
+            # be so many of user-defined Python subclasses for this to become
+            # an issue.
+            module = namespace.get("__module__")
+            if (
+                module
+                and (mod := sys.modules.get(module))
+                and (v := getattr(mod, "__gel_default_variant__", _unset))
+                is not _unset
+            ):
+                assert isinstance(v, str)
+                __gel_variant__ = v
+
         with warnings.catch_warnings():
             # Make pydantic shut up about attribute redefinition.
             warnings.filterwarnings(
