@@ -458,6 +458,24 @@ class TestQueryBuilder(tb.ModelTestCase):
         self.assertEqual(res.str, "another one")
         self.assertEqual(set(res.p_multi_str), {"brown", "jumps"})
 
+    @tb.typecheck
+    def test_qb_limit_offset_01(self):
+        from models import default, std
+
+        res = self.client.get(
+            default.User.select(name=True)
+            .filter(lambda u: std.contains(u.name, "li"))
+            .order_by(lambda u: u.name)
+            .offset(1)
+            .limit(1)
+        )
+        self.assertEqual(
+            res.model_dump(exclude={"id"}),
+            {
+                "name": "Billie",
+            },
+        )
+
 
 class TestQueryBuilderModify(tb.ModelTestCase):
     """This test suite is for data manipulation using QB."""
