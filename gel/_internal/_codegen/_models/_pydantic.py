@@ -728,7 +728,15 @@ class BaseGeneratedModule:
         self._schema_part = schema_part
         self._is_package = self.mod_is_package(modname, schema_part)
         self._py_files = {
-            ModuleAspect.MAIN: GeneratedModule(COMMENT, BASE_IMPL),
+            ModuleAspect.MAIN: GeneratedModule(
+                COMMENT,
+                BASE_IMPL,
+                code_preamble=(
+                    '__gel_default_variant__ = "Default"'
+                    if self._schema_part is reflection.SchemaPart.USER
+                    else None
+                ),
+            ),
             ModuleAspect.VARIANTS: GeneratedModule(COMMENT, BASE_IMPL),
             ModuleAspect.LATE: GeneratedModule(COMMENT, BASE_IMPL),
         }
@@ -4212,9 +4220,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         objtype: reflection.ObjectType,
     ) -> None:
         self.write()
-        self.write("#")
-        self.write(f"# type {objtype.name}")
-        self.write("#")
+        self.write()
 
         type_name = objtype.schemapath
         name = type_name.name
@@ -4234,8 +4240,14 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         with self._class_def(
             name,
             base_types,
-            class_kwargs={"__gel_variant__": '"Default"'},
+            class_kwargs=(
+                {}
+                if self._schema_part is reflection.SchemaPart.USER
+                else {"__gel_variant__": '"Default"'}
+            ),
         ):
+            self.write(f'"""type {objtype.name}"""')
+            self.write()
             pointers = _get_object_type_body(objtype)
             if pointers:
                 localns = frozenset(ptr.name for ptr in pointers)

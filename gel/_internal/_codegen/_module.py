@@ -252,7 +252,13 @@ def _in_ns(imported: str, ns: AbstractSet[str] | None) -> bool:
 class GeneratedModule:
     INDENT = " " * 4
 
-    def __init__(self, preamble: str, substrate_module: str) -> None:
+    def __init__(
+        self,
+        preamble: str,
+        substrate_module: str,
+        *,
+        code_preamble: str | None = None,
+    ) -> None:
         self._comment_preamble = preamble
         self._indent_level = 0
         self._in_type_checking = False
@@ -267,6 +273,7 @@ class GeneratedModule:
         self._typevars: defaultdict[str, dict[str | None, str]] = defaultdict(
             dict
         )
+        self._code_preamble = code_preamble
 
     def has_content(self) -> bool:
         return any(
@@ -820,6 +827,9 @@ class GeneratedModule:
         out.write("\n\n")
         out.write("from __future__ import annotations\n\n")
         out.write(self.render_imports())
+        if self._code_preamble:
+            out.write("\n\n\n")
+            out.write(self._code_preamble)
         if typevars:
             out.write("\n\n\n")
             out.write(typevars)
