@@ -12,11 +12,11 @@ from typing import (
     Protocol,
     TypedDict,
     TypeVar,
+    cast,
 )
 from typing_extensions import TypeAliasType
 
 import base64
-import collections
 import dataclasses
 import enum
 import functools
@@ -31,7 +31,7 @@ import textwrap
 import uuid
 
 from collections import defaultdict
-from collections.abc import Mapping, MutableMapping  # noqa: TC003  # pydantic needs it
+from collections.abc import Mapping  # noqa: TC003 # coerce_to_dataclass needs it
 from contextlib import contextmanager
 
 import gel
@@ -41,6 +41,7 @@ from gel._internal import _dataclass_extras
 from gel._internal import _dirsync
 from gel._internal import _reflection as reflection
 from gel._internal import _version as _ver_utils
+from gel._internal._collections_extras import ImmutableChainMap
 from gel._internal._namespace import ident, dunder
 from gel._internal._qbmodel import _abstract as _qbmodel
 from gel._internal._reflection._enums import SchemaPart, TypeModifier
@@ -58,7 +59,6 @@ if TYPE_CHECKING:
         Generator,
         Iterable,
         Iterator,
-        Mapping,
         Sequence,
         Set as AbstractSet,
     )
@@ -160,7 +160,7 @@ class IntrospectedModule(TypedDict):
 
 @dataclasses.dataclass(kw_only=True, frozen=True)
 class Schema:
-    types: MutableMapping[str, reflection.Type]
+    types: Mapping[str, reflection.AnyType]
     casts: reflection.CastMatrix
     operators: reflection.OperatorMatrix
     functions: list[reflection.Function]
@@ -459,7 +459,7 @@ class SchemaGenerator:
         if self._schema_part is not std_part:
             assert self._std_schema is not None
             std_types = self._std_schema.types
-            self._types = collections.ChainMap(std_types, these_types)
+            self._types = ImmutableChainMap(std_types, these_types)
             std_casts = self._std_schema.casts
             self._casts = self._casts.chain(std_casts)
             std_operators = self._std_schema.operators
@@ -492,7 +492,7 @@ class SchemaGenerator:
             self._modules[name.parent]["globals"].append(g)
 
         return Schema(
-            types=self._types,
+            types=cast("Mapping[str, reflection.AnyType]", self._types),
             casts=self._casts,
             operators=self._operators,
             functions=self._functions,

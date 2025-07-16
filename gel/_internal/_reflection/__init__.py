@@ -54,6 +54,7 @@ from ._state import (
 )
 
 from ._types import (
+    AnyType,
     ArrayType,
     CollectionType,
     HeterogeneousCollectionType,
@@ -89,6 +90,7 @@ from ._modules import (
 )
 
 __all__ = (
+    "AnyType",
     "ArrayType",
     "BranchState",
     "Callable",
