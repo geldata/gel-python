@@ -85,6 +85,7 @@ This will find your Python project and add a ``models`` package to it. Then you 
 
 .. code-block:: python
 
+    import datetime
     from models import User, std
     from gel import create_client
 
