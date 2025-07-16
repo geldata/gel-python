@@ -23,7 +23,7 @@ from gel._internal._polyfills._intenum import IntEnum
 if TYPE_CHECKING:
     import io
 
-    from collections.abc import Iterator, Iterable
+    from collections.abc import Iterator, Iterable, Mapping
     from collections.abc import Set as AbstractSet
 
 
@@ -851,12 +851,24 @@ class GeneratedModule:
             out.write(exports)
         out.write("\n")
 
+    def format_type_ignore(
+        self,
+        ignores: Iterable[str],
+        *,
+        comment: str | None = None,
+    ) -> str:
+        line = f"type: ignore [{', '.join(ignores)}]"
+        if comment:
+            line = f"{line}  # {comment}"
+        return line
+
     def format_list(
         self,
         tpl: str,
         values: Iterable[str],
         *,
         first_line_comment: str | None = None,
+        item_comments: Mapping[int, str] | None = None,
         extra_indent: int = 0,
         separator: str = ", ",
         carry_separator: bool = False,
@@ -865,31 +877,52 @@ class GeneratedModule:
         vlist = list(values)
         if trailing_separator is None:
             trailing_separator = not carry_separator
-        list_string = separator.join(vlist)
         if carry_separator:
             strip_sep = separator.lstrip()
         else:
             strip_sep = separator.rstrip()
-        if list_string and trailing_separator:
-            list_string += strip_sep
-        output_string = tpl.format(list=list_string)
-        line_length = len(output_string) + len(
-            self.current_indentation(extra_indent)
-        )
-        if line_length > MAX_LINE_LENGTH:
-            if carry_separator:
-                line_sep = f"\n{self.INDENT}{strip_sep}"
-            else:
-                line_sep = f"{strip_sep}\n{self.INDENT}"
-            list_string = line_sep.join(vlist)
+
+        list_string = separator.join(vlist)
+        carry = bool(item_comments)
+        if not carry:
             if list_string and trailing_separator:
                 list_string += strip_sep
-            if first_line_comment:
-                list_string = f"  # {first_line_comment}\n    {list_string}\n"
-            else:
-                list_string = f"\n    {list_string}\n"
             output_string = tpl.format(list=list_string)
-        elif first_line_comment:
-            output_string += f"  # {first_line_comment}"
+            line_length = len(output_string) + len(
+                self.current_indentation(extra_indent)
+            )
+            carry = line_length > MAX_LINE_LENGTH
+            if not carry:
+                if first_line_comment:
+                    output_string += f"  # {first_line_comment}"
+                return output_string
 
-        return output_string
+        if carry_separator:
+            line_sep = f"\n{self.INDENT}{strip_sep}"
+            if item_comments:
+                list_string = line_sep.join(
+                    f"{v}  # {cmt}" if (cmt := item_comments.get(i)) else v
+                    for i, v in enumerate(vlist)
+                )
+            else:
+                list_string = line_sep.join(vlist)
+        else:
+            if item_comments:
+                list_string = "".join(
+                    f"{v}{strip_sep}  # {cmt}\n{self.INDENT}"
+                    if (cmt := item_comments.get(i))
+                    else v
+                    for i, v in enumerate(vlist)
+                )
+            else:
+                line_sep = f"{strip_sep}\n{self.INDENT}"
+                list_string = line_sep.join(vlist)
+
+        if list_string and trailing_separator:
+            list_string += strip_sep
+        if first_line_comment:
+            list_string = f"  # {first_line_comment}\n    {list_string}\n"
+        else:
+            list_string = f"\n    {list_string}\n"
+
+        return tpl.format(list=list_string)
