@@ -1,6 +1,11 @@
+# SPDX-PackageName: gel-python
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright Gel Data Inc. and the contributors.
+
 from __future__ import annotations
 
 from typing import (
+    TYPE_CHECKING,
     Any,
     ClassVar,
     Generic,
@@ -21,8 +26,38 @@ from . import _typing_eval
 from . import _typing_inspect
 from ._typecache import type_cache
 
+if TYPE_CHECKING:
+    import types
+
 
 T = TypeVar("T", covariant=True)
+_CastMap = TypeAliasType("_CastMap", Mapping[type[Any], tuple[type[Any], ...]])
+
+
+def coerce_to_dataclass(
+    cls: type[T] | types.UnionType,
+    obj: Any,
+    *,
+    cast_map: _CastMap | None = None,
+    replace: Mapping[str, Any] | None = None,
+) -> T:
+    """Reconstruct a dataclass from a dataclass-like object including
+    all nested dataclass-like instances."""
+    # Handle generic aliases directly (for recursive calls)
+    if _typing_inspect.is_generic_alias(cls):
+        return _coerce_generic_alias(cls, obj, cast_map=cast_map)  # type: ignore [no-any-return]
+
+    target = _coerceable(cls)
+    if target is None:
+        raise TypeError(
+            f"{cls!r} is not a dataclass or a "
+            f"discriminated union of dataclasses"
+        )
+
+    return _coerce_to_dataclass(
+        target, obj, cast_map=cast_map, replace=replace
+    )
+
 
 _FieldGetter = TypeAliasType(
     "_FieldGetter", "type[operator.itemgetter[str] | operator.attrgetter[str]]"
@@ -60,7 +95,7 @@ _Coerceable = TypeAliasType(
 )
 
 
-def _coerceable(cls: type[T]) -> _Coerceable[T] | None:
+def _coerceable(cls: type[T] | types.UnionType) -> _Coerceable[T] | None:
     if isinstance(cls, type) and dataclasses.is_dataclass(cls):
         return cls
     elif _typing_inspect.is_union_type(cls):
@@ -100,54 +135,142 @@ def _dataclass_fields(
     )
 
 
-def coerce_to_dataclass(
-    cls: type[T],
+def _coerce_value(
+    target_type: Any,
     obj: Any,
     *,
-    cast_map: Mapping[type[Any], tuple[type[Any], ...]] | None = None,
-    replace: Mapping[str, Any] | None = None,
-) -> T:
-    """Reconstruct a dataclass from a dataclass-like object including
-    all nested dataclass-like instances."""
-    target = _coerceable(cls)
-    if target is None:
-        raise TypeError(
-            f"{cls!r} is not a dataclass or a "
-            f"discriminated union of dataclasses"
-        )
+    cast_map: _CastMap | None = None,
+) -> Any:
+    """Recursively coerce a value to match the target type."""
+    # Handle None values first
+    if obj is None:
+        return None
 
-    return _coerce_to_dataclass(
-        target, obj, cast_map=cast_map, replace=replace
-    )
+    # Try direct dataclass coercion
+    if (coerceable_target := _coerceable(target_type)) is not None:
+        return _coerce_to_dataclass(coerceable_target, obj, cast_map=cast_map)
+
+    # Handle union types
+    if _typing_inspect.is_union_type(target_type):
+        return _coerce_union_value(target_type, obj, cast_map=cast_map)
+
+    # Handle generic aliases (containers)
+    if _typing_inspect.is_generic_alias(target_type):
+        return _coerce_generic_alias(target_type, obj, cast_map=cast_map)
+
+    # Handle enum coercion
+    if isinstance(target_type, type) and issubclass(target_type, enum.Enum):
+        return target_type(obj)
+
+    # Handle cast_map coercion
+    if (
+        isinstance(target_type, type)
+        and cast_map is not None
+        and (from_types := cast_map.get(target_type))
+        and isinstance(obj, from_types)
+    ):
+        return target_type(obj)
+
+    # Return as-is if no coercion needed
+    return obj
+
+
+def _coerce_union_value(
+    union_type: Any,
+    obj: Any,
+    *,
+    cast_map: _CastMap | None = None,
+) -> Any:
+    """Coerce a value to a union type by trying each component."""
+    # Handle None values specially - if None is in the union, return None
+    if obj is None and type(None) in typing.get_args(union_type):
+        return None
+
+    last_error = None
+    for component in typing.get_args(union_type):
+        # Skip None type - we already handled it above
+        if component is type(None):
+            continue
+
+        try:
+            return _coerce_value(component, obj, cast_map=cast_map)
+        except (TypeError, ValueError, KeyError, AttributeError) as e:
+            last_error = e
+
+    # All components failed
+    if last_error is not None:
+        raise last_error
+
+    # If no components were coerceable, return the object as-is
+    return obj
+
+
+def _coerce_generic_alias(
+    target_type: Any,
+    obj: Any,
+    *,
+    cast_map: _CastMap | None = None,
+) -> Any:
+    """Coerce a value to a generic alias type (list, dict, etc.)."""
+    origin = typing.get_origin(target_type)
+
+    # Handle sequence types (list, tuple, set)
+    if origin in {list, tuple, set}:
+        element_type = typing.get_args(target_type)[0]
+        coerced_items = [
+            _coerce_value(element_type, item, cast_map=cast_map)
+            for item in obj
+        ]
+        return origin(coerced_items)
+
+    # Handle mapping types (dict, Mapping, MutableMapping)
+    elif origin in {dict, Mapping, MutableMapping}:
+        args = typing.get_args(target_type)
+        value_type = args[1]  # Key type is args[0], value type is args[1]
+        coerced_dict = {
+            k: _coerce_value(value_type, v, cast_map=cast_map)
+            for k, v in obj.items()
+        }
+        return coerced_dict
+
+    # For other generic aliases, return the object as-is
+    return obj
 
 
 def _coerce_to_dataclass(
     target: _Coerceable[T],
     obj: Any,
     *,
-    cast_map: Mapping[type[Any], tuple[type[Any], ...]] | None = None,
+    cast_map: _CastMap | None = None,
     replace: Mapping[str, Any] | None = None,
 ) -> T:
+    """Coerce an object to a dataclass instance."""
+    # Determine field getter based on object type
     getter: _FieldGetter
     if isinstance(obj, dict):
         getter = operator.itemgetter
     else:
         getter = operator.attrgetter
 
+    # Handle discriminated unions
     if isinstance(target, _TaggedUnion):
         target = target.discriminate(obj, getter)
 
+    # Process each field in the dataclass
     new_kwargs: dict[str, Any] = {}
     for field, defined_in in _dataclass_fields(target):
         module = _namespace.module_of(defined_in)
         field_type = _typing_eval.resolve_type(field.type, owner=module)
         value_getter = getter(field.name)
+
+        # Handle optional fields
         if _typing_inspect.is_optional_type(field_type):
             try:
                 value = value_getter(obj)
             except (AttributeError, KeyError):
                 value = None
 
+            # Extract non-None types from the optional union
             opt_args = [
                 arg
                 for arg in typing.get_args(field_type)
@@ -159,66 +282,17 @@ def _coerce_to_dataclass(
         else:
             value = value_getter(obj)
 
+        # Skip None values
         if value is None:
             new_kwargs[field.name] = value
             continue
 
-        if (ft := _coerceable(field_type)) is not None:
-            value = _coerce_to_dataclass(ft, value, cast_map=cast_map)
-        elif _typing_inspect.is_union_type(field_type):
-            last_error = None
-            for component in typing.get_args(field_type):
-                try:
-                    value = _coerce_to_dataclass(
-                        component, value, cast_map=cast_map
-                    )
-                except (TypeError, ValueError) as e:  # noqa: PERF203
-                    last_error = e
-                else:
-                    break
-            if last_error is not None:
-                raise last_error
+        # Coerce the field value
+        new_kwargs[field.name] = _coerce_value(
+            field_type, value, cast_map=cast_map
+        )
 
-        elif _typing_inspect.is_generic_alias(field_type):
-            origin = typing.get_origin(field_type)
-
-            if origin in {list, tuple, set}:
-                element_type = typing.get_args(field_type)[0]
-                new_values = []
-                for item in value:
-                    if (elt := _coerceable(element_type)) is not None:
-                        new_item = _coerce_to_dataclass(
-                            elt, item, cast_map=cast_map
-                        )
-                    else:
-                        new_item = item
-                    new_values.append(new_item)
-
-                value = origin(new_values)
-            elif origin in {dict, Mapping, MutableMapping}:
-                args = typing.get_args(field_type)
-                element_type = args[1]
-                new_value = {}
-                for k, v in value.items():
-                    if (elt := _coerceable(element_type)) is not None:
-                        new_item = _coerce_to_dataclass(
-                            elt, v, cast_map=cast_map
-                        )
-                    else:
-                        new_item = v
-                    new_value[k] = new_item
-
-                value = new_value
-        elif (
-            isinstance(field_type, type)
-            and cast_map is not None
-            and (from_types := cast_map.get(field_type))
-            and isinstance(value, from_types)
-        ) or issubclass(field_type, enum.Enum):
-            value = field_type(value)
-
-        new_kwargs[field.name] = value
-
+    # Apply any field replacements
     if replace is not None:
         new_kwargs.update(replace)
 

@@ -602,6 +602,8 @@ PrimitiveType = (
     | MultiRangeType
 )
 
+AnyType = PrimitiveType | PseudoType | ObjectType
+
 Types = dict[str, Type]
 
 
