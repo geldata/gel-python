@@ -474,6 +474,39 @@ class TestQueryBuilder(tb.ModelTestCase):
             },
         )
 
+    @tb.typecheck
+    def test_qb_boolean_operator_error_01(self):
+        from models import default
+
+        # Test that using 'and' operator raises TypeError
+        with self.assertRaisesRegex(TypeError, "use std.and_"):
+            default.User.filter(
+                lambda u: u.name == "Alice" and u.nickname == "Al"
+            )
+
+        # Test that using 'or' operator raises TypeError
+        with self.assertRaisesRegex(TypeError, "use std.or_"):
+            default.User.filter(lambda u: u.name == "Alice" or u.name == "Bob")
+
+        # Test that using 'not' operator raises TypeError
+        with self.assertRaisesRegex(TypeError, "use std.not_"):
+            default.User.filter(lambda u: not u.name)  # type: ignore [arg-type, return-value]
+
+        # Test that using 'in'/'not in' operator raises TypeError
+        with self.assertRaisesRegex(TypeError, "use std.in_"):
+            default.User.filter(lambda u: "blue" in u.groups.name)  # type: ignore [arg-type, operator, return-value]
+
+        with self.assertRaisesRegex(TypeError, "use std.in_"):
+            default.User.filter(lambda u: "blue" not in u.groups.name)  # type: ignore [arg-type, operator, return-value]
+
+        # Test that using bool() conversion raises TypeError
+        with self.assertRaisesRegex(TypeError, "use std.exists"):
+            default.User.filter(lambda u: bool(u.name))  # type: ignore [arg-type, return-value]
+
+        # Test that using if statement raises TypeError
+        with self.assertRaisesRegex(TypeError, "use std.if_"):
+            default.User.filter(lambda u: u.name if u.name else "default")  # type: ignore [arg-type, return-value]
+
 
 class TestQueryBuilderModify(tb.ModelTestCase):
     """This test suite is for data manipulation using QB."""

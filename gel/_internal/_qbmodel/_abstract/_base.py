@@ -87,7 +87,7 @@ if TYPE_CHECKING:
 
 else:
 
-    class GelTypeMeta(type):
+    class GelTypeMeta(_qb.CheckedContainsOpType, type):
         pass
 
     class GelType(
@@ -150,8 +150,7 @@ class AbstractGelModelMeta(GelTypeMeta):
 
     if TYPE_CHECKING:
         # Splat qb protocol
-        def __iter__(cls) -> Iterator[_qb.ShapeElement]:
-            ...
+        def __iter__(cls) -> Iterator[_qb.ShapeElement]: ...
 
     def __new__(
         mcls,
