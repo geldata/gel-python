@@ -1489,12 +1489,21 @@ class BaseGeneratedModule:
         else:
             return set()
 
+    def format_type_ignore(
+        self,
+        ignores: Iterable[str],
+        *,
+        comment: str | None = None,
+    ) -> str:
+        return self.py_file.format_type_ignore(ignores, comment=comment)
+
     def format_list(
         self,
         tpl: str,
         values: Iterable[str],
         *,
         first_line_comment: str | None = None,
+        item_comments: Mapping[int, str] | None = None,
         extra_indent: int = 0,
         separator: str = ", ",
         carry_separator: bool = False,
@@ -1504,6 +1513,7 @@ class BaseGeneratedModule:
             tpl,
             values,
             first_line_comment=first_line_comment,
+            item_comments=item_comments,
             extra_indent=extra_indent,
             separator=separator,
             carry_separator=carry_separator,
@@ -1545,12 +1555,7 @@ class BaseGeneratedModule:
         line_comment: str | None = None,
     ) -> Iterator[None]:
         if ti := list(type_ignore):
-            type_ignore_comment = f"type: ignore [{', '.join(ti)}]"
-            if line_comment:
-                line_comment = f"{type_ignore_comment}  # {line_comment}"
-            else:
-                line_comment = type_ignore_comment
-
+            line_comment = self.format_type_ignore(ti, comment=line_comment)
         class_line = self._format_class_line(
             class_name,
             base_types,
@@ -1573,6 +1578,7 @@ class BaseGeneratedModule:
         stub: bool = False,
         decorators: Iterable[str] = (),
         type_ignore: Iterable[str] = (),
+        param_type_ignores: Mapping[int, Iterable[str]] | None = None,
         line_comment: str | None = None,
         implicit_param: bool = True,
     ) -> Iterator[None]:
@@ -1587,7 +1593,7 @@ class BaseGeneratedModule:
             decor_line = f"@{over}"
             if type_ignore:
                 ignores = sorted({*type_ignore, "unused-ignore"})
-                type_ignore_comment = f"type: ignore [{', '.join(ignores)}]"
+                type_ignore_comment = self.format_type_ignore(ignores)
                 decor_line = f"{decor_line}  # {type_ignore_comment}"
             self.write(decor_line)
         for decorator in decorators:
@@ -1608,16 +1614,24 @@ class BaseGeneratedModule:
             tpl += " ..."
 
         if type_ignore:
-            type_ignore_comment = f"type: ignore [{', '.join(type_ignore)}]"
-            if line_comment:
-                line_comment = f"{type_ignore_comment}  # {line_comment}"
-            else:
-                line_comment = type_ignore_comment
+            line_comment = self.format_type_ignore(
+                type_ignore, comment=line_comment
+            )
+
+        if param_type_ignores:
+            item_comments = {
+                i: self.format_type_ignore(ign)
+                for i in range(len(params))
+                if (ign := param_type_ignores.get(i))
+            }
+        else:
+            item_comments = {}
 
         def_line = self.format_list(
             tpl,
             params,
             first_line_comment=line_comment,
+            item_comments=item_comments,
         )
         self.write(def_line)
         with self.indented():
@@ -1686,6 +1700,7 @@ class BaseGeneratedModule:
         type_ignore: Iterable[str] = (),
         line_comment: str | None = None,
         implicit_param: bool = True,
+        param_type_ignores: Mapping[int, Iterable[str]] | None = None,
     ) -> Iterator[None]:
         with self._func_def(
             func_name,
@@ -1697,6 +1712,7 @@ class BaseGeneratedModule:
             type_ignore=type_ignore,
             line_comment=line_comment,
             implicit_param=implicit_param,
+            param_type_ignores=param_type_ignores,
         ):
             yield
 
