@@ -90,7 +90,6 @@ INFIX_OPERATOR_MAP: dict[str, str | tuple[str, str]] = {
     "std::%": ("__mod__", "__rmod__"),
     "std::^": ("__pow__", "__rpow__"),
     "std::[]": "__getitem__",
-    "std::IN": "__contains__",
 }
 
 PREFIX_OPERATOR_MAP = {

@@ -14,6 +14,7 @@ from typing import (
 )
 
 
+import contextvars
 import dataclasses
 import functools
 import inspect
@@ -226,6 +227,9 @@ class BaseAlias(metaclass=BaseAliasMeta):
         other_operand = operand
         if isinstance(operand, BaseAlias):
             other_operand = operand.__gel_origin__
+            operand_is_alias = True
+        else:
+            operand_is_alias = False
 
         type_class = this_operand.__gel_type_class__
         op_impl = getattr(type_class, op, None)
@@ -236,7 +240,11 @@ class BaseAlias(metaclass=BaseAliasMeta):
                 f"operation not supported between instances of {t1} and {t2}"
             )
 
-        expr = op_impl(this_operand, other_operand)
+        cvar_token = OPERAND_IS_ALIAS.set(operand_is_alias)
+        try:
+            expr = op_impl(this_operand, other_operand)
+        finally:
+            OPERAND_IS_ALIAS.reset(cvar_token)
         assert isinstance(expr, ExprAlias)
         metadata = expr.__gel_metadata__
         assert isinstance(metadata, BinaryOp)

@@ -2093,6 +2093,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             classvar = self.import_name(
                 "typing", "ClassVar", import_time=ImportTime.typecheck
             )
+            type_ = self.import_name("builtins", "type")
             typevartup = self.import_name("typing_extensions", "TypeVarTuple")
             unpack = self.import_name("typing_extensions", "Unpack")
             geltype = self.import_name(BASE_IMPL, "GelType")
@@ -2200,7 +2201,12 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                 tname = gt.name
                 tmeta = f"__{tname}_meta__"
                 with self._class_def(tmeta, meta_bases):
-                    self.write("pass")
+                    un_ops = self._write_prefix_operator_methods(ptype)
+                    bin_ops = self._write_infix_operator_methods(ptype)
+                    if gt.name == "anytype":
+                        self.write(f"__hash__ = {type_}.__hash__")
+                    elif not un_ops and not bin_ops:
+                        self.write("pass")
 
                 class_kwargs["metaclass"] = tmeta
 
@@ -4872,13 +4878,25 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                 attribute)
             node_ctor: QB node constructor (default is _write_func_node_ctor).
         """
-        params = []
-        kwargs = []
+        params: list[str] = []
+        kwargs: list[str] = []
         pos_names: list[str] = []
         kw_names: list[str] = []
         variadic: str | None = None
+        param_non_type_types: dict[CallableParamKey, list[str]] = {}
 
         generic_param_map = function.generics(self._types)
+        if (
+            style == "method"
+            and (first := generic_param_map.get(0)) is not None
+            and len(first) == 1
+            and len(indirections := first[first_t := next(iter(first))]) == 1
+            and not next(iter(indirections))
+        ):
+            self_t = first_t
+        else:
+            self_t = None
+
         # Create TypeVars for generic params
         typevars: dict[reflection.Type, str] = {}
         for typ in itertools.chain.from_iterable(generic_param_map.values()):
@@ -4936,7 +4954,8 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                 param_workaround_casts[param.name] = expr_compat
 
             # Build the union type for parameter.
-            union = []
+            union: list[str] = []
+            non_type_union: list[str] = []
             for item in param_type:
                 # The type class (i.e another qb expression)
                 pt_str = self.get_type_type(
@@ -4953,11 +4972,21 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                         typevars=typevars,
                     )
                     union.append(pt_str)
+                    if self_t is not None and style == "method":
+                        pt_str = self.get_type(
+                            item,
+                            import_time=ImportTime.typecheck_runtime,
+                            typevars=typevars | {self_t: "self"},
+                        )
+                        non_type_union.append(pt_str)
 
             if cast_map is not None and (
                 (param_casts := cast_map.get(param.key)) is not None
             ):
                 union.extend(param_casts)
+                non_type_union.extend(param_casts)
+
+            param_non_type_types[param.key] = sorted(non_type_union)
 
             pt = self._render_callable_sig_type(
                 " | ".join(sorted(union)),
@@ -5008,11 +5037,20 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             else self._func_def
         )
         def_kwargs: dict[str, Any] = {}
+        param_type_ignores: dict[int, list[str]] = {}
         # Constructor functions use __new__ and need explicit cls parameter
         if style == "constructor":
             fname = "__new__"
             params.insert(0, "cls")
-            def_kwargs["implicit_param"] = False
+        elif style == "method":
+            if self_t is not None:
+                type_ = self.import_name("builtins", "type")
+                self_param = f"self: {type_}[{typevars[self_t]}]"
+                param_type_ignores[0] = ["misc", "unused-ignore"]
+                type_ignore = sorted({*type_ignore, "misc"})
+            else:
+                self_param = "self"
+            params.insert(0, self_param)
 
         with fdef(
             fname,
@@ -5020,12 +5058,37 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             rtype,
             overload=num_overloads_total > 1,
             type_ignore=type_ignore,
+            implicit_param=False,
+            param_type_ignores=param_type_ignores,
             **def_kwargs,
         ):
             aexpr = self.import_name(BASE_IMPL, "AnnotatedExpr")
             unsp = self.import_name(BASE_IMPL, "Unspecified")
             expr_compat = self.import_name(BASE_IMPL, "ExprCompatible")
             list_ = self.import_name("builtins", "list")
+
+            if style == "method" and fname in {"__eq__", "__ne__"}:
+                basealias = self.import_name(BASE_IMPL, "BaseAlias")
+                tc = self.import_name("typing", "TYPE_CHECKING")
+                op_is_safe = self.import_name(BASE_IMPL, "OPERAND_IS_ALIAS")
+                isinstance_ = self.import_name("builtins", "isinstance")
+                type_ = self.import_name("builtins", "type")
+                non_type_types = [
+                    *next(iter(param_non_type_types.values())),
+                    basealias,
+                ]
+                rarg_types = ", ".join(non_type_types)
+                rarg = pos_names[0]
+
+                with self.if_(
+                    f"not {tc} and not {op_is_safe}.get() and "
+                    f"({isinstance_}({rarg}, {type_}) "
+                    f"or not {isinstance_}({rarg}, ({rarg_types})))"
+                ):
+                    self.write(
+                        f"return {type_}.{fname}(self, {rarg})"
+                        f"  # type: ignore [return-value]"
+                    )
 
             if cast_map is None:
                 cast_map = {}

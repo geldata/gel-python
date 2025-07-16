@@ -61,6 +61,7 @@ from ._expressions import (
 )
 
 from ._generics import (
+    OPERAND_IS_ALIAS,
     AnnotatedGlobal,
     AnnotatedExpr,
     AnnotatedPath,
@@ -95,6 +96,7 @@ from ._reflection import (
 
 
 __all__ = (
+    "OPERAND_IS_ALIAS",
     "AbstractDescriptor",
     "AbstractFieldDescriptor",
     "AnnotatedExpr",

@@ -19,6 +19,7 @@ from gel._internal._utils import UnspecifiedType, Unspecified
 from gel._internal._xmethod import classonlymethod
 
 from gel._internal._qb import (
+    OPERAND_IS_ALIAS,
     AnnotatedExpr,
     BaseAlias,
     EmptyDirection,
@@ -102,6 +103,7 @@ from gel._internal._qbmodel._pydantic import (
 
 __all__ = (
     "DEFAULT_VALUE",
+    "OPERAND_IS_ALIAS",
     "AnnotatedExpr",
     "AnyEnum",
     "AnyEnumMeta",
