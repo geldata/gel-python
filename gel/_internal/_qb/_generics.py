@@ -12,6 +12,7 @@ from typing import (
     TypedDict,
     get_args,
 )
+from typing_extensions import Never
 
 
 import contextvars
@@ -20,6 +21,7 @@ import functools
 import inspect
 import types
 
+from gel._internal import _dis_bool
 from gel._internal import _edgeql
 from gel._internal import _namespace
 from gel._internal import _typing_inspect
@@ -53,6 +55,7 @@ _OP_OVERLOADS = frozenset(
     {
         "__add__",
         "__and__",
+        "__contains__",
         "__divmod__",
         "__eq__",
         "__floordiv__",
@@ -109,6 +112,49 @@ SPECIAL_EXPR_METHODS = frozenset(
     }
 )
 
+OPERAND_IS_ALIAS: contextvars.ContextVar[bool] = contextvars.ContextVar(
+    "GEL_EXPR_OPERAND_IS_EXPR", default=False
+)
+
+
+_BOOL_ERROR_MAP = {
+    _dis_bool.BoolOp.UNKNOWN: (
+        "Boolean conversion not supported; use std functions instead"
+    ),
+    _dis_bool.BoolOp.EXPLICIT_BOOL: (
+        "Boolean conversion with bool() is not supported; "
+        "use std.exists(...) instead"
+    ),
+    _dis_bool.BoolOp.IMPLICIT_BOOL: (
+        "Boolean conversion is not supported; use std.if_(...) for "
+        "conditionals or std.exists(...) for existence checks"
+    ),
+    _dis_bool.BoolOp.NOT: (
+        "Boolean 'not' operation is not supported; use std.not_(...) instead"
+    ),
+    _dis_bool.BoolOp.AND: (
+        "Boolean 'and' operation is not supported; use std.and_(...) instead"
+    ),
+    _dis_bool.BoolOp.OR: (
+        "Boolean 'or' operation is not supported; use std.or_(...) instead"
+    ),
+}
+
+
+class CheckedBoolOpType:
+    def __bool__(self) -> Never:
+        msg = _BOOL_ERROR_MAP[_dis_bool.guess_bool_op()]
+        raise TypeError(msg)
+
+
+class CheckedContainsOpType:
+    def __contains__(self, other: Any) -> Never:
+        err = (
+            "'in/not in' operation is not supported; use std.in_(...) "
+            "or std.not_in(...) instead"
+        )
+        raise TypeError(err)
+
 
 class BaseAliasMeta(type):
     def __new__(
@@ -134,7 +180,11 @@ class BaseAliasMeta(type):
         return super().__new__(mcls, name, bases, namespace)
 
 
-class BaseAlias(metaclass=BaseAliasMeta):
+class BaseAlias(
+    CheckedBoolOpType,
+    CheckedContainsOpType,
+    metaclass=BaseAliasMeta,
+):
     def __init__(self, origin: type[TypeClassProto], metadata: Expr) -> None:
         self.__gel_origin__ = origin
         self.__gel_metadata__ = metadata
@@ -285,8 +335,7 @@ def AnnotatedPath(origin: type, metadata: Path) -> PathAlias:  # noqa: N802
 
 
 class ExprAlias(BaseAlias):
-    def __bool__(self) -> bool:
-        return False
+    pass
 
 
 def AnnotatedExpr(origin: type[Any], metadata: Expr) -> ExprAlias:  # noqa: N802

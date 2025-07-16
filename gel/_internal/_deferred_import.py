@@ -6,30 +6,21 @@ from __future__ import annotations
 from typing import Any, NamedTuple
 
 import importlib
-import inspect
 import sys
 import types
 import weakref
 
+from gel._internal import _inspect_extras
+
 
 def _get_caller_module(stack_offset: int = 2) -> types.ModuleType | None:
-    frame = inspect.currentframe()
-    try:
-        counter = 0
-        while frame is not None and counter < stack_offset:
-            frame = frame.f_back
-            counter += 1
-
+    with _inspect_extras.frame(stack_offset) as frame:
         if (
             frame is not None
             and (mod_name := frame.f_globals.get("__name__"))
             and (caller_mod := sys.modules.get(mod_name)) is not None
         ):
             return caller_mod
-    finally:
-        if frame is not None:
-            # Break possible refcycle (of this frame onto itself via locals)
-            del frame
 
     return None
 
