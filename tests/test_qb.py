@@ -507,6 +507,14 @@ class TestQueryBuilder(tb.ModelTestCase):
         with self.assertRaisesRegex(TypeError, "use std.if_"):
             default.User.filter(lambda u: u.name if u.name else "default")  # type: ignore [arg-type, return-value]
 
+        # Test that using '== None' comparison raises TypeError
+        with self.assertRaisesRegex(TypeError, r"use std.not_\(std.exists"):
+            default.User.filter(lambda u: u.name == None)  # type: ignore [arg-type, return-value]  # noqa: E711
+
+        # Test that using '!= None' comparison raises TypeError
+        with self.assertRaisesRegex(TypeError, "use std.exists"):
+            default.User.filter(lambda u: u.name != None)  # type: ignore [arg-type, return-value]  # noqa: E711
+
 
 class TestQueryBuilderModify(tb.ModelTestCase):
     """This test suite is for data manipulation using QB."""

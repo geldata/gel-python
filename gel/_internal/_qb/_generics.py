@@ -266,12 +266,23 @@ class BaseAlias(
     def __infix_op__(
         self,
         op: str,
-        operand: BaseAlias | type[TypeClassProto],
+        operand: Any,
         *,
         swapped: bool = False,
     ) -> Any:
         if op == "__eq__" and operand is self:
             return True
+
+        # Check for None comparison and raise appropriate error
+        if operand is None and op in {"__eq__", "__ne__"}:
+            suggestion = "std.exists(...)"
+            if op == "__eq__":
+                suggestion = f"std.not_({suggestion})"
+            msg = (
+                f"Comparison with None is not supported; "
+                f"use {suggestion} instead"
+            )
+            raise TypeError(msg)
 
         this_operand = self.__gel_origin__
         other_operand = operand
