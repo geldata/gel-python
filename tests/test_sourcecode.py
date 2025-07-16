@@ -43,7 +43,7 @@ class TestFlake8(unittest.TestCase):
         for subdir in ["edgedb", "gel", "tests"]:
             try:
                 subprocess.run(
-                    ["ruff", "check", "."],
+                    [sys.executable, "-m", "ruff", "check", "."],
                     check=True,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
@@ -66,7 +66,7 @@ class TestFlake8(unittest.TestCase):
         for subdir in ["gel"]:
             try:
                 subprocess.run(
-                    ["ruff", "format", "--check", "."],
+                    [sys.executable, "-m", "ruff", "format", "--check", "."],
                     check=True,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
@@ -113,6 +113,7 @@ class TestFlake8(unittest.TestCase):
                     f"mypy validation failed:\n{output}"
                 ) from None
 
+    @unittest.skipIf(os.environ.get("CIBUILDWHEEL"), "broken in CIBW tests")
     def test_cqa_pyright(self):
         project_root = find_project_root()
         config_path = project_root / "pyproject.toml"

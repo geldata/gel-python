@@ -105,7 +105,7 @@ class TestCodegen(tb.AsyncQueryTestCase):
                         p.returncode, args, output=await p.stdout.read(),
                     )
 
-        cmd = env.get("EDGEDB_PYTHON_TEST_CODEGEN_CMD", "gel-py")
+        cmd = env.get("GEL_PYTHON_TEST_CODEGEN_CMD", "gel-py")
         await run(
             cmd, extra_env={"GEL_PYTHON_CODEGEN_PY_VER": "3.11.11"}
         )
