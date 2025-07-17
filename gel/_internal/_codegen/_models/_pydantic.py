@@ -3188,79 +3188,75 @@ class GeneratedSchemaModule(BaseGeneratedModule):
 
         for overload in overloads:
             generics = overload.generics(self._types)
-            if (gen_return := generics.get("__return__")) is not None:
-                overload_specializations = []
-                gen_type_map: dict[reflection.Type, list[reflection.Type]] = {}
-                in_params: defaultdict[
-                    reflection.Type,
-                    list[tuple[CallableParamKey, AbstractSet[Indirection]]],
-                ] = defaultdict(list)
-                for param_key, param_generics in generics.items():
-                    if param_key != "__return__":
-                        for type_, paths in param_generics.items():
-                            in_params[type_].append((param_key, paths))
+            if not generics:
+                continue
 
-                for gen_t in gen_return:
-                    if gen_t not in in_params:
-                        continue
+            overload_specializations = []
+            gen_type_map: dict[reflection.Type, list[reflection.Type]] = {}
+            gen_params: defaultdict[
+                reflection.Type,
+                list[tuple[CallableParamKey, AbstractSet[Indirection]]],
+            ] = defaultdict(list)
 
-                    if isinstance(gen_t, reflection.ScalarType):
-                        descendants = gen_t.descendants(self._types)
-                        gen_type_map[gen_t] = sorted(
-                            (
-                                descendant
-                                for descendant in descendants
-                                if descendant.name in base_scalars
-                            ),
-                            key=specialization_sort_key,
+            for param_key, param_generics in generics.items():
+                for type_, paths in param_generics.items():
+                    gen_params[type_].append((param_key, paths))
+
+            for gen_t in gen_params:
+                if isinstance(gen_t, reflection.ScalarType):
+                    descendants = gen_t.descendants(self._types)
+                    gen_type_map[gen_t] = sorted(
+                        (
+                            descendant
+                            for descendant in descendants
+                            if descendant.name in base_scalars
+                        ),
+                        key=specialization_sort_key,
+                    )
+                elif gen_t.name == "anytype":
+                    gen_type_map[gen_t] = sorted(
+                        (
+                            self._types_by_name[tn]
+                            for tn in base_scalars
+                            if tn in self._types_by_name
+                        ),
+                        key=specialization_sort_key,
+                    )
+
+            for gen_t, specializations in gen_type_map.items():
+                if not specializations:
+                    continue
+
+                for specialization in specializations:
+                    param_specializations = {
+                        param_key: dict.fromkeys(
+                            paths,
+                            (gen_t, specialization),
                         )
-                    elif gen_t.name == "anytype":
-                        gen_type_map[gen_t] = sorted(
-                            (
-                                self._types_by_name[tn]
-                                for tn in base_scalars
-                                if tn in self._types_by_name
-                            ),
-                            key=specialization_sort_key,
-                        )
+                        for param_key, paths in gen_params[gen_t]
+                    }
 
-                for gen_t, specializations in gen_type_map.items():
-                    if not specializations:
-                        continue
+                    specialized = overload.specialize(
+                        param_specializations, schema=self._types
+                    )
+                    spec_param_types: reflection.CallableParamTypeMap = {
+                        param.key: [param.get_type(self._types)]
+                        for param in param_getter(specialized)
+                    }
 
-                    for specialization in specializations:
-                        param_specializations = {
-                            param_key: dict.fromkeys(
-                                paths,
-                                (gen_t, specialization),
-                            )
-                            for param_key, paths in (
-                                ("__return__", gen_return[gen_t]),
-                                *in_params[gen_t],
-                            )
-                        }
+                    if not self._would_cause_overlap(
+                        overload,
+                        spec_param_types,
+                        overload_signatures,
+                    ):
+                        overload_specializations.append(specialized)
+                        overload_signatures[specialized] = spec_param_types
 
-                        specialized = overload.specialize(
-                            param_specializations, schema=self._types
-                        )
-                        spec_param_types: reflection.CallableParamTypeMap = {
-                            param.key: [param.get_type(self._types)]
-                            for param in param_getter(specialized)
-                        }
+                        for param in param_getter(specialized):
+                            param_overload_map[param.key].add(specialized)
 
-                        if not self._would_cause_overlap(
-                            overload,
-                            spec_param_types,
-                            overload_signatures,
-                        ):
-                            overload_specializations.append(specialized)
-                            overload_signatures[specialized] = spec_param_types
-
-                            for param in param_getter(specialized):
-                                param_overload_map[param.key].add(specialized)
-
-                overloads_specializations[overload] = overload_specializations
-                num_specializations += len(overload_specializations)
+            overloads_specializations[overload] = overload_specializations
+            num_specializations += len(overload_specializations)
 
         if num_specializations > 0:
             nominal_overloads_total += num_specializations
@@ -3268,7 +3264,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             # Splice generic specializations into the overloads list
             expanded_overloads: list[_Callable_T] = []
             for overload in overloads:
-                if overload_specs := overloads_specializations[overload]:
+                if overload_specs := overloads_specializations.get(overload):
                     expanded_overloads.extend(overload_specs)
                 expanded_overloads.append(overload)
             overloads = expanded_overloads
