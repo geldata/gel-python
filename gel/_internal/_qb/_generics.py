@@ -10,6 +10,7 @@ from typing import (
     TYPE_CHECKING,
     Any,
     TypedDict,
+    NoReturn,
     get_args,
 )
 from typing_extensions import Never
@@ -17,6 +18,7 @@ from typing_extensions import Never
 
 import contextvars
 import dataclasses
+import enum
 import functools
 import inspect
 import types
@@ -117,7 +119,13 @@ OPERAND_IS_ALIAS: contextvars.ContextVar[bool] = contextvars.ContextVar(
 )
 
 
-_BOOL_ERROR_MAP = {
+class _Op(enum.Enum):
+    IS_NONE = enum.auto()
+    IS_NOT_NONE = enum.auto()
+    IN_NOT_IN = enum.auto()
+
+
+_OP_ERROR_MAP: dict[_Op | _dis_bool.BoolOp, str] = {
     _dis_bool.BoolOp.UNKNOWN: (
         "Boolean conversion not supported; use std functions instead"
     ),
@@ -138,22 +146,58 @@ _BOOL_ERROR_MAP = {
     _dis_bool.BoolOp.OR: (
         "Boolean 'or' operation is not supported; use std.or_(...) instead"
     ),
+    _Op.IS_NONE: (
+        "Comparison with None is not supported; "
+        "use std.not_(std.exists(...)) instead"
+    ),
+    _Op.IS_NOT_NONE: (
+        "Comparison with None is not supported; use std.exists(...) instead"
+    ),
+    _Op.IN_NOT_IN: (
+        "'in/not in' operation is not supported; use std.in_(...) "
+        "or std.not_in(...) instead"
+    ),
 }
 
 
+def _raise_op_error(op: _Op | _dis_bool.BoolOp) -> NoReturn:
+    __tracebackhide__ = True
+    msg = _OP_ERROR_MAP.get(op)
+    if msg is None:
+        # This should not happen, _OP_ERROR_MAP should be exhaustive
+        msg = (
+            f"unsupported query builder operator: {op}; "
+            f"if you see this error, please open an issue "
+            f"here: https://github.com/geldata/gel-python/issues/new"
+            f"?template=bug_report.md"
+        )
+        raise AssertionError(msg)
+    # incorrect query builder expression
+    raise TypeError(msg)
+
+
 class CheckedBoolOpType:
-    def __bool__(self) -> Never:
-        msg = _BOOL_ERROR_MAP[_dis_bool.guess_bool_op()]
-        raise TypeError(msg)
+    def __bool__(self) -> Never:  # noqa: PLE0304
+        _raise_op_error(_dis_bool.guess_bool_op())
 
 
 class CheckedContainsOpType:
     def __contains__(self, other: Any) -> Never:
-        err = (
-            "'in/not in' operation is not supported; use std.in_(...) "
-            "or std.not_in(...) instead"
-        )
-        raise TypeError(err)
+        _raise_op_error(_Op.IN_NOT_IN)
+
+
+class CheckedIsNoneType:
+    def __gel_is__(self, other: Any) -> bool:
+        if other is None:
+            _raise_op_error(_Op.IS_NONE)
+        else:
+            return self is other
+
+    def __gel_is_not__(self, other: Any) -> bool:
+        if other is None:
+            _raise_op_error(_Op.IS_NOT_NONE)
+        else:
+            return self is not other
 
 
 class BaseAliasMeta(type):
@@ -183,6 +227,7 @@ class BaseAliasMeta(type):
 class BaseAlias(
     CheckedBoolOpType,
     CheckedContainsOpType,
+    CheckedIsNoneType,
     metaclass=BaseAliasMeta,
 ):
     def __init__(self, origin: type[TypeClassProto], metadata: Expr) -> None:
@@ -275,14 +320,7 @@ class BaseAlias(
 
         # Check for None comparison and raise appropriate error
         if operand is None and op in {"__eq__", "__ne__"}:
-            suggestion = "std.exists(...)"
-            if op == "__eq__":
-                suggestion = f"std.not_({suggestion})"
-            msg = (
-                f"Comparison with None is not supported; "
-                f"use {suggestion} instead"
-            )
-            raise TypeError(msg)
+            _raise_op_error(_Op.IS_NONE if op == "__eq__" else _Op.IS_NOT_NONE)
 
         this_operand = self.__gel_origin__
         other_operand = operand
