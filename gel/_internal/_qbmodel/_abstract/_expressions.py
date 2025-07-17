@@ -117,7 +117,7 @@ def _const_to_expr(
 def select(
     cls: type[AbstractGelModel],
     /,
-    *elements: _qb.ShapeElement | Literal["*"],
+    *elements: _qb.ShapeElement | Literal["*", "**"],
     __operand__: _qb.ExprAlias | None = None,
     **kwargs: bool | _Value,
 ) -> _qb.ShapeOp:
@@ -144,6 +144,12 @@ def select(
     for elem in elements:
         if elem == "*":
             shape_elements.extend(iter(cls))
+        elif elem == "**":
+            shape_elements.extend(
+                _qb.Shape.splat(
+                    source=this_type, kind=_qb.Splat.DOUBLESTAR
+                ).elements
+            )
         else:
             shape_elements.append(elem)
 

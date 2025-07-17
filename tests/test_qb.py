@@ -294,7 +294,6 @@ class TestQueryBuilder(tb.ModelTestCase):
         self.assertEqual(res.name, "red")
         self.assertEqual(res.count, 2)
 
-    @tb.xfail
     def test_qb_filter_07(self):
         from models import default
 
@@ -693,7 +692,6 @@ class TestQueryBuilderModify(tb.ModelTestCase):
             [p.body for p in after], ["*magic stuff*", "I'm Cameron"]
         )
 
-    @tb.xfail
     def test_qb_delete_03(self):
         from models import default
 
