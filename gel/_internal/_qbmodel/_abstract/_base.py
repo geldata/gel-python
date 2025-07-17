@@ -143,9 +143,11 @@ class AbstractGelModelMeta(GelTypeMeta):
         weakref.WeakValueDictionary[uuid.UUID, type[Any]]
     ] = weakref.WeakValueDictionary()
 
-    if TYPE_CHECKING:
-        # Splat qb protocol
-        def __iter__(cls) -> Iterator[_qb.ShapeElement]: ...
+    # Splat qb protocol
+    def __iter__(cls) -> Iterator[_qb.ShapeElement]:
+        cls = cast("type[AbstractGelModel]", cls)
+        shape = _qb.get_object_type_splat(cls)
+        return iter(shape.elements)
 
     def __new__(
         mcls,
