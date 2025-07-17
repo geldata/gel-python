@@ -3390,15 +3390,12 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                     else:
                         # Handle Python type coercions
                         st = param_py_scalar_map[param_idx][t][overload]
-                        py_type = t
 
                         # Import the Python type symbol
-                        if proto := _qbmodel.maybe_get_protocol_for_py_type(
-                            py_type
-                        ):
+                        if proto := _qbmodel.maybe_get_protocol_for_py_type(t):
                             ptype_sym = self.import_name(BASE_IMPL, proto)
                         else:
-                            ptype_sym = self.import_name(*py_type)
+                            ptype_sym = self.import_name(*t)
 
                         # Map Python type to canonical Gel scalar type
                         py_coerce_map[ptype_sym] = st
@@ -4893,6 +4890,9 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         else:
             self_t = None
 
+        if cast_map is None:
+            cast_map = {}
+
         # Create TypeVars for generic params
         typevars: dict[reflection.Type, str] = {}
         for typ in itertools.chain.from_iterable(generic_param_map.values()):
@@ -4967,6 +4967,13 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                         import_time=ImportTime.typecheck_runtime,
                         typevars=typevars,
                     )
+                    if param.typemod is TypeModifier.SetOf:
+                        iterable_ = self.import_name(
+                            "collections.abc", "Iterable"
+                        )
+                        pt_str = f"{iterable_}[{pt_str}]"
+                    else:
+                        iterable_ = ""
                     union.append(pt_str)
                     if self_t is not None and style == "method":
                         pt_str = self.get_type(
@@ -4974,13 +4981,18 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                             import_time=ImportTime.typecheck_runtime,
                             typevars=typevars | {self_t: "self"},
                         )
+                        if param.typemod is TypeModifier.SetOf:
+                            pt_str = f"{iterable_}[{pt_str}]"
                         non_type_union.append(pt_str)
 
-            if cast_map is not None and (
-                (param_casts := cast_map.get(param.key)) is not None
-            ):
-                union.extend(param_casts)
-                non_type_union.extend(param_casts)
+            if (param_casts := cast_map.get(param.key)) is not None:
+                iterable_ = self.import_name("collections.abc", "Iterable")
+                if param.typemod is TypeModifier.SetOf:
+                    non_type_union.append(iterable_)
+                    union.extend(f"{iterable_}[{pc}]" for pc in param_casts)
+                else:
+                    union.extend(param_casts)
+                    non_type_union.extend(param_casts)
 
             param_non_type_types[param.key] = sorted(non_type_union)
 
@@ -5061,7 +5073,6 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             aexpr = self.import_name(BASE_IMPL, "AnnotatedExpr")
             unsp = self.import_name(BASE_IMPL, "Unspecified")
             expr_compat = self.import_name(BASE_IMPL, "ExprCompatible")
-            list_ = self.import_name("builtins", "list")
 
             if style == "method" and fname in {"__eq__", "__ne__"}:
                 basealias = self.import_name(BASE_IMPL, "BaseAlias")
@@ -5086,8 +5097,23 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                         f"  # type: ignore [return-value]"
                     )
 
-            if cast_map is None:
-                cast_map = {}
+            def write_cast_match(
+                var: str,
+                casts: dict[str, str],
+                *,
+                type_var: str | None = None,
+            ) -> None:
+                self.write(f"match {var}:")
+                with self.indented():
+                    for py_type, cast_t in casts.items():
+                        self.write(f"case {py_type}():")
+                        with self.indented():
+                            self.write(f"{var} = {cast_t}({var})")
+                            if type_var is not None:
+                                self.write(
+                                    f"{type_var} = "
+                                    f"{cast_t}.__gel_reflection__.name"
+                                )
 
             # Build a `match` block for Python-to-Gel coercion of values.
             for param in function.params:
@@ -5100,27 +5126,46 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                         for py_type, st in param_cast.items()
                     }
                     if param.is_variadic:
+                        list_ = self.import_name("builtins", "list")
                         new_list = "__variadic__"
                         self.write(f"{new_list}: {list_}[{expr_compat}] = []")
                         it = f"{dunder(param.name)}el__"
                         self.write(f"for {it} in {pident}:")
                         with self.indented():
-                            self.write(f"match {it}:")
-                            with self.indented():
-                                for py_type, cast_t in casts.items():
-                                    self.write(f"case {py_type}():")
-                                    with self.indented():
-                                        self.write(f"{it} = {cast_t}({it})")
+                            write_cast_match(it, casts)
                             self.write(f"{new_list}.append({it})")
+                    elif param.typemod is TypeModifier.SetOf:
+                        list_ = self.import_name("builtins", "list")
+                        isinstance_ = self.import_name(
+                            "builtins", "isinstance"
+                        )
+                        issubclass_ = self.import_name(
+                            "builtins", "issubclass"
+                        )
+                        type_ = self.import_name("builtins", "type")
+                        anytype = self.get_type(self._types_by_name["anytype"])
+                        type_var = f"{dunder(param.name)}t__"
+                        with self.if_(
+                            f"not {isinstance_}({pident}, {type_})"
+                            f" or not {issubclass_}({pident}, {anytype})"
+                        ):
+                            new_list = f"{dunder(param.name)}list__"
+                            self.write(
+                                f"{new_list}: {list_}[{expr_compat}] = []"
+                            )
+                            it = f"{dunder(param.name)}el__"
+                            self.write(f"for {it} in {pident}:")
+                            with self.indented():
+                                write_cast_match(it, casts, type_var=type_var)
+                                self.write(f"{new_list}.append({it})")
+
+                            set_lit = self.import_name(BASE_IMPL, "SetLiteral")
+                            self.write(
+                                f"{pident} = {set_lit}(items=(*{new_list},))"
+                            )
                     else:
-                        self.write(f"match {pident}:")
-                        with self.indented():
-                            for py_type, cast_t in casts.items():
-                                self.write(f"case {py_type}():")
-                                with self.indented():
-                                    self.write(
-                                        f"{pident} = {cast_t}({pident})"
-                                    )
+                        write_cast_match(pident, casts)
+
                 elif param.is_variadic:
                     self.write(f"__variadic__ = {ident(param.name)}")
 

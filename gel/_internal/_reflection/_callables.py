@@ -606,10 +606,13 @@ class Callable(SchemaObject):
         get_other_gen = functools.partial(_generics, genmap=other_generics)
 
         def is_assignable(
+            *,
             self_type: Type | PyTypeName,
             other_type: Type | PyTypeName,
             self_generics: dict[Indirection, Type] | None,
             other_generics: dict[Indirection, Type] | None,
+            self_typemod: TypeModifier,
+            other_typemod: TypeModifier,
         ) -> bool:
             if isinstance(self_type, Type):
                 if isinstance(other_type, Type):
@@ -628,6 +631,13 @@ class Callable(SchemaObject):
                     return False
             else:
                 if isinstance(other_type, Type):
+                    return False
+                elif (self_typemod == TypeModifier.SetOf) != (
+                    other_typemod == TypeModifier.SetOf
+                ):
+                    # If params are of different upper cardinalities, they
+                    # would never overlap in Python, because they're reflected
+                    # as different types.
                     return False
                 elif consider_py_inheritance:
                     self_py_type = _get_py_type(self_type)
@@ -649,9 +659,18 @@ class Callable(SchemaObject):
                 other_types = other_type(other_param)
                 self_gen = get_self_gen(self_param)
                 other_gen = get_other_gen(other_param)
+                self_typemod = self_param.typemod
+                other_typemod = other_param.typemod
 
                 num_overlapping += any(
-                    is_assignable(st, ot, self_gen, other_gen)
+                    is_assignable(
+                        self_type=st,
+                        other_type=ot,
+                        self_generics=self_gen,
+                        other_generics=other_gen,
+                        self_typemod=self_typemod,
+                        other_typemod=other_typemod,
+                    )
                     for st in self_types
                     for ot in other_types
                 )
