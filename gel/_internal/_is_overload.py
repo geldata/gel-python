@@ -177,7 +177,7 @@ class _IsTransformer(ast.NodeTransformer):
         """
         return self._num_transforms
 
-    def visit_Compare(self, node: ast.Compare) -> ast.AST:  # noqa: N802
+    def visit_Compare(self, node: ast.Compare) -> ast.AST:
         """Visit a `Compare` node and transform `is` and `is not`
         operations.
         """
