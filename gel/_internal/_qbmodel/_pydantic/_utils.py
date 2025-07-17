@@ -143,6 +143,7 @@ def model_dump_json_signature(
     self: BaseModel,
     *,
     indent: int | None = None,
+    ensure_ascii: bool = False,
     include: IncEx | None = None,
     exclude: IncEx | None = None,
     context: GelDumpContext | None = None,

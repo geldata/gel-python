@@ -35,10 +35,13 @@ dependencies = [
 
 [project.optional-dependencies]
 test = [
-    'mypy>=1.17.0',
+    # Typecheckers and linters must be pinned exactly
+    # to avoid cqa breakage in CI.
+    'mypy==1.17.0',
+    'pyright==1.1.403',
+    'ruff==0.12.4',
+
     'pytest>=3.6.0',
-    'pyright>=1.1.400',
-    'ruff>=0.12.0',
     'uvloop>=0.15.1; platform_system != "Windows"',
     'fastapi',
     'pyjwt',
