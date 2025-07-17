@@ -18,6 +18,7 @@ from typing_extensions import TypeAliasType, TypeIs
 from collections.abc import Callable
 
 from gel._internal import _utils
+from gel._internal import _is_overload
 
 from ._abstract import Expr, ScopeContext
 
@@ -131,6 +132,11 @@ def edgeql_qb_expr(
     as_expr = getattr(x, "__edgeql_qb_expr__", None)
     if as_expr is None or not callable(as_expr):
         if is_expr_closure(x):
+            # Transform identity checks before evaluating the closure
+            # so that we can raise a TypeError on invalid uses of
+            # `expr is None`.
+            x = _is_overload.maybe_overload_is_operator(x)
+
             if var is None:
                 raise ValueError(
                     "edgeql_qb_expr: must specify *var* when evaluating "
