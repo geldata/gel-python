@@ -1261,7 +1261,7 @@ class TestModelGenerator(tb.ModelTestCase):
         with self.assertRaisesRegex(ValueError, "id argument"):
             default.UserGroup(None)  # type: ignore
 
-    @unittest.skipIf(sys.platform == "win32", "crashes")
+    @unittest.skip("blows stack and segfaults due to infinite recursion")
     @tb.xfail
     def test_modelgen_pydantic_apis_13(self):
         # https://github.com/geldata/gel-python/issues/785
