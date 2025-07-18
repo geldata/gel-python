@@ -3710,6 +3710,12 @@ class TestModelGenerator(tb.ModelTestCase):
         e2 = self.client.get(default.EnumTest.filter(name="color test 1"))
         self.assertEqual(e2.color, default.Color.Indigo)
 
+        e.color = default.Color("Violet")
+        self.client.save(e)
+
+        e2 = self.client.get(default.EnumTest.filter(name="color test 1"))
+        self.assertEqual(e2.color, default.Color.Violet)
+
     @tb.typecheck
     def test_modelgen_save_collections_01(self):
         from models import default
