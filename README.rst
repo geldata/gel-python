@@ -70,6 +70,50 @@ Basic Usage
     if __name__ == '__main__':
         main()
 
+Using the ``models`` generator
+------------------------------
+
+We provide a ``models`` generator that lets you build queries programmatically, and generate Pydantic models directly from your schema.
+
+To use, run the following command:
+
+.. code-block:: bash
+
+    $ gel generate py/models
+
+This will find your Python project and add a ``models`` package to it. Then you can use the generated models to build queries and mutate instances of your objects directly.
+
+.. code-block:: python
+
+    import datetime
+    from models import User, std
+    from gel import create_client
+
+    def main():
+        client = create_client()
+
+        # Create a new User instance and save it to the database
+        bob = User(name='Bob', dob=datetime.date(1984, 3, 1))
+        client.save(bob)
+
+        # Select all Users
+        users = client.query(User)
+
+        # Select all users with names like "Bob"
+        bob_like = client.query(User.filter(lambda u: std.ilike(u.name, '%bob%')))
+
+        # Update an object
+        bob.name = 'Robert'
+        client.save(bob)
+
+        # Delete an object
+        client.execute(User.filter(id=bob.id).delete())
+
+        client.close()
+
+    if __name__ == '__main__':
+        main()
+
 Development
 -----------
 
