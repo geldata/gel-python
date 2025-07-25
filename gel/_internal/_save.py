@@ -705,7 +705,7 @@ def make_plan(objs: Iterable[GelModel]) -> SavePlan:
 
             # No adds or changes for this link?
             if not added:
-                if replace:
+                if replace and not is_new:
                     # Need to reset this link to an empty list
                     push_change(
                         requireds,
@@ -715,9 +715,9 @@ def make_plan(objs: Iterable[GelModel]) -> SavePlan:
                             info=prop,
                         ),
                     )
-                else:
-                    # Continue to the next object
-                    continue
+
+                # Continue to the next object
+                continue
 
             added_proxies: Sequence[ProxyModel[GelModel]] = added  # type: ignore [assignment]
 
