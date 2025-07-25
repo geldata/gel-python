@@ -181,12 +181,14 @@ class PydanticModelsGenerator(AbstractCodeGenerator):
             logger.exception("could not connect to Gel instance")
             self.abort(61)
 
-        models_root = self._project_dir / self._args.output
+        models_root = self._args.output
+        if not models_root:
+            models_root = self._project_dir / "models"
         tmp_models_root = tempfile.TemporaryDirectory(
             prefix=".~tmp.models.",
             dir=self._project_dir,
         )
-        file_state = self._get_last_state()
+        file_state = self._get_last_state(models_root)
 
         with tmp_models_root, self._client:
             db_state = reflection.fetch_branch_state(self._client)
@@ -275,8 +277,10 @@ class PydanticModelsGenerator(AbstractCodeGenerator):
         except Exception:
             return None
 
-    def _get_last_state(self) -> GeneratedState | None:
-        state_json = self._project_dir / "models" / "_state.json"
+    def _get_last_state(
+        self, models_root: str | pathlib.Path
+    ) -> GeneratedState | None:
+        state_json = pathlib.Path(models_root) / "_state.json"
         try:
             with open(state_json, encoding="utf8") as f:
                 state_data = json.load(f)
