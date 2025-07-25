@@ -341,6 +341,45 @@ class TestQueryBuilder(tb.ModelTestCase):
         self.assertEqual(post.author.name, "Elsa")
         self.assertEqual(post.body, "*magic stuff*")
 
+    @tb.xfail
+    @tb.typecheck
+    def test_qb_filter_09(self):
+        from models import default, std
+
+        # Find GameSession with same players as the green group
+        green = default.UserGroup.filter(name="green")
+        q = default.GameSession.select(
+            "*",
+            players=True,
+        ).filter(
+            lambda g: std.array_agg(g.players.id)
+            == std.array_agg(green.users.id)
+        )
+
+        res = self.client.get(q)
+        self.assertEqual(res.num, 123)
+        self.assertEqual(
+            {u.id for u in res.players}, {u.id for u in green.users}
+        )
+
+    @tb.xfail
+    @tb.typecheck
+    def test_qb_filter_10(self):
+        from models import default, std
+
+        # Find GameSession with same *number* of players as the green group
+        green = default.UserGroup.filter(name="green")
+        q = default.GameSession.select(
+            "*",
+            players=True,
+        ).filter(lambda g: std.count(g.players) == std.count(green.users))
+
+        res = self.client.get(q)
+        self.assertEqual(res.num, 123)
+        self.assertEqual(
+            {u.id for u in res.players}, {u.id for u in green.users}
+        )
+
     @tb.typecheck
     def test_qb_link_property_01(self):
         from models import default
@@ -523,6 +562,16 @@ class TestQueryBuilder(tb.ModelTestCase):
         with self.assertRaisesRegex(TypeError, "use std.exists"):
             default.User.filter(lambda u: u.name is not None)  # type: ignore
 
+    @tb.xfail
+    @tb.typecheck
+    def test_qb_enum_01(self):
+        from models import default
+
+        e = self.client.get(default.EnumTest.filter(color=default.Color.Red))
+
+        self.assertEqual(e.color, default.Color.Red)
+        self.assertEqual(e.name, "red")
+
 
 class TestQueryBuilderModify(tb.ModelTestCase):
     """This test suite is for data manipulation using QB."""
@@ -695,3 +744,35 @@ class TestQueryBuilderModify(tb.ModelTestCase):
         self.assertEqual(res[0].author.name, "Alice")
         self.assertEqual(res[1].body, "I'm Alice")
         self.assertEqual(res[1].author.name, "Alice")
+
+    @tb.xfail
+    @tb.typecheck
+    def test_qb_enum_edit_01(self):
+        from models import default
+
+        e = self.client.get(
+            default.EnumTest.filter(
+                name="red",
+            )
+            .update(color=default.Color.Orange)
+            .select("*")
+        )
+
+        self.assertEqual(e.color, default.Color.Orange)
+        self.assertEqual(e.name, "red")
+
+    @tb.xfail
+    @tb.typecheck
+    def test_qb_enum_edit_02(self):
+        from models import default
+
+        e = self.client.get(
+            default.EnumTest.filter(
+                name="red",
+            )
+            .update(color=lambda e: default.Color("Violet"))
+            .select("*")
+        )
+
+        self.assertEqual(e.color, default.Color.Violet)
+        self.assertEqual(e.name, "red")
