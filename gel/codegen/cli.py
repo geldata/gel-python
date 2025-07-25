@@ -102,8 +102,10 @@ def run_queries_generator(args: argparse.Namespace) -> None:
 def _augment_models_parser(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--output",
-        help="Generated models output directory",
-        default="models",
+        help=(
+            "Generated models output directory, "
+            "defaults to <PROJECT_ROOT>/models"
+        ),
     )
 
 
