@@ -182,8 +182,23 @@ class PydanticModelsGenerator(AbstractCodeGenerator):
             self.abort(61)
 
         models_root = self._args.output
+
+        # First, detect FastAPI-style well-known project structure in cwd
+        if not models_root:
+            for subdir in map(pathlib.Path, ["app", "api"]):
+                if subdir.is_dir():
+                    models_root = subdir / "models"
+                    break
+        if not models_root:
+            for app_file in map(pathlib.Path, ["app.py", "api.py"]):
+                if app_file.is_file():
+                    models_root = "models"
+                    break
+
+        # Or else, defaults to "models" directory in the project root
         if not models_root:
             models_root = self._project_dir / "models"
+
         tmp_models_root = tempfile.TemporaryDirectory(
             prefix=".~tmp.models.",
             dir=self._project_dir,
@@ -248,7 +263,10 @@ class PydanticModelsGenerator(AbstractCodeGenerator):
                 _dirsync.dirsync(outdir, models_root, keep=std_manifest)
 
         if not self._quiet:
-            self.print_msg(f"{C.GREEN}{C.BOLD}Done.{C.ENDC}")
+            self.print_msg(
+                f"{C.GREEN}{C.BOLD}Done{C.ENDC}, generated models in:"
+                f" {C.CYAN}{pathlib.Path(models_root).absolute()}{C.ENDC}",
+            )
 
     def _cache_key(self, suf: str, sv: reflection.ServerVersion) -> str:
         ver_key = _ver_utils.get_project_version_key()
