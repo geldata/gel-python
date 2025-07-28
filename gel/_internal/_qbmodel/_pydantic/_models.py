@@ -631,7 +631,7 @@ class GelSourceModel(
             self = super().model_construct(_fields_set, id=id, **values)
 
         if cls.__gel_has_id_field__:
-            cls.__gel_new__ = id is UNSET_UUID
+            self.__gel_new__ = id is UNSET_UUID
 
         __dict__ = self.__dict__
 
