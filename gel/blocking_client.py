@@ -61,7 +61,7 @@ class SaveDebug:
 
 @dataclasses.dataclass
 class SaveQueryDebug:
-    query: str = ""
+    query: Any = ""
     max_args_number: int = 0
     total_execs: int = 0
     total_exec_time: float = 0
@@ -538,10 +538,15 @@ class BatchIteration(transaction.BaseTransaction):
         finally:
             self._lock.release()
 
-    def send_query(self, query: str, *args: Any, **kwargs: Any) -> None:
+    def send_query(
+        self,
+        query: str | abstract.Queryable[Any],
+        *args: Any,
+        **kwargs: Any,
+    ) -> None:
         self._batched_ops.append(
             abstract.QueryContext(
-                query=abstract.QueryWithArgs(query, None, args, kwargs),
+                query=abstract.QueryWithArgs.from_query(query, args, kwargs),
                 cache=self._client._get_query_cache(),
                 retry_options=None,
                 state=self._client._get_state(),
@@ -551,10 +556,15 @@ class BatchIteration(transaction.BaseTransaction):
             )
         )
 
-    def send_query_single(self, query: str, *args: Any, **kwargs: Any) -> None:
+    def send_query_single(
+        self,
+        query: str | abstract.Queryable[Any],
+        *args: Any,
+        **kwargs: Any,
+    ) -> None:
         self._batched_ops.append(
             abstract.QuerySingleContext(
-                query=abstract.QueryWithArgs(query, None, args, kwargs),
+                query=abstract.QueryWithArgs.from_query(query, args, kwargs),
                 cache=self._client._get_query_cache(),
                 retry_options=None,
                 state=self._client._get_state(),
@@ -565,11 +575,14 @@ class BatchIteration(transaction.BaseTransaction):
         )
 
     def send_query_required_single(
-        self, query: str, *args: Any, **kwargs: Any
+        self,
+        query: str | abstract.Queryable[Any],
+        *args: Any,
+        **kwargs: Any,
     ) -> None:
         self._batched_ops.append(
             abstract.QueryRequiredSingleContext(
-                query=abstract.QueryWithArgs(query, None, args, kwargs),
+                query=abstract.QueryWithArgs.from_query(query, args, kwargs),
                 cache=self._client._get_query_cache(),
                 retry_options=None,
                 state=self._client._get_state(),
@@ -639,8 +652,15 @@ class Client(
     __slots__ = ()
     _impl_class = _PoolImpl
 
-    def save(self, *objs: GelModel) -> None:
-        make_executor = make_save_executor_constructor(objs)
+    def save(
+        self,
+        *objs: GelModel,
+        refetch: bool = True,
+    ) -> None:
+        make_executor = make_save_executor_constructor(
+            objs,
+            refetch=refetch,
+        )
 
         for tx in self._batch():
             with tx:
@@ -651,16 +671,19 @@ class Client(
                         tx.send_query(batch.query, batch.args)
                     batch_ids = tx.wait()
                     for ids, batch in zip(batch_ids, batches, strict=True):
-                        batch.feed_ids(ids)
+                        batch.feed_db_data(ids)
 
                 executor.commit()
 
     def __debug_save__(self, *objs: GelModel) -> SaveDebug:
         ns = time.monotonic_ns()
-        make_executor = make_save_executor_constructor(objs)
+        make_executor = make_save_executor_constructor(
+            objs,
+            refetch=False,  # TODO
+        )
         plan_time = time.monotonic_ns() - ns
 
-        queries: dict[str, SaveQueryDebug] = collections.defaultdict(
+        queries: dict[Any, SaveQueryDebug] = collections.defaultdict(
             SaveQueryDebug
         )
 
@@ -694,7 +717,7 @@ class Client(
                             qdebug.max_args_number, len(batch.args)
                         )
 
-                        batch.feed_ids(batch_ids[0])
+                        batch.feed_db_data(batch_ids[0])
 
                 executor.commit()
 

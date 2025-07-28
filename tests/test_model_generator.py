@@ -3027,6 +3027,7 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(len(g_final.players), 1)
         self.assertEqual(g_final.players[0].name, "TestUser1")
 
+    @tb.typecheck
     def test_modelgen_save_35(self):
         # GameSession with players assignment then clear
         # Select data, modify it, check consistency
@@ -3125,6 +3126,7 @@ class TestModelGenerator(tb.ModelTestCase):
             {p.name for p in final_session.players}, {"Elsa", "Zoe"}
         )
 
+    @tb.typecheck
     def test_modelgen_save_37(self):
         # Fetch a GameSession object, save its id.
         # Make a new GameSession instance,
@@ -3177,6 +3179,7 @@ class TestModelGenerator(tb.ModelTestCase):
             [p.name for p in final_session.players], ["Dana", "Elsa", "Zoe"]
         )
 
+    @tb.typecheck
     def test_modelgen_save_38(self):
         # Fetch a GameSession object, save its id. Make a new GameSession
         # instance, pass id and players list to it. Test that save()
@@ -3288,25 +3291,42 @@ class TestModelGenerator(tb.ModelTestCase):
 
     @tb.typecheck
     def test_modelgen_save_41(self):
-        """Create and save a mode with random UUID"""
+        """Create and save a model with random UUID"""
         import uuid
         from models import default
+        from gel import errors
 
-        obj = default.User(
-            id=uuid.uuid4(),
-            name="Flora",
-        )
-        self.client.save(obj)
+        with self.assertRaisesRegex(
+            errors.CardinalityViolationError, "does not exist"
+        ):
+            obj = default.User(
+                id=uuid.uuid4(),
+                name="Flora",
+            )
+            self.client.save(obj)
 
-        # The ID was random, so we don't expect collisions with real models.
-        # We also don't expect any model to have been created.
-        res = self.client.query(
-            """
-            select User filter .id = <uuid>$id
-        """,
-            id=obj.id,
-        )
-        self.assertEqual(len(res), 0)
+    @tb.typecheck
+    def test_modelgen_save_42(self):
+        from models import default
+
+        # regression test -- model_construct() had a bug where it set
+        # __gel_new__ on a class, not on the instance it created.
+        default.GameSession.model_construct(num=909, public=False)
+        self.client.save(default.GameSession(num=9000))
+
+    @tb.typecheck
+    def test_modelgen_save_43(self):
+        """Test refetch"""
+        from models import default
+
+        u1 = default.User(name="Al")
+        self.client.save(u1)
+        self.assertTrue(hasattr(u1, "name_len"))
+        self.assertEqual(u1.name_len, 2)
+
+        u2 = default.User(name="Al")
+        self.client.save(u2, refetch=False)
+        self.assertFalse(hasattr(u2, "name_len"))
 
     def test_modelgen_write_only_dlist_errors(self):
         # Test that reading operations on write-only dlists raise
