@@ -60,6 +60,7 @@ jobs:
       uses: vampire/setup-wsl@6a8db447be7ed35f2f499c02c6e60ff77ef11278  # v6.0.0
       with:
         wsl-shell-user: edgedb
+        distribution: Ubuntu-24.04
         additional-packages:
           ca-certificates
           curl
