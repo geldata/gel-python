@@ -12,6 +12,8 @@ from typing import (
 
 import getpass
 import io
+import json
+import os
 import pathlib
 import sys
 import typing
@@ -36,11 +38,10 @@ class AbstractCodeGenerator:
         client: gel.Client | None = None,
         interactive: bool = True,
     ):
-        self._args = args
+        self._no_cache = False
+        self._quiet = False
         self._default_module = "default"
         self._async = False
-        self._no_cache = args.no_cache
-        self._quiet = args.quiet
 
         self._interactive = interactive
         self._stderr: TextIO
@@ -66,10 +67,84 @@ class AbstractCodeGenerator:
         else:
             self._project_dir = project_dir
 
+        self._apply_env_config()
+        self._apply_cli_config(args)
+
         if client is None:
             self._client = gel.create_client(**self._get_conn_args(args))
         else:
             self._client = client
+
+    def _apply_cli_config(self, args: argparse.Namespace) -> None:
+        if args.no_cache is not None:
+            self._no_cache = args.no_cache
+        if args.quiet is not None:
+            self._quiet = args.quiet
+
+    def _apply_env_config(self) -> None:
+        config_str = os.getenv("GEL_GENERATE_CONFIG")
+        if not config_str:
+            return
+        config = json.loads(config_str)
+        if not isinstance(config, dict):
+            raise ValueError("GEL_GENERATE_CONFIG must be a JSON object")
+        for key, value in config.items():
+            if not isinstance(value, dict):
+                raise ValueError(
+                    f"Invalid GEL_GENERATE_CONFIG value for {key!r}: "
+                    f"expected a JSON object, got {type(value).__name__}"
+                )
+            m = getattr(self, f"_apply_env_{key}", None)
+            if m is None:
+                self.print_msg(
+                    f"{C.WARNING}Skipping unknown environment config: "
+                    f"{key}{C.ENDC}"
+                )
+                continue
+            try:
+                m(value["value"])
+            except ValueError as e:
+                span = value.get("span")
+                src = os.getenv("GEL_TOML_CONTENT")
+                if span and src:
+                    self.print_error(f"{type(e).__name__}: {e}")
+                    start, end = span
+                    marking = False
+                    lines = src.splitlines(keepends=True)
+                    left = len(str(len(lines))) + 1
+                    offset = 0
+                    for no, line in enumerate(lines):
+                        llen = len(line.encode("utf8"))
+                        if not marking and offset < start < offset + llen:
+                            self.print_msg(
+                                f"{'':>{left}}{C.BLUE}-->{C.ENDC} "
+                                f"gel.toml:{no + 1}:{start - offset + 1}"
+                            )
+                            self.print_msg(f"{'':>{left}}{C.BLUE} |{C.ENDC}")
+                            marking = True
+                        if marking:
+                            self.print_msg(
+                                f"{C.BLUE}{no + 1:>{left}} | {C.ENDC}"
+                                f"{line.rstrip()}"
+                            )
+                            l = max(0, start - offset)
+                            r = min(llen - l, end - offset - l)
+                            self.print_msg(
+                                f"{'':>{left}}{C.BLUE} | {C.ENDC}"
+                                f"{'':>{l}}{C.FAIL}{'':^>{r}}{C.ENDC}"
+                            )
+                            if offset < end < offset + llen:
+                                break
+                        offset += llen
+                    self.print_msg(f"{'':>{left}}{C.BLUE} |{C.ENDC}")
+                    sys.exit(22)
+                else:
+                    raise
+
+    def _apply_env_no_cache(self, value: Any) -> None:
+        if not isinstance(value, bool):
+            raise ValueError('"no_cache" must be a boolean')
+        self._no_cache = value
 
     def get_error_output(self) -> str:
         if isinstance(self._stderr, io.StringIO):
