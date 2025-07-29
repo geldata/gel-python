@@ -4169,6 +4169,66 @@ class TestModelGenerator(tb.ModelTestCase):
             "tuple<a:std::str, b:tuple<c:std::int64, d:std::str>>",
         )
 
+    def test_modelgen_json_schema_1(self):
+        # test that optional fields have `= None` -- which means that
+        # they have the correct default value at the schema level, which
+        # in turn means that they will be reflected as "optional" in the JSON
+        # schema.
+
+        import textwrap
+        import json
+
+        from models import default
+        from gel._testbase_schema import render_schema_from_json
+
+        schema = render_schema_from_json(
+            json.dumps(
+                default.User.model_json_schema(mode="serialization"),
+                indent=2,
+            )
+        )
+
+        self.assertEqual(
+            schema.strip(),
+            textwrap.dedent(
+                """\
+                class User:
+                    groups: list[UserGroup]  # readonly
+                    id: UUID
+                    name: str
+                    name_len: Any  # readonly
+                    nickname: None | str = None
+                    nickname_len: None | int  # readonly
+
+                class UserGroup:
+                    id: UUID
+                    mascot: None | str = None
+                    name: str
+                    name_len: Any  # readonly
+                    nickname: None | str = None
+                    nickname_len: None | int  # readonly
+                    users: list[User] = ..."""
+            ),
+        )
+
+        schema = render_schema_from_json(
+            json.dumps(
+                default.User.model_json_schema(mode="validation"),
+                indent=2,
+            )
+        )
+
+        self.assertEqual(
+            schema.strip(),
+            textwrap.dedent(
+                """\
+                class User:
+                    id: UUID
+                    name: str
+                    nickname: None | str = None"""
+            ),
+        )
+
     @tb.typecheck
     def test_modelgen_function_overloads_01(self):
         """Test basic function overloads with different parameter types"""
