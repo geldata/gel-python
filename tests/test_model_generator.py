@@ -175,7 +175,7 @@ class TestModelGenerator(tb.ModelTestCase):
         from models import default
 
         self.assertEqual(
-            reveal_type(default.User.name), "type[models.__variants__.std.str]"
+            reveal_type(default.User.name), "type[models.__shapes__.std.str]"
         )
 
         self.assertEqual(
@@ -3955,7 +3955,7 @@ class TestModelGenerator(tb.ModelTestCase):
 
         self.assertEqual(
             reveal_type(default.current_game_session_num),
-            "type[models.__variants__.std.int64]",
+            "type[models.__shapes__.std.int64]",
         )
 
         sess_num = 988
