@@ -3328,6 +3328,104 @@ class TestModelGenerator(tb.ModelTestCase):
         self.client.save(u2, refetch=False)
         self.assertFalse(hasattr(u2, "name_len"))
 
+    @tb.typecheck
+    def test_modelgen_save_44(self):
+        # Test link props on multi links -- specifically that we support:
+        #
+        # - setting some of the props
+        #
+        # - updating one prop with one value,
+        #   but the other props in the db must survive
+        #
+        # - resetting one prop to None - with it actually resetting to
+        #   an empty set in the DB and other props surviving
+
+        import json
+        from typing import Any
+        from models import default
+
+        def check(expected: Any) -> None:
+            res = self.client.query_required_single_json("""
+                select Team {
+                    members: {
+                        @rank,
+                        @role,
+                        name,
+                    } order by .name
+                }
+                filter .name = "test team 8"
+            """)
+            self.assertEqual(json.loads(res), expected)
+
+        ####################
+
+        a = self.client.get(default.User.filter(name="Alice"))
+        b = self.client.get(default.User.filter(name="Billie"))
+
+        self.client.save(default.Team(name="test team 8"))
+
+        ####################
+
+        team = self.client.get(
+            default.Team.select(name=True, members=True).filter(
+                name="test team 8"
+            )
+        )
+
+        team.members.extend(
+            [
+                default.Team.members.link(a, role="lead", rank=1),
+                default.Team.members.link(b, rank=2),
+            ]
+        )
+        self.client.save(team)
+        check(
+            {
+                "members": [
+                    {"name": "Alice", "@rank": 1, "@role": "lead"},
+                    {"name": "Billie", "@rank": 2, "@role": None},
+                ]
+            }
+        )
+
+        ####################
+
+        team2 = self.client.get(
+            default.Team.select(
+                name=True,
+            ).filter(name="test team 8")
+        )
+
+        team2.members.append(default.Team.members.link(a, rank=1000))
+        self.client.save(team2)
+        check(
+            {
+                "members": [
+                    {"name": "Alice", "@rank": 1000, "@role": "lead"},
+                    {"name": "Billie", "@rank": 2, "@role": None},
+                ]
+            }
+        )
+
+        ####################
+
+        team3 = self.client.get(
+            default.Team.select(
+                name=True,
+            ).filter(name="test team 8")
+        )
+
+        team3.members.append(default.Team.members.link(a, rank=None))
+        self.client.save(team3)
+        check(
+            {
+                "members": [
+                    {"name": "Alice", "@rank": None, "@role": "lead"},
+                    {"name": "Billie", "@rank": 2, "@role": None},
+                ]
+            }
+        )
+
     def test_modelgen_write_only_dlist_errors(self):
         # Test that reading operations on write-only dlists raise
         # RuntimeError

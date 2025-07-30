@@ -121,7 +121,6 @@ class MultiLinkAdd(BaseFieldChange):
             self.props_info is not None
             and len(self.added_props) > 0
             and len(self.added) == len(self.added_props)
-            and next(iter(self.added_props)).keys() == self.props_info.keys()
         )
 
 
@@ -753,10 +752,13 @@ def make_plan(objs: Iterable[GelModel]) -> SavePlan:
                 added=unwrap_dlist(added),
                 added_props=[
                     {
-                        p.name: getattr(
-                            ll_attr(link, "__linkprops__"), p.name, None
+                        p: getattr(ll_attr(link, "__linkprops__"), p, None)
+                        for p in (
+                            ll_attr(
+                                link, "__linkprops__"
+                            ).__gel_changed_fields__
+                            or ()
                         )
-                        for p in props_info
                     }
                     for link in cast("list[ProxyModel[GelModel]]", added)
                 ],
@@ -1059,11 +1061,11 @@ class SaveExecutor:
             # link props that have types of arrays.
             if type_ql.startswith("array<"):
                 cast = f"array<tuple<{type_ql}>>"
-                ret = lambda x: f"(select array_unpack({x}).0 limit 1)"  # noqa: E731
+                ret = lambda x: f"(select std::array_unpack({x}).0 limit 1)"  # noqa: E731
                 arg_pack = lambda x: [(x,)] if x is not None else []  # noqa: E731
             else:
                 cast = f"array<{type_ql}>"
-                ret = lambda x: f"(select array_unpack({x}) limit 1)"  # noqa: E731
+                ret = lambda x: f"(select std::array_unpack({x}) limit 1)"  # noqa: E731
                 arg_pack = lambda x: [x] if x is not None else []  # noqa: E731
             return cast, ret, arg_pack
 
@@ -1078,6 +1080,7 @@ class SaveExecutor:
 
         obj = change.model
         type_name = obj_to_name_ql(obj)
+        q_type_name = quote_ident(type_name)
 
         for ch in change.fields.values():
             if isinstance(ch, PropertyChange):
@@ -1106,14 +1109,14 @@ class SaveExecutor:
                     arg = add_arg(arg_t, [(el,) for el in ch.added])
                     shape_parts.append(
                         f"{quote_ident(ch.name)} {assign_op} "
-                        f"array_unpack({arg}).0"
+                        f"std::array_unpack({arg}).0"
                     )
                 else:
                     arg_t = f"array<{ch.info.typexpr}>"
                     arg = add_arg(arg_t, ch.added)
                     shape_parts.append(
                         f"{quote_ident(ch.name)} {assign_op} "
-                        f"array_unpack({arg})"
+                        f"std::array_unpack({arg})"
                     )
 
             elif isinstance(ch, MultiPropRemove):
@@ -1123,13 +1126,13 @@ class SaveExecutor:
                     arg_t = f"array<tuple<{ch.info.typexpr}>>"
                     arg = add_arg(arg_t, [(el,) for el in ch.removed])
                     shape_parts.append(
-                        f"{quote_ident(ch.name)} -= array_unpack({arg}).0"
+                        f"{quote_ident(ch.name)} -= std::array_unpack({arg}).0"
                     )
                 else:
                     arg_t = f"array<{ch.info.typexpr}>"
                     arg = add_arg(arg_t, ch.removed)
                     shape_parts.append(
-                        f"{quote_ident(ch.name)} -= array_unpack({arg})"
+                        f"{quote_ident(ch.name)} -= std::array_unpack({arg})"
                     )
 
             elif isinstance(ch, SingleLinkChange):
@@ -1181,7 +1184,7 @@ class SaveExecutor:
                         shape_parts.append(
                             f"{quote_ident(ch.name)} := "
                             f"<{linked_name}><std::uuid>("
-                            f"  select array_unpack({arg}) limit 1"
+                            f"  select std::array_unpack({arg}) limit 1"
                             f")"
                         )
                     else:
@@ -1202,11 +1205,12 @@ class SaveExecutor:
 
                 shape_parts.append(
                     f"{quote_ident(ch.name)} -= "
-                    f"<{ch.info.typexpr}>array_unpack({arg})"
+                    f"<{ch.info.typexpr}>std::array_unpack({arg})"
                 )
 
             elif isinstance(ch, MultiLinkAdd):
-                assign_op = ":=" if (for_insert or ch.replace) else "+="
+                new_link = for_insert or ch.replace
+                assign_op = ":=" if new_link else "+="
 
                 if ch.added_props:
                     assert ch.props_info
@@ -1219,7 +1223,10 @@ class SaveExecutor:
                         for k in ch.props_info
                     }
 
-                    tuple_subt = [arg_casts[k][0] for k in ch.props_info]
+                    tuple_subt = [
+                        f"tuple<std::bool, {arg_casts[k][0]}>"
+                        for k in ch.props_info
+                    ]
 
                     for addo, addp in zip(
                         ch.added, ch.added_props, strict=True
@@ -1228,7 +1235,7 @@ class SaveExecutor:
                             (
                                 self._get_id(addo),
                                 *(
-                                    arg_casts[k][2](addp[k])
+                                    (k in addp, arg_casts[k][2](addp.get(k)))
                                     for k in ch.props_info
                                 ),
                             )
@@ -1239,20 +1246,70 @@ class SaveExecutor:
                         link_args,
                     )
 
-                    lp_assign = ", ".join(
-                        f"@{quote_ident(p)} := "
-                        f"{arg_casts[p][1](f'__tup.{i + 1}')}"
-                        for i, p in enumerate(ch.props_info)
-                    )
+                    if new_link:
+                        lp_assign = ", ".join(
+                            f"@{quote_ident(p)} := "
+                            f"{arg_casts[p][1](f'__tup.{i + 1}.1')}"
+                            for i, p in enumerate(ch.props_info)
+                        )
 
-                    shape_parts.append(
-                        f"{quote_ident(ch.name)} {assign_op} "
-                        f"assert_distinct(("
-                        f"for __tup in array_unpack({arg}) union ("
-                        f"select (<{ch.info.typexpr}>__tup.0) {{ "
-                        f"{lp_assign}"
-                        f"}})))"
-                    )
+                        shape_parts.append(
+                            f"{quote_ident(ch.name)} {assign_op} "
+                            f"assert_distinct(("
+                            f"for __tup in std::array_unpack({arg}) union ("
+                            f"select (<{ch.info.typexpr}>__tup.0) {{ "
+                            f"{lp_assign}"
+                            f"}})))"
+                        )
+                    else:
+                        lps_to_select_shape = ",".join(
+                            # There appears to be a bug wit cardinality
+                            # inference here, so we force the cardibality
+                            # to be multi to be forward compatible with Gel
+                            # versions that fix the bug
+                            f"std::array_agg(__m@{quote_ident(k)})"
+                            for k in ch.props_info
+                        )
+
+                        lp_assign_reload = ", ".join(
+                            f"""
+                                @{quote_ident(p)} :=
+                                (
+                                    {arg_casts[p][1](f"__tup.{i + 1}.1")}
+                                    if __tup.{i + 1}.0 else
+                                    (
+                                        select std::array_unpack(__lprops.{i})
+                                        limit 1
+                                    )
+                                )
+                            """
+                            for i, p in enumerate(ch.props_info)
+                        )
+
+                        # Re `__lprops` below -- currently this is just about
+                        # the only way to "load" existing link properties on
+                        # the link and use them later.  We do that to support
+                        # "partial" updates to link props -- when only one
+                        # changed other should stay as is.
+                        shape_parts.append(
+                            f"""
+                            {quote_ident(ch.name)} {assign_op}
+                            assert_distinct((
+                                for __tup in array_unpack({arg}) union (
+                                    with __lprops := (
+                                        for __m in .{quote_ident(ch.name)}
+                                        select (
+                                            {lps_to_select_shape},
+                                        )
+                                        filter __m.id = __tup.0
+                                    )
+                                    select (<{ch.info.typexpr}>__tup.0) {{
+                                        {lp_assign_reload}
+                                    }}
+                                )
+                            ))
+                            """
+                        )
 
                 else:
                     arg = add_arg(
@@ -1263,7 +1320,7 @@ class SaveExecutor:
                     shape_parts.append(
                         f"{quote_ident(ch.name)} {assign_op} "
                         f"assert_distinct("
-                        f"<{ch.info.typexpr}>array_unpack({arg})"
+                        f"<{ch.info.typexpr}>std::array_unpack({arg})"
                         f")"
                     )
 
@@ -1276,8 +1333,6 @@ class SaveExecutor:
 
             else:
                 raise TypeError(f"unknown model change {type(ch).__name__}")
-
-        q_type_name = quote_ident(type_name)
 
         shape = ", ".join(shape_parts)
         query: str
@@ -1316,7 +1371,7 @@ class SaveExecutor:
             multi_query = f"""
                 with __query := (
                     with __all_data := <array<tuple<{",".join(args_types)}>>>$0
-                    for __data in array_unpack(__all_data) union (
+                    for __data in std::array_unpack(__all_data) union (
                         ({query})
                     )
                 ) select __query{select_shape}
@@ -1324,7 +1379,7 @@ class SaveExecutor:
 
             args_query = f"""
                 with __all_data := <array<tuple<{",".join(args_types)}>>>$0
-                select count(array_unpack(__all_data))
+                select std::count(std::array_unpack(__all_data))
             """
 
         else:
@@ -1341,7 +1396,7 @@ class SaveExecutor:
             multi_query = f"""
                 with __query := (
                     with __all_data := <array<int64>>$0
-                    for __data in array_unpack(__all_data) union (
+                    for __data in std::array_unpack(__all_data) union (
                         ({query})
                     )
                 ) select __query{select_shape}
