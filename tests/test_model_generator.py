@@ -1102,7 +1102,9 @@ class TestModelGenerator(tb.ModelTestCase):
         t.opt_friend = u
 
         # Assignment of a different ProxyModel is an error
-        with self.assertRaisesRegex(ValueError, "cannot assign"):
+        with self.assertRaisesRegex(
+            ValueError, "satisfy Python type system restrictions"
+        ):
             t.opt_wprop_friend = default.TestSingleLinks.req_wprop_friend.link(  # type: ignore [assignment]
                 u, strength=123
             )
@@ -1660,7 +1662,8 @@ class TestModelGenerator(tb.ModelTestCase):
 
         with self.assertRaisesRegex(
             ValueError,
-            r"cannot assign",
+            r"(?s)is expected to satisfy Python type system.*"
+            r"models.default.TestSingleLinks.opt_wprop_friend.link\(\)",
         ):
             t.opt_wprop_friend = u1  # type: ignore [assignment]
 

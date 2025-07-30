@@ -391,6 +391,31 @@ class _AnyLink(Generic[_MT_co, _BMT_co]):
         # defer to Pydantic
         return mt.model_validate(value)  # type: ignore [no-any-return]
 
+    @classmethod
+    def _validate_link_prop_target(
+        cls,
+        value: Any,
+        generic_args: tuple[type[Any], type[Any]],
+    ) -> None:
+        if isinstance(value, generic_args[1]) and not isinstance(
+            value, generic_args[0]
+        ):
+            link_meth_name = ".".join(
+                (
+                    generic_args[1].__module__,
+                    generic_args[0].__qualname__.replace(".__links__.", "."),
+                    "link",
+                )
+            )
+            raise ValueError(
+                f"object is an instance of {generic_args[1].__qualname__!r} "
+                f"but an instance of {generic_args[0].__qualname__!r} "
+                f"is expected to satisfy Python type "
+                f"system restrictions.\n\n"
+                f"Use `{link_meth_name}()` to wrap your object for this link."
+                f"\n\n"
+            )
+
 
 class _Link(
     _AnyLink[_MT_co, _BMT_co],
@@ -426,10 +451,38 @@ class _OptionalLink(
         return super()._validate(value, generic_args)
 
 
+class _OptionalLinkWithProps(
+    _OptionalLink[_MT_co, _BMT_co],
+):
+    @classmethod
+    def _validate(
+        cls,
+        value: Any,
+        generic_args: tuple[type[Any], type[Any]],
+    ) -> _MT_co | None:
+        if value is None:
+            return None
+        cls._validate_link_prop_target(value, generic_args)
+        return super()._validate(value, generic_args)
+
+
+class _RequiredLinkWithProps(
+    _Link[_MT_co, _BMT_co],
+):
+    @classmethod
+    def _validate(
+        cls,
+        value: Any,
+        generic_args: tuple[type[Any], type[Any]],
+    ) -> _MT_co | None:
+        cls._validate_link_prop_target(value, generic_args)
+        return super()._validate(value, generic_args)
+
+
 RequiredLinkWithProps = TypeAliasType(
     "RequiredLinkWithProps",
     Annotated[
-        _Link[_MT_co, _BMT_co],
+        _RequiredLinkWithProps[_MT_co, _BMT_co],
         _abstract.PointerInfo(
             cardinality=_edgeql.Cardinality.One,
             kind=_edgeql.PointerKind.Link,
@@ -517,7 +570,7 @@ OptionalComputedLink = TypeAliasType(
 OptionalLinkWithProps = TypeAliasType(
     "OptionalLinkWithProps",
     Annotated[
-        _OptionalLink[_PT_co, _MT_co],
+        _OptionalLinkWithProps[_PT_co, _MT_co],
         pydantic.Field(default=None),
         _abstract.PointerInfo(
             cardinality=_edgeql.Cardinality.AtMostOne,
