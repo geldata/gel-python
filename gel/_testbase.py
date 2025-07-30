@@ -521,12 +521,13 @@ class DatabaseTestCase(ClusterTestCase, ConnectedTestCaseMixin):
                 f"{os.getpid()}_{type(self).__name__}_{self._testMethodName}"
             )
             testdb = "_" + hashlib.sha1(testdb.encode()).hexdigest()
+            self.__testdb__ = testdb
 
-            cls.__client__.query(f"""
+            cls.admin_client.query(f"""
                 create data branch {testdb} from {root};
             """)
-            cls.client = cls.make_test_client(database=testdb)
-            cls.client.ensure_connected()
+            self.client = cls.make_test_client(database=testdb)
+            self.client.ensure_connected()
 
         if self.SETUP_METHOD:
             self.adapt_call(self.client.execute(self.SETUP_METHOD))
@@ -550,9 +551,12 @@ class DatabaseTestCase(ClusterTestCase, ConnectedTestCaseMixin):
 
             finally:
                 if self.ISOLATED_TEST_BRANCHES:
-                    cls = type(self)
-                    cls.client.close()
-                    cls.client = cls.__client__
+                    self.client.terminate()
+                    self.client = None
+
+                    type(self).admin_client.query(f"""
+                        drop branch {self.__testdb__};
+                    """)
 
                 super().tearDown()
 
@@ -571,7 +575,7 @@ class DatabaseTestCase(ClusterTestCase, ConnectedTestCaseMixin):
             cls.admin_client = cls.make_test_client()
             cls.adapt_call(cls.admin_client.execute(script))
 
-        cls.__client__ = cls.client = cls.make_test_client(database=dbname)
+        cls.client = cls.make_test_client(database=dbname)
         cls.server_version = cls.adapt_call(
             cls.client.query_required_single("""
                 select sys::get_version()
@@ -670,10 +674,7 @@ class DatabaseTestCase(ClusterTestCase, ConnectedTestCaseMixin):
                 cls.adapt_call(cls.client.execute(script))
         finally:
             try:
-                if cls.is_client_async:
-                    cls.adapt_call(cls.client.aclose())
-                else:
-                    cls.client.close()
+                cls.client.terminate()
 
                 dbname = cls.get_database_name()
                 script = f"DROP DATABASE {dbname};"
@@ -1077,9 +1078,10 @@ class TestModel(ModelTestCase):
     if typing.TYPE_CHECKING:
     {
         "      client: typing.ClassVar[gel.AsyncIOClient] = "
-        "gel.create_async_client()"
+        "gel.create_async_client()  # type: ignore[misc]"
         if is_async
-        else "       client: typing.ClassVar[gel.Client] = gel.create_client()"
+        else "       client: typing.ClassVar[gel.Client] = "
+        "gel.create_client()  # type: ignore[misc]"
     }
 
     {"async " if is_async else ""}def {wrapped.__name__}(self) -> None:
