@@ -1147,7 +1147,7 @@ class SaveExecutor:
         if obj.__gel_new__:
             return self.object_ids[id(obj)]
         else:
-            return obj.id
+            return obj.id  # type: ignore [no-any-return]
 
     def _compile_change(
         self, change: ModelChange, /, *, for_insert: bool

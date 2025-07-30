@@ -789,7 +789,7 @@ class BaseGeneratedModule:
                 COMMENT,
                 BASE_IMPL,
                 code_preamble=(
-                    '__gel_default_variant__ = "Default"'
+                    '__gel_default_shape__ = "Default"'
                     if self._schema_part is reflection.SchemaPart.USER
                     else None
                 ),
@@ -3685,9 +3685,54 @@ class GeneratedSchemaModule(BaseGeneratedModule):
 
         builtin_shapes = frozenset({"Base", *id_shapes, *ptr_shapes})
 
+        def write_id_attr(
+            objtype: reflection.ObjectType,
+            id_variant: str,
+        ) -> None:
+            id_ptr = objtype.get_pointer("id")
+            ptr_type = self.get_ptr_type(
+                objtype,
+                id_ptr,
+                cardinality=(
+                    reflection.Cardinality.AtMostOne
+                    if id_variant == "OptionalId"
+                    else reflection.Cardinality.One
+                ),
+            )
+            self._write_model_attribute(id_ptr.name, ptr_type)
+
+        def write_id_computed(
+            objtype: reflection.ObjectType,
+        ) -> None:
+            id_ptr = objtype.get_pointer("id")
+            ptr_type = self.get_ptr_type(
+                objtype,
+                id_ptr,
+                style="arg",
+            )
+            computed_field = self.import_name(BASE_IMPL, "computed_field")
+            computed_field_ignore = self.format_type_ignore(
+                ("prop-decorator", "unused-ignore")
+            )
+            attribute_error = self.import_name("builtins", "AttributeError")
+            with self._property_def(
+                "id",
+                return_type=ptr_type,
+                decorators=(f"{computed_field}  # {computed_field_ignore}",),
+            ):
+                self.write("try:")
+                with self.indented():
+                    self.write(
+                        'return self.__dict__["id"]  '
+                        "# type: ignore [no-any-return]"
+                    )
+                self.write("except KeyError:")
+                with self.indented():
+                    self.write(f'raise {attribute_error}("id") from None')
+
         class_r_kwargs = {
             "__gel_type_id__": f"{uuid}(int={objtype.uuid.int})",
-            "__gel_variant__": '"Base"',
+            "__gel_shape__": '"RequiredId"',
         }
         with self._class_def(
             name,
@@ -3697,7 +3742,9 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             if not base_types:
                 with self.not_type_checking():
                     self.write(f"__gel_type_class__ = __{name}_ops__")
-            self._write_base_object_type_body(objtype, default_shape_class)
+            if objtype.name == "std::BaseObject":
+                write_id_attr(objtype, "RequiredId")
+            self._write_base_object_type_body(objtype)
             with self.type_checking():
                 self._write_object_type_qb_methods(objtype)
             self.write()
@@ -3734,9 +3781,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                     class_kwargs=class_kwargs,
                     variant_bases=(),
                 ):
-                    self._write_base_object_type_body(
-                        objtype, default_shape_class
-                    )
+                    self._write_base_object_type_body(objtype)
                     with self.type_checking():
                         self._write_object_type_qb_methods(objtype)
 
@@ -3747,7 +3792,13 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                         static_bases=[],
                         class_kwargs=class_kwargs,
                     ):
-                        self.write("pass")
+                        if objtype.name == "std::BaseObject":
+                            if id_variant == "NoId":
+                                write_id_computed(objtype)
+                            else:
+                                write_id_attr(objtype, id_variant)
+                        else:
+                            self.write("pass")
 
                 for variant_name, (
                     filters,
@@ -3805,7 +3856,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
 
         self.write()
         with self.not_type_checking():
-            self.write(f"{name}.__shapes__.Base = {name}")
+            self.write(f"{name}.__shapes__.RequiredId = {name}")
 
         if name in builtin_shapes:
             # alias classes that conflict with variant types
@@ -3840,7 +3891,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         with self._class_def(
             variant,
             bases,
-            class_kwargs=class_kwargs | {"__gel_variant__": f'"{variant}"'},
+            class_kwargs=class_kwargs | {"__gel_shape__": f'"{variant}"'},
             line_comment=line_comment,
         ):
             yield
@@ -4083,7 +4134,6 @@ class GeneratedSchemaModule(BaseGeneratedModule):
     def _write_base_object_type_body(
         self,
         objtype: reflection.ObjectType,
-        fields_class: str,
     ) -> None:
         if objtype.name == "std::BaseObject":
             gmm = self.import_name(BASE_IMPL, "GelModelMeta")
@@ -4104,11 +4154,6 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                             "return actualcls.__gel_reflection__.object"
                             "  # type: ignore [attr-defined, no-any-return]"
                         )
-                elif ptr.name == "id":
-                    priv_type = self.import_name("uuid", "UUID")
-                    ptr_type = self.get_ptr_type(objtype, ptr)
-                    desc = self.import_name(BASE_IMPL, "IdProperty")
-                    self.write(f"id: {desc}[{ptr_type}, {priv_type}]")
                 self.write()
 
         with self.type_checking():
@@ -4458,7 +4503,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             class_kwargs=(
                 {}
                 if self._schema_part is reflection.SchemaPart.USER
-                else {"__gel_variant__": '"Default"'}
+                else {"__gel_shape__": '"Default"'}
             ),
         ):
             self.write(f'"""type {objtype.name}"""')
