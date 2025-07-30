@@ -487,17 +487,14 @@ def make_plan(objs: Iterable[GelModel]) -> SavePlan:
 
         for prop in pointers:
             # Skip computeds, we can't update them.
-            if prop.computed:
+            if prop.computed or prop.readonly:
+                # Exclude computeds but also props like `__type__` and `id`
                 continue
 
             # Iterate through changes of *propertes* and *single links*.
             if prop.name in field_changes:
                 # Since there was a change and we don't implement `del`,
                 # the attribute must be set
-
-                if prop.name == "id":
-                    # id is special, we don't need to track it
-                    continue
 
                 val = getattr(obj, prop.name)
                 if (
@@ -626,6 +623,37 @@ def make_plan(objs: Iterable[GelModel]) -> SavePlan:
                         ),
                     )
                     continue
+
+            if (
+                prop.kind is PointerKind.Link
+                and not prop.cardinality.is_multi()
+                and prop.properties
+            ):
+                val = getattr(obj, prop.name, _unset)
+                if val is _unset:
+                    continue
+                assert isinstance(val, ProxyModel)
+                lprops = val.__linkprops__
+                if not lprops.__gel_changed_fields__:
+                    continue
+
+                # Single link with link properties has some of
+                # them updated (the linked object itself isn't modified
+                # or we'd handle that earlier)
+
+                ptrs = get_pointers(type(val).__linkprops__)
+                props = {p.name: getattr(lprops, p.name, None) for p in ptrs}
+
+                sch = SingleLinkChange(
+                    name=prop.name,
+                    info=prop,
+                    target=unwrap_proxy(val),
+                    props=props,
+                    props_info={p.name: p for p in ptrs},
+                )
+
+                push_change(requireds, sched, sch)
+                continue
 
             if (
                 prop.kind is not PointerKind.Link
