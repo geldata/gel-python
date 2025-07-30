@@ -127,11 +127,14 @@ class AbstractCodeGenerator:
                                 f"{C.BLUE}{no + 1:>{left}} | {C.ENDC}"
                                 f"{line.rstrip()}"
                             )
-                            l = max(0, start - offset)
-                            r = min(llen - l, end - offset - l)
+                            n_spaces = max(0, start - offset)
+                            mark_len = min(
+                                llen - n_spaces, end - offset - n_spaces
+                            )
                             self.print_msg(
                                 f"{'':>{left}}{C.BLUE} | {C.ENDC}"
-                                f"{'':>{l}}{C.FAIL}{'':^>{r}}{C.ENDC}"
+                                f"{'':>{n_spaces}}"
+                                f"{C.FAIL}{'':^>{mark_len}}{C.ENDC}"
                             )
                             if offset < end < offset + llen:
                                 break
