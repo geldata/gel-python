@@ -246,6 +246,13 @@ class ObjectType(InheritingType):
     compound_type: bool
     pointers: tuple[Pointer, ...]
 
+    def get_pointer(self, name: str) -> Pointer:
+        for ptr in self.pointers:
+            if ptr.name == name:
+                return ptr
+
+        raise LookupError(f"object type {self.name} has no pointer {name}")
+
 
 class CollectionType(Type):
     @functools.cached_property

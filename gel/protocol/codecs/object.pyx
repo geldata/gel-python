@@ -401,10 +401,14 @@ cdef class ObjectCodec(BaseNamedRecordCodec):
                 subs.append(None)
                 dlists.append(None)
                 origins.append(return_type)
-            elif name in {"__tname__", "__tid__"}:
+            elif name == "__tid__":
                 subs.append(None)
                 dlists.append(None)
                 self.cached_tid_index = i
+                origins.append(return_type)
+            elif name in {"__tname__", "id"}:
+                subs.append(None)
+                dlists.append(None)
                 origins.append(return_type)
             else:
                 origin = return_type
