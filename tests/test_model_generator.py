@@ -3429,6 +3429,57 @@ class TestModelGenerator(tb.ModelTestCase):
             }
         )
 
+    @tb.typecheck
+    def test_modelgen_save_45(self):
+        # Test link props on single links -- specifically that we support:
+        #
+        # - detecting a change to link props when the linked object
+        #   itself isn't changed
+        #
+
+        import json
+        from typing import Any
+        from models import default
+
+        def check(expected: Any) -> None:
+            res = self.client.query_required_single_json("""
+                select StackableLoot {
+                    owner: {
+                        @count,
+                        @bonus,
+                        name,
+                    }
+                }
+                filter .name = "bbb"
+            """)
+            self.assertEqual(json.loads(res), expected)
+
+        ####################
+
+        a = self.client.get(default.User.filter(name="Alice"))
+
+        self.client.save(
+            default.StackableLoot(
+                name="bbb",
+                owner=default.StackableLoot.owner.link(a, count=123),
+            )
+        )
+
+        check({"owner": {"name": "Alice", "@count": 123, "@bonus": None}})
+
+        ####################
+
+        t = self.client.get(
+            default.StackableLoot.select(name=True, owner=True).filter(
+                name="bbb"
+            )
+        )
+        assert t.owner is not None
+        t.owner.__linkprops__.bonus = True
+        self.client.save(t)
+
+        check({"owner": {"name": "Alice", "@count": 123, "@bonus": True}})
+
     def test_modelgen_write_only_dlist_errors(self):
         # Test that reading operations on write-only dlists raise
         # RuntimeError
