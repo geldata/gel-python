@@ -24,6 +24,7 @@ import atexit
 import contextlib
 import functools
 import gc
+import hashlib
 import importlib.util
 import inspect
 import json
@@ -515,7 +516,12 @@ class DatabaseTestCase(ClusterTestCase, ConnectedTestCaseMixin):
         if self.ISOLATED_TEST_BRANCHES:
             cls = type(self)
             root = cls.get_database_name()
-            testdb = self._testMethodName[:MAX_BRANCH_NAME_LEN]
+
+            testdb = (
+                f"{os.getpid()}_{type(self).__name__}_{self._testMethodName}"
+            )
+            testdb = "_" + hashlib.sha1(testdb.encode()).hexdigest()
+
             cls.__client__.query(f"""
                 create data branch {testdb} from {root};
             """)
