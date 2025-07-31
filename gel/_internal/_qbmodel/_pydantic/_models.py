@@ -856,10 +856,11 @@ class GelModel(
 ):
     __slots__ = ()
 
-    __gel_has_id_field__ = True
+    __gel_has_id_field__: ClassVar[bool] = True
 
     if TYPE_CHECKING:
         id: uuid.UUID
+        __gel_new__: bool
         __gel_custom_serializer__: ClassVar[pydantic_core.SchemaSerializer]
 
     def __new__(
