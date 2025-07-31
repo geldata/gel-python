@@ -3455,6 +3455,7 @@ class TestModelGenerator(tb.ModelTestCase):
             self.assertEqual(json.loads(res), expected)
 
         ####################
+        # Test creating new object with a link with some link props
 
         a = self.client.get(default.User.filter(name="Alice"))
 
@@ -3468,6 +3469,7 @@ class TestModelGenerator(tb.ModelTestCase):
         check({"owner": {"name": "Alice", "@count": 123, "@bonus": None}})
 
         ####################
+        # Test updating just one link prop
 
         t = self.client.get(
             default.StackableLoot.select(name=True, owner=True).filter(
@@ -3479,6 +3481,22 @@ class TestModelGenerator(tb.ModelTestCase):
         self.client.save(t)
 
         check({"owner": {"name": "Alice", "@count": 123, "@bonus": True}})
+
+        ####################
+        # Test rewriting the whole link
+
+        t = self.client.get(
+            default.StackableLoot.select(name=True, owner=True).filter(
+                name="bbb"
+            )
+        )
+        assert t.owner is not None
+        t.owner = default.StackableLoot.owner.link(
+            a, count=424242, bonus=False
+        )
+        self.client.save(t)
+
+        check({"owner": {"name": "Alice", "@count": 424242, "@bonus": False}})
 
     def test_modelgen_write_only_dlist_errors(self):
         # Test that reading operations on write-only dlists raise
