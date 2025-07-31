@@ -60,6 +60,8 @@ from gel.orm.django.generator import ModelGenerator as DjangoModGen
 
 log = logging.getLogger(__name__)
 
+_unset = object()
+
 
 @contextlib.contextmanager
 def silence_asyncio_long_exec_warning():
@@ -801,9 +803,7 @@ class ModelTestCase(SyncQueryTestCase):
     def assertPydanticSerializes(
         self,
         model: pydantic.BaseModel,
-        expected: typing.Any,
-        *,
-        test_roundtrip: bool = True,
+        expected: typing.Any = _unset,
     ) -> None:
         context = {}
         try:
@@ -814,11 +814,16 @@ class ModelTestCase(SyncQueryTestCase):
             else:
                 raise
 
-        self.assertEqual(pop_ids(model.model_dump(context=context)), expected)
-        self.assertEqual(
-            json.loads(pop_ids_json(model.model_dump_json(context=context))),
-            expected,
-        )
+        if expected is not _unset:
+            self.assertEqual(
+                pop_ids(model.model_dump(context=context)), expected
+            )
+            self.assertEqual(
+                json.loads(
+                    pop_ids_json(model.model_dump_json(context=context))
+                ),
+                expected,
+            )
 
         # Test that these two don't fail.
         model.model_json_schema(mode="serialization")

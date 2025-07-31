@@ -3879,7 +3879,6 @@ class TestModelGenerator(tb.ModelTestCase):
         ks2 = self.client.get(default.KitchenSink.filter(str="hello world"))
         self.assertEqual(ks2.p_opt_str, "silly goose")
 
-    @tb.xfail
     @tb.typecheck(["import datetime as dt", "from gel import Range"])
     def test_modelgen_save_range_01(self):
         from models import default
@@ -3918,7 +3917,9 @@ class TestModelGenerator(tb.ModelTestCase):
             Range(dt.date(2025, 1, 6), dt.date(2025, 2, 17)),
         )
 
-    @tb.xfail
+        self.assertPydanticSerializes(r)
+        self.assertPydanticSerializes(r2)
+
     @tb.typecheck(["import datetime as dt", "from gel import Range"])
     def test_modelgen_save_range_02(self):
         from models import default
