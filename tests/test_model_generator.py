@@ -1370,6 +1370,18 @@ class TestModelGenerator(tb.ModelTestCase):
             ),
         )
 
+    def test_modelgen_pydantic_apis_16(self):
+        # just check that this type-checks
+        # https://github.com/geldata/gel-python/issues/744
+
+        from gel.models.pydantic import GelModel
+        from typing import TypeVar, Any
+
+        T = TypeVar("T", bound=GelModel)
+
+        def select_everything(model: type[T]) -> Any:
+            return model.select("*")
+
     def test_modelgen_data_unpack_polymorphic(self):
         from models import default
 

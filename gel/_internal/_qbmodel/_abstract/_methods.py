@@ -39,7 +39,12 @@ class BaseGelModel(AbstractGelModel):
     if TYPE_CHECKING:
 
         @classmethod
-        def select(cls, /, **kwargs: Any) -> type[Self]: ...
+        def select(
+            cls,
+            /,
+            *elements: _qb.PathAlias | Literal["*"],
+            **kwargs: Any,
+        ) -> type[Self]: ...
 
         @classmethod
         def update(cls, /, **kwargs: Any) -> type[Self]: ...
