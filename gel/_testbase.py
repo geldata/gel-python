@@ -1042,7 +1042,7 @@ def gen_lock_key():
     return os.getpid() * 1000 + _lock_cnt
 
 
-def _typecheck(func, imports=None, *, xfail=False):
+def _typecheck(func, *, xfail=False):
     wrapped = inspect.unwrap(func)
     is_async = inspect.iscoroutinefunction(wrapped)
 
@@ -1059,12 +1059,6 @@ def _typecheck(func, imports=None, *, xfail=False):
     source_code = "\n".join(lines[body_offset + 1 :])
     dedented_body = textwrap.dedent(source_code)
 
-    if imports is None:
-        imports = ("from models import default, std",)
-    else:
-        imports = (*imports, "import models as m")
-
-    add_imports = "\n".join(imports)
     source_code = f"""\
 import unittest
 import typing
@@ -1072,8 +1066,6 @@ import typing
 import gel
 
 from gel._testbase import ModelTestCase
-
-{add_imports}
 
 if not typing.TYPE_CHECKING:
     def reveal_type(_: typing.Any) -> str:
@@ -1187,25 +1179,8 @@ class TestModel(ModelTestCase):
 
 
 def typecheck(arg):
-    if callable(arg):
-        return _typecheck(arg)
-    else:
-
-        def decorator(func):
-            return _typecheck(func, arg)
-
-        return decorator
-
-
-def typecheck_xfail(arg):
-    if callable(arg):
-        return _typecheck(arg, xfail=True)
-    else:
-
-        def decorator(func):
-            return _typecheck(func, arg, xfail=True)
-
-        return decorator
+    # Please don't add arguments to this decorator, thank you.
+    return _typecheck(arg)
 
 
 def must_fail(f):

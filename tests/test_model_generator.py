@@ -18,7 +18,6 @@
 
 from __future__ import annotations
 
-import datetime as dt
 import json
 import os
 import pathlib
@@ -29,12 +28,10 @@ import tempfile
 import typing
 import unittest
 
-import pydantic
 
 if typing.TYPE_CHECKING:
     from typing import reveal_type
 
-from gel import MultiRange, Range, errors
 from gel import _testbase as tb
 from gel._internal import _dirdiff
 from gel._internal import _typing_inspect
@@ -530,8 +527,9 @@ class TestModelGenerator(tb.ModelTestCase):
         run_test(user_loaded, UserUpdate(name="Alice A."), new=False)
         run_test(user_new, UserUpdate(name="Bob B."), new=True)
 
-    @tb.typecheck(["import json"])
+    @tb.typecheck
     def test_modelgen_pydantic_apis_02(self):
+        import json
         from models import default
 
         user_loaded = self.client.get(
@@ -626,11 +624,12 @@ class TestModelGenerator(tb.ModelTestCase):
             ),
         )
 
-    @tb.typecheck(["import typing, json"])
+    @tb.typecheck
     def test_modelgen_pydantic_apis_03(self):
         # Test model_dump() and model_dump_json() on ProxyModel linked
         # via a single link.
 
+        import json
         from models import default
         from gel._testbase import pop_ids, pop_ids_json
 
@@ -737,11 +736,12 @@ class TestModelGenerator(tb.ModelTestCase):
             },
         )
 
-    @tb.typecheck(["import typing, json"])
+    @tb.typecheck
     def test_modelgen_pydantic_apis_04(self):
         # Test model_dump() and model_dump_json() on ProxyModel linked
         # via a multi link.
 
+        import json
         from models import default
         from gel._testbase import pop_ids, pop_ids_json
 
@@ -1005,7 +1005,7 @@ class TestModelGenerator(tb.ModelTestCase):
                 type(v_before).__name__, type(v_after).__name__, attr
             )
 
-    @tb.typecheck(["import typing, json"])
+    @tb.typecheck
     def test_modelgen_pydantic_apis_09(self):
         # Test model_dump() and model_dump_json() on models;
         # test nested serialization -- that it doesn't crash on
@@ -1041,11 +1041,12 @@ class TestModelGenerator(tb.ModelTestCase):
         }
         self.assertPydanticSerializes(ug, expected)
 
-    @tb.typecheck(["import typing, json, pydantic"])
+    @tb.typecheck
     def test_modelgen_pydantic_apis_10(self):
         # Test model_dump() and model_dump_json() on models;
         # test *single required* link serialization
 
+        import pydantic
         from models import default
 
         p = self.client.get(
@@ -1069,7 +1070,7 @@ class TestModelGenerator(tb.ModelTestCase):
         }
         self.assertPydanticSerializes(p, expected)
 
-    @tb.typecheck(["import typing, json, pydantic"])
+    @tb.typecheck
     def test_modelgen_pydantic_apis_11(self):
         # Test model_dump() and model_dump_json() on models;
         # test *single required* link serialization in all combinations
@@ -1261,7 +1262,7 @@ class TestModelGenerator(tb.ModelTestCase):
             },
         )
 
-    @tb.typecheck(["import typing, json, pydantic"])
+    @tb.typecheck
     def test_modelgen_pydantic_apis_12(self):
         import uuid
         from models import default
@@ -2730,8 +2731,9 @@ class TestModelGenerator(tb.ModelTestCase):
         ):
             p.members.extend([a])
 
-    @tb.typecheck(["from gel import errors"])
+    @tb.typecheck
     def test_modelgen_save_30(self):
+        from gel import errors
         from models import default
 
         a = self.client.get(default.User.filter(name="Alice"))
@@ -3885,8 +3887,10 @@ class TestModelGenerator(tb.ModelTestCase):
         ks2 = self.client.get(default.KitchenSink.filter(str="hello world"))
         self.assertEqual(ks2.p_opt_str, "silly goose")
 
-    @tb.typecheck(["import datetime as dt", "from gel import Range"])
+    @tb.typecheck
     def test_modelgen_save_range_01(self):
+        import datetime as dt
+        from gel import Range
         from models import default
 
         r = self.client.get(default.RangeTest.filter(name="test range"))
@@ -3926,8 +3930,10 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertPydanticSerializes(r)
         self.assertPydanticSerializes(r2)
 
-    @tb.typecheck(["import datetime as dt", "from gel import Range"])
+    @tb.typecheck
     def test_modelgen_save_range_02(self):
+        import datetime as dt
+        from gel import Range
         from models import default
 
         r = default.RangeTest(
@@ -3953,10 +3959,10 @@ class TestModelGenerator(tb.ModelTestCase):
             Range(dt.date(2025, 3, 4), dt.date(2025, 11, 21)),
         )
 
-    @tb.typecheck(
-        ["import datetime as dt", "from gel import MultiRange, Range"]
-    )
+    @tb.typecheck
     def test_modelgen_save_multirange_01(self):
+        import datetime as dt
+        from gel import MultiRange, Range
         from models import default
 
         r = self.client.get(
@@ -4014,10 +4020,10 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertPydanticSerializes(r)
         self.assertPydanticSerializes(r2)
 
-    @tb.typecheck(
-        ["import datetime as dt", "from gel import MultiRange, Range"]
-    )
+    @tb.typecheck
     def test_modelgen_save_multirange_02(self):
+        import datetime as dt
+        from gel import MultiRange, Range
         from models import default
 
         r = default.MultiRangeTest(
