@@ -82,67 +82,105 @@ class AbstractCodeGenerator:
             self._quiet = args.quiet
 
     def _apply_env_config(self) -> None:
-        config_str = os.getenv("GEL_GENERATE_CONFIG")
-        if not config_str:
+        """
+        Apply environment configuration.
+
+        _GEL_PROJECT_MANIFEST is a JSON string from the Gel CLI in the form:
+        {
+            "generate-config": {
+                "no_cache": {
+                    "value": true,
+                    "span": [<start>, <end>]
+                },
+                "some_other_config": {
+                    "value": ...,
+                    "span": [<start>, <end>]
+                }
+            },
+            "manifest-path": "path/to/gel.toml"
+        }
+        """
+        manifest_str = os.getenv("_GEL_PROJECT_MANIFEST")
+        if not manifest_str:
             return
-        config = json.loads(config_str)
+        manifest = json.loads(manifest_str)
+        if not isinstance(manifest, dict):
+            raise ValueError("_GEL_PROJECT_MANIFEST must be a JSON object")
+        config = manifest.get("generate-config")
+        if not config:
+            return
         if not isinstance(config, dict):
-            raise ValueError("GEL_GENERATE_CONFIG must be a JSON object")
+            raise ValueError("generate-config must be a JSON object")
         for key, value in config.items():
             if not isinstance(value, dict):
                 raise ValueError(
-                    f"Invalid GEL_GENERATE_CONFIG value for {key!r}: "
+                    f"Invalid generate-config value for {key!r}: "
                     f"expected a JSON object, got {type(value).__name__}"
                 )
             m = getattr(self, f"_apply_env_{key}", None)
             if m is None:
-                self.print_msg(
-                    f"{C.WARNING}Skipping unknown environment config: "
-                    f"{key}{C.ENDC}"
-                )
+                if not self._quiet:
+                    self.print_msg(
+                        f"{C.WARNING}Skipping unknown environment config: "
+                        f"{key}{C.ENDC}"
+                    )
                 continue
             try:
                 m(value["value"])
             except ValueError as e:
                 span = value.get("span")
-                src = os.getenv("GEL_TOML_CONTENT")
-                if span and src:
-                    self.print_error(f"{type(e).__name__}: {e}")
-                    start, end = span
-                    marking = False
-                    lines = src.splitlines(keepends=True)
-                    left = len(str(len(lines))) + 1
-                    offset = 0
-                    for no, line in enumerate(lines):
-                        llen = len(line.encode("utf8"))
-                        if not marking and offset < start < offset + llen:
-                            self.print_msg(
-                                f"{'':>{left}}{C.BLUE}-->{C.ENDC} "
-                                f"gel.toml:{no + 1}:{start - offset + 1}"
-                            )
-                            self.print_msg(f"{'':>{left}}{C.BLUE} |{C.ENDC}")
-                            marking = True
-                        if marking:
-                            self.print_msg(
-                                f"{C.BLUE}{no + 1:>{left}} | {C.ENDC}"
-                                f"{line.rstrip()}"
-                            )
-                            n_spaces = max(0, start - offset)
-                            mark_len = min(
-                                llen - n_spaces, end - offset - n_spaces
-                            )
-                            self.print_msg(
-                                f"{'':>{left}}{C.BLUE} | {C.ENDC}"
-                                f"{'':>{n_spaces}}"
-                                f"{C.FAIL}{'':^>{mark_len}}{C.ENDC}"
-                            )
-                            if offset < end < offset + llen:
-                                break
-                        offset += llen
-                    self.print_msg(f"{'':>{left}}{C.BLUE} |{C.ENDC}")
-                    sys.exit(22)
+                path = manifest.get("manifest-path")
+                if span and path:
+                    try:
+                        self._print_env_config_error(e, path, span)
+                    except Exception as print_err:
+                        raise RuntimeError(
+                            "Failed to print error of environment config"
+                        ) from print_err
                 else:
                     raise
+
+    def _print_env_config_error(
+        self, error: ValueError, path: Any, span: Any
+    ) -> typing.NoReturn:
+        self.print_error(f"{type(error).__name__}: {error}")
+        if self._quiet:
+            sys.exit(22)
+        if not isinstance(path, str):
+            raise ValueError("manifest-path must be a string")
+        start, end = span
+        if not isinstance(start, int) or not isinstance(end, int):
+            raise ValueError("span must be a list of two integers")
+        src = pathlib.Path(path).read_text(encoding="utf8")
+        marking = False
+        lines = src.splitlines(keepends=True)
+        left = len(str(len(lines))) + 1
+        offset = 0
+        for no, line in enumerate(lines):
+            llen = len(line.encode("utf8"))
+            if not marking and offset < start < offset + llen:
+                self.print_msg(
+                    f"{'':>{left}}{C.BLUE}-->{C.ENDC} "
+                    f"gel.toml:{no + 1}:{start - offset + 1}"
+                )
+                self.print_msg(f"{'':>{left}}{C.BLUE} |{C.ENDC}")
+                marking = True
+            if marking:
+                self.print_msg(
+                    f"{C.BLUE}{no + 1:>{left}} | {C.ENDC}{line.rstrip()}"
+                )
+                n_spaces = max(0, start - offset)
+                mark_len = min(llen - n_spaces, end - offset - n_spaces)
+                self.print_msg(
+                    f"{'':>{left}}{C.BLUE} | {C.ENDC}"
+                    f"{'':>{n_spaces}}"
+                    f"{C.FAIL}{'':^>{mark_len}}{C.ENDC}"
+                )
+                if offset < end < offset + llen:
+                    break
+            offset += llen
+        self.print_msg(f"{'':>{left}}{C.BLUE} |{C.ENDC}")
+        sys.exit(22)
 
     def _apply_env_no_cache(self, value: Any) -> None:
         if not isinstance(value, bool):
