@@ -457,7 +457,7 @@ class MultiLinkDescriptor(AnyLinkDescriptor[_MT_co, _BMT_co]):
         def __set__(
             self,
             instance: Any,
-            value: Sequence[_MT_co],
+            value: Sequence[_MT_co | _BMT_co],
             /,
         ) -> None: ...
 
@@ -639,6 +639,6 @@ class MultiLinkWithPropsDescriptor(MultiLinkDescriptor[_PT_co, _BMT_co]):
         def __set__(
             self,
             instance: Any,
-            value: Sequence[_PT_co],
+            value: Sequence[_PT_co | _BMT_co],
             /,
         ) -> None: ...
