@@ -94,9 +94,7 @@ class SingleLinkChange(BaseFieldChange):
         assert not isinstance(self.target, ProxyModel)
         assert not self.info.cardinality.is_multi()
         assert (self.props_info is None and self.props is None) or (
-            self.props_info is not None
-            and self.props is not None
-            and self.props_info.keys() == self.props.keys()
+            self.props_info is not None and self.props is not None
         )
 
 
@@ -521,7 +519,7 @@ def make_plan(objs: Iterable[GelModel]) -> SavePlan:
                     prop.kind is PointerKind.Link
                     and not prop.cardinality.is_multi()
                 ):
-                    # Single link.
+                    # Single link got overwritten with a new value.
                     #
                     # (Multi links are more complicated
                     # as they can be changed without being picked up by
@@ -637,12 +635,13 @@ def make_plan(objs: Iterable[GelModel]) -> SavePlan:
                 if not lprops.__gel_changed_fields__:
                     continue
 
-                # Single link with link properties has some of
-                # them updated (the linked object itself isn't modified
-                # or we'd handle that earlier)
+                # An existing single link has updated link props.
 
                 ptrs = get_pointers(type(val).__linkprops__)
-                props = {p.name: getattr(lprops, p.name, None) for p in ptrs}
+                props = {
+                    p: getattr(lprops, p, None)
+                    for p in lprops.__gel_get_changed_fields__()
+                }
 
                 sch = SingleLinkChange(
                     name=prop.name,
@@ -784,8 +783,7 @@ def make_plan(objs: Iterable[GelModel]) -> SavePlan:
                         for p in (
                             ll_attr(
                                 link, "__linkprops__"
-                            ).__gel_changed_fields__
-                            or ()
+                            ).__gel_get_changed_fields__()
                         )
                     }
                     for link in cast("list[ProxyModel[GelModel]]", added)
@@ -1178,30 +1176,111 @@ class SaveExecutor:
                         for k in ch.props_info
                     }
 
-                    sl_subt = [arg_casts[k][0] for k in ch.props_info]
+                    if ch.props.keys() == ch.props_info.keys() or for_insert:
+                        # Simple case -- we overwrite all link props
 
-                    sl_args = [
-                        tid,
-                        *(arg_casts[k][2](ch.props[k]) for k in ch.props_info),
-                    ]
+                        sl_subt = [arg_casts[k][0] for k in ch.props_info]
 
-                    arg = add_arg(
-                        f"tuple<std::uuid, {','.join(sl_subt)}>",
-                        sl_args,
-                    )
+                        sl_args = [
+                            tid,
+                            *(
+                                arg_casts[k][2](ch.props[k])
+                                for k in ch.props_info
+                            ),
+                        ]
 
-                    subq_shape = [
-                        f"@{quote_ident(pname)} := "
-                        f"{arg_casts[pname][1](f'{arg}.{i}')}"
-                        for i, pname in enumerate(ch.props_info, 1)
-                    ]
+                        arg = add_arg(
+                            f"tuple<std::uuid, {','.join(sl_subt)}>",
+                            sl_args,
+                        )
 
-                    shape_parts.append(
-                        f"{quote_ident(ch.name)} := "
-                        f"(select (<{linked_name}>{arg}.0) {{ "
-                        f"  {', '.join(subq_shape)}"
-                        f"}})"
-                    )
+                        subq_shape = [
+                            f"@{quote_ident(pname)} := "
+                            f"{arg_casts[pname][1](f'{arg}.{i}')}"
+                            for i, pname in enumerate(ch.props_info, 1)
+                        ]
+
+                        shape_parts.append(
+                            f"{quote_ident(ch.name)} := "
+                            f"(select (<{linked_name}>{arg}.0) {{ "
+                            f"  {', '.join(subq_shape)}"
+                            f"}})"
+                        )
+
+                    else:
+                        # Harder case -- we update *some* props, meaning
+                        # that those props that we don't update must retain
+                        # their set value in the DB.
+
+                        sl_subt = [
+                            f"tuple<std::bool, {arg_casts[k][0]}>"
+                            for k in ch.props_info
+                        ]
+
+                        sl_args = [
+                            tid,
+                            *(
+                                (
+                                    k in ch.props,
+                                    arg_casts[k][2](ch.props.get(k)),
+                                )
+                                for k in ch.props_info
+                            ),
+                        ]
+
+                        arg = add_arg(
+                            f"tuple<std::uuid, {','.join(sl_subt)}>",
+                            sl_args,
+                        )
+
+                        lps_to_select_shape = ",".join(
+                            f"__{quote_ident(k)} := "
+                            f"std::array_agg(@{quote_ident(k)})"
+                            for k in ch.props_info
+                        )
+
+                        lps_to_select_shape_tup = ",".join(
+                            f"__m.{quote_ident(ch.name)}.__{quote_ident(k)}"
+                            for k in ch.props_info
+                        )
+
+                        lp_assign_reload = ", ".join(
+                            f"""
+                                @{quote_ident(p)} :=
+                                (
+                                    {arg_casts[p][1](f"{arg}.{i + 1}.1")}
+                                    if {arg}.{i + 1}.0 else
+                                    (
+                                        select std::array_unpack(__lprops.{i})
+                                        limit 1
+                                    )
+                                )
+                            """
+                            for i, p in enumerate(ch.props_info)
+                        )
+
+                        shape_parts.append(
+                            f"""
+                                {quote_ident(ch.name)} :=
+                                (
+                                    with __lprops := (
+                                        with __m := (
+                                            select {q_type_name} {{
+                                                {quote_ident(ch.name)}: {{
+                                                    {lps_to_select_shape}
+                                                }} filter .id = {arg}.0
+                                            }}
+                                        )
+                                        select (
+                                            {lps_to_select_shape_tup},
+                                        )
+                                    )
+                                    select (<{linked_name}>{arg}.0) {{
+                                        {lp_assign_reload}
+                                    }}
+                                )
+                            """
+                        )
 
                 else:
                     if ch.info.cardinality.is_optional():
@@ -1291,10 +1370,6 @@ class SaveExecutor:
                         )
                     else:
                         lps_to_select_shape = ",".join(
-                            # There appears to be a bug wit cardinality
-                            # inference here, so we force the cardibality
-                            # to be multi to be forward compatible with Gel
-                            # versions that fix the bug
                             f"std::array_agg(__m@{quote_ident(k)})"
                             for k in ch.props_info
                         )
