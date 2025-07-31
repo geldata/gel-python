@@ -657,9 +657,12 @@ class Client(
         *objs: GelModel,
         refetch: bool = True,
     ) -> None:
+        opts = self._get_debug_options()
+
         make_executor = make_save_executor_constructor(
             objs,
             refetch=refetch,
+            save_postcheck=opts.save_postcheck,
         )
 
         for tx in self._batch():
