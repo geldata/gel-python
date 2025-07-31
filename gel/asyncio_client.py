@@ -490,7 +490,12 @@ class AsyncIOBatchIteration(transaction.BaseTransaction):
         finally:
             self._locked = False
 
-    async def send_query(self, query: str, *args: Any, **kwargs: Any) -> None:
+    async def send_query(
+        self,
+        query: str | abstract.Queryable[Any],
+        *args: Any,
+        **kwargs: Any,
+    ) -> None:
         self._batched_ops.append(
             abstract.QueryContext(
                 query=abstract.QueryWithArgs(query, None, args, kwargs),
@@ -504,7 +509,10 @@ class AsyncIOBatchIteration(transaction.BaseTransaction):
         )
 
     async def send_query_single(
-        self, query: str, *args: Any, **kwargs: Any
+        self,
+        query: str | abstract.Queryable[Any],
+        *args: Any,
+        **kwargs: Any,
     ) -> None:
         self._batched_ops.append(
             abstract.QuerySingleContext(
@@ -519,7 +527,10 @@ class AsyncIOBatchIteration(transaction.BaseTransaction):
         )
 
     async def send_query_required_single(
-        self, query: str, *args: Any, **kwargs: Any
+        self,
+        query: str | abstract.Queryable[Any],
+        *args: Any,
+        **kwargs: Any,
     ) -> None:
         self._batched_ops.append(
             abstract.QueryRequiredSingleContext(
@@ -622,8 +633,15 @@ class AsyncIOClient(
             )
         )
 
-    async def save(self, *objs: GelModel) -> None:
-        make_executor = make_save_executor_constructor(objs)
+    async def save(
+        self,
+        *objs: GelModel,
+        refetch: bool = True,
+    ) -> None:
+        make_executor = make_save_executor_constructor(
+            objs,
+            refetch=refetch,
+        )
 
         async for tx in self._batch():
             async with tx:
@@ -634,7 +652,7 @@ class AsyncIOClient(
                         await tx.send_query(batch.query, batch.args)
                     batch_ids = await tx.wait()
                     for ids, batch in zip(batch_ids, batches, strict=True):
-                        batch.feed_ids(ids)
+                        batch.feed_db_data(ids)
 
                 executor.commit()
 

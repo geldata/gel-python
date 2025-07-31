@@ -459,7 +459,13 @@ def _process_pydantic_fields(
         elif fdef_is_desc:
             # ... is a special Pydantic marker meaning "the field is required
             # but has no default"
-            overrides["default"] = ...
+            has_factory = any(
+                fi.default_factory is not None for fi in field_infos
+            )
+            is_ptr_optional = ptr is not None and ptr.cardinality.is_optional()
+            overrides["default"] = (
+                None if is_ptr_optional and not has_factory else ...
+            )
 
         if (
             cls.__gel_variant__ is None
@@ -631,7 +637,7 @@ class GelSourceModel(
             self = super().model_construct(_fields_set, id=id, **values)
 
         if cls.__gel_has_id_field__:
-            cls.__gel_new__ = id is UNSET_UUID
+            self.__gel_new__ = id is UNSET_UUID
 
         __dict__ = self.__dict__
 

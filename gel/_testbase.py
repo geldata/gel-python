@@ -24,6 +24,7 @@ import atexit
 import contextlib
 import functools
 import gc
+import hashlib
 import importlib.util
 import inspect
 import json
@@ -39,6 +40,7 @@ import sys
 import tempfile
 import textwrap
 import time
+import types
 import typing
 import unittest
 import warnings
@@ -58,6 +60,8 @@ from gel.orm.django.generator import ModelGenerator as DjangoModGen
 
 
 log = logging.getLogger(__name__)
+
+_unset = object()
 
 
 @contextlib.contextmanager
@@ -515,12 +519,18 @@ class DatabaseTestCase(ClusterTestCase, ConnectedTestCaseMixin):
         if self.ISOLATED_TEST_BRANCHES:
             cls = type(self)
             root = cls.get_database_name()
-            testdb = self._testMethodName[:MAX_BRANCH_NAME_LEN]
-            cls.__client__.query(f"""
+
+            testdb = (
+                f"{os.getpid()}_{type(self).__name__}_{self._testMethodName}"
+            )
+            testdb = "_" + hashlib.sha1(testdb.encode()).hexdigest()
+            self.__testdb__ = testdb
+
+            cls.admin_client.query(f"""
                 create data branch {testdb} from {root};
             """)
-            cls.client = cls.make_test_client(database=testdb)
-            cls.client.ensure_connected()
+            self.client = cls.make_test_client(database=testdb)
+            self.client.ensure_connected()
 
         if self.SETUP_METHOD:
             self.adapt_call(self.client.execute(self.SETUP_METHOD))
@@ -544,9 +554,12 @@ class DatabaseTestCase(ClusterTestCase, ConnectedTestCaseMixin):
 
             finally:
                 if self.ISOLATED_TEST_BRANCHES:
-                    cls = type(self)
-                    cls.client.close()
-                    cls.client = cls.__client__
+                    self.client.terminate()
+                    self.client = None
+
+                    type(self).admin_client.query(f"""
+                        drop branch {self.__testdb__};
+                    """)
 
                 super().tearDown()
 
@@ -565,7 +578,7 @@ class DatabaseTestCase(ClusterTestCase, ConnectedTestCaseMixin):
             cls.admin_client = cls.make_test_client()
             cls.adapt_call(cls.admin_client.execute(script))
 
-        cls.__client__ = cls.client = cls.make_test_client(database=dbname)
+        cls.client = cls.make_test_client(database=dbname)
         cls.server_version = cls.adapt_call(
             cls.client.query_required_single("""
                 select sys::get_version()
@@ -664,10 +677,7 @@ class DatabaseTestCase(ClusterTestCase, ConnectedTestCaseMixin):
                 cls.adapt_call(cls.client.execute(script))
         finally:
             try:
-                if cls.is_client_async:
-                    cls.adapt_call(cls.client.aclose())
-                else:
-                    cls.client.close()
+                cls.client.terminate()
 
                 dbname = cls.get_database_name()
                 script = f"DROP DATABASE {dbname};"
@@ -772,6 +782,28 @@ class ModelTestCase(SyncQueryTestCase):
             if not cls.orm_debug:
                 cls.tmp_model_dir.cleanup()
 
+    def assertScalarsEqual(
+        self,
+        tname: str,
+        name: str,
+        prop: str,
+    ) -> None:
+        self.assertTrue(
+            self.client.query_single(f"""
+                with
+                    A := assert_single((
+                        select {tname}
+                        filter .name = 'hello world'
+                    )),
+                    B := assert_single((
+                        select {tname}
+                        filter .name = {name!r}
+                    )),
+                select A.{prop} = B.{prop}
+            """),
+            f"property {prop!r} value does not match",
+        )
+
     def assertPydanticChangedFields(
         self,
         model: pydantic.BaseModel,
@@ -794,9 +826,7 @@ class ModelTestCase(SyncQueryTestCase):
     def assertPydanticSerializes(
         self,
         model: pydantic.BaseModel,
-        expected: typing.Any,
-        *,
-        test_roundtrip: bool = True,
+        expected: typing.Any = _unset,
     ) -> None:
         context = {}
         try:
@@ -807,11 +837,16 @@ class ModelTestCase(SyncQueryTestCase):
             else:
                 raise
 
-        self.assertEqual(pop_ids(model.model_dump(context=context)), expected)
-        self.assertEqual(
-            json.loads(pop_ids_json(model.model_dump_json(context=context))),
-            expected,
-        )
+        if expected is not _unset:
+            self.assertEqual(
+                pop_ids(model.model_dump(context=context)), expected
+            )
+            self.assertEqual(
+                json.loads(
+                    pop_ids_json(model.model_dump_json(context=context))
+                ),
+                expected,
+            )
 
         # Test that these two don't fail.
         model.model_json_schema(mode="serialization")
@@ -1030,7 +1065,7 @@ def gen_lock_key():
     return os.getpid() * 1000 + _lock_cnt
 
 
-def _typecheck(func, imports=None, *, xfail=False):
+def _typecheck(func, *, xfail=False):
     wrapped = inspect.unwrap(func)
     is_async = inspect.iscoroutinefunction(wrapped)
 
@@ -1047,12 +1082,6 @@ def _typecheck(func, imports=None, *, xfail=False):
     source_code = "\n".join(lines[body_offset + 1 :])
     dedented_body = textwrap.dedent(source_code)
 
-    if imports is None:
-        imports = ("from models import default, std",)
-    else:
-        imports = (*imports, "import models as m")
-
-    add_imports = "\n".join(imports)
     source_code = f"""\
 import unittest
 import typing
@@ -1060,8 +1089,6 @@ import typing
 import gel
 
 from gel._testbase import ModelTestCase
-
-{add_imports}
 
 if not typing.TYPE_CHECKING:
     def reveal_type(_: typing.Any) -> str:
@@ -1071,9 +1098,10 @@ class TestModel(ModelTestCase):
     if typing.TYPE_CHECKING:
     {
         "      client: typing.ClassVar[gel.AsyncIOClient] = "
-        "gel.create_async_client()"
+        "gel.create_async_client()  # type: ignore[misc]"
         if is_async
-        else "       client: typing.ClassVar[gel.Client] = gel.create_client()"
+        else "       client: typing.ClassVar[gel.Client] = "
+        "gel.create_client()  # type: ignore[misc]"
     }
 
     {"async " if is_async else ""}def {wrapped.__name__}(self) -> None:
@@ -1174,25 +1202,48 @@ class TestModel(ModelTestCase):
 
 
 def typecheck(arg):
-    if callable(arg):
+    """Type-check one test of the entire test cases class.
+
+    This is designed to type check unit tests that work with reflected Gel
+    schemas and the query builder APIs.
+    """
+    # Please don't add arguments to this decorator, thank you.
+    if isinstance(arg, type):
+        for func in arg.__dict__.values():
+            if not isinstance(func, types.FunctionType):
+                continue
+            if not func.__name__.startswith("test_"):
+                continue
+            new_func = typecheck(func)
+            setattr(arg, func.__name__, new_func)
+        return arg
+    else:
+        assert isinstance(arg, types.FunctionType)
+        if hasattr(arg, "_typecheck_skipped"):
+            return arg
         return _typecheck(arg)
-    else:
-
-        def decorator(func):
-            return _typecheck(func, arg)
-
-        return decorator
 
 
-def typecheck_xfail(arg):
-    if callable(arg):
-        return _typecheck(arg, xfail=True)
-    else:
+def skip_typecheck(arg):
+    """Explicitly opt out the decorated test from being type-checked.
 
-        def decorator(func):
-            return _typecheck(func, arg, xfail=True)
+    Example:
 
-        return decorator
+        @tb.typecheck                                 # type-check all tests...
+        class TestModelGenerator(tb.ModelTestCase):
+
+            @tb.skip_typecheck                        # ...but this one
+            def test_foo(self):
+                ...
+
+
+    Use it for tests where the test isn't testing the typesefety of the public
+    API, but rather performs some other kind of testing. @typecheck is designed
+    to test the reflected schema and the query builder APIs, everything else
+    is the job of the IDE's and CI's type-checkers.
+    """
+    assert isinstance(arg, types.FunctionType)
+    arg._typecheck_skipped = True
 
 
 def must_fail(f):
