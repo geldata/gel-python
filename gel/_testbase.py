@@ -40,6 +40,7 @@ import sys
 import tempfile
 import textwrap
 import time
+import types
 import typing
 import unittest
 import warnings
@@ -781,6 +782,28 @@ class ModelTestCase(SyncQueryTestCase):
             if not cls.orm_debug:
                 cls.tmp_model_dir.cleanup()
 
+    def assertScalarsEqual(
+        self,
+        tname: str,
+        name: str,
+        prop: str,
+    ) -> None:
+        self.assertTrue(
+            self.client.query_single(f"""
+                with
+                    A := assert_single((
+                        select {tname}
+                        filter .name = 'hello world'
+                    )),
+                    B := assert_single((
+                        select {tname}
+                        filter .name = {name!r}
+                    )),
+                select A.{prop} = B.{prop}
+            """),
+            f"property {prop!r} value does not match",
+        )
+
     def assertPydanticChangedFields(
         self,
         model: pydantic.BaseModel,
@@ -1179,8 +1202,48 @@ class TestModel(ModelTestCase):
 
 
 def typecheck(arg):
+    """Type-check one test of the entire test cases class.
+
+    This is designed to type check unit tests that work with reflected Gel
+    schemas and the query builder APIs.
+    """
     # Please don't add arguments to this decorator, thank you.
-    return _typecheck(arg)
+    if isinstance(arg, type):
+        for func in arg.__dict__.values():
+            if not isinstance(func, types.FunctionType):
+                continue
+            if not func.__name__.startswith("test_"):
+                continue
+            new_func = typecheck(func)
+            setattr(arg, func.__name__, new_func)
+        return arg
+    else:
+        assert isinstance(arg, types.FunctionType)
+        if hasattr(arg, "_typecheck_skipped"):
+            return arg
+        return _typecheck(arg)
+
+
+def skip_typecheck(arg):
+    """Explicitly opt out the decorated test from being type-checked.
+
+    Example:
+
+        @tb.typecheck                                 # type-check all tests...
+        class TestModelGenerator(tb.ModelTestCase):
+
+            @tb.skip_typecheck                        # ...but this one
+            def test_foo(self):
+                ...
+
+
+    Use it for tests where the test isn't testing the typesefety of the public
+    API, but rather performs some other kind of testing. @typecheck is designed
+    to test the reflected schema and the query builder APIs, everything else
+    is the job of the IDE's and CI's type-checkers.
+    """
+    assert isinstance(arg, types.FunctionType)
+    arg._typecheck_skipped = True
 
 
 def must_fail(f):

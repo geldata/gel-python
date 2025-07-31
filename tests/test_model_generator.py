@@ -18,7 +18,6 @@
 
 from __future__ import annotations
 
-import json
 import os
 import pathlib
 import shutil
@@ -51,6 +50,7 @@ class MockPointer(typing.NamedTuple):
     properties: dict[str, MockPointer] | None
 
 
+@tb.typecheck
 class TestModelGenerator(tb.ModelTestCase):
     SCHEMA = os.path.join(os.path.dirname(__file__), "dbsetup", "orm.gel")
 
@@ -143,31 +143,12 @@ class TestModelGenerator(tb.ModelTestCase):
                     f"{p.type!r} != {e.type!r}",
                 )
 
-    def assert_scalars_equal(self, tname, name, prop):
-        self.assertTrue(
-            self.client.query_single(f"""
-                with
-                    A := assert_single((
-                        select {tname}
-                        filter .name = 'hello world'
-                    )),
-                    B := assert_single((
-                        select {tname}
-                        filter .name = {name!r}
-                    )),
-                select A.{prop} = B.{prop}
-            """),
-            f"property {prop} value does not match",
-        )
-
-    @tb.must_fail
-    @tb.typecheck
+    @tb.must_fail  # this test ensures that @typecheck is working
     def test_modelgen__smoke_test(self):
         from models import default
 
         self.assertEqual(reveal_type(default.User.groups), "this must fail")
 
-    @tb.typecheck
     def test_modelgen_01(self):
         from models import default
 
@@ -188,7 +169,6 @@ class TestModelGenerator(tb.ModelTestCase):
             "builtins.tuple[models.default.UserGroup, ...]",
         )
 
-    @tb.typecheck
     def test_modelgen_02(self):
         from models import default
 
@@ -215,7 +195,6 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertTrue(a == t2.members[0])
         self.assertTrue(t.members[0] == t2.members[0])
 
-    @tb.typecheck
     def test_modelgen_03(self):
         from models import default
 
@@ -227,7 +206,6 @@ class TestModelGenerator(tb.ModelTestCase):
         ):
             default.Team.members.link(m, rank=1)
 
-    @tb.typecheck
     def test_modelgen_04(self):
         from models import default
 
@@ -236,7 +214,6 @@ class TestModelGenerator(tb.ModelTestCase):
         ):
             set([default.User(name="Xavier")])
 
-    @tb.typecheck
     def test_modelgen_05(self):
         from models import default
 
@@ -245,7 +222,6 @@ class TestModelGenerator(tb.ModelTestCase):
         ):
             set([default.Team.members.link(default.User(name="Xavier"))])
 
-    @tb.typecheck
     def test_modelgen_data_unpack_1a(self):
         import gel
         from models import default
@@ -276,7 +252,6 @@ class TestModelGenerator(tb.ModelTestCase):
         sys.version_info < (3, 11),
         "dispatch_overload currently broken under Python 3.10",
     )
-    @tb.typecheck
     def test_modelgen_data_unpack_1b(self):
         from models import default, std
 
@@ -304,7 +279,6 @@ class TestModelGenerator(tb.ModelTestCase):
 
         self.assertEqual(d.author.name, "Alice")
 
-    @tb.typecheck
     def test_modelgen_data_unpack_1c(self):
         from models import default, std
 
@@ -341,7 +315,6 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertIsInstance(d, default.User)
         self.assertEqual(d.posts, 2)
 
-    @tb.typecheck
     def test_modelgen_data_unpack_2(self):
         from models import default
 
@@ -349,7 +322,6 @@ class TestModelGenerator(tb.ModelTestCase):
         d = self.client.query(q)[0]
         self.assertIsInstance(d, default.Post)
 
-    @tb.typecheck
     def test_modelgen_data_unpack_3(self):
         from models import default
 
@@ -399,7 +371,6 @@ class TestModelGenerator(tb.ModelTestCase):
         ):
             post.xxx = 123
 
-    @tb.typecheck
     def test_modelgen_data_unpack_4(self):
         from models import default
 
@@ -412,7 +383,6 @@ class TestModelGenerator(tb.ModelTestCase):
         with self.assertRaisesRegex(AttributeError, r".body. is not set"):
             d.body
 
-    @tb.typecheck
     def test_modelgen_pdlist_parametrized(self):
         from models import default
         from gel._internal._qbmodel._abstract import (
@@ -426,7 +396,6 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertIs(pl.type, default.GameSession.__links__.players)
         self.assertIs(pl.basetype, default.User)
 
-    @tb.typecheck
     def test_modelgen_data_init_unfetched_link(self):
         from gel._internal._qbmodel._abstract import (
             AbstractDistinctList,
@@ -455,7 +424,6 @@ class TestModelGenerator(tb.ModelTestCase):
 
         self.assertEqual(ug2.id, ug.id)
 
-    @tb.typecheck
     def test_modelgen_pydantic_apis_01(self):
         # regression test for https://github.com/geldata/gel-python/issues/722
 
@@ -527,7 +495,6 @@ class TestModelGenerator(tb.ModelTestCase):
         run_test(user_loaded, UserUpdate(name="Alice A."), new=False)
         run_test(user_new, UserUpdate(name="Bob B."), new=True)
 
-    @tb.typecheck
     def test_modelgen_pydantic_apis_02(self):
         import json
         from models import default
@@ -624,7 +591,6 @@ class TestModelGenerator(tb.ModelTestCase):
             ),
         )
 
-    @tb.typecheck
     def test_modelgen_pydantic_apis_03(self):
         # Test model_dump() and model_dump_json() on ProxyModel linked
         # via a single link.
@@ -736,7 +702,6 @@ class TestModelGenerator(tb.ModelTestCase):
             },
         )
 
-    @tb.typecheck
     def test_modelgen_pydantic_apis_04(self):
         # Test model_dump() and model_dump_json() on ProxyModel linked
         # via a multi link.
@@ -801,7 +766,6 @@ class TestModelGenerator(tb.ModelTestCase):
             expected,
         )
 
-    @tb.typecheck
     def test_modelgen_pydantic_apis_05(self):
         # Test pickling a nested model that has a multi link with link props.
 
@@ -854,7 +818,6 @@ class TestModelGenerator(tb.ModelTestCase):
 
         self.assertIsInstance(sl2.players, type(sl.players))
 
-    @tb.typecheck
     def test_modelgen_pydantic_apis_06(self):
         # Test pickling a nested model that has a single link with link props.
 
@@ -910,7 +873,6 @@ class TestModelGenerator(tb.ModelTestCase):
 
         self.assertIsInstance(sl2.owner, type(sl.owner))
 
-    @tb.typecheck
     def test_modelgen_pydantic_apis_07(self):
         # Test pickling a nested model that has a multi link.
 
@@ -970,7 +932,6 @@ class TestModelGenerator(tb.ModelTestCase):
 
         self.assertIsInstance(sl2.users, type(sl.users))
 
-    @tb.typecheck
     def test_modelgen_pydantic_apis_08(self):
         # Test pickling a model that has a multi prop.
 
@@ -1005,7 +966,6 @@ class TestModelGenerator(tb.ModelTestCase):
                 type(v_before).__name__, type(v_after).__name__, attr
             )
 
-    @tb.typecheck
     def test_modelgen_pydantic_apis_09(self):
         # Test model_dump() and model_dump_json() on models;
         # test nested serialization -- that it doesn't crash on
@@ -1041,7 +1001,6 @@ class TestModelGenerator(tb.ModelTestCase):
         }
         self.assertPydanticSerializes(ug, expected)
 
-    @tb.typecheck
     def test_modelgen_pydantic_apis_10(self):
         # Test model_dump() and model_dump_json() on models;
         # test *single required* link serialization
@@ -1070,7 +1029,6 @@ class TestModelGenerator(tb.ModelTestCase):
         }
         self.assertPydanticSerializes(p, expected)
 
-    @tb.typecheck
     def test_modelgen_pydantic_apis_11(self):
         # Test model_dump() and model_dump_json() on models;
         # test *single required* link serialization in all combinations
@@ -1262,7 +1220,6 @@ class TestModelGenerator(tb.ModelTestCase):
             },
         )
 
-    @tb.typecheck
     def test_modelgen_pydantic_apis_12(self):
         import uuid
         from models import default
@@ -1286,7 +1243,6 @@ class TestModelGenerator(tb.ModelTestCase):
 
     @unittest.skipIf(sys.platform == "win32", "crashes")
     @tb.xfail
-    # @tb.typecheck
     def test_modelgen_pydantic_apis_13(self):
         # https://github.com/geldata/gel-python/issues/785
 
@@ -1376,6 +1332,7 @@ class TestModelGenerator(tb.ModelTestCase):
         # when the actual model_dump() is called on a non-GelModel
         # pydantic model.
 
+        import json
         import pydantic
         from models import default
         from gel._testbase import pop_ids, pop_ids_json
@@ -1413,7 +1370,6 @@ class TestModelGenerator(tb.ModelTestCase):
             ),
         )
 
-    @tb.typecheck
     def test_modelgen_data_unpack_polymorphic(self):
         from models import default
 
@@ -1426,7 +1382,6 @@ class TestModelGenerator(tb.ModelTestCase):
             if isinstance(item, default.UserGroup):
                 self.assertIsNotNone(item.mascot)
 
-    @tb.typecheck
     def test_modelgen_assert_single(self):
         from models import default
 
@@ -1445,7 +1400,6 @@ class TestModelGenerator(tb.ModelTestCase):
             )
             self.client.query(q)
 
-    @tb.typecheck
     def test_modelgen_submodules_and_reexports(self):
         import models
 
@@ -1457,7 +1411,6 @@ class TestModelGenerator(tb.ModelTestCase):
             "type[models.default.Post]",
         )
 
-    @tb.typecheck
     def test_modelgen_typed_query_expr(self):
         import gel
         import models
@@ -1486,7 +1439,6 @@ class TestModelGenerator(tb.ModelTestCase):
 
         self.assertEqual(p[0].id, p_expected.id)
 
-    @tb.typecheck
     def test_modelgen_query_methods_on_instances(self):
         import models
 
@@ -1508,7 +1460,6 @@ class TestModelGenerator(tb.ModelTestCase):
             ):
                 getattr(d, method)
 
-    @tb.typecheck
     def test_modelgen_data_model_validation_1(self):
         from typing import cast
 
@@ -1615,7 +1566,6 @@ class TestModelGenerator(tb.ModelTestCase):
         ):
             u.name_len = cast(std.int64, 123)  # type: ignore[assignment]
 
-    @tb.typecheck
     def test_modelgen_data_model_validation_2(self):
         from models import default
 
@@ -1668,7 +1618,6 @@ class TestModelGenerator(tb.ModelTestCase):
         ):
             t.opt_wprop_friend = u1  # type: ignore [assignment]
 
-    @tb.typecheck
     def test_modelgen_save_01(self):
         from models import default
 
@@ -1736,7 +1685,6 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(p2.alice.name, "Alice the 5th")
         self.assertEqual(p2.new_alice.name, "New Alice")
 
-    @tb.typecheck
     def test_modelgen_save_02(self):
         import uuid
 
@@ -1769,7 +1717,6 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(m.name, "John Smith")
         self.assertEqual(m.nickname, "Hannibal")
 
-    @tb.typecheck
     def test_modelgen_save_03(self):
         from models import default
         # insert an object with a required multi: no link props, more than one
@@ -1820,7 +1767,6 @@ class TestModelGenerator(tb.ModelTestCase):
             self.assertEqual(m.name, name)
             self.assertEqual(m.nickname, nickname)
 
-    @tb.typecheck
     def test_modelgen_save_04(self):
         from models import default
         # insert an object with a required multi: with link props, one object
@@ -1871,7 +1817,6 @@ class TestModelGenerator(tb.ModelTestCase):
         m = res.members[0]
         self.assertEqual(m.__linkprops__.rank, 2)
 
-    @tb.typecheck
     def test_modelgen_save_05(self):
         from models import default
         # insert an object with a required multi: with link props, more than
@@ -1944,7 +1889,6 @@ class TestModelGenerator(tb.ModelTestCase):
             self.assertEqual(m["@role"], role)
             self.assertEqual(m["@rank"], rank)
 
-    @tb.typecheck
     def test_modelgen_save_06(self):
         from models import default
         # Update object adding multiple existing objects to an exiting link
@@ -1969,7 +1913,6 @@ class TestModelGenerator(tb.ModelTestCase):
         """)
         self.assertEqual(set(res), {"Alice", "Cameron", "Zoe"})
 
-    @tb.typecheck
     def test_modelgen_save_07(self):
         from models import default
         # Update object adding multiple existing objects to an exiting link
@@ -1994,7 +1937,6 @@ class TestModelGenerator(tb.ModelTestCase):
         """)
         self.assertEqual(set(res), {"Alice", "Billie", "Cameron", "Zoe"})
 
-    @tb.typecheck
     def test_modelgen_save_08(self):
         from models import default
         # Update object adding multiple existing objects to an exiting link
@@ -2085,7 +2027,6 @@ class TestModelGenerator(tb.ModelTestCase):
             ],
         )
 
-    @tb.typecheck
     def test_modelgen_save_09(self):
         from models import default
         # Update object removing multiple existing objects from an existing
@@ -2113,7 +2054,6 @@ class TestModelGenerator(tb.ModelTestCase):
         """)
         self.assertEqual(set(res), {"Alice", "Dana"})
 
-    @tb.typecheck
     def test_modelgen_save_10(self):
         from models import default
         # Update object removing multiple existing objects from an existing
@@ -2170,7 +2110,6 @@ class TestModelGenerator(tb.ModelTestCase):
             ],
         )
 
-    @tb.typecheck
     def test_modelgen_save_11(self):
         from models import default
         # Update object adding an existing objecs to an exiting single
@@ -2195,7 +2134,6 @@ class TestModelGenerator(tb.ModelTestCase):
         assert len(res) == 1
         self.assertEqual(res[0].author.name, "Zoe")
 
-    @tb.typecheck
     def test_modelgen_save_12(self):
         from models import default
 
@@ -2239,7 +2177,6 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(img.author.__linkprops__.caption, "cute")
         self.assertEqual(img.author.__linkprops__.year, 2024)
 
-    @tb.typecheck
     def test_modelgen_save_13(self):
         from models import default
         # Update object adding an existing object to an exiting single
@@ -2264,7 +2201,6 @@ class TestModelGenerator(tb.ModelTestCase):
         """)
         self.assertEqual(res.owner.name, "Zoe")
 
-    @tb.typecheck
     def test_modelgen_save_14(self):
         from models import default
         # Update object adding an existing object to an exiting single
@@ -2331,7 +2267,6 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(loot.owner.__linkprops__.count, 56)
         self.assertEqual(loot.owner.__linkprops__.bonus, False)
 
-    @tb.typecheck
     def test_modelgen_save_15(self):
         from models import default
         # insert an object with a required single: no link props, one object
@@ -2353,7 +2288,6 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(res.body, "test post 15")
         self.assertEqual(res.author.name, "Zoe")
 
-    @tb.typecheck
     def test_modelgen_save_16(self):
         from models import default
         # insert an object with a required single: with link props
@@ -2380,7 +2314,6 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(img.author.__linkprops__.caption, "woof!")
         self.assertEqual(img.author.__linkprops__.year, 2000)
 
-    @tb.typecheck
     def test_modelgen_save_17(self):
         from models import default
         # insert an object with an optional single: no link props, one object
@@ -2401,7 +2334,6 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(res.name, "Pony")
         self.assertEqual(res.owner.name, "Zoe")
 
-    @tb.typecheck
     def test_modelgen_save_18(self):
         from models import default
         # insert an object with an optional single: with link props
@@ -2429,7 +2361,6 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(loot.owner.__linkprops__.count, 5)
         self.assertEqual(loot.owner.__linkprops__.bonus, False)
 
-    @tb.typecheck
     def test_modelgen_save_19(self):
         from models import default
         # insert an object with an optional link to self set to self
@@ -2447,7 +2378,6 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(res[0].label, "singleton")
         self.assertEqual(res[0].id, res[0].next.id)
 
-    @tb.typecheck
     def test_modelgen_save_20(self):
         from models import default
         # make a self loop in 2 steps
@@ -2467,7 +2397,6 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(res[0].label, "singleton")
         self.assertEqual(res[0].id, res[0].next.id)
 
-    @tb.typecheck
     def test_modelgen_save_21(self):
         from models import default
         # insert an object with an optional link to self set to self
@@ -2496,7 +2425,6 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(res[2].label, "step 2")
         self.assertEqual(res[2].next.label, "start")
 
-    @tb.typecheck
     def test_modelgen_save_22(self):
         # Test empty object insertion; regression test for
         # https://github.com/geldata/gel-python/issues/720
@@ -2521,7 +2449,6 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(z.pointer.id, x.id)
         self.assertIs(z.pointer, x)
 
-    @tb.typecheck
     def test_modelgen_save_23(self):
         from models import default
 
@@ -2540,7 +2467,6 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(p.id, p2.id)
         self.assertEqual(p.author.id, p2.author.id)
 
-    @tb.typecheck
     def test_modelgen_save_24(self):
         from models import default
 
@@ -2564,7 +2490,6 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(p2.body, "Hello world")
         self.assertEqual(p2.author.name, "Zoe")
 
-    @tb.typecheck
     def test_modelgen_save_25(self):
         from models import default
 
@@ -2588,7 +2513,6 @@ class TestModelGenerator(tb.ModelTestCase):
         )
         self.assertEqual(g2.mascot, "iguana")
 
-    @tb.typecheck
     def test_modelgen_save_26(self):
         from models import default
 
@@ -2610,7 +2534,6 @@ class TestModelGenerator(tb.ModelTestCase):
         ):
             self.client.save(l0, l1)
 
-    @tb.typecheck
     def test_modelgen_save_27(self):
         from models import default
 
@@ -2657,7 +2580,6 @@ class TestModelGenerator(tb.ModelTestCase):
             {("Alice", 1), ("Billie", 2)},
         )
 
-    @tb.typecheck
     def test_modelgen_save_28(self):
         from models import default
 
@@ -2700,7 +2622,6 @@ class TestModelGenerator(tb.ModelTestCase):
             {("Alice", 1), ("Xavier", None)},
         )
 
-    @tb.typecheck
     def test_modelgen_save_29(self):
         from models import default
 
@@ -2731,7 +2652,6 @@ class TestModelGenerator(tb.ModelTestCase):
         ):
             p.members.extend([a])
 
-    @tb.typecheck
     def test_modelgen_save_30(self):
         from gel import errors
         from models import default
@@ -2765,7 +2685,6 @@ class TestModelGenerator(tb.ModelTestCase):
         ):
             self.client.save(p)
 
-    @tb.typecheck
     def test_modelgen_save_31(self):
         # Test that using model_copy with a sparse model updates
         # the target model
@@ -2787,7 +2706,6 @@ class TestModelGenerator(tb.ModelTestCase):
         user2 = self.client.get(default.User.filter(name="Anna").limit(1))
         self.assertEqual(user2.nickname, "Lacey")
 
-    @tb.typecheck
     def test_modelgen_save_32(self):
         # Test updating an existing model
 
@@ -2806,7 +2724,6 @@ class TestModelGenerator(tb.ModelTestCase):
         u2 = self.client.get(default.User.filter(name="Victoria").limit(1))
         self.assertEqual(u2.id, u.id)
 
-    @tb.typecheck
     def test_modelgen_save_33(self):
         # Test linked lists:
         # - they must not be ever overridden (the state tracking must not
@@ -2973,7 +2890,6 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertTrue(g.players.__gel_overwrite_data__)
         self.assertPydanticChangedFields(g, {"num", "public", "players"})
 
-    @tb.typecheck
     def test_modelgen_save_34(self):
         # new User and GameSession objects with players assignment
         # Select data, modify it, check consistency
@@ -3032,7 +2948,6 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(len(g_final.players), 1)
         self.assertEqual(g_final.players[0].name, "TestUser1")
 
-    @tb.typecheck
     def test_modelgen_save_35(self):
         # GameSession with players assignment then clear
         # Select data, modify it, check consistency
@@ -3108,6 +3023,8 @@ class TestModelGenerator(tb.ModelTestCase):
 
         # Override players with new collection
         new_session.players = [elsa, zoe]
+        self.assertIn("ProxyDistinctList", reveal_type(new_session.players))
+
         self.assertEqual(new_session.players._mode, Mode.ReadWrite)
         self.assertTrue(new_session.players.__gel_overwrite_data__)
         self.assertEqual(len(new_session.players), 2)
@@ -3131,7 +3048,6 @@ class TestModelGenerator(tb.ModelTestCase):
             {p.name for p in final_session.players}, {"Elsa", "Zoe"}
         )
 
-    @tb.typecheck
     def test_modelgen_save_37(self):
         # Fetch a GameSession object, save its id.
         # Make a new GameSession instance,
@@ -3184,7 +3100,6 @@ class TestModelGenerator(tb.ModelTestCase):
             [p.name for p in final_session.players], ["Dana", "Elsa", "Zoe"]
         )
 
-    @tb.typecheck
     def test_modelgen_save_38(self):
         # Fetch a GameSession object, save its id. Make a new GameSession
         # instance, pass id and players list to it. Test that save()
@@ -3249,7 +3164,6 @@ class TestModelGenerator(tb.ModelTestCase):
         session = self.client.get(default.GameSession.filter(num=9001))
         self.assertEqual(session.time_limit, None)
 
-    @tb.typecheck
     def test_modelgen_save_40(self):
         from models import default
         from pydantic import BaseModel
@@ -3294,7 +3208,6 @@ class TestModelGenerator(tb.ModelTestCase):
         """)
         self.assertEqual(set(res), {"Cameron", "Zoe"})
 
-    @tb.typecheck
     def test_modelgen_save_41(self):
         """Create and save a model with random UUID"""
         import uuid
@@ -3310,7 +3223,6 @@ class TestModelGenerator(tb.ModelTestCase):
             )
             self.client.save(obj)
 
-    @tb.typecheck
     def test_modelgen_save_42(self):
         from models import default
 
@@ -3319,7 +3231,6 @@ class TestModelGenerator(tb.ModelTestCase):
         default.GameSession.model_construct(num=909, public=False)
         self.client.save(default.GameSession(num=9000))
 
-    @tb.typecheck
     def test_modelgen_save_43(self):
         """Test refetch"""
         from models import default
@@ -3333,7 +3244,6 @@ class TestModelGenerator(tb.ModelTestCase):
         self.client.save(u2, refetch=False)
         self.assertFalse(hasattr(u2, "name_len"))
 
-    @tb.typecheck
     def test_modelgen_save_44(self):
         # Test link props on multi links -- specifically that we support:
         #
@@ -3431,7 +3341,6 @@ class TestModelGenerator(tb.ModelTestCase):
             }
         )
 
-    @tb.typecheck
     def test_modelgen_save_45(self):
         # Test link props on single links -- specifically that we support:
         #
@@ -3500,6 +3409,7 @@ class TestModelGenerator(tb.ModelTestCase):
 
         check({"owner": {"name": "Alice", "@count": 424242, "@bonus": False}})
 
+    @tb.skip_typecheck
     def test_modelgen_write_only_dlist_errors(self):
         # Test that reading operations on write-only dlists raise
         # RuntimeError
@@ -3634,29 +3544,30 @@ class TestModelGenerator(tb.ModelTestCase):
             ],
         )
         self.client.save(s)
-        self.assert_scalars_equal("AssortedScalars", "scalars test 1", "json")
+        self.assertScalarsEqual("AssortedScalars", "scalars test 1", "json")
 
         s.bstr = b"word\x00\x0b"
         self.client.save(s)
-        self.assert_scalars_equal("AssortedScalars", "scalars test 1", "bstr")
+        self.assertScalarsEqual("AssortedScalars", "scalars test 1", "bstr")
 
         s.time = dt.time(20, 13, 45, 678000)
         s.date = dt.date(2025, 1, 26)
         s.ts = dt.datetime(2025, 1, 26, 20, 13, 45, tzinfo=dt.timezone.utc)
         s.lts = dt.datetime(2025, 1, 26, 20, 13, 45)
         self.client.save(s)
-        self.assert_scalars_equal("AssortedScalars", "scalars test 1", "time")
-        self.assert_scalars_equal("AssortedScalars", "scalars test 1", "date")
-        self.assert_scalars_equal("AssortedScalars", "scalars test 1", "ts")
-        self.assert_scalars_equal("AssortedScalars", "scalars test 1", "lts")
+        self.assertScalarsEqual("AssortedScalars", "scalars test 1", "time")
+        self.assertScalarsEqual("AssortedScalars", "scalars test 1", "date")
+        self.assertScalarsEqual("AssortedScalars", "scalars test 1", "ts")
+        self.assertScalarsEqual("AssortedScalars", "scalars test 1", "lts")
 
         s.positive = 123
         self.client.save(s)
-        self.assert_scalars_equal(
+        self.assertScalarsEqual(
             "AssortedScalars", "scalars test 1", "positive"
         )
 
     def test_modelgen_scalars_03(self):
+        import json
         from models import default
 
         # Test deeply nested mixed collections.
@@ -3676,11 +3587,10 @@ class TestModelGenerator(tb.ModelTestCase):
             ),
         ]
         self.client.save(s)
-        self.assert_scalars_equal(
+        self.assertScalarsEqual(
             "AssortedScalars", "scalars test 2", "nested_mixed"
         )
 
-    @tb.typecheck
     def test_modelgen_enum_01(self):
         from models import default
 
@@ -3696,7 +3606,6 @@ class TestModelGenerator(tb.ModelTestCase):
             ],
         )
 
-    @tb.typecheck
     def test_modelgen_enum_02(self):
         from models import default
 
@@ -3718,7 +3627,6 @@ class TestModelGenerator(tb.ModelTestCase):
         e2 = self.client.get(default.EnumTest.filter(name="color test 1"))
         self.assertEqual(e2.color, default.Color.Violet)
 
-    @tb.typecheck
     def test_modelgen_save_collections_01(self):
         from models import default
         # insert an object with an optional single: with link props
@@ -3753,7 +3661,6 @@ class TestModelGenerator(tb.ModelTestCase):
         ks3 = self.client.get(default.KitchenSink.filter(str="coll_test_1"))
         self.assertEqual(sorted(ks3.p_multi_str), ["222", "zzz", "zzz"])
 
-    @tb.typecheck
     def test_modelgen_save_collections_02(self):
         from models import default
 
@@ -3822,7 +3729,6 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(ks5.p_opt_str, "hello again")
         self.assertEqual(ks5.array, ["bye bye"])
 
-    @tb.typecheck
     def test_modelgen_save_collections_03(self):
         from models import default
 
@@ -3843,7 +3749,6 @@ class TestModelGenerator(tb.ModelTestCase):
         ks3 = self.client.get(default.KitchenSink.filter(str="hello world"))
         self.assertEqual(ks3.array, ["bar"])
 
-    @tb.typecheck
     def test_modelgen_save_collections_04(self):
         from models import default
 
@@ -3857,7 +3762,6 @@ class TestModelGenerator(tb.ModelTestCase):
         ks2 = self.client.get(default.KitchenSink.filter(str="hello world"))
         self.assertEqual(sorted(ks2.p_multi_arr), [["bar"]])
 
-    @tb.typecheck
     def test_modelgen_save_collections_05(self):
         from models import default
 
@@ -3871,7 +3775,6 @@ class TestModelGenerator(tb.ModelTestCase):
         ks2 = self.client.get(default.KitchenSink.filter(str="hello world"))
         self.assertEqual(ks2.p_opt_arr, ["silly", "goose"])
 
-    @tb.typecheck
     def test_modelgen_save_collections_06(self):
         from models import default
 
@@ -3887,7 +3790,6 @@ class TestModelGenerator(tb.ModelTestCase):
         ks2 = self.client.get(default.KitchenSink.filter(str="hello world"))
         self.assertEqual(ks2.p_opt_str, "silly goose")
 
-    @tb.typecheck
     def test_modelgen_save_range_01(self):
         import datetime as dt
         from gel import Range
@@ -3930,7 +3832,6 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertPydanticSerializes(r)
         self.assertPydanticSerializes(r2)
 
-    @tb.typecheck
     def test_modelgen_save_range_02(self):
         import datetime as dt
         from gel import Range
@@ -3959,7 +3860,6 @@ class TestModelGenerator(tb.ModelTestCase):
             Range(dt.date(2025, 3, 4), dt.date(2025, 11, 21)),
         )
 
-    @tb.typecheck
     def test_modelgen_save_multirange_01(self):
         import datetime as dt
         from gel import MultiRange, Range
@@ -4020,7 +3920,6 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertPydanticSerializes(r)
         self.assertPydanticSerializes(r2)
 
-    @tb.typecheck
     def test_modelgen_save_multirange_02(self):
         import datetime as dt
         from gel import MultiRange, Range
@@ -4053,7 +3952,6 @@ class TestModelGenerator(tb.ModelTestCase):
             MultiRange([Range(dt.date(2025, 3, 4), dt.date(2025, 11, 21))]),
         )
 
-    @tb.typecheck
     def test_modelgen_linkprops_1(self):
         from models import default
 
@@ -4080,7 +3978,6 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(p.name, "Zoe")
         self.assertEqual(p.__linkprops__.is_tall_enough, True)
 
-    @tb.typecheck
     def test_modelgen_linkprops_2(self):
         from models import default
 
@@ -4118,7 +4015,6 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(p.name, "Elsa")
         self.assertEqual(p.__linkprops__.is_tall_enough, False)
 
-    @tb.typecheck
     def test_modelgen_linkprops_3(self):
         from models import default
 
@@ -4153,7 +4049,6 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(p1.nickname, "HACKED")
         self.assertEqual(p1.__linkprops__.is_tall_enough, False)
 
-    @tb.typecheck
     def test_modelgen_globals_01(self):
         """Test reflection of globals"""
         from models import default
@@ -4204,6 +4099,7 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(len(fetched_sess.players), 1)
         self.assertEqual(fetched_sess.players[0].name, "General Global")
 
+    @tb.skip_typecheck
     def test_modelgen_reflection_1(self):
         from models import default
 
@@ -4414,7 +4310,6 @@ class TestModelGenerator(tb.ModelTestCase):
             ),
         )
 
-    @tb.typecheck
     def test_modelgen_function_overloads_01(self):
         """Test basic function overloads with different parameter types"""
         from models import default
@@ -4437,7 +4332,6 @@ class TestModelGenerator(tb.ModelTestCase):
         )
         self.assertEqual(result_str, "HelloWorld")
 
-    @tb.typecheck
     def test_modelgen_function_overloads_02(self):
         """Test function overloads with optional parameters"""
         from models import default
@@ -4461,7 +4355,6 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(result_3, "Manager: Charlie Jr.")
 
     @tb.to_be_fixed  # scalar/object overloads seem to be broken
-    @tb.typecheck
     def test_modelgen_function_overloads_03(self):
         """Test function overloads with different return types"""
         from models import default
@@ -4486,7 +4379,6 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(result_user, "Alice")
 
     @tb.to_be_fixed  # python value casting for arrays
-    @tb.typecheck
     def test_modelgen_function_overloads_04(self):
         """Test function overloads with array parameters"""
         from models import default
@@ -4504,7 +4396,6 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertAlmostEqual(result_float, 7.0, places=5)
 
     @tb.to_be_fixed  # python value casting for tuples
-    @tb.typecheck
     def test_modelgen_function_overloads_05(self):
         """Test function overloads with tuple parameters"""
         from models import default
@@ -4521,7 +4412,6 @@ class TestModelGenerator(tb.ModelTestCase):
         )
         self.assertEqual(result_2, "hello | world")
 
-    @tb.typecheck
     def test_modelgen_function_overloads_06(self):
         """Test complex function overloads with overlapping parameters"""
         from models import default
@@ -4556,7 +4446,6 @@ class TestModelGenerator(tb.ModelTestCase):
         )
         self.assertEqual(result_str_int, "str+int: value 200")
 
-    @tb.typecheck
     def test_modelgen_function_overloads_with_python_values(self):
         """Test that function overloads work with regular Python values"""
         from models import default
@@ -4593,7 +4482,6 @@ class TestModelGenerator(tb.ModelTestCase):
         )
         self.assertEqual(result_complex_str, "str: Python")
 
-    @tb.typecheck
     def test_modelgen_function_simple_defaults_01(self):
         """Test functions with simple default parameters"""
         from models import default
@@ -4622,7 +4510,6 @@ class TestModelGenerator(tb.ModelTestCase):
         )
         self.assertEqual(result_str2, "Hello World")
 
-    @tb.typecheck
     def test_modelgen_function_optional_params(self):
         """Test functions with optional parameters"""
         from models import default
@@ -4642,7 +4529,6 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertAlmostEqual(result_float2, 12.5, places=5)  # 5 * 2.5
 
     @tb.to_be_fixed  # Python auto-cast for lists is missing
-    @tb.typecheck
     def test_modelgen_function_array_params(self):
         """Test functions with array parameters and defaults"""
         from models import default
@@ -4659,7 +4545,6 @@ class TestModelGenerator(tb.ModelTestCase):
         )
         self.assertEqual(result_join2, "A-B-C")
 
-    @tb.typecheck
     def test_modelgen_function_multiple_defaults(self):
         """Test functions with multiple default parameters"""
         from models import default
@@ -4696,7 +4581,6 @@ class TestModelGenerator(tb.ModelTestCase):
         )
         self.assertEqual(result_fmt5, ">>> HELLO <<<")
 
-    @tb.typecheck
     def test_modelgen_function_defaults_with_python_values(self):
         """Test that default parameter functions work with regular
         Python values"""
@@ -4722,7 +4606,6 @@ class TestModelGenerator(tb.ModelTestCase):
         )
         self.assertEqual(result_py_fmt, "Python  with defaults")
 
-    @tb.typecheck
     def test_modelgen_function_variadic_01(self):
         from models import default
 
@@ -4732,7 +4615,6 @@ class TestModelGenerator(tb.ModelTestCase):
         )
         self.assertEqual(result, "pref-hello0-suf")
 
-    @tb.typecheck
     def test_modelgen_function_variadic_02(self):
         from models import default
 
@@ -4742,7 +4624,6 @@ class TestModelGenerator(tb.ModelTestCase):
         )
         self.assertEqual(result, "pref-hello5-suf")
 
-    @tb.typecheck
     def test_modelgen_function_variadic_03(self):
         from models import default
 
@@ -4752,7 +4633,6 @@ class TestModelGenerator(tb.ModelTestCase):
         )
         self.assertEqual(result, "pref-hello15-suf")
 
-    @tb.typecheck
     def test_modelgen_function_variadic_04(self):
         from models import default
 
@@ -4762,7 +4642,6 @@ class TestModelGenerator(tb.ModelTestCase):
         )
         self.assertEqual(result, "pref-hello3-END")
 
-    @tb.typecheck
     def test_modelgen_function_variadic_05(self):
         from models import default
 
@@ -4774,7 +4653,6 @@ class TestModelGenerator(tb.ModelTestCase):
         )
         self.assertEqual(result, "START-hello30-DONE")
 
-    @tb.typecheck
     def test_modelgen_function_variadic_06(self):
         from models import default
 
@@ -4782,7 +4660,6 @@ class TestModelGenerator(tb.ModelTestCase):
         result: int = self.client.query_required_single(default.sum_variadic())
         self.assertEqual(result, 0)
 
-    @tb.typecheck
     def test_modelgen_function_variadic_07(self):
         from models import default
 
@@ -4792,7 +4669,6 @@ class TestModelGenerator(tb.ModelTestCase):
         )
         self.assertEqual(result, 15)
 
-    @tb.typecheck
     def test_modelgen_function_variadic_08(self):
         from models import default
 
@@ -4802,7 +4678,6 @@ class TestModelGenerator(tb.ModelTestCase):
         )
         self.assertEqual(result, "a-b-c-d")
 
-    @tb.typecheck
     def test_modelgen_function_variadic_11(self):
         from models import default
 
@@ -4812,7 +4687,6 @@ class TestModelGenerator(tb.ModelTestCase):
         )
         self.assertEqual(result, "sum: 6")
 
-    @tb.typecheck
     def test_modelgen_function_variadic_12(self):
         from models import default
 
@@ -4822,7 +4696,6 @@ class TestModelGenerator(tb.ModelTestCase):
         )
         self.assertEqual(result, "sum: 60")
 
-    @tb.typecheck
     def test_modelgen_function_named_only_01(self):
         from models import default
 
@@ -4832,7 +4705,6 @@ class TestModelGenerator(tb.ModelTestCase):
         )
         self.assertEqual(result, "hello")
 
-    @tb.typecheck
     def test_modelgen_function_named_only_02(self):
         from models import default
 
@@ -4842,7 +4714,6 @@ class TestModelGenerator(tb.ModelTestCase):
         )
         self.assertEqual(result, "[BOLD]hello[/BOLD]")
 
-    @tb.typecheck
     def test_modelgen_function_named_only_03(self):
         from models import default
 
@@ -4852,7 +4723,6 @@ class TestModelGenerator(tb.ModelTestCase):
         )
         self.assertEqual(result, "[BOLD][ITALIC]hello[/ITALIC][/BOLD]")
 
-    @tb.typecheck
     def test_modelgen_function_named_only_04(self):
         from models import default
 
@@ -4862,7 +4732,6 @@ class TestModelGenerator(tb.ModelTestCase):
         )
         self.assertEqual(result, ">>> hello <<<")
 
-    @tb.typecheck
     def test_modelgen_function_named_only_05(self):
         from models import default
 
@@ -4880,7 +4749,6 @@ class TestModelGenerator(tb.ModelTestCase):
             result, "[START][BOLD][ITALIC]hello[/ITALIC][/BOLD][END]"
         )
 
-    @tb.typecheck
     def test_modelgen_function_optional_variadic_01(self):
         from models import default
 
@@ -4888,7 +4756,6 @@ class TestModelGenerator(tb.ModelTestCase):
         result: int = self.client.query_required_single(default.optional_sum())
         self.assertEqual(result, 0)
 
-    @tb.typecheck
     def test_modelgen_function_optional_variadic_02(self):
         from models import default
 
@@ -4898,7 +4765,6 @@ class TestModelGenerator(tb.ModelTestCase):
         )
         self.assertEqual(result, 100)
 
-    @tb.typecheck
     def test_modelgen_function_optional_variadic_03(self):
         from models import default
 
@@ -4908,7 +4774,6 @@ class TestModelGenerator(tb.ModelTestCase):
         )
         self.assertEqual(result, 20)
 
-    @tb.typecheck
     def test_modelgen_function_complex_variadic_01(self):
         from models import default
 
@@ -4918,7 +4783,6 @@ class TestModelGenerator(tb.ModelTestCase):
         )
         self.assertEqual(result, "test (default) sum=0")
 
-    @tb.typecheck
     def test_modelgen_function_complex_variadic_02(self):
         from models import default
 
@@ -4928,7 +4792,6 @@ class TestModelGenerator(tb.ModelTestCase):
         )
         self.assertEqual(result, "test (custom) sum=0")
 
-    @tb.typecheck
     def test_modelgen_function_complex_variadic_03(self):
         from models import default
 
@@ -4938,7 +4801,6 @@ class TestModelGenerator(tb.ModelTestCase):
         )
         self.assertEqual(result, "test (custom) sum=60")
 
-    @tb.typecheck
     def test_modelgen_function_complex_variadic_04(self):
         from models import default
 
@@ -4948,7 +4810,6 @@ class TestModelGenerator(tb.ModelTestCase):
         )
         self.assertEqual(result, "test (custom) sum=30 [FLAG]")
 
-    @tb.typecheck
     def test_modelgen_function_complex_variadic_05(self):
         from models import default
 
@@ -4958,7 +4819,6 @@ class TestModelGenerator(tb.ModelTestCase):
         )
         self.assertEqual(result, "test (custom) sum=75")
 
-    @tb.typecheck
     def test_modelgen_function_complex_variadic_06(self):
         from models import default
 
@@ -4970,7 +4830,6 @@ class TestModelGenerator(tb.ModelTestCase):
         )
         self.assertEqual(result, "test (custom) sum=70 [FLAG]")
 
-    @tb.typecheck
     def test_modelgen_function_variadic_with_python_values(self):
         from models import default
 
@@ -4986,7 +4845,6 @@ class TestModelGenerator(tb.ModelTestCase):
         )
         self.assertEqual(result, "PY-python_value6-suf")
 
-    @tb.typecheck
     def test_modelgen_function_named_only_edge_cases(self):
         from models import default
 
@@ -4997,7 +4855,6 @@ class TestModelGenerator(tb.ModelTestCase):
         )
         self.assertEqual(result, "test")
 
-    @tb.typecheck
     def test_modelgen_operators_string_comparison(self):
         """Test string comparison operators with mixed Python/Gel values"""
         from models import default
@@ -5036,7 +4893,6 @@ class TestModelGenerator(tb.ModelTestCase):
         )
         self.assertTrue(all(u.name < "Z" for u in users_before_z))
 
-    @tb.typecheck
     def test_modelgen_operators_string_arithmetic(self):
         """Test string concatenation and repetition operators"""
         from models import default, std
@@ -5074,7 +4930,6 @@ class TestModelGenerator(tb.ModelTestCase):
         for user in users_with_prefix:
             self.assertEqual(user.full_name, f"User: {user.name}")
 
-    @tb.typecheck
     def test_modelgen_operators_integer_arithmetic(self):
         """Test integer arithmetic operators with mixed Python/Gel values"""
         from models import default, std
@@ -5101,7 +4956,6 @@ class TestModelGenerator(tb.ModelTestCase):
             self.assertEqual(user.name_len_times_two, name_len * 2)
             self.assertEqual(user.name_len_minus_py, name_len - python_value)
 
-    @tb.typecheck
     def test_modelgen_operators_integer_comparison(self):
         """Test integer comparison operators"""
         from models import default
@@ -5126,7 +4980,6 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertTrue(all(len(u.name) == 5 for u in exact_len_users))
 
     @tb.to_be_fixed  # comparisons with None are broken
-    @tb.typecheck
     def test_modelgen_operators_boolean_logical(self):
         """Test boolean logical operators and functions"""
         from models import default, std
@@ -5150,7 +5003,6 @@ class TestModelGenerator(tb.ModelTestCase):
         for user in users_std_or:
             self.assertTrue(len(user.name) > 10 or user.nickname is not None)
 
-    @tb.typecheck
     def test_modelgen_operators_boolean_not(self):
         """Test boolean not operator and std.not_ function"""
         from models import default, std
@@ -5162,7 +5014,6 @@ class TestModelGenerator(tb.ModelTestCase):
         for user in users_not_alice:
             self.assertNotEqual(user.name, "Alice")
 
-    @tb.typecheck
     def test_modelgen_operators_mixed_types_with_casting(self):
         """Test operators with mixed types requiring casting"""
         from models import default, std
@@ -5187,7 +5038,6 @@ class TestModelGenerator(tb.ModelTestCase):
             )
 
     @tb.to_be_fixed  # comparisons with None are broken
-    @tb.typecheck
     def test_modelgen_operators_complex_expressions(self):
         """Test complex operator expressions combining multiple types"""
         from models import default, std
@@ -5208,7 +5058,6 @@ class TestModelGenerator(tb.ModelTestCase):
             self.assertTrue(user.name > "A" or user.nickname is not None)
             self.assertNotEqual(user.name, "")
 
-    @tb.typecheck
     def test_modelgen_operators_with_python_values_in_computeds(self):
         """Test operators using Python values in computed expressions"""
         from models import default, std
@@ -5245,7 +5094,6 @@ class TestModelGenerator(tb.ModelTestCase):
             )
             self.assertEqual(user.meets_criteria, expected_criteria)
 
-    @tb.typecheck
     def test_modelgen_operators_string_contains_and_patterns(self):
         """Test string containment and pattern matching operators"""
         from models import default, std
@@ -5267,7 +5115,6 @@ class TestModelGenerator(tb.ModelTestCase):
         for user in users_with_char:
             self.assertTrue(search_char in user.name.lower())
 
-    @tb.typecheck
     def test_modelgen_operators_numeric(self):
         """Test numeric operators with edge cases and mixed precision"""
         from models import default, std
@@ -5299,7 +5146,6 @@ class TestModelGenerator(tb.ModelTestCase):
                 self.assertEqual(session.num_floor_div, expected_floor_div)
                 self.assertEqual(session.num_mod, expected_mod)
 
-    @tb.typecheck
     def test_modelgen_ad_hoc_computeds_are_frozen(self):
         """Test that ad-hoc computeds cannot be passed to init or mutated"""
         from models import default, std
@@ -5359,7 +5205,6 @@ class TestModelGenerator(tb.ModelTestCase):
         ):
             users[0].upper_name = "foo"
 
-    @tb.typecheck
     def test_modelgen_result_inference(self):
         import models.std as std
         from models import default
@@ -5368,7 +5213,6 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(reveal_type(c), "builtins.int")
         self.assertEqual(c, 1)
 
-    @tb.typecheck
     def test_modelgen_abstract_type_no_init(self):
         from models import default
 
@@ -5378,20 +5222,20 @@ class TestModelGenerator(tb.ModelTestCase):
             default.Named(name="aaa")  # type: ignore
 
 
+@tb.typecheck
 class TestEmptyModelGenerator(tb.ModelTestCase):
     DEFAULT_MODULE = "default"
 
-    @tb.typecheck
     def test_modelgen_empty_schema_1(self):
         # This is it, we're just testing empty import.
         from models import default, std  # noqa: F401
 
 
+@tb.typecheck
 class TestEmptyAiModelGenerator(tb.ModelTestCase):
     DEFAULT_MODULE = "default"
     SCHEMA = os.path.join(os.path.dirname(__file__), "dbsetup", "empty_ai.gel")
 
-    @tb.typecheck
     def test_modelgen_empty_ai_schema_1(self):
         # This is it, we're just testing empty import.
         import models
@@ -5400,7 +5244,6 @@ class TestEmptyAiModelGenerator(tb.ModelTestCase):
             models.sys.ExtensionPackage.__name__, "ExtensionPackage"
         )
 
-    @tb.typecheck
     def test_modelgen_empty_ai_schema_2(self):
         # This is it, we're just testing empty import.
         from models.ext import ai  # noqa: F401
@@ -5410,6 +5253,7 @@ class TestEmptyAiModelGenerator(tb.ModelTestCase):
 # it hard to integrate them with the main tests suite without breaking many
 # tests in it as well. Presumably after fixing the issues, the schema and
 # tests can just be merged with the main suite.
+@tb.typecheck
 class TestModelGeneratorOther(tb.ModelTestCase):
     SCHEMA = os.path.join(
         os.path.dirname(__file__), "dbsetup", "orm_other.gel"
@@ -5421,7 +5265,6 @@ class TestModelGeneratorOther(tb.ModelTestCase):
 
     ISOLATED_TEST_BRANCHES = True
 
-    @tb.typecheck
     def test_modelgen_escape_01(self):
         from models import default
         # insert an object that needs a lot of escaping
@@ -5452,7 +5295,6 @@ class TestModelGeneratorOther(tb.ModelTestCase):
         self.assertEqual(res.configure[0].name, "Alice")
         self.assertEqual(res.configure[0].__linkprops__.create, True)
 
-    @tb.typecheck
     def test_modelgen_escape_02(self):
         from models import default
         # insert and update an object that needs a lot of escaping
