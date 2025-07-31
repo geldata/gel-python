@@ -22,6 +22,9 @@ import datetime
 import decimal
 import uuid
 
+# Accept raw Range/MultiRange instances from gel.datatypes
+from gel.datatypes import range as _range
+
 import pydantic_core
 from pydantic_core import core_schema
 
@@ -117,12 +120,70 @@ def _get_range_core_schema(
 
 class Range(_abstract.Range[_T]):
     @classmethod
+    def _validate_bound(cls, eltype: type, value: Any) -> Any:
+        if value is None:
+            return None
+
+        if issubclass(eltype, (datetime.date, datetime.datetime)):
+            return eltype.fromisoformat(value)
+
+        return eltype(value)  # type: ignore [call-arg]
+
+    @classmethod
+    def _serialize_bound(cls, eltype: type, value: Any) -> Any:
+        if value is None:
+            return None
+
+        if issubclass(eltype, (datetime.date, datetime.datetime)):
+            return value.isoformat()
+
+        return value
+
+    @classmethod
+    def _validate(cls, eltype: type, value: Any) -> _range.Range[_T]:
+        if isinstance(value, _range.Range):
+            # TODO -- this needs to be further validated
+            return value
+
+        elif isinstance(value, dict):
+            return cls(
+                lower=cls._validate_bound(eltype, value["lower"]),
+                upper=cls._validate_bound(eltype, value["upper"]),
+                inc_lower=value["inc_lower"],
+                inc_upper=value["inc_upper"],
+                empty=value["empty"],
+            )
+        else:
+            raise TypeError(
+                "Range must be a gel.Range instance or a dict of field values"
+            )
+
+    @classmethod
     def __get_pydantic_core_schema__(
         cls,
         source_type: Any,
         handler: pydantic.GetCoreSchemaHandler,
     ) -> pydantic_core.CoreSchema:
-        return _get_range_core_schema(cls, handler)
+        eltype = source_type.__element_type__.__gel_py_type__
+        python_schema = core_schema.no_info_plain_validator_function(
+            lambda value: cls._validate(eltype, value)
+        )
+
+        json_fields_schema = _get_range_core_schema(cls, handler)
+
+        return core_schema.json_or_python_schema(
+            json_schema=json_fields_schema,
+            python_schema=python_schema,
+            serialization=core_schema.plain_serializer_function_ser_schema(
+                lambda v: {
+                    "lower": cls._serialize_bound(eltype, v.lower),
+                    "upper": cls._serialize_bound(eltype, v.upper),
+                    "inc_lower": v.inc_lower,
+                    "inc_upper": v.inc_upper,
+                    "empty": v.is_empty(),
+                },
+            ),
+        )
 
 
 class MultiRange(_abstract.MultiRange[_T]):
