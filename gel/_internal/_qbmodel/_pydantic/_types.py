@@ -155,7 +155,8 @@ class Range(_abstract.Range[_T]):
             )
         else:
             raise TypeError(
-                "Range must be a gel.Range instance or a dict of field values"
+                "value must be a gel.Range instance or "
+                "a dict of range constructor arguments"
             )
 
     @classmethod
@@ -188,13 +189,65 @@ class Range(_abstract.Range[_T]):
 
 class MultiRange(_abstract.MultiRange[_T]):
     @classmethod
+    def _validate(cls, eltype: type, value: Any) -> _range.MultiRange[_T]:
+        if isinstance(value, _range.MultiRange):
+            # TODO -- this needs to be further validated
+            return value
+
+        elif isinstance(value, list) and all(
+            isinstance(i, dict) for i in value
+        ):
+            return _range.MultiRange(
+                [
+                    _range.Range(  # type: ignore [misc]
+                        lower=Range._validate_bound(eltype, i["lower"]),
+                        upper=Range._validate_bound(eltype, i["upper"]),
+                        inc_lower=i["inc_lower"],
+                        inc_upper=i["inc_upper"],
+                        empty=i["empty"],
+                    )
+                    for i in value
+                ]
+            )
+        else:
+            raise TypeError(
+                "value must be a gel.MultiRange instance or "
+                "a list of dicts of range constructor arguments"
+            )
+
+    @classmethod
     def __get_pydantic_core_schema__(
         cls,
         source_type: Any,
         handler: pydantic.GetCoreSchemaHandler,
     ) -> pydantic_core.CoreSchema:
-        range_schema = _get_range_core_schema(cls, handler)
-        return core_schema.list_schema(range_schema)
+        wrapped_range = source_type.__element_type__
+        eltype = wrapped_range.__element_type__.__gel_py_type__
+
+        python_schema = core_schema.no_info_plain_validator_function(
+            lambda value: cls._validate(eltype, value)
+        )
+
+        json_fields_schema = core_schema.list_schema(
+            _get_range_core_schema(cls, handler)
+        )
+
+        return core_schema.json_or_python_schema(
+            json_schema=json_fields_schema,
+            python_schema=python_schema,
+            serialization=core_schema.plain_serializer_function_ser_schema(
+                lambda value: [
+                    {
+                        "lower": Range._serialize_bound(eltype, v.lower),
+                        "upper": Range._serialize_bound(eltype, v.upper),
+                        "inc_lower": v.inc_lower,
+                        "inc_upper": v.inc_upper,
+                        "empty": v.is_empty(),
+                    }
+                    for v in value
+                ],
+            ),
+        )
 
 
 _PT_co = TypeVar("_PT_co", bound=_abstract.PyConstType, covariant=True)

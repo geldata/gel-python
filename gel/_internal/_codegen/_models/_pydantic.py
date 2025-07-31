@@ -1390,6 +1390,9 @@ class BaseGeneratedModule:
             return f"{rang}[{elem_type}]"
 
         elif reflection.is_multi_range_type(stype):
+            rang_el = self.import_name(
+                BASE_IMPL, "Range", import_time=foreign_import_time
+            )
             rang = self.import_name(
                 BASE_IMPL, "MultiRange", import_time=foreign_import_time
             )
@@ -1400,7 +1403,7 @@ class BaseGeneratedModule:
                 localns=localns,
                 typevars=typevars,
             )
-            return f"{rang}[{elem_type}]"
+            return f"{rang}[{rang_el}[{elem_type}]]"
 
         elif reflection.is_pseudo_type(stype):
             type_path = SchemaPath("std", stype.name)
@@ -2018,8 +2021,9 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                 )
             else:
                 el = self.get_type(el_type, import_time=import_time)
+            rng_el = self.import_name("gel", "Range")
             rng = self.import_name("gel", "MultiRange")
-            return f"{rng}[{el}]"
+            return f"{rng}[{rng_el}[{el}]]"
         elif reflection.is_named_tuple_type(stype) or reflection.is_tuple_type(
             stype
         ):

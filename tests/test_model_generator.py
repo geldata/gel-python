@@ -4005,7 +4005,9 @@ class TestModelGenerator(tb.ModelTestCase):
             ),
         )
 
-    @tb.xfail
+        self.assertPydanticSerializes(r)
+        self.assertPydanticSerializes(r2)
+
     @tb.typecheck(
         ["import datetime as dt", "from gel import MultiRange, Range"]
     )
@@ -4027,15 +4029,15 @@ class TestModelGenerator(tb.ModelTestCase):
         )
         self.assertEqual(r2.name, "new multirange")
         self.assertEqual(
-            r2.int_range,
+            r2.int_mrange,
             MultiRange([Range(11)]),
         )
         self.assertEqual(
-            r2.float_range,
+            r2.float_mrange,
             MultiRange(),
         )
         self.assertEqual(
-            r2.date_range,
+            r2.date_mrange,
             MultiRange([Range(dt.date(2025, 3, 4), dt.date(2025, 11, 21))]),
         )
 
