@@ -36,6 +36,9 @@ from gel._internal import _typing_inspect
 from gel._internal import _typing_parametric as parametric
 from gel._internal._polyfills._strenum import StrEnum
 
+if TYPE_CHECKING:
+    from pathlib import Path
+
 
 _T_co = TypeVar("_T_co", covariant=True)
 
@@ -213,6 +216,14 @@ class AbstractTrackedList(
         # that now we'll be tracking changes and generating update
         # queries for the collection (not replacement queries.)
         self.__gel_overwrite_data__ = False
+
+    def __gel_post_commit_check__(self, path: Path) -> None:
+        if self._initial_items:
+            raise ValueError(f"{path} has non-empty `self._initial_items`")
+        if self.__gel_overwrite_data__:
+            raise ValueError(
+                f"{path} list did not reset self.__gel_overwrite_data__"
+            )
 
     def _check_value(self, value: Any) -> _T_co:
         """Ensure `value` is of type T and return it."""

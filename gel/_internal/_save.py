@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import collections
 import dataclasses
+import pathlib
 import weakref
+import uuid
 
 from typing import (
     TYPE_CHECKING,
@@ -34,7 +36,6 @@ from gel._internal._qbmodel._abstract import (
 from gel._internal._edgeql import PointerKind, quote_ident
 
 if TYPE_CHECKING:
-    import uuid
     from collections.abc import (
         Iterable,
         Iterator,
@@ -418,7 +419,7 @@ def push_change(
     sched: FieldChangeLists,
     change: FieldChange,
 ) -> None:
-    """Push a fiekd change either to *requireds* or *sched*."""
+    """Push a field change either to *requireds* or *sched*."""
 
     if requireds.get(change.name):
         sched[change.name].append(change)
@@ -711,7 +712,7 @@ def make_plan(objs: Iterable[GelModel]) -> SavePlan:
             #   or updating link props on the existing one is still the same:
             #   `+=`
             #
-            # - Why aern't we capturing which link props have changes
+            # - Why aren't we capturing which link props have changes
             #   specifically? Becuse with EdgeQL we don't have a mechanism
             #   (yet) to update a specific link prop -- we'll have to submit
             #   all of them.
@@ -860,6 +861,7 @@ def make_save_executor_constructor(
     objs: tuple[GelModel, ...],
     *,
     refetch: bool,
+    save_postcheck: bool = False,
 ) -> Callable[[], SaveExecutor]:
     create_batches, updates = make_plan(objs)
     return lambda: SaveExecutor(
@@ -867,6 +869,7 @@ def make_save_executor_constructor(
         create_batches=create_batches,
         updates=updates,
         refetch=refetch,
+        save_postcheck=save_postcheck,
     )
 
 
@@ -936,6 +939,7 @@ class SaveExecutor:
     create_batches: list[ChangeBatch]
     updates: ChangeBatch
     refetch: bool
+    save_postcheck: bool
 
     object_ids: dict[int, uuid.UUID] = dataclasses.field(init=False)
 
@@ -1050,6 +1054,94 @@ class SaveExecutor:
 
         for o in self.objs:
             _traverse(o)
+
+        if self.save_postcheck:
+            self._post_commit_check()
+
+    def _post_commit_check(self) -> None:
+        # This is only run in debug mode, specifically enabled in our tests
+        # to double check that everything is in a proper committed state after
+        # save(), e.g.:
+        #
+        # - all models are committed
+        # - all models (and things like link props) have no changes
+        # - all collections (multi links, multi props) are in a sound state
+
+        visited: IDTracker[GelModel, None] = IDTracker()
+
+        def _check_recursive(obj: GelModel, path: pathlib.Path) -> None:
+            if obj in visited:
+                return
+
+            assert not isinstance(obj, ProxyModel)
+
+            visited.track(obj)
+
+            path /= f"{type(obj).__qualname__}:{obj.id}"
+
+            if obj.__gel_get_changed_fields__():
+                raise ValueError(f"{path} has changed fields after save")
+            if not hasattr(obj, "id"):
+                raise ValueError(f"{path} has no id after save()")
+            if not isinstance(obj.id, uuid.UUID):
+                raise ValueError(f"{path} has non-uuid id after save()")
+            if obj.__gel_new__:
+                raise ValueError(f"{path} has __gel_new__ set")
+
+            for prop in get_pointers(type(obj)):
+                val = getattr(obj, prop.name, _unset)
+                if val is _unset or val is None:
+                    continue
+
+                link_path = path / prop.name
+
+                if prop.kind is PointerKind.Link:
+                    if prop.cardinality.is_multi():
+                        if is_proxy_link_list(val):
+                            val.__gel_post_commit_check__(link_path)
+                            for i, proxy in enumerate(val._items):
+                                list_path = link_path / str(i)
+                                lps = proxy.__linkprops__
+                                if lps.__gel_get_changed_fields__():
+                                    raise ValueError(
+                                        f"{list_path} has changed link props "
+                                        f"after save"
+                                    )
+                                unwrapped = unwrap_proxy_no_check(proxy)
+                                _check_recursive(unwrapped, list_path)
+                        else:
+                            assert is_link_dlist(val)
+                            val.__gel_post_commit_check__(link_path)
+                            for i, model in enumerate(val._items):
+                                list_path = link_path / str(i)
+                                _check_recursive(model, list_path)
+                    else:
+                        if isinstance(val, ProxyModel):
+                            if val.__linkprops__.__gel_get_changed_fields__():
+                                raise ValueError(
+                                    f"{link_path} has changed link props "
+                                    f"after save"
+                                )
+                            _check_recursive(
+                                unwrap_proxy_no_check(val), link_path
+                            )
+                        else:
+                            _check_recursive(cast("GelModel", val), link_path)
+
+                else:
+                    assert prop.kind is PointerKind.Property
+                    if prop.cardinality.is_multi():
+                        assert is_prop_list(val)
+                        val.__gel_post_commit_check__(link_path)
+
+        for o in self.objs:
+            _check_recursive(o, pathlib.Path())
+
+        # Final check: make sure that the save plan is empty
+        # in case we've missed something in `_check_recursive()`.
+        create_batches, updates = make_plan(self.objs)
+        if create_batches or updates:
+            raise ValueError("non-empty save plan after save()")
 
     def _get_id(self, obj: GelModel) -> uuid.UUID:
         if obj.__gel_new__:

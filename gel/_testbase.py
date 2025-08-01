@@ -529,7 +529,9 @@ class DatabaseTestCase(ClusterTestCase, ConnectedTestCaseMixin):
             cls.admin_client.query(f"""
                 create data branch {testdb} from {root};
             """)
-            self.client = cls.make_test_client(database=testdb)
+            self.client = cls.make_test_client(database=testdb)._with_debug(
+                save_postcheck=True,
+            )
             self.client.ensure_connected()
 
         if self.SETUP_METHOD:

@@ -1370,6 +1370,18 @@ class TestModelGenerator(tb.ModelTestCase):
             ),
         )
 
+    def test_modelgen_pydantic_apis_16(self):
+        # just check that this type-checks
+        # https://github.com/geldata/gel-python/issues/744
+
+        from gel.models.pydantic import GelModel
+        from typing import TypeVar, Any
+
+        T = TypeVar("T", bound=GelModel)
+
+        def select_everything(model: type[T]) -> Any:
+            return model.select("*")
+
     def test_modelgen_data_unpack_polymorphic(self):
         from models import default
 
@@ -2566,6 +2578,20 @@ class TestModelGenerator(tb.ModelTestCase):
         p.members.extend(p.members)
         self.client.save(p)
 
+        # technically this won't change things
+        p.members.extend(list(p.members))
+        self.client.save(p)
+
+        # technically this won't change things
+        for el in list(p.members):
+            p.members.append(el)
+        self.client.save(p)
+
+        # technically this won't change things
+        for el in list(p.members):
+            p.members.append(el._p__obj__)
+        self.client.save(p)
+
         # Fetch and verify
         res2 = self.client.get(
             default.Raid.select(
@@ -2646,11 +2672,6 @@ class TestModelGenerator(tb.ModelTestCase):
         m = res.members[0]
         self.assertEqual(m.name, "Alice")
         self.assertEqual(m.__linkprops__.rank, 1)
-
-        with self.assertRaisesRegex(
-            ValueError, r"the list already contains.+User"
-        ):
-            p.members.extend([a])
 
     def test_modelgen_save_30(self):
         from gel import errors

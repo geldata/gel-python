@@ -21,6 +21,7 @@ from typing import Any
 from typing_extensions import Self
 
 import abc
+import dataclasses
 import enum
 import logging
 import random
@@ -354,10 +355,13 @@ class _OptionsMixin:
         super().__init__(*args, **kwargs)
 
     @abc.abstractmethod
-    def _shallow_clone(self):
-        pass
+    def _shallow_clone(self) -> Self:
+        raise NotImplementedError
 
-    def with_transaction_options(self, options: TransactionOptions = None):
+    def with_transaction_options(
+        self,
+        options: TransactionOptions | None = None,
+    ) -> Self:
         """Returns object with adjusted options for future transactions.
 
         :param options TransactionOptions:
@@ -375,7 +379,10 @@ class _OptionsMixin:
         result._options = self._options.with_transaction_options(options)
         return result
 
-    def with_retry_options(self, options: RetryOptions = None):
+    def with_retry_options(
+        self,
+        options: RetryOptions | None = None,
+    ) -> Self:
         """Returns object with adjusted options for future retrying
         transactions.
 
@@ -393,7 +400,10 @@ class _OptionsMixin:
         result._options = self._options.with_retry_options(options)
         return result
 
-    def with_warning_handler(self, warning_handler: WarningHandler = None):
+    def with_warning_handler(
+        self,
+        warning_handler: WarningHandler | None = None,
+    ) -> Self:
         """Returns object with adjusted options for handling warnings.
 
         :param warning_handler WarningHandler:
@@ -412,26 +422,29 @@ class _OptionsMixin:
         result._options = self._options.with_warning_handler(warning_handler)
         return result
 
-    def with_state(self, state: State):
+    def with_state(self, state: State) -> Self:
         result = self._shallow_clone()
         result._options = self._options.with_state(state)
         return result
 
-    def with_default_module(self, module: typing.Optional[str] = None):
+    def with_default_module(
+        self,
+        module: typing.Optional[str] = None,
+    ) -> Self:
         result = self._shallow_clone()
         result._options = self._options.with_state(
             self._options.state.with_default_module(module)
         )
         return result
 
-    def with_module_aliases(self, *args, **aliases):
+    def with_module_aliases(self, *args, **aliases) -> Self:
         result = self._shallow_clone()
         result._options = self._options.with_state(
             self._options.state.with_module_aliases(*args, **aliases)
         )
         return result
 
-    def with_config(self, *args, **config):
+    def with_config(self, *args, **config) -> Self:
         result = self._shallow_clone()
         result._options = self._options.with_state(
             self._options.state.with_config(*args, **config)
@@ -445,28 +458,28 @@ class _OptionsMixin:
         )
         return result
 
-    def without_module_aliases(self, *aliases):
+    def without_module_aliases(self, *aliases: str) -> Self:
         result = self._shallow_clone()
         result._options = self._options.with_state(
             self._options.state.without_module_aliases(*aliases)
         )
         return result
 
-    def without_config(self, *config_names):
+    def without_config(self, *config_names) -> Self:
         result = self._shallow_clone()
         result._options = self._options.with_state(
             self._options.state.without_config(*config_names)
         )
         return result
 
-    def without_globals(self, *global_names):
+    def without_globals(self, *global_names) -> Self:
         result = self._shallow_clone()
         result._options = self._options.with_state(
             self._options.state.without_globals(*global_names)
         )
         return result
 
-    def with_query_tag(self, tag: str):
+    def with_query_tag(self, tag: str) -> Self:
         for prefix in ["edgedb/", "gel/"]:
             if tag.startswith(prefix):
                 raise errors.InvalidArgumentError(f"reserved tag: {prefix}*")
@@ -488,6 +501,27 @@ class _OptionsMixin:
         result._options = self._options.with_annotations(annotations)
         return result
 
+    def _with_debug(
+        self,
+        *,
+        save_postcheck: bool = False,
+    ) -> Self:
+        result = self._shallow_clone()
+        result._options = self._options.with_debug(
+            self._options._debug.with_flags(
+                save_postcheck=save_postcheck,
+            )
+        )
+        return result
+
+
+@dataclasses.dataclass(frozen=True)
+class Debug:
+    save_postcheck: bool = False
+
+    def with_flags(self, **flags: Any) -> Debug:
+        return Debug(**(dataclasses.asdict(self) | flags))
+
 
 class _Options:
     """Internal class for storing connection options"""
@@ -498,21 +532,24 @@ class _Options:
         "_state",
         "_warning_handler",
         "_annotations",
+        "_debug",
     ]
 
     def __init__(
         self,
-        retry_options: RetryOptions,
-        transaction_options: TransactionOptions,
+        retry_options: RetryOptions | None,
+        transaction_options: TransactionOptions | None,
         state: State,
-        warning_handler: WarningHandler,
+        warning_handler: WarningHandler | None,
         annotations: typing.Dict[str, str],
+        debug: Debug,
     ):
         self._retry_options = retry_options
         self._transaction_options = transaction_options
         self._state = state
         self._warning_handler = warning_handler
         self._annotations = annotations
+        self._debug = debug
 
     @property
     def retry_options(self):
@@ -534,22 +571,27 @@ class _Options:
     def annotations(self):
         return self._annotations
 
-    def with_retry_options(self, options: RetryOptions):
+    def with_retry_options(self, options: RetryOptions | None):
         return _Options(
             options,
             self._transaction_options,
             self._state,
             self._warning_handler,
             self._annotations,
+            self._debug,
         )
 
-    def with_transaction_options(self, options: TransactionOptions):
+    def with_transaction_options(
+        self,
+        options: TransactionOptions | None,
+    ):
         return _Options(
             self._retry_options,
             options,
             self._state,
             self._warning_handler,
             self._annotations,
+            self._debug,
         )
 
     def with_state(self, state: State):
@@ -559,15 +601,20 @@ class _Options:
             state,
             self._warning_handler,
             self._annotations,
+            self._debug,
         )
 
-    def with_warning_handler(self, warning_handler: WarningHandler):
+    def with_warning_handler(
+        self,
+        warning_handler: WarningHandler | None,
+    ):
         return _Options(
             self._retry_options,
             self._transaction_options,
             self._state,
             warning_handler,
             self._annotations,
+            self._debug,
         )
 
     def with_annotations(self, annotations: typing.Dict[str, str]):
@@ -577,6 +624,17 @@ class _Options:
             self._state,
             self._warning_handler,
             annotations,
+            self._debug,
+        )
+
+    def with_debug(self, debug: Debug):
+        return _Options(
+            self._retry_options,
+            self._transaction_options,
+            self._state,
+            self._warning_handler,
+            self._annotations,
+            debug,
         )
 
     @classmethod
@@ -587,4 +645,5 @@ class _Options:
             State.defaults(),
             log_warnings,
             {},
+            Debug(),
         )
