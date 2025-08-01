@@ -94,6 +94,11 @@ type Team extending ExclusivelyNamed {
     };
 }
 
+type ExtraTeam extending Team {
+    # multi prop computed
+    multi property member_names := .members.name;
+}
+
 # Object with single required link with link props
 type Image {
     required file: str;
@@ -126,7 +131,7 @@ type LinearPath {
     }
 }
 
-# Object with optional link to self, has link props
+# Object with optional link with link props
 type StepPath {
     required label: str {
         constraint exclusive;
@@ -249,6 +254,55 @@ type TestSingleLinks {
         strength: int32;
     };
     comp_opt_wprop_friend := .opt_wprop_friend;
+}
+
+type TestPropRewrites extending ExclusivelyNamed {
+    required name_len: int64 {
+        # This rewrite will keep the name_len in sync with the name.
+        rewrite insert, update using (len(.name));
+    }
+    toggle: bool {
+        # This toggle will flip every time the record is saved. It can also
+        #be turned off by setting it to {}
+        rewrite insert, update using (not .toggle);
+    }
+}
+
+type TestLinkDefault extending ExclusivelyNamed {
+    link user: User {
+        default := (select User filter .name = "Alice" limit 1);
+    }
+}
+
+type TestLinkRewrite extending ExclusivelyNamed {
+    link user: User {
+        rewrite insert, update using (
+            # get the first user with a name >= the object's name
+            select User order by .name < __subject__.name then .name limit 1
+        );
+    }
+}
+
+type TestLinkTrigger extending ExclusivelyNamed {
+    link user: User;
+
+    # Copy the name as the user nickname
+    trigger set_default_user after insert, update for each do (
+        update __new__.user
+        set {
+            nickname := __new__.name
+        }
+    );
+}
+
+# Object with keyword links and props
+type `limit` {
+    `alter`: bool;
+    `like`: str;
+    `commit`: User;
+    multi `configure`: User {
+        `create`: bool;
+    }
 }
 
 # Functions for testing overloads
