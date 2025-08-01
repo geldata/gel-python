@@ -85,27 +85,35 @@ class AbstractCodeGenerator:
         """
         Apply environment configuration.
 
-        _GEL_PROJECT_MANIFEST is a JSON string from the Gel CLI in the form:
+        _GEL_MANIFEST is a JSON string from the Gel CLI in the form:
         {
             "generate-config": {
                 "no_cache": {
                     "value": true,
-                    "span": [<start>, <end>]
+                    "source": {
+                        "span": [<start>, <end>],
+                        "manifest": "project"
+                    }
                 },
                 "some_other_config": {
                     "value": ...,
-                    "span": [<start>, <end>]
+                    "source": {
+                        "span": [<start>, <end>],
+                        "manifest": "project"
+                    }
                 }
             },
-            "manifest-path": "path/to/gel.toml"
+            "manifests": {
+                "project": "path/to/gel.toml"
+            }
         }
         """
-        manifest_str = os.getenv("_GEL_PROJECT_MANIFEST")
+        manifest_str = os.getenv("_GEL_MANIFEST")
         if not manifest_str:
             return
         manifest = json.loads(manifest_str)
         if not isinstance(manifest, dict):
-            raise ValueError("_GEL_PROJECT_MANIFEST must be a JSON object")
+            raise ValueError("_GEL_MANIFEST must be a JSON object")
         config = manifest.get("generate-config")
         if not config:
             return
@@ -128,26 +136,41 @@ class AbstractCodeGenerator:
             try:
                 m(value["value"])
             except ValueError as e:
-                span = value.get("span")
-                path = manifest.get("manifest-path")
-                if span and path:
+                source = value.get("source")
+                manifests = manifest.get("manifests")
+                if source and manifests:
                     try:
-                        self._print_env_config_error(e, path, span)
+                        self._print_env_config_error(e, source, manifests)
                     except Exception as print_err:
                         raise RuntimeError(
                             "Failed to print error of environment config"
                         ) from print_err
+                    else:
+                        sys.exit(22)
                 else:
                     raise
 
     def _print_env_config_error(
-        self, error: ValueError, path: Any, span: Any
-    ) -> typing.NoReturn:
+        self, error: ValueError, source: Any, manifests: Any
+    ) -> None:
         self.print_error(f"{type(error).__name__}: {error}")
         if self._quiet:
-            sys.exit(22)
+            return
+        if not isinstance(source, dict):
+            raise ValueError("source must be a JSON object")
+        manifest = source.get("manifest")
+        if not isinstance(manifest, str):
+            raise ValueError("manifest must be a string")
+        if not isinstance(manifests, dict):
+            raise ValueError("manifests must be a JSON object")
+        path = manifests.get(manifest)
+        if not path:
+            return
         if not isinstance(path, str):
             raise ValueError("manifest-path must be a string")
+        span = source.get("span")
+        if not isinstance(span, list) or len(span) != 2:
+            raise ValueError("span must be a list of two integers")
         start, end = span
         if not isinstance(start, int) or not isinstance(end, int):
             raise ValueError("span must be a list of two integers")
@@ -180,7 +203,6 @@ class AbstractCodeGenerator:
                     break
             offset += llen
         self.print_msg(f"{'':>{left}}{C.BLUE} |{C.ENDC}")
-        sys.exit(22)
 
     def _apply_env_no_cache(self, value: Any) -> None:
         if not isinstance(value, bool):
