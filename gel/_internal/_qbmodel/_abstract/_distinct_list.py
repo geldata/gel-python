@@ -27,6 +27,7 @@ from ._base import AbstractGelSourceModel, AbstractGelModel
 from ._descriptors import AbstractGelProxyModel
 
 if TYPE_CHECKING:
+    from pathlib import Path
     from collections.abc import Iterator
     from ._base import AbstractGelSourceModel
 
@@ -91,6 +92,28 @@ class AbstractDistinctList(AbstractTrackedList[_MT_co]):
         super().__gel_reset_snapshot__()
         self._set = None
         self._unhashables = None
+
+    def __gel_post_commit_check__(self, path: Path) -> None:
+        super().__gel_post_commit_check__(path)
+        if self._unhashables:
+            raise ValueError(
+                f"{path} has non-empty `self._unhashables` after save()"
+            )
+
+        if self._set is not None and len(self._set) != len(self._items):
+            # tracked but _set is not agreeing with _items
+            raise ValueError(
+                f"{path}: `{len(self._set or {})=}` != `{len(self._items)=}`"
+            )
+
+    def __gel_commit__(self) -> None:
+        super().__gel_commit__()
+
+        if self._unhashables is not None:
+            assert self._set is not None
+            for item in self._unhashables.values():
+                self._set.add(item)
+            self._unhashables.clear()
 
     def _init_tracking(self) -> None:
         if self._set is None:
@@ -230,7 +253,10 @@ class AbstractDistinctList(AbstractTrackedList[_MT_co]):
 
     def extend(self, values: Iterable[_MT_co]) -> None:
         if values is self:
-            values = list(values)
+            # This is a "unique list" with a set-like behavior, so
+            # DistinctList.extend(self) is a no-op.
+            return
+
         if isinstance(values, AbstractTrackedList):
             values = values.__gel_basetype_iter__()
         for v in values:
@@ -386,11 +412,93 @@ class ProxyDistinctList(
     AbstractDistinctList[_PT_co],
     Generic[_PT_co, _BMT_co],
 ):
-    # Mapping of object IDs to ProxyModels that wrap them.
+    # Mapping of GelModels' id()s to ProxyModels that wrap them.
+    #
+    # We need to ensure that we don't have two proxies wrapping the same
+    # object in `self._items`. So:
+    #
+    # - `self._set`` is a set of hashable proxies
+    #   (proxies over an object with .id)
+    #
+    # - `self._unhashables` is a mapping of unhashable proxies' id()s to
+    #   themselves.
+    #
+    # - `self._wrapped_index` is a mapping of wrapped object's id()s
+    #   to proxies. We need it because "unsaved" objects without `.id`
+    #   can only be tracked by their address. And `self._set` and
+    #   `self._unhashables` are already tasked with tracking ProxyModel's,
+    #   but we need something to track the uniquiness of *unsaved*
+    #   wrapped GelModels.
+    #
+    # Let's look at different cases, for the following example list:
+    #
+    #     `[p1(a), p2(b_new)]`
+    #
+    # where:
+    #
+    # - `a` is an object with `.id`,
+    # - `b_new` is an object without `.id` (not saved yet), and
+    # - `pN(x)` is a `ProxyModel` instance wrapping `x` with Python's
+    #   id() of the *proxy* object equal to `N`.
+    #
+    # Cases:
+    #
+    # - we attempt to add `a` again: `a` will be wrapped in a proxy and
+    #   become `p3(a)`; `p3(a) in self._set` will evaluate to `True`, so
+    #   `a` will not be added again.
+    #
+    # - we attempt to add `p4(a)`: `p4(a) in self._set` will evaluate to
+    #   `True`; `p4(a)` will not be added as we already have `p1(a)`
+    #
+    # - we attempt to add `p2(b_new)`; but it's in `self._unhashables` so we
+    #   won't add it.
+    #
+    # - we attempt to add `b_new`. `id(b_new) in self._wrapped_index` will
+    #   be `True`, so `b_new` won't be added again.
+    #
+    # - we attempt to add `p5(b_new)` -- `b_new` will be unwrapped and since
+    #   it's in the `_wrapped_index` it won't be added again.
+    #
     _wrapped_index: dict[int, _PT_co] | None = None
 
     basetype: ClassVar[type[_BMT_co]]  # type: ignore [misc]
     type: ClassVar[type[_PT_co]]  # type: ignore [misc]
+
+    def __gel_post_commit_check__(self, path: Path) -> None:
+        super().__gel_post_commit_check__(path)
+
+        if self._set is None:
+            # This collection isn't tracked.
+            assert self._wrapped_index is None
+            assert self._unhashables is None
+            return
+
+        if len(self._items) != len(self._wrapped_index or {}):
+            raise ValueError(
+                f"{path}: `{len(self._wrapped_index or {})=}` != "
+                f"`{len(self._items)=}`"
+            )
+
+        if self._items:
+            assert self._wrapped_index
+            if set(self._items) != set(self._wrapped_index.values()):
+                raise ValueError(
+                    f"{path}: `self._items` != `self._wrapped_index.values()`"
+                )
+
+    def __gel_commit__(self) -> None:
+        super().__gel_commit__()
+
+        if self._set is None:
+            # This collection isn't tracked.
+            assert self._wrapped_index is None
+            return
+
+        assert self._wrapped_index is not None
+        if len(self._items) != len(self._wrapped_index):
+            self._wrapped_index = {
+                id(ll_getattr(item, "_p__obj__")): item for item in self._items
+            }
 
     def _init_tracking(self) -> None:
         super()._init_tracking()
@@ -437,7 +545,10 @@ class ProxyDistinctList(
             return
 
         if values is self:
-            values = list(values)
+            # This is a "unique list" with a set-like behavior, so
+            # DistinctList.extend(self) is a no-op.
+            return
+
         if isinstance(values, AbstractTrackedList):
             values = list(values.__gel_basetype_iter__())
 
@@ -453,7 +564,7 @@ class ProxyDistinctList(
 
         # For an empty list we can call one extend() call instead
         # of slow iterative appends.
-        empty_items = len(self._wrapped_index) == len(self._items) == 0
+        empty_items = not self._items
 
         proxy: _PT_co
         for v in values:
@@ -472,18 +583,10 @@ class ProxyDistinctList(
                 proxy, obj = self._cast_value(v)
 
             oid = id(obj)
-            existing_proxy = self._wrapped_index.get(oid)
-            if existing_proxy is None:
-                self._wrapped_index[oid] = proxy
-            else:
-                if (
-                    existing_proxy.__linkprops__.__dict__
-                    != proxy.__linkprops__.__dict__
-                ):
-                    raise ValueError(
-                        f"the list already contains {v!r} with "
-                        f"a different set of link properties"
-                    )
+            if oid in self._wrapped_index:
+                continue
+
+            self._wrapped_index[oid] = proxy
 
             if obj.__gel_new__:
                 self._unhashables[id(proxy)] = proxy
@@ -543,30 +646,8 @@ class ProxyDistinctList(
         return [self._check_value(value) for value in values]
 
     def _check_value(self, value: Any) -> _PT_co:
-        proxy, obj = self._cast_value(value)
-
-        # We have to check if a proxy around the same object is already
-        # present in the list.
-        self._init_tracking()
-        assert self._wrapped_index is not None
-        try:
-            existing_proxy = self._wrapped_index[id(obj)]
-        except KeyError:
-            return proxy
-
-        assert isinstance(existing_proxy, AbstractGelProxyModel)
-
-        if (
-            existing_proxy.__linkprops__.__dict__
-            != proxy.__linkprops__.__dict__
-        ):
-            raise ValueError(
-                f"the list already contains {value!r} with "
-                f" a different set of link properties"
-            )
-        # Return the already present identical proxy instead of inserting
-        # another one
-        return existing_proxy
+        proxy, _ = self._cast_value(value)
+        return proxy
 
     def _find_proxied_obj(self, item: _PT_co | _BMT_co) -> _PT_co | None:
         self._init_tracking()
