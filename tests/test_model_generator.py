@@ -3430,6 +3430,336 @@ class TestModelGenerator(tb.ModelTestCase):
 
         check({"owner": {"name": "Alice", "@count": 424242, "@bonus": False}})
 
+    def test_modelgen_save_reload_props_01(self):
+        from models import default
+
+        # Test that we can omit props with default values and then the values
+        # are populated after save.
+        gs = default.GameSession(num=1312)
+        self.client.save(gs)
+        self.assertEqual(gs.num, 1312)
+        self.assertEqual(gs.time_limit, 60)
+        self.assertEqual(gs.public, False)
+
+        # Verify by fetching fresh from database
+        fresh = self.client.get(default.GameSession.filter(id=gs.id))
+        self.assertEqual(fresh.num, gs.num)
+        self.assertEqual(fresh.time_limit, gs.time_limit)
+        self.assertEqual(fresh.public, gs.public)
+
+    def test_modelgen_save_reload_props_02(self):
+        from models import default
+
+        # Test that rewrite rules are executed and values are populated
+        # after save.
+        # We provide name_len=0 for two reasons:
+        # 1) it's required without a default, and we can't assume rewrites
+        #    guarantee a value
+        # 2) to verify the rewrite overwrites our initial value
+        tpr = default.TestPropRewrites(name="dancing banana", name_len=0)
+
+        self.client.save(tpr)
+
+        self.assertEqual(tpr.name, "dancing banana")
+        self.assertEqual(tpr.name_len, 14)
+        self.assertEqual(tpr.toggle, None)
+
+        tpr.name = "woof"
+        self.client.save(tpr)
+
+        self.assertEqual(tpr.name, "woof")
+        self.assertEqual(tpr.name_len, 4)
+        self.assertEqual(tpr.toggle, None)
+
+        tpr.name = "meow"
+        self.client.save(tpr)
+
+        self.assertEqual(tpr.name, "meow")
+        self.assertEqual(tpr.name_len, 4)
+        self.assertEqual(tpr.toggle, None)
+
+        # Verify by fetching fresh from database
+        fresh = self.client.get(default.TestPropRewrites.filter(id=tpr.id))
+        self.assertEqual(fresh.name, tpr.name)
+        self.assertEqual(fresh.name_len, tpr.name_len)
+        self.assertEqual(fresh.toggle, tpr.toggle)
+
+    def test_modelgen_save_reload_props_03(self):
+        from models import default
+
+        # Test toggle rewrite behavior: flipping, disabling, and re-enabling
+
+        # Start with toggle = True, should flip to False
+        tpr = default.TestPropRewrites(
+            name="pizza party", name_len=0, toggle=True
+        )
+        self.client.save(tpr)
+
+        self.assertEqual(tpr.name, "pizza party")
+        self.assertEqual(tpr.name_len, 11)
+        self.assertEqual(tpr.toggle, False)
+
+        # Save again without changes - no updates means no rewrite execution
+        self.client.save(tpr)
+        self.assertEqual(tpr.toggle, False)
+
+        # Save again without changes - still no updates, no rewrite execution
+        self.client.save(tpr)
+        self.assertEqual(tpr.toggle, False)
+
+        # Set to False explicitly - marks object as modified, rewrite executes
+        tpr.toggle = False
+        self.client.save(tpr)
+        self.assertEqual(tpr.toggle, True)
+
+        # Test "turning off" the toggle by setting to None
+        tpr.toggle = None
+        self.client.save(tpr)
+        self.assertEqual(tpr.toggle, None)
+
+        # Change name to trigger update - toggle should remain None (inactive)
+        tpr.name = "sleepy koala"
+        self.client.save(tpr)
+        self.assertEqual(tpr.name, "sleepy koala")
+        self.assertEqual(tpr.name_len, 12)
+        self.assertEqual(tpr.toggle, None)
+
+        # Test "turning on" the toggle by setting to a specific value
+        tpr.toggle = False
+        self.client.save(tpr)
+        self.assertEqual(tpr.toggle, True)
+
+        # Change name_len - this should trigger update and flip toggle
+        tpr.name_len = 999
+        self.client.save(tpr)
+        self.assertEqual(tpr.name_len, 12)
+        self.assertEqual(tpr.toggle, False)
+
+        # Verify by fetching fresh from database
+        fresh = self.client.get(default.TestPropRewrites.filter(id=tpr.id))
+        self.assertEqual(fresh.name, tpr.name)
+        self.assertEqual(fresh.name_len, tpr.name_len)
+        self.assertEqual(fresh.toggle, tpr.toggle)
+
+    @tb.xfail
+    # AttributeError: type object 'DefaultValue' has no attribute
+    # '__gel_reflection__'
+    # happens on the first save
+    def test_modelgen_save_reload_links_01(self):
+        from models import default
+
+        # Test that default link values are populated correctly
+        alice = self.client.get(default.User.filter(name="Alice"))
+        tld = default.TestLinkDefault(name="magical wizard")
+        self.client.save(tld)
+
+        self.assertEqual(tld.name, "magical wizard")
+        # Save might not load the entire "user", but it probably should update
+        # the link id.
+        assert tld.user is not None
+        self.assertEqual(tld.user.id, alice.id)
+
+        # Verify by fetching fresh from database
+        fresh = self.client.get(
+            default.TestLinkDefault.select("*", user=True).filter(id=tld.id)
+        )
+        self.assertEqual(fresh.name, tld.name)
+        assert fresh.user is not None
+        self.assertEqual(fresh.user.name, tld.user.name)
+
+    @tb.xfail
+    # See XXX comments
+    def test_modelgen_save_reload_links_02(self):
+        from models import default
+
+        # Test that rewrite link rules are executed correctly
+        # The rewrite selects first User >= the object's name alphabetically
+
+        # "Barn Owl" should get user "Billie" (first user >= "Barn Owl")
+        tlr = default.TestLinkRewrite(name="Barn Owl")
+        self.client.save(tlr)
+
+        self.assertEqual(tlr.name, "Barn Owl")
+
+        # Check what's actually in the database first
+        tlr2 = self.client.get(
+            default.TestLinkRewrite.select("*", user=True).filter(id=tlr.id)
+        )
+        self.assertEqual(tlr2.name, "Barn Owl")
+        assert tlr2.user is not None
+        self.assertEqual(tlr2.user.name, "Billie")
+
+        # XXX: Save might not load the entire "user", but it probably should
+        # update the link id.
+        assert tlr.user is not None
+        self.assertEqual(tlr.user.id, tlr2.user.id)
+
+        # Update the name - rewrite should execute again
+        # "Bugle" should get "Cameron" (first user >= "Bugle")
+        tlr2.name = "Bugle"
+        self.client.save(tlr2)
+
+        self.assertEqual(tlr2.name, "Bugle")
+
+        # Check what's in the database after the update
+        tlr3 = self.client.get(
+            default.TestLinkRewrite.select("*", user=True).filter(id=tlr.id)
+        )
+        self.assertEqual(tlr3.name, "Bugle")
+        assert tlr3.user is not None
+        self.assertEqual(tlr3.user.name, "Cameron")
+
+        # XXX: "user" was loaded and modified in tlr2, so it might be
+        # reasonable to update it with auto-reload?
+        assert tlr2.user is not None
+        self.assertEqual(tlr2.user.name, "Cameron")
+
+    @tb.xfail
+    # See XXX comments
+    def test_modelgen_save_reload_links_03(self):
+        from models import default
+
+        # Test that link trigger rules are executed correctly
+        # This trigger updates the linked user's nickname to match the
+        # object's name
+
+        # Get Alice and create a TestLinkTrigger linked to her
+        alice = self.client.get(default.User.filter(name="Alice"))
+        original_nickname = alice.nickname
+
+        tlt = default.TestLinkTrigger(name="magical unicorn", user=alice)
+        self.client.save(tlt)
+
+        self.assertEqual(tlt.name, "magical unicorn")
+
+        # Check that the trigger updated Alice's nickname
+        assert tlt.user is not None
+        updated_alice = self.client.get(default.User.filter(id=tlt.user.id))
+        self.assertEqual(updated_alice.nickname, "magical unicorn")
+        self.assertNotEqual(updated_alice.nickname, original_nickname)
+
+        # XXX: tlt.user was modified and saved, so maybe it's auto-reloaded?
+        self.assertEqual(tlt.user.name, "Alice")
+        self.assertEqual(tlt.user.nickname, "magical unicorn")
+
+        # XXX: Was alice reloaded? After all that's the object used in tlt.user
+        self.assertEqual(alice.nickname, "magical unicorn")
+
+    @tb.xfail
+    # link props aren't reloaded after save
+    def test_modelgen_save_reload_linkprops_01(self):
+        from models import default
+
+        # Test that link property defaults are populated correctly after save
+        # StepPath.next has a link property "steps" with default value 1
+
+        # Create LinearPath targets
+        end = default.LinearPath(label="destination")
+        self.client.save(end)
+
+        # Create StepPath with next link but omit steps property
+        # The steps should default to 1
+        path = default.StepPath(
+            label="journey", next=default.StepPath.next.link(end)
+        )
+        self.client.save(path)
+
+        self.assertEqual(path.label, "journey")
+        assert path.next is not None
+        self.assertEqual(path.next.label, "destination")
+
+        # Check that the link property was populated with the default value
+        self.assertEqual(path.next.__linkprops__.steps, 1)
+
+        # Verify by fetching fresh from database
+        fresh = self.client.get(
+            default.StepPath.select("*", next=True).filter(id=path.id)
+        )
+        self.assertEqual(fresh.label, path.label)
+        assert fresh.next is not None
+        self.assertEqual(fresh.next.label, path.next.label)
+        self.assertEqual(
+            fresh.next.__linkprops__.steps, path.next.__linkprops__.steps
+        )
+
+    @tb.xfail
+    def test_modelgen_save_computed_multiprops_01(self):
+        from models import default
+
+        alice = self.client.get(default.User.filter(name="Alice"))
+        billie = self.client.get(default.User.filter(name="Billie"))
+        team = default.ExtraTeam(
+            name="dancing bananas",
+            members=[
+                default.ExtraTeam.members.link(alice),
+                default.ExtraTeam.members.link(billie),
+            ],
+        )
+        # Test that ORM save works with computed multi properties
+        self.client.save(team)
+
+    def test_modelgen_save_computed_multiprops_02(self):
+        from models import default
+
+        # Create ExtraTeam using EdgeQL to avoid ORM save issues
+        t = self.client.query_required_single("""
+            insert ExtraTeam {
+                name := 'magical unicorns',
+                members := (select User filter .name in {'Alice', 'Billie'})
+            }
+        """)
+
+        # Fetch the ExtraTeam with computed multi property
+        team = self.client.get(
+            default.ExtraTeam.filter(id=t.id)
+        )
+
+        # Reading computed multi property works
+        self.assertEqual(set(team.member_names), {"Alice", "Billie"})
+
+        # Cannot assign to computed multi property
+        with self.assertRaises(AssertionError):
+            team.member_names = ["Alice", "Billie", "Cameron"]  # type: ignore
+
+        # Cannot pass computed multi property to constructor
+        with self.assertRaisesRegex(
+            ValueError,
+            r"(?s)member_names\n\s*Extra inputs are not permitted",
+        ):
+            default.ExtraTeam(
+                name="flying elephants", member_names=["Alice", "Billie"]
+            )  # type: ignore
+
+        # Cannot modify computed multi property collection
+        with self.assertRaises(AssertionError):
+            team.member_names += ("Cameron",)  # type: ignore
+
+    def test_modelgen_save_computed_multiprops_03(self):
+        from models import default
+
+        # Create ExtraTeam using EdgeQL to avoid ORM save issues
+        t = self.client.query_required_single("""
+            insert ExtraTeam {
+                name := 'cosmic penguins',
+                members := (select User filter .name in {'Alice', 'Cameron'})
+            }
+        """)
+
+        # Fetch ExtraTeam with partial selection (excluding computed multi
+        # property from select)
+        team = self.client.get(
+            default.ExtraTeam.select(name=True, members=True).filter(id=t.id)
+        )
+
+        self.assertEqual(team.name, "cosmic penguins")
+
+        # Cannot modify computed multi property collection in partial fetch
+        with self.assertRaisesRegex(
+            AttributeError,
+            r"'member_names' is not set",
+        ):
+            team.member_names.append("Billie")  # type: ignore
+
     @tb.skip_typecheck
     def test_modelgen_write_only_dlist_errors(self):
         # Test that reading operations on write-only dlists raise
@@ -5330,50 +5660,6 @@ class TestModelGenerator(tb.ModelTestCase):
             # (mypy will also error out if "type: ignore" is not used)
             default.Named(name="aaa")  # type: ignore
 
-
-@tb.typecheck
-class TestEmptyModelGenerator(tb.ModelTestCase):
-    DEFAULT_MODULE = "default"
-
-    def test_modelgen_empty_schema_1(self):
-        # This is it, we're just testing empty import.
-        from models import default, std  # noqa: F401
-
-
-@tb.typecheck
-class TestEmptyAiModelGenerator(tb.ModelTestCase):
-    DEFAULT_MODULE = "default"
-    SCHEMA = os.path.join(os.path.dirname(__file__), "dbsetup", "empty_ai.gel")
-
-    def test_modelgen_empty_ai_schema_1(self):
-        # This is it, we're just testing empty import.
-        import models
-
-        self.assertEqual(
-            models.sys.ExtensionPackage.__name__, "ExtensionPackage"
-        )
-
-    def test_modelgen_empty_ai_schema_2(self):
-        # This is it, we're just testing empty import.
-        from models.ext import ai  # noqa: F401
-
-
-# TODO: currently the schema and the tests here are broken in a way that makes
-# it hard to integrate them with the main tests suite without breaking many
-# tests in it as well. Presumably after fixing the issues, the schema and
-# tests can just be merged with the main suite.
-@tb.typecheck
-class TestModelGeneratorOther(tb.ModelTestCase):
-    SCHEMA = os.path.join(
-        os.path.dirname(__file__), "dbsetup", "orm_other.gel"
-    )
-
-    SETUP = os.path.join(
-        os.path.dirname(__file__), "dbsetup", "orm_other.edgeql"
-    )
-
-    ISOLATED_TEST_BRANCHES = True
-
     def test_modelgen_escape_01(self):
         from models import default
         # insert an object that needs a lot of escaping
@@ -5436,6 +5722,33 @@ class TestModelGeneratorOther(tb.ModelTestCase):
         self.assertEqual(len(res.configure), 1)
         self.assertEqual(res.configure[0].name, "Alice")
         self.assertEqual(res.configure[0].__linkprops__.create, True)
+
+
+@tb.typecheck
+class TestEmptyModelGenerator(tb.ModelTestCase):
+    DEFAULT_MODULE = "default"
+
+    def test_modelgen_empty_schema_1(self):
+        # This is it, we're just testing empty import.
+        from models import default, std  # noqa: F401
+
+
+@tb.typecheck
+class TestEmptyAiModelGenerator(tb.ModelTestCase):
+    DEFAULT_MODULE = "default"
+    SCHEMA = os.path.join(os.path.dirname(__file__), "dbsetup", "empty_ai.gel")
+
+    def test_modelgen_empty_ai_schema_1(self):
+        # This is it, we're just testing empty import.
+        import models
+
+        self.assertEqual(
+            models.sys.ExtensionPackage.__name__, "ExtensionPackage"
+        )
+
+    def test_modelgen_empty_ai_schema_2(self):
+        # This is it, we're just testing empty import.
+        from models.ext import ai  # noqa: F401
 
 
 class TestModelGeneratorReproducibility(tb.ModelTestCase):
