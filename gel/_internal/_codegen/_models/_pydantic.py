@@ -3,12 +3,12 @@
 # SPDX-FileCopyrightText: Copyright Gel Data Inc. and the contributors.
 
 from __future__ import annotations
-import contextlib
 from typing import (
     TYPE_CHECKING,
     Any,
     Literal,
     NamedTuple,
+    Optional,
     Protocol,
     TypedDict,
     TypeVar,
@@ -17,6 +17,7 @@ from typing import (
 from typing_extensions import TypeAliasType
 
 import base64
+import contextlib
 import dataclasses
 import enum
 import functools
@@ -54,6 +55,7 @@ from .._generator import C, AbstractCodeGenerator
 from .._module import ImportTime, CodeSection, GeneratedModule
 
 if TYPE_CHECKING:
+    import argparse
     import io
 
     from collections.abc import (
@@ -176,6 +178,18 @@ class GeneratedState:
 
 
 class PydanticModelsGenerator(AbstractCodeGenerator):
+    _output: Optional[str | pathlib.Path] = None
+
+    def _apply_cli_config(self, args: argparse.Namespace) -> None:
+        super()._apply_cli_config(args)
+        if args.output is not None:
+            self._output = args.output
+
+    def _apply_env_output(self, value: Any) -> None:
+        if not isinstance(value, str):
+            raise ValueError('"output" must be a string')
+        self._output = self._project_dir / value
+
     def run(self) -> None:
         try:
             self._client.ensure_connected()
@@ -183,7 +197,7 @@ class PydanticModelsGenerator(AbstractCodeGenerator):
             logger.exception("could not connect to Gel instance")
             self.abort(61)
 
-        models_root = self._args.output
+        models_root = self._output
 
         # First, detect FastAPI-style well-known project structure in cwd
         if not models_root:
