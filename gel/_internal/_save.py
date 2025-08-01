@@ -1069,7 +1069,7 @@ class SaveExecutor:
 
         visited: IDTracker[GelModel, None] = IDTracker()
 
-        def _traverse(obj: GelModel, path: pathlib.Path) -> None:
+        def _check_recursive(obj: GelModel, path: pathlib.Path) -> None:
             if obj in visited:
                 return
 
@@ -1108,13 +1108,13 @@ class SaveExecutor:
                                         f"after save"
                                     )
                                 unwrapped = unwrap_proxy_no_check(proxy)
-                                _traverse(unwrapped, list_path)
+                                _check_recursive(unwrapped, list_path)
                         else:
                             assert is_link_dlist(val)
                             val.__gel_post_commit_check__(link_path)
                             for i, model in enumerate(val._items):
                                 list_path = link_path / str(i)
-                                _traverse(model, list_path)
+                                _check_recursive(model, list_path)
                     else:
                         if isinstance(val, ProxyModel):
                             if val.__linkprops__.__gel_get_changed_fields__():
@@ -1122,9 +1122,11 @@ class SaveExecutor:
                                     f"{link_path} has changed link props "
                                     f"after save"
                                 )
-                            _traverse(unwrap_proxy_no_check(val), link_path)
+                            _check_recursive(
+                                unwrap_proxy_no_check(val), link_path
+                            )
                         else:
-                            _traverse(cast("GelModel", val), link_path)
+                            _check_recursive(cast("GelModel", val), link_path)
 
                 else:
                     assert prop.kind is PointerKind.Property
@@ -1133,13 +1135,13 @@ class SaveExecutor:
                         val.__gel_post_commit_check__(link_path)
 
         for o in self.objs:
-            _traverse(o, pathlib.Path())
+            _check_recursive(o, pathlib.Path())
 
-        for o in self.objs:
-            if list(get_linked_new_objects(o)):
-                raise ValueError(
-                    f"traversing {o!r} revealed unsaved new objects"
-                )
+        # Final check: make sure that the save plan is empty
+        # in case we've missed something in `_check_recursive()`.
+        create_batches, updates = make_plan(self.objs)
+        if create_batches or updates:
+            raise ValueError("non-empty save plan after save()")
 
     def _get_id(self, obj: GelModel) -> uuid.UUID:
         if obj.__gel_new__:
