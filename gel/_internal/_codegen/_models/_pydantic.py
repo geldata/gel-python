@@ -4346,20 +4346,35 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             self.write_link_reflection(link, reflection_bases)
 
             assert link.pointers
+
+            is_mutable = False
+            attrs: dict[str, str] = {}
             for lprop in link.pointers:
                 if lprop.name in {"source", "target"}:
                     continue
                 ttype = self._types[lprop.target_id]
-                assert reflection.is_scalar_type(ttype)
+                assert reflection.is_primitive_type(ttype)
                 ptr_type = self.get_type(ttype)
-                pytype = " | ".join(self._get_pytype_for_scalar(ttype))
+                pytype = self._get_pytype_for_primitive_type(ttype)
                 py_anno = self._py_anno_for_ptr(
                     lprop,
                     ptr_type,
                     pytype,
                     reflection.Cardinality(lprop.card),
                 )
-                self._write_model_attribute(lprop.name, py_anno)
+                is_mutable = is_mutable or ttype.mutable(self._types)
+                attrs[lprop.name] = py_anno
+
+            classvar = self.import_name(
+                "typing", "ClassVar", import_time=ImportTime.typecheck
+            )
+            self.write(
+                f"__gel_has_mutable_props__: {classvar}[bool] = {is_mutable!r}"
+            )
+            self.write()
+
+            for lprop_name, py_anno in attrs.items():
+                self._write_model_attribute(lprop_name, py_anno)
 
         self.write()
 
@@ -4425,8 +4440,8 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             if lprop.name in {"source", "target"}:
                 continue
             ttype = self._types[lprop.target_id]
-            assert reflection.is_scalar_type(ttype)
-            pytype = " | ".join(self._get_pytype_for_scalar(ttype))
+            assert reflection.is_primitive_type(ttype)
+            pytype = self._get_pytype_for_primitive_type(ttype)
             lprop_line = f"{lprop.name}: {pytype} | None = None"
             lprops.append(lprop_line)
 
