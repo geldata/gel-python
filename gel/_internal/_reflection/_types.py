@@ -125,6 +125,9 @@ class Type(SchemaObject, abc.ABC):
         else:
             return {}
 
+    def mutable(self, schema: Schema) -> bool:
+        return self.kind == TypeKind.Array
+
     def specialize(
         self,
         spec: Mapping[Indirection, tuple[Type, Type]],
@@ -253,6 +256,9 @@ class ObjectType(InheritingType):
 
         raise LookupError(f"object type {self.name} has no pointer {name}")
 
+    def mutable(self, schema: Schema) -> bool:
+        return True
+
 
 class CollectionType(Type):
     @functools.cached_property
@@ -267,6 +273,11 @@ class CollectionType(Type):
 @struct
 class HomogeneousCollectionType(CollectionType):
     element_type: Type | None = None
+
+    def mutable(self, schema: Schema) -> bool:
+        return super().mutable(schema) or self.get_element_type(
+            schema
+        ).mutable(schema)
 
     def get_id_and_name(self, element_type: Type) -> tuple[str, str]:
         cls = type(self)
@@ -349,6 +360,11 @@ class HomogeneousCollectionType(CollectionType):
 @struct
 class HeterogeneousCollectionType(CollectionType):
     element_types: tuple[Type, ...] | None = None
+
+    def mutable(self, schema: Schema) -> bool:
+        return super().mutable(schema) or (
+            any(mt.mutable(schema) for mt in self.get_element_types(schema))
+        )
 
     def get_id_and_name(
         self, element_types: tuple[Type, ...]
