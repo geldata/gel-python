@@ -2094,10 +2094,6 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         self,
         glob: reflection.Global,
     ) -> None:
-        type_ = self.get_type(
-            glob.get_type(self._types),
-            import_time=ImportTime.typecheck_runtime,
-        )
         name = ident(glob.schemapath.name)
 
         with self.aspect(ModuleAspect.SHAPES):
@@ -2110,8 +2106,13 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             glob.schemapath,
             aspect=ModuleAspect.SHAPES,
         )
-        self.write(f"{name} = {impl}.global_({type_})")
-        self.write()
+        type_ = self.get_type(
+            glob.get_type(self._types),
+            import_time=ImportTime.late_runtime,
+        )
+        with self.code_section(CodeSection.after_late_import):
+            self.write(f"{name} = {impl}.global_({type_})")
+            self.write()
 
     def prepare_namespace(self, mod: IntrospectedModule) -> None:
         for aspect in (ModuleAspect.SHAPES, ModuleAspect.MAIN):
