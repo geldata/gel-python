@@ -5,26 +5,24 @@
 """Pydantic implementation of the query builder model"""
 
 from __future__ import annotations
-
 from typing import (
+    TYPE_CHECKING,
     Annotated,
     Any,
     ClassVar,
     Generic,
     TypeVar,
 )
-
 from typing_extensions import (
     TypeAliasType,
 )
 
+import dataclasses
 import functools
 import typing
 
-import pydantic
 import pydantic_core
 from pydantic_core import core_schema
-
 
 from gel._internal import _tracked_list
 from gel._internal import _edgeql
@@ -36,6 +34,10 @@ from gel._internal._qbmodel._abstract import DistinctList, ProxyDistinctList
 from ._models import GelModel, ProxyModel
 
 from . import _utils as _pydantic_utils
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+    import pydantic
 
 
 _T_co = TypeVar("_T_co", bound=_abstract.GelType, covariant=True)
@@ -54,6 +56,21 @@ _BMT_co = TypeVar("_BMT_co", bound=GelModel, covariant=True)
 
 _PT_co = TypeVar("_PT_co", bound=ProxyModel[GelModel], covariant=True)
 """Proxy model"""
+
+
+@dataclasses.dataclass(kw_only=True, frozen=True)
+class PointerInfo:
+    default: Any = pydantic_core.PydanticUndefined
+    default_factory: (
+        Callable[[], Any] | Callable[[dict[str, Any]], Any] | None
+    ) = None
+    validate_default: bool | None = None
+    computed: bool = False
+    readonly: bool = False
+    has_props: bool = False
+    cardinality: _edgeql.Cardinality = _edgeql.Cardinality.One
+    annotation: type[Any] | None = None
+    kind: _edgeql.PointerKind | None = None
 
 
 class _MultiPointer(_abstract.PointerDescriptor[_T_co, _BT_co]):
@@ -130,7 +147,7 @@ class _BaseMultiLink(_MultiPointer[_T_co, _BT_co]):
             return handler.generate_schema(source_type)
 
 
-class Property(_abstract.PropertyDescriptor[_ST_co, _BT_co]):
+class _Property(_abstract.PropertyDescriptor[_ST_co, _BT_co]):
     @classmethod
     def __get_pydantic_core_schema__(
         cls,
@@ -142,6 +159,18 @@ class Property(_abstract.PropertyDescriptor[_ST_co, _BT_co]):
             return handler.generate_schema(args[0])
         else:
             return handler.generate_schema(source_type)
+
+
+Property = TypeAliasType(
+    "Property",
+    Annotated[
+        _Property[_ST_co, _BT_co],
+        PointerInfo(
+            kind=_edgeql.PointerKind.Property,
+        ),
+    ],
+    type_params=(_ST_co, _BT_co),
+)
 
 
 class _ComputedProperty(_abstract.ComputedPropertyDescriptor[_ST_co, _BT_co]):
@@ -165,8 +194,7 @@ ComputedProperty = TypeAliasType(
     "ComputedProperty",
     Annotated[
         _ComputedProperty[_ST_co, _BT_co],
-        pydantic.Field(init=False, frozen=True),
-        _abstract.PointerInfo(
+        PointerInfo(
             computed=True,
             readonly=True,
             kind=_edgeql.PointerKind.Property,
@@ -179,9 +207,8 @@ ComputedProperty = TypeAliasType(
 IdProperty = TypeAliasType(
     "IdProperty",
     Annotated[
-        Property[_ST_co, _BT_co],
-        pydantic.Field(init=False, frozen=True),
-        _abstract.PointerInfo(
+        _Property[_ST_co, _BT_co],
+        PointerInfo(
             computed=True,
             readonly=True,
             kind=_edgeql.PointerKind.Property,
@@ -211,9 +238,8 @@ OptionalProperty = TypeAliasType(
     "OptionalProperty",
     Annotated[
         _OptionalProperty[_ST_co, _BT_co],
-        pydantic.Field(default=None),
-        _abstract.PointerInfo(
-            computed=False,
+        PointerInfo(
+            default=None,
             cardinality=_edgeql.Cardinality.AtMostOne,
             kind=_edgeql.PointerKind.Property,
         ),
@@ -226,8 +252,8 @@ OptionalComputedProperty = TypeAliasType(
     "OptionalComputedProperty",
     Annotated[
         _OptionalProperty[_ST_co, _BT_co],
-        pydantic.Field(default=None, init=False, frozen=True),
-        _abstract.PointerInfo(
+        PointerInfo(
+            default=None,
             computed=True,
             readonly=True,
             cardinality=_edgeql.Cardinality.AtMostOne,
@@ -282,13 +308,11 @@ MultiProperty = TypeAliasType(
     "MultiProperty",
     Annotated[
         _MultiProperty[_ST_co, _BT_co],
-        pydantic.Field(
+        PointerInfo(
             default_factory=_tracked_list.DefaultList,
             # Force validate call to convert the empty list
             # to a properly typed one.
             validate_default=True,
-        ),
-        _abstract.PointerInfo(
             cardinality=_edgeql.Cardinality.Many,
             kind=_edgeql.PointerKind.Property,
         ),
@@ -301,12 +325,8 @@ ComputedMultiProperty = TypeAliasType(
     "ComputedMultiProperty",
     Annotated[
         _ComputedMultiProperty[_ST_co, _BT_co],
-        pydantic.Field(
+        PointerInfo(
             default_factory=tuple,
-            init=False,
-            frozen=True,
-        ),
-        _abstract.PointerInfo(
             computed=True,
             readonly=True,
             cardinality=_edgeql.Cardinality.Many,
@@ -483,7 +503,7 @@ RequiredLinkWithProps = TypeAliasType(
     "RequiredLinkWithProps",
     Annotated[
         _RequiredLinkWithProps[_MT_co, _BMT_co],
-        _abstract.PointerInfo(
+        PointerInfo(
             cardinality=_edgeql.Cardinality.One,
             kind=_edgeql.PointerKind.Link,
             has_props=True,
@@ -497,8 +517,7 @@ ComputedLinkWithProps = TypeAliasType(
     "ComputedLinkWithProps",
     Annotated[
         _Link[_MT_co, _BMT_co],
-        pydantic.Field(init=False, frozen=True),
-        _abstract.PointerInfo(
+        PointerInfo(
             computed=True,
             readonly=True,
             has_props=True,
@@ -513,8 +532,7 @@ ComputedLink = TypeAliasType(
     "ComputedLink",
     Annotated[
         _Link[_MT_co, _MT_co],
-        pydantic.Field(init=False, frozen=True),
-        _abstract.PointerInfo(
+        PointerInfo(
             computed=True,
             readonly=True,
             cardinality=_edgeql.Cardinality.One,
@@ -529,8 +547,8 @@ RequiredLink = TypeAliasType(
     "RequiredLink",
     Annotated[
         _Link[_MT_co, _MT_co],
-        pydantic.Field(default=None),
-        _abstract.PointerInfo(
+        PointerInfo(
+            default=None,
             cardinality=_edgeql.Cardinality.AtMostOne,
             kind=_edgeql.PointerKind.Link,
         ),
@@ -543,8 +561,8 @@ OptionalLink = TypeAliasType(
     "OptionalLink",
     Annotated[
         _OptionalLink[_MT_co, _MT_co],
-        pydantic.Field(default=None),
-        _abstract.PointerInfo(
+        PointerInfo(
+            default=None,
             cardinality=_edgeql.Cardinality.AtMostOne,
             kind=_edgeql.PointerKind.Link,
         ),
@@ -556,8 +574,8 @@ OptionalComputedLink = TypeAliasType(
     "OptionalComputedLink",
     Annotated[
         _OptionalLink[_MT_co, _MT_co],
-        pydantic.Field(default=None, init=False, frozen=True),
-        _abstract.PointerInfo(
+        PointerInfo(
+            default=None,
             computed=True,
             readonly=True,
             cardinality=_edgeql.Cardinality.AtMostOne,
@@ -571,8 +589,8 @@ OptionalLinkWithProps = TypeAliasType(
     "OptionalLinkWithProps",
     Annotated[
         _OptionalLinkWithProps[_PT_co, _MT_co],
-        pydantic.Field(default=None),
-        _abstract.PointerInfo(
+        PointerInfo(
+            default=None,
             cardinality=_edgeql.Cardinality.AtMostOne,
             kind=_edgeql.PointerKind.Link,
             has_props=True,
@@ -585,8 +603,8 @@ OptionalComputedLinkWithProps = TypeAliasType(
     "OptionalComputedLinkWithProps",
     Annotated[
         _OptionalLink[_PT_co, _MT_co],
-        pydantic.Field(default=None, init=False, frozen=True),
-        _abstract.PointerInfo(
+        PointerInfo(
+            default=None,
             computed=True,
             readonly=True,
             has_props=True,
@@ -666,13 +684,11 @@ OptionalMultiLink = TypeAliasType(
     "OptionalMultiLink",
     Annotated[
         _MultiLink[_MT_co, _MT_co],
-        pydantic.Field(
+        PointerInfo(
             default_factory=_tracked_list.DefaultList,
             # Force validate call to convert the empty list
             # to a properly typed one.
             validate_default=True,
-        ),
-        _abstract.PointerInfo(
             cardinality=_edgeql.Cardinality.Many,
             kind=_edgeql.PointerKind.Link,
         ),
@@ -684,13 +700,11 @@ RequiredMultiLink = TypeAliasType(
     "RequiredMultiLink",
     Annotated[
         _MultiLink[_MT_co, _MT_co],
-        pydantic.Field(
+        PointerInfo(
             default_factory=_tracked_list.DefaultList,
             # Force validate call to convert the empty list
             # to a properly typed one.
             validate_default=True,
-        ),
-        _abstract.PointerInfo(
             cardinality=_edgeql.Cardinality.AtLeastOne,
             kind=_edgeql.PointerKind.Link,
         ),
@@ -702,12 +716,8 @@ ComputedMultiLink = TypeAliasType(
     "ComputedMultiLink",
     Annotated[
         _ComputedMultiLink[_MT_co, _MT_co],
-        pydantic.Field(
+        PointerInfo(
             default_factory=tuple,
-            init=False,
-            frozen=True,
-        ),
-        _abstract.PointerInfo(
             computed=True,
             readonly=True,
             cardinality=_edgeql.Cardinality.Many,
@@ -721,13 +731,11 @@ OptionalMultiLinkWithProps = TypeAliasType(
     "OptionalMultiLinkWithProps",
     Annotated[
         _MultiLinkWithProps[_PT_co, _MT_co],
-        pydantic.Field(
+        PointerInfo(
             default_factory=_tracked_list.DefaultList,
             # Force validate call to convert the empty list
             # to a properly typed one.
             validate_default=True,
-        ),
-        _abstract.PointerInfo(
             has_props=True,
             cardinality=_edgeql.Cardinality.Many,
             kind=_edgeql.PointerKind.Link,
@@ -740,13 +748,11 @@ RequiredMultiLinkWithProps = TypeAliasType(
     "RequiredMultiLinkWithProps",
     Annotated[
         _MultiLinkWithProps[_PT_co, _MT_co],
-        pydantic.Field(
+        PointerInfo(
             default_factory=_tracked_list.DefaultList,
             # Force validate call to convert the empty list
             # to a properly typed one.
             validate_default=True,
-        ),
-        _abstract.PointerInfo(
             has_props=True,
             cardinality=_edgeql.Cardinality.AtLeastOne,
             kind=_edgeql.PointerKind.Link,
@@ -759,12 +765,8 @@ ComputedMultiLinkWithProps = TypeAliasType(
     "ComputedMultiLinkWithProps",
     Annotated[
         _ComputedMultiLink[_PT_co, _MT_co],
-        pydantic.Field(
+        PointerInfo(
             default_factory=tuple,
-            init=False,
-            frozen=True,
-        ),
-        _abstract.PointerInfo(
             computed=True,
             readonly=True,
             has_props=True,
