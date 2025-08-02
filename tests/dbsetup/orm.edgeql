@@ -120,6 +120,14 @@ insert RangeTest {
         <cal::local_date>'2025-01-06',
         <cal::local_date>'2025-02-17',
     ),
+    datetime_range := range(
+        <cal::local_datetime>'2025-01-06 12:12:12',
+        <cal::local_datetime>'2025-01-08 12:12:12'
+    ),
+    tz_datetime_range := range(
+        <datetime>'2010-12-27T23:59:59-07:00',
+        <datetime>'2011-01-27T23:59:59-07:00'
+    ),
 };
 
 insert MultiRangeTest {

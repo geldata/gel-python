@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import collections
 import dataclasses
+import pathlib
 import weakref
+import uuid
 
 from typing import (
     TYPE_CHECKING,
@@ -34,7 +36,6 @@ from gel._internal._qbmodel._abstract import (
 from gel._internal._edgeql import PointerKind, quote_ident
 
 if TYPE_CHECKING:
-    import uuid
     from collections.abc import (
         Iterable,
         Iterator,
@@ -46,6 +47,7 @@ if TYPE_CHECKING:
 
 
 T = TypeVar("T")
+T_co = TypeVar("T_co", covariant=True)
 V = TypeVar("V")
 
 _unset = object()
@@ -93,9 +95,7 @@ class SingleLinkChange(BaseFieldChange):
         assert not isinstance(self.target, ProxyModel)
         assert not self.info.cardinality.is_multi()
         assert (self.props_info is None and self.props is None) or (
-            self.props_info is not None
-            and self.props is not None
-            and self.props_info.keys() == self.props.keys()
+            self.props_info is not None and self.props is not None
         )
 
 
@@ -120,7 +120,6 @@ class MultiLinkAdd(BaseFieldChange):
             self.props_info is not None
             and len(self.added_props) > 0
             and len(self.added) == len(self.added_props)
-            and next(iter(self.added_props)).keys() == self.props_info.keys()
         )
 
 
@@ -420,7 +419,7 @@ def push_change(
     sched: FieldChangeLists,
     change: FieldChange,
 ) -> None:
-    """Push a fiekd change either to *requireds* or *sched*."""
+    """Push a field change either to *requireds* or *sched*."""
 
     if requireds.get(change.name):
         sched[change.name].append(change)
@@ -487,17 +486,14 @@ def make_plan(objs: Iterable[GelModel]) -> SavePlan:
 
         for prop in pointers:
             # Skip computeds, we can't update them.
-            if prop.computed:
+            if prop.computed or prop.readonly:
+                # Exclude computeds but also props like `__type__` and `id`
                 continue
 
             # Iterate through changes of *propertes* and *single links*.
             if prop.name in field_changes:
                 # Since there was a change and we don't implement `del`,
                 # the attribute must be set
-
-                if prop.name == "id":
-                    # id is special, we don't need to track it
-                    continue
 
                 val = getattr(obj, prop.name)
                 if (
@@ -524,7 +520,7 @@ def make_plan(objs: Iterable[GelModel]) -> SavePlan:
                     prop.kind is PointerKind.Link
                     and not prop.cardinality.is_multi()
                 ):
-                    # Single link.
+                    # Single link got overwritten with a new value.
                     #
                     # (Multi links are more complicated
                     # as they can be changed without being picked up by
@@ -628,6 +624,38 @@ def make_plan(objs: Iterable[GelModel]) -> SavePlan:
                     continue
 
             if (
+                prop.kind is PointerKind.Link
+                and not prop.cardinality.is_multi()
+                and prop.properties
+            ):
+                val = getattr(obj, prop.name, _unset)
+                if val is _unset:
+                    continue
+                assert isinstance(val, ProxyModel)
+                lprops = val.__linkprops__
+                if not lprops.__gel_changed_fields__:
+                    continue
+
+                # An existing single link has updated link props.
+
+                ptrs = get_pointers(type(val).__linkprops__)
+                props = {
+                    p: getattr(lprops, p, None)
+                    for p in lprops.__gel_get_changed_fields__()
+                }
+
+                sch = SingleLinkChange(
+                    name=prop.name,
+                    info=prop,
+                    target=unwrap_proxy(val),
+                    props=props,
+                    props_info={p.name: p for p in ptrs},
+                )
+
+                push_change(requireds, sched, sch)
+                continue
+
+            if (
                 prop.kind is not PointerKind.Link
                 or not prop.cardinality.is_multi()
             ):
@@ -684,7 +712,7 @@ def make_plan(objs: Iterable[GelModel]) -> SavePlan:
             #   or updating link props on the existing one is still the same:
             #   `+=`
             #
-            # - Why aern't we capturing which link props have changes
+            # - Why aren't we capturing which link props have changes
             #   specifically? Becuse with EdgeQL we don't have a mechanism
             #   (yet) to update a specific link prop -- we'll have to submit
             #   all of them.
@@ -705,7 +733,7 @@ def make_plan(objs: Iterable[GelModel]) -> SavePlan:
 
             # No adds or changes for this link?
             if not added:
-                if replace:
+                if replace and not is_new:
                     # Need to reset this link to an empty list
                     push_change(
                         requireds,
@@ -715,9 +743,9 @@ def make_plan(objs: Iterable[GelModel]) -> SavePlan:
                             info=prop,
                         ),
                     )
-                else:
-                    # Continue to the next object
-                    continue
+
+                # Continue to the next object
+                continue
 
             added_proxies: Sequence[ProxyModel[GelModel]] = added  # type: ignore [assignment]
 
@@ -752,10 +780,12 @@ def make_plan(objs: Iterable[GelModel]) -> SavePlan:
                 added=unwrap_dlist(added),
                 added_props=[
                     {
-                        p.name: getattr(
-                            ll_attr(link, "__linkprops__"), p.name, None
+                        p: getattr(ll_attr(link, "__linkprops__"), p, None)
+                        for p in (
+                            ll_attr(
+                                link, "__linkprops__"
+                            ).__gel_get_changed_fields__()
                         )
-                        for p in props_info
                     }
                     for link in cast("list[ProxyModel[GelModel]]", added)
                 ],
@@ -829,9 +859,33 @@ def make_plan(objs: Iterable[GelModel]) -> SavePlan:
 
 def make_save_executor_constructor(
     objs: tuple[GelModel, ...],
+    *,
+    refetch: bool,
+    save_postcheck: bool = False,
 ) -> Callable[[], SaveExecutor]:
     create_batches, updates = make_plan(objs)
-    return lambda: SaveExecutor(objs, create_batches, updates)
+    return lambda: SaveExecutor(
+        objs=objs,
+        create_batches=create_batches,
+        updates=updates,
+        refetch=refetch,
+        save_postcheck=save_postcheck,
+    )
+
+
+class TypeWrapper(Generic[T_co]):
+    def __init__(self, tp: type[T_co], query: str) -> None:
+        self.tp = tp
+        self.query = query
+
+    def __edgeql__(self) -> tuple[type[T_co], str]:
+        return self.tp, self.query
+
+    def __repr__(self) -> str:
+        return (
+            f"save.TypeWrapper["
+            f"{self.tp.__module__}.{self.tp.__qualname__}; {self.query!r}]"
+        )
 
 
 # How many INSERT/UPDATE operations can be combined into a single query.
@@ -843,17 +897,31 @@ MAX_BATCH_SIZE = 1280
 @_struct
 class QueryBatch:
     executor: SaveExecutor
-    query: str
+    query: str | TypeWrapper[Any]
     args_query: str
     args: list[tuple[object, ...] | int]
     changes: list[ModelChange]
     insert: bool
 
-    def feed_ids(self, obj_ids: Iterable[uuid.UUID]) -> None:
-        if not self.insert:
+    def feed_db_data(self, obj_data: Iterable[Any]) -> None:
+        if not self.executor.refetch:
+            # in this case `obj_data` is a list of UUIDs
+            if not self.insert:
+                return
+            for obj_upd, change in zip(obj_data, self.changes, strict=True):
+                self.executor.object_ids[id(change.model)] = obj_upd
             return
-        for obj_id, change in zip(obj_ids, self.changes, strict=True):
-            self.executor.object_ids[id(change.model)] = obj_id
+
+        # In this case `obj_data` is a list of GelModel instances
+        # unpacked from `update` and `insert` queries generated by `save()`,
+        # as they're wrapped in `select {*}` to refetch the data.
+        for obj_upd, change in zip(obj_data, self.changes, strict=True):
+            for field in obj_upd.__dict__:
+                if field in {"id", "__tid__"}:
+                    continue
+                change.model.__dict__[field] = obj_upd.__dict__[field]
+            if self.insert:
+                self.executor.object_ids[id(change.model)] = obj_upd.id
 
 
 @_struct
@@ -870,6 +938,8 @@ class SaveExecutor:
     objs: tuple[GelModel, ...]
     create_batches: list[ChangeBatch]
     updates: ChangeBatch
+    refetch: bool
+    save_postcheck: bool
 
     object_ids: dict[int, uuid.UUID] = dataclasses.field(init=False)
 
@@ -880,32 +950,41 @@ class SaveExecutor:
         self, batch: ChangeBatch, /, *, for_insert: bool
     ) -> list[QueryBatch]:
         compiled = [
-            self._compile_change(obj, for_insert=for_insert) for obj in batch
+            (
+                type(change.model),
+                self._compile_change(change, for_insert=for_insert),
+            )
+            for change in batch
         ]
 
         # Queries must be independent of each other within the same
         # ChangeBatch, so we can sort them to group queries.
-        compiled.sort(key=lambda x: x.single_query)
+        compiled.sort(
+            key=lambda x: (x[0].__gel_reflection__.id, x[1].single_query)
+        )
 
         icomp = iter(compiled)
         local_queries = [[next(icomp)]]
 
-        for cq in icomp:
+        for ctype, cq in icomp:
             if (
-                cq.single_query == local_queries[-1][0].single_query
+                ctype is local_queries[-1][0][0]
+                and cq.single_query == local_queries[-1][0][1].single_query
                 and len(local_queries[-1]) < MAX_BATCH_SIZE
             ):
-                local_queries[-1].append(cq)
+                local_queries[-1].append((ctype, cq))
             else:
-                local_queries.append([cq])
+                local_queries.append([(ctype, cq)])
 
         return [
             QueryBatch(
                 executor=self,
-                query=lqs[0].multi_query,
-                args_query=lqs[0].args_query,
-                args=[lq.arg for lq in lqs],
-                changes=[lq.change for lq in lqs],
+                query=TypeWrapper(lqs[0][0], lqs[0][1].multi_query)
+                if self.refetch
+                else lqs[0][1].multi_query,
+                args_query=lqs[0][1].args_query,
+                args=[lq[1].arg for lq in lqs],
+                changes=[lq[1].change for lq in lqs],
                 insert=for_insert,
             )
             for lqs in local_queries
@@ -976,6 +1055,94 @@ class SaveExecutor:
         for o in self.objs:
             _traverse(o)
 
+        if self.save_postcheck:
+            self._post_commit_check()
+
+    def _post_commit_check(self) -> None:
+        # This is only run in debug mode, specifically enabled in our tests
+        # to double check that everything is in a proper committed state after
+        # save(), e.g.:
+        #
+        # - all models are committed
+        # - all models (and things like link props) have no changes
+        # - all collections (multi links, multi props) are in a sound state
+
+        visited: IDTracker[GelModel, None] = IDTracker()
+
+        def _check_recursive(obj: GelModel, path: pathlib.Path) -> None:
+            if obj in visited:
+                return
+
+            assert not isinstance(obj, ProxyModel)
+
+            visited.track(obj)
+
+            path /= f"{type(obj).__qualname__}:{obj.id}"
+
+            if obj.__gel_get_changed_fields__():
+                raise ValueError(f"{path} has changed fields after save")
+            if not hasattr(obj, "id"):
+                raise ValueError(f"{path} has no id after save()")
+            if not isinstance(obj.id, uuid.UUID):
+                raise ValueError(f"{path} has non-uuid id after save()")
+            if obj.__gel_new__:
+                raise ValueError(f"{path} has __gel_new__ set")
+
+            for prop in get_pointers(type(obj)):
+                val = getattr(obj, prop.name, _unset)
+                if val is _unset or val is None:
+                    continue
+
+                link_path = path / prop.name
+
+                if prop.kind is PointerKind.Link:
+                    if prop.cardinality.is_multi():
+                        if is_proxy_link_list(val):
+                            val.__gel_post_commit_check__(link_path)
+                            for i, proxy in enumerate(val._items):
+                                list_path = link_path / str(i)
+                                lps = proxy.__linkprops__
+                                if lps.__gel_get_changed_fields__():
+                                    raise ValueError(
+                                        f"{list_path} has changed link props "
+                                        f"after save"
+                                    )
+                                unwrapped = unwrap_proxy_no_check(proxy)
+                                _check_recursive(unwrapped, list_path)
+                        else:
+                            assert is_link_dlist(val)
+                            val.__gel_post_commit_check__(link_path)
+                            for i, model in enumerate(val._items):
+                                list_path = link_path / str(i)
+                                _check_recursive(model, list_path)
+                    else:
+                        if isinstance(val, ProxyModel):
+                            if val.__linkprops__.__gel_get_changed_fields__():
+                                raise ValueError(
+                                    f"{link_path} has changed link props "
+                                    f"after save"
+                                )
+                            _check_recursive(
+                                unwrap_proxy_no_check(val), link_path
+                            )
+                        else:
+                            _check_recursive(cast("GelModel", val), link_path)
+
+                else:
+                    assert prop.kind is PointerKind.Property
+                    if prop.cardinality.is_multi():
+                        assert is_prop_list(val)
+                        val.__gel_post_commit_check__(link_path)
+
+        for o in self.objs:
+            _check_recursive(o, pathlib.Path())
+
+        # Final check: make sure that the save plan is empty
+        # in case we've missed something in `_check_recursive()`.
+        create_batches, updates = make_plan(self.objs)
+        if create_batches or updates:
+            raise ValueError("non-empty save plan after save()")
+
     def _get_id(self, obj: GelModel) -> uuid.UUID:
         if obj.__gel_new__:
             return self.object_ids[id(obj)]
@@ -1012,11 +1179,11 @@ class SaveExecutor:
             # link props that have types of arrays.
             if type_ql.startswith("array<"):
                 cast = f"array<tuple<{type_ql}>>"
-                ret = lambda x: f"(select array_unpack({x}).0 limit 1)"  # noqa: E731
+                ret = lambda x: f"(select std::array_unpack({x}).0 limit 1)"  # noqa: E731
                 arg_pack = lambda x: [(x,)] if x is not None else []  # noqa: E731
             else:
                 cast = f"array<{type_ql}>"
-                ret = lambda x: f"(select array_unpack({x}) limit 1)"  # noqa: E731
+                ret = lambda x: f"(select std::array_unpack({x}) limit 1)"  # noqa: E731
                 arg_pack = lambda x: [x] if x is not None else []  # noqa: E731
             return cast, ret, arg_pack
 
@@ -1031,6 +1198,7 @@ class SaveExecutor:
 
         obj = change.model
         type_name = obj_to_name_ql(obj)
+        q_type_name = quote_ident(type_name)
 
         for ch in change.fields.values():
             if isinstance(ch, PropertyChange):
@@ -1059,14 +1227,14 @@ class SaveExecutor:
                     arg = add_arg(arg_t, [(el,) for el in ch.added])
                     shape_parts.append(
                         f"{quote_ident(ch.name)} {assign_op} "
-                        f"array_unpack({arg}).0"
+                        f"std::array_unpack({arg}).0"
                     )
                 else:
                     arg_t = f"array<{ch.info.typexpr}>"
                     arg = add_arg(arg_t, ch.added)
                     shape_parts.append(
                         f"{quote_ident(ch.name)} {assign_op} "
-                        f"array_unpack({arg})"
+                        f"std::array_unpack({arg})"
                     )
 
             elif isinstance(ch, MultiPropRemove):
@@ -1076,13 +1244,13 @@ class SaveExecutor:
                     arg_t = f"array<tuple<{ch.info.typexpr}>>"
                     arg = add_arg(arg_t, [(el,) for el in ch.removed])
                     shape_parts.append(
-                        f"{quote_ident(ch.name)} -= array_unpack({arg}).0"
+                        f"{quote_ident(ch.name)} -= std::array_unpack({arg}).0"
                     )
                 else:
                     arg_t = f"array<{ch.info.typexpr}>"
                     arg = add_arg(arg_t, ch.removed)
                     shape_parts.append(
-                        f"{quote_ident(ch.name)} -= array_unpack({arg})"
+                        f"{quote_ident(ch.name)} -= std::array_unpack({arg})"
                     )
 
             elif isinstance(ch, SingleLinkChange):
@@ -1100,30 +1268,111 @@ class SaveExecutor:
                         for k in ch.props_info
                     }
 
-                    sl_subt = [arg_casts[k][0] for k in ch.props_info]
+                    if ch.props.keys() == ch.props_info.keys() or for_insert:
+                        # Simple case -- we overwrite all link props
 
-                    sl_args = [
-                        tid,
-                        *(arg_casts[k][2](ch.props[k]) for k in ch.props_info),
-                    ]
+                        sl_subt = [arg_casts[k][0] for k in ch.props_info]
 
-                    arg = add_arg(
-                        f"tuple<std::uuid, {','.join(sl_subt)}>",
-                        sl_args,
-                    )
+                        sl_args = [
+                            tid,
+                            *(
+                                arg_casts[k][2](ch.props[k])
+                                for k in ch.props_info
+                            ),
+                        ]
 
-                    subq_shape = [
-                        f"@{quote_ident(pname)} := "
-                        f"{arg_casts[pname][1](f'{arg}.{i}')}"
-                        for i, pname in enumerate(ch.props_info, 1)
-                    ]
+                        arg = add_arg(
+                            f"tuple<std::uuid, {','.join(sl_subt)}>",
+                            sl_args,
+                        )
 
-                    shape_parts.append(
-                        f"{quote_ident(ch.name)} := "
-                        f"(select (<{linked_name}>{arg}.0) {{ "
-                        f"  {', '.join(subq_shape)}"
-                        f"}})"
-                    )
+                        subq_shape = [
+                            f"@{quote_ident(pname)} := "
+                            f"{arg_casts[pname][1](f'{arg}.{i}')}"
+                            for i, pname in enumerate(ch.props_info, 1)
+                        ]
+
+                        shape_parts.append(
+                            f"{quote_ident(ch.name)} := "
+                            f"(select (<{linked_name}>{arg}.0) {{ "
+                            f"  {', '.join(subq_shape)}"
+                            f"}})"
+                        )
+
+                    else:
+                        # Harder case -- we update *some* props, meaning
+                        # that those props that we don't update must retain
+                        # their set value in the DB.
+
+                        sl_subt = [
+                            f"tuple<std::bool, {arg_casts[k][0]}>"
+                            for k in ch.props_info
+                        ]
+
+                        sl_args = [
+                            tid,
+                            *(
+                                (
+                                    k in ch.props,
+                                    arg_casts[k][2](ch.props.get(k)),
+                                )
+                                for k in ch.props_info
+                            ),
+                        ]
+
+                        arg = add_arg(
+                            f"tuple<std::uuid, {','.join(sl_subt)}>",
+                            sl_args,
+                        )
+
+                        lps_to_select_shape = ",".join(
+                            f"__{quote_ident(k)} := "
+                            f"std::array_agg(@{quote_ident(k)})"
+                            for k in ch.props_info
+                        )
+
+                        lps_to_select_shape_tup = ",".join(
+                            f"__m.{quote_ident(ch.name)}.__{quote_ident(k)}"
+                            for k in ch.props_info
+                        )
+
+                        lp_assign_reload = ", ".join(
+                            f"""
+                                @{quote_ident(p)} :=
+                                (
+                                    {arg_casts[p][1](f"{arg}.{i + 1}.1")}
+                                    if {arg}.{i + 1}.0 else
+                                    (
+                                        select std::array_unpack(__lprops.{i})
+                                        limit 1
+                                    )
+                                )
+                            """
+                            for i, p in enumerate(ch.props_info)
+                        )
+
+                        shape_parts.append(
+                            f"""
+                                {quote_ident(ch.name)} :=
+                                (
+                                    with __lprops := (
+                                        with __m := (
+                                            select {q_type_name} {{
+                                                {quote_ident(ch.name)}: {{
+                                                    {lps_to_select_shape}
+                                                }} filter .id = {arg}.0
+                                            }}
+                                        )
+                                        select (
+                                            {lps_to_select_shape_tup},
+                                        )
+                                    )
+                                    select (<{linked_name}>{arg}.0) {{
+                                        {lp_assign_reload}
+                                    }}
+                                )
+                            """
+                        )
 
                 else:
                     if ch.info.cardinality.is_optional():
@@ -1134,7 +1383,7 @@ class SaveExecutor:
                         shape_parts.append(
                             f"{quote_ident(ch.name)} := "
                             f"<{linked_name}><std::uuid>("
-                            f"  select array_unpack({arg}) limit 1"
+                            f"  select std::array_unpack({arg}) limit 1"
                             f")"
                         )
                     else:
@@ -1155,11 +1404,12 @@ class SaveExecutor:
 
                 shape_parts.append(
                     f"{quote_ident(ch.name)} -= "
-                    f"<{ch.info.typexpr}>array_unpack({arg})"
+                    f"<{ch.info.typexpr}>std::array_unpack({arg})"
                 )
 
             elif isinstance(ch, MultiLinkAdd):
-                assign_op = ":=" if (for_insert or ch.replace) else "+="
+                new_link = for_insert or ch.replace
+                assign_op = ":=" if new_link else "+="
 
                 if ch.added_props:
                     assert ch.props_info
@@ -1172,7 +1422,10 @@ class SaveExecutor:
                         for k in ch.props_info
                     }
 
-                    tuple_subt = [arg_casts[k][0] for k in ch.props_info]
+                    tuple_subt = [
+                        f"tuple<std::bool, {arg_casts[k][0]}>"
+                        for k in ch.props_info
+                    ]
 
                     for addo, addp in zip(
                         ch.added, ch.added_props, strict=True
@@ -1181,7 +1434,7 @@ class SaveExecutor:
                             (
                                 self._get_id(addo),
                                 *(
-                                    arg_casts[k][2](addp[k])
+                                    (k in addp, arg_casts[k][2](addp.get(k)))
                                     for k in ch.props_info
                                 ),
                             )
@@ -1192,20 +1445,66 @@ class SaveExecutor:
                         link_args,
                     )
 
-                    lp_assign = ", ".join(
-                        f"@{quote_ident(p)} := "
-                        f"{arg_casts[p][1](f'__tup.{i + 1}')}"
-                        for i, p in enumerate(ch.props_info)
-                    )
+                    if new_link:
+                        lp_assign = ", ".join(
+                            f"@{quote_ident(p)} := "
+                            f"{arg_casts[p][1](f'__tup.{i + 1}.1')}"
+                            for i, p in enumerate(ch.props_info)
+                        )
 
-                    shape_parts.append(
-                        f"{quote_ident(ch.name)} {assign_op} "
-                        f"assert_distinct(("
-                        f"for __tup in array_unpack({arg}) union ("
-                        f"select (<{ch.info.typexpr}>__tup.0) {{ "
-                        f"{lp_assign}"
-                        f"}})))"
-                    )
+                        shape_parts.append(
+                            f"{quote_ident(ch.name)} {assign_op} "
+                            f"assert_distinct(("
+                            f"for __tup in std::array_unpack({arg}) union ("
+                            f"select (<{ch.info.typexpr}>__tup.0) {{ "
+                            f"{lp_assign}"
+                            f"}})))"
+                        )
+                    else:
+                        lps_to_select_shape = ",".join(
+                            f"std::array_agg(__m@{quote_ident(k)})"
+                            for k in ch.props_info
+                        )
+
+                        lp_assign_reload = ", ".join(
+                            f"""
+                                @{quote_ident(p)} :=
+                                (
+                                    {arg_casts[p][1](f"__tup.{i + 1}.1")}
+                                    if __tup.{i + 1}.0 else
+                                    (
+                                        select std::array_unpack(__lprops.{i})
+                                        limit 1
+                                    )
+                                )
+                            """
+                            for i, p in enumerate(ch.props_info)
+                        )
+
+                        # Re `__lprops` below -- currently this is just about
+                        # the only way to "load" existing link properties on
+                        # the link and use them later.  We do that to support
+                        # "partial" updates to link props -- when only one
+                        # changed other should stay as is.
+                        shape_parts.append(
+                            f"""
+                            {quote_ident(ch.name)} {assign_op}
+                            assert_distinct((
+                                for __tup in array_unpack({arg}) union (
+                                    with __lprops := (
+                                        for __m in .{quote_ident(ch.name)}
+                                        select (
+                                            {lps_to_select_shape},
+                                        )
+                                        filter __m.id = __tup.0
+                                    )
+                                    select (<{ch.info.typexpr}>__tup.0) {{
+                                        {lp_assign_reload}
+                                    }}
+                                )
+                            ))
+                            """
+                        )
 
                 else:
                     arg = add_arg(
@@ -1216,7 +1515,7 @@ class SaveExecutor:
                     shape_parts.append(
                         f"{quote_ident(ch.name)} {assign_op} "
                         f"assert_distinct("
-                        f"<{ch.info.typexpr}>array_unpack({arg})"
+                        f"<{ch.info.typexpr}>std::array_unpack({arg})"
                         f")"
                     )
 
@@ -1230,10 +1529,11 @@ class SaveExecutor:
             else:
                 raise TypeError(f"unknown model change {type(ch).__name__}")
 
-        q_type_name = quote_ident(type_name)
-
         shape = ", ".join(shape_parts)
         query: str
+
+        select_shape = "{*}" if self.refetch else ".id"
+
         if for_insert:
             if shape:
                 assert args_types
@@ -1246,8 +1546,7 @@ class SaveExecutor:
 
             arg = add_arg("std::uuid", self._get_id(obj))
             query = f"""\
-                update {q_type_name}
-                filter .id = {arg}
+                update <{q_type_name}>{arg}
                 set {{ {shape} }}
             """  # noqa: S608
 
@@ -1261,21 +1560,21 @@ class SaveExecutor:
                 with __query := (
                     with __data := <tuple<{",".join(args_types)}>>$0
                     select ({query})
-                ) select __query.id
+                ) select __query{select_shape}
             """
 
             multi_query = f"""
                 with __query := (
                     with __all_data := <array<tuple<{",".join(args_types)}>>>$0
-                    for __data in array_unpack(__all_data) union (
+                    for __data in std::array_unpack(__all_data) union (
                         ({query})
                     )
-                ) select __query.id
+                ) select __query{select_shape}
             """
 
             args_query = f"""
                 with __all_data := <array<tuple<{",".join(args_types)}>>>$0
-                select count(array_unpack(__all_data))
+                select std::count(std::array_unpack(__all_data))
             """
 
         else:
@@ -1286,16 +1585,16 @@ class SaveExecutor:
                 with __query := (
                     with __data := <int64>$0
                     select ({query})
-                ) select __query.id
+                ) select __query{select_shape}
             """
 
             multi_query = f"""
                 with __query := (
                     with __all_data := <array<int64>>$0
-                    for __data in array_unpack(__all_data) union (
+                    for __data in std::array_unpack(__all_data) union (
                         ({query})
                     )
-                ) select __query.id
+                ) select __query{select_shape}
             """
 
             args_query = "select 'no args'"

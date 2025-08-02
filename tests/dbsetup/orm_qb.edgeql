@@ -135,3 +135,7 @@ insert MultiRangeTest {
         ),
     ]),
 };
+
+insert EnumTest {name := 'red', color := Color.Red};
+insert EnumTest {name := 'green', color := Color.Green};
+insert EnumTest {name := 'blue', color := Color.Blue};

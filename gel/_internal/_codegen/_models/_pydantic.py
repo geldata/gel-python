@@ -3,12 +3,12 @@
 # SPDX-FileCopyrightText: Copyright Gel Data Inc. and the contributors.
 
 from __future__ import annotations
-import contextlib
 from typing import (
     TYPE_CHECKING,
     Any,
     Literal,
     NamedTuple,
+    Optional,
     Protocol,
     TypedDict,
     TypeVar,
@@ -17,6 +17,7 @@ from typing import (
 from typing_extensions import TypeAliasType
 
 import base64
+import contextlib
 import dataclasses
 import enum
 import functools
@@ -54,6 +55,7 @@ from .._generator import C, AbstractCodeGenerator
 from .._module import ImportTime, CodeSection, GeneratedModule
 
 if TYPE_CHECKING:
+    import argparse
     import io
 
     from collections.abc import (
@@ -176,6 +178,18 @@ class GeneratedState:
 
 
 class PydanticModelsGenerator(AbstractCodeGenerator):
+    _output: Optional[str | pathlib.Path] = None
+
+    def _apply_cli_config(self, args: argparse.Namespace) -> None:
+        super()._apply_cli_config(args)
+        if args.output is not None:
+            self._output = args.output
+
+    def _apply_env_output(self, value: Any) -> None:
+        if not isinstance(value, str):
+            raise ValueError('"output" must be a string')
+        self._output = self._project_dir / value
+
     def run(self) -> None:
         try:
             self._client.ensure_connected()
@@ -183,7 +197,7 @@ class PydanticModelsGenerator(AbstractCodeGenerator):
             logger.exception("could not connect to Gel instance")
             self.abort(61)
 
-        models_root = self._args.output
+        models_root = self._output
 
         # First, detect FastAPI-style well-known project structure in cwd
         if not models_root:
@@ -1390,6 +1404,9 @@ class BaseGeneratedModule:
             return f"{rang}[{elem_type}]"
 
         elif reflection.is_multi_range_type(stype):
+            rang_el = self.import_name(
+                BASE_IMPL, "Range", import_time=foreign_import_time
+            )
             rang = self.import_name(
                 BASE_IMPL, "MultiRange", import_time=foreign_import_time
             )
@@ -1400,7 +1417,7 @@ class BaseGeneratedModule:
                 localns=localns,
                 typevars=typevars,
             )
-            return f"{rang}[{elem_type}]"
+            return f"{rang}[{rang_el}[{elem_type}]]"
 
         elif reflection.is_pseudo_type(stype):
             type_path = SchemaPath("std", stype.name)
@@ -2018,8 +2035,9 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                 )
             else:
                 el = self.get_type(el_type, import_time=import_time)
+            rng_el = self.import_name("gel", "Range")
             rng = self.import_name("gel", "MultiRange")
-            return f"{rng}[{el}]"
+            return f"{rng}[{rng_el}[{el}]]"
         elif reflection.is_named_tuple_type(stype) or reflection.is_tuple_type(
             stype
         ):
@@ -2076,10 +2094,6 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         self,
         glob: reflection.Global,
     ) -> None:
-        type_ = self.get_type(
-            glob.get_type(self._types),
-            import_time=ImportTime.typecheck_runtime,
-        )
         name = ident(glob.schemapath.name)
 
         with self.aspect(ModuleAspect.SHAPES):
@@ -2092,8 +2106,13 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             glob.schemapath,
             aspect=ModuleAspect.SHAPES,
         )
-        self.write(f"{name} = {impl}.global_({type_})")
-        self.write()
+        type_ = self.get_type(
+            glob.get_type(self._types),
+            import_time=ImportTime.late_runtime,
+        )
+        with self.code_section(CodeSection.after_late_import):
+            self.write(f"{name} = {impl}.global_({type_})")
+            self.write()
 
     def prepare_namespace(self, mod: IntrospectedModule) -> None:
         for aspect in (ModuleAspect.SHAPES, ModuleAspect.MAIN):

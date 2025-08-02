@@ -24,6 +24,7 @@ from typing_extensions import (
     TypeVar,
     Unpack,
 )
+from collections.abc import Iterable
 
 import builtins
 import datetime
@@ -51,7 +52,7 @@ from ._functions import assert_single
 
 if TYPE_CHECKING:
     import enum
-    from collections.abc import Iterable, Mapping, MutableMapping, Sequence
+    from collections.abc import Mapping, MutableMapping, Sequence
 
 
 _T = TypeVar("_T", bound=GelType)
@@ -373,12 +374,15 @@ if TYPE_CHECKING:
         pass
 else:
 
-    class MultiRangeMeta(type(HomogeneousCollection), GelTypeMeta):
+    class MultiRangeMeta(
+        type(HomogeneousCollection), type(Iterable), GelTypeMeta
+    ):
         pass
 
 
 class MultiRange(
     HomogeneousCollection[_T],
+    _range.MultiRange[_T],
     metaclass=MultiRangeMeta,
 ):
     if TYPE_CHECKING:

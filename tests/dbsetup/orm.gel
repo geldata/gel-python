@@ -1,3 +1,7 @@
+using future simple_scoping;
+
+module default {
+
 abstract type Named {
     required name: str;
     name_len := len(.name);
@@ -202,6 +206,8 @@ type RangeTest {
     int_range: range<int64>;
     float_range: range<float64>;
     date_range: range<cal::local_date>;
+    datetime_range: range<cal::local_datetime>;
+    tz_datetime_range: range<datetime>;
 }
 
 type MultiRangeTest {
@@ -427,3 +433,5 @@ function complex_variadic(
         (' [FLAG]' if flag else '')
     )
 };
+
+}

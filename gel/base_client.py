@@ -800,6 +800,9 @@ class BaseClient(
             query_cache=self._impl.query_cache,
         )
 
+    def _get_debug_options(self) -> _options.Debug:
+        return self._options._debug  # type: ignore [no-any-return]
+
     def _get_retry_options(self) -> _options.RetryOptions | None:
         # This is overloaded in transaction.py to return None, to prevent
         # retrying *inside* a transaction.

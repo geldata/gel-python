@@ -23,6 +23,7 @@ import os
 from gel import _testbase as tb
 
 
+@tb.typecheck
 class TestQueryBuilder(tb.ModelTestCase):
     SCHEMA = os.path.join(os.path.dirname(__file__), "dbsetup", "orm.gel")
 
@@ -30,7 +31,6 @@ class TestQueryBuilder(tb.ModelTestCase):
 
     ISOLATED_TEST_BRANCHES = False
 
-    @tb.typecheck
     def test_qb_computed_01(self):
         """Replace an existing field with a computed literal value"""
         from models import default, std
@@ -53,7 +53,6 @@ class TestQueryBuilder(tb.ModelTestCase):
         self.assertEqual(res2.name, "Alice")
         self.assertEqual(res2.nickname, "hello")
 
-    @tb.typecheck
     def test_qb_computed_02(self):
         from models import default
 
@@ -67,7 +66,6 @@ class TestQueryBuilder(tb.ModelTestCase):
         self.assertEqual(res.nickname, "Little Alice")
 
     @tb.xfail
-    @tb.typecheck
     def test_qb_computed_03(self):
         from models import default, std
 
@@ -80,7 +78,6 @@ class TestQueryBuilder(tb.ModelTestCase):
         self.assertEqual(res.name, "Alice")
         self.assertEqual(res.nickname, "Alice5")
 
-    @tb.typecheck
     def test_qb_computed_04(self):
         from models import default, std
 
@@ -96,7 +93,6 @@ class TestQueryBuilder(tb.ModelTestCase):
         self.assertEqual(res.name, "Alice")
         self.assertEqual(res.foo, "hello")
 
-    @tb.typecheck
     def test_qb_computed_05(self):
         from models import default
 
@@ -118,7 +114,6 @@ class TestQueryBuilder(tb.ModelTestCase):
         self.assertEqual(res2.name, "Alice")
         self.assertEqual(res2.name_len, 15)
 
-    @tb.typecheck
     def test_qb_computed_06(self):
         from models import default
 
@@ -148,7 +143,6 @@ class TestQueryBuilder(tb.ModelTestCase):
         )
         self.assertEqual(res3.name, "A!")
 
-    @tb.typecheck
     def test_qb_order_01(self):
         from models import default
 
@@ -158,7 +152,6 @@ class TestQueryBuilder(tb.ModelTestCase):
             ["Alice", "Billie", "Cameron", "Dana", "Elsa", "Zoe"],
         )
 
-    @tb.typecheck
     def test_qb_order_02(self):
         from models import default
 
@@ -177,7 +170,6 @@ class TestQueryBuilder(tb.ModelTestCase):
             [("Alice", False), ("Billie", True)],
         )
 
-    @tb.typecheck
     def test_qb_order_03(self):
         from models import default
 
@@ -195,7 +187,6 @@ class TestQueryBuilder(tb.ModelTestCase):
             [("Alice", False), ("Billie", True)],
         )
 
-    @tb.typecheck
     def test_qb_filter_01(self):
         from models import default, std
 
@@ -223,7 +214,6 @@ class TestQueryBuilder(tb.ModelTestCase):
         # Compare the objects
         self.assertEqual(list(res), list(res2))
 
-    @tb.typecheck
     def test_qb_filter_02(self):
         from models import default
 
@@ -238,7 +228,6 @@ class TestQueryBuilder(tb.ModelTestCase):
         )
 
     @tb.xfail
-    @tb.typecheck
     def test_qb_filter_03(self):
         from models import default
 
@@ -255,7 +244,6 @@ class TestQueryBuilder(tb.ModelTestCase):
             [u.name for u in res.users], ["Alice", "Billie", "Cameron", "Dana"]
         )
 
-    @tb.typecheck
     def test_qb_filter_04(self):
         from models import default, std
 
@@ -274,7 +262,6 @@ class TestQueryBuilder(tb.ModelTestCase):
         )
 
     @tb.xfail
-    @tb.typecheck
     def test_qb_filter_05(self):
         from models import default, std
 
@@ -289,7 +276,6 @@ class TestQueryBuilder(tb.ModelTestCase):
         self.assertEqual(res.user_count, 4)
 
     @tb.xfail
-    @tb.typecheck
     def test_qb_filter_06(self):
         from models import default, std
 
@@ -309,7 +295,6 @@ class TestQueryBuilder(tb.ModelTestCase):
         self.assertEqual(res.count, 2)
 
     @tb.xfail
-    @tb.typecheck
     def test_qb_filter_07(self):
         from models import default
 
@@ -326,7 +311,6 @@ class TestQueryBuilder(tb.ModelTestCase):
         self.assertEqual(res[1].body, "I'm Alice")
 
     @tb.xfail
-    @tb.typecheck
     def test_qb_filter_08(self):
         from models import default
 
@@ -341,7 +325,43 @@ class TestQueryBuilder(tb.ModelTestCase):
         self.assertEqual(post.author.name, "Elsa")
         self.assertEqual(post.body, "*magic stuff*")
 
-    @tb.typecheck
+    @tb.xfail
+    def test_qb_filter_09(self):
+        from models import default, std
+
+        # Find GameSession with same players as the green group
+        green = default.UserGroup.filter(name="green")
+        q = default.GameSession.select(
+            "*",
+            players=True,
+        ).filter(
+            lambda g: std.array_agg(g.players.id)
+            == std.array_agg(green.users.id)
+        )
+
+        res = self.client.get(q)
+        self.assertEqual(res.num, 123)
+        self.assertEqual(
+            {u.id for u in res.players}, {u.id for u in green.users}
+        )
+
+    @tb.xfail
+    def test_qb_filter_10(self):
+        from models import default, std
+
+        # Find GameSession with same *number* of players as the green group
+        green = default.UserGroup.filter(name="green")
+        q = default.GameSession.select(
+            "*",
+            players=True,
+        ).filter(lambda g: std.count(g.players) == std.count(green.users))
+
+        res = self.client.get(q)
+        self.assertEqual(res.num, 123)
+        self.assertEqual(
+            {u.id for u in res.players}, {u.id for u in green.users}
+        )
+
     def test_qb_link_property_01(self):
         from models import default
 
@@ -360,7 +380,6 @@ class TestQueryBuilder(tb.ModelTestCase):
             [("Alice", False), ("Billie", True)],
         )
 
-    @tb.typecheck
     def test_qb_link_property_02(self):
         from models import default
 
@@ -376,7 +395,6 @@ class TestQueryBuilder(tb.ModelTestCase):
         self.assertEqual(res.num, 123)
         self.assertEqual([u.name for u in res.players], ["Billie"])
 
-    @tb.typecheck
     def test_qb_multiprop_01(self):
         from models import default
 
@@ -394,7 +412,6 @@ class TestQueryBuilder(tb.ModelTestCase):
         self.assertEqual(set(res[1].p_multi_str), {"brown", "fox"})
 
     @tb.xfail
-    @tb.typecheck
     def test_qb_multiprop_02(self):
         from models import default
 
@@ -410,7 +427,6 @@ class TestQueryBuilder(tb.ModelTestCase):
         self.assertEqual(set(res.p_multi_str), {"quick", "fox", "jumps"})
 
     @tb.xfail
-    @tb.typecheck
     def test_qb_multiprop_03(self):
         from models import default
 
@@ -425,7 +441,6 @@ class TestQueryBuilder(tb.ModelTestCase):
         self.assertEqual(set(res.p_multi_str), {"quick", "fox", "jumps"})
 
     @tb.xfail
-    @tb.typecheck
     def test_qb_multiprop_04(self):
         from models import default
 
@@ -440,7 +455,6 @@ class TestQueryBuilder(tb.ModelTestCase):
         self.assertEqual(set(res.p_multi_str), {"brown", "jumps"})
 
     @tb.xfail
-    @tb.typecheck
     def test_qb_multiprop_05(self):
         from models import default, std
 
@@ -456,7 +470,6 @@ class TestQueryBuilder(tb.ModelTestCase):
         self.assertEqual(res.str, "another one")
         self.assertEqual(set(res.p_multi_str), {"brown", "jumps"})
 
-    @tb.typecheck
     def test_qb_limit_offset_01(self):
         from models import default, std
 
@@ -474,7 +487,6 @@ class TestQueryBuilder(tb.ModelTestCase):
             },
         )
 
-    @tb.typecheck
     def test_qb_boolean_operator_error_01(self):
         from models import default
 
@@ -523,6 +535,15 @@ class TestQueryBuilder(tb.ModelTestCase):
         with self.assertRaisesRegex(TypeError, "use std.exists"):
             default.User.filter(lambda u: u.name is not None)  # type: ignore
 
+    @tb.xfail
+    def test_qb_enum_01(self):
+        from models import default
+
+        e = self.client.get(default.EnumTest.filter(color=default.Color.Red))
+
+        self.assertEqual(e.color, default.Color.Red)
+        self.assertEqual(e.name, "red")
+
 
 class TestQueryBuilderModify(tb.ModelTestCase):
     """This test suite is for data manipulation using QB."""
@@ -533,7 +554,6 @@ class TestQueryBuilderModify(tb.ModelTestCase):
 
     ISOLATED_TEST_BRANCHES = True
 
-    @tb.typecheck
     def test_qb_update_01(self):
         from models import default
 
@@ -549,7 +569,6 @@ class TestQueryBuilderModify(tb.ModelTestCase):
         self.assertEqual(res.nickname, "singer")
 
     @tb.xfail
-    @tb.typecheck
     def test_qb_update_02(self):
         from models import default
 
@@ -566,7 +585,6 @@ class TestQueryBuilderModify(tb.ModelTestCase):
         self.assertEqual({u.name for u in res.users}, {"Zoe", "Dana"})
 
     @tb.xfail
-    @tb.typecheck
     def test_qb_update_03(self):
         from models import default, std
 
@@ -584,7 +602,6 @@ class TestQueryBuilderModify(tb.ModelTestCase):
         self.assertEqual({g.name for g in res.author.groups}, {"redgreen"})
 
     @tb.xfail
-    @tb.typecheck
     def test_qb_update_04(self):
         from models import default, std
 
@@ -632,7 +649,6 @@ class TestQueryBuilderModify(tb.ModelTestCase):
         self.assertEqual(res2.name, "blue")
         self.assertEqual({u.name for u in res2.users}, {"Zoe", "Alice"})
 
-    @tb.typecheck
     def test_qb_delete_01(self):
         from models import default
 
@@ -654,7 +670,6 @@ class TestQueryBuilderModify(tb.ModelTestCase):
             [p.body for p in after], ["*magic stuff*", "Hello", "I'm Alice"]
         )
 
-    @tb.typecheck
     def test_qb_delete_02(self):
         from models import default
 
@@ -679,7 +694,6 @@ class TestQueryBuilderModify(tb.ModelTestCase):
         )
 
     @tb.xfail
-    @tb.typecheck
     def test_qb_delete_03(self):
         from models import default
 
@@ -695,3 +709,33 @@ class TestQueryBuilderModify(tb.ModelTestCase):
         self.assertEqual(res[0].author.name, "Alice")
         self.assertEqual(res[1].body, "I'm Alice")
         self.assertEqual(res[1].author.name, "Alice")
+
+    @tb.xfail
+    def test_qb_enum_edit_01(self):
+        from models import default
+
+        e = self.client.get(
+            default.EnumTest.filter(
+                name="red",
+            )
+            .update(color=default.Color.Orange)
+            .select("*")
+        )
+
+        self.assertEqual(e.color, default.Color.Orange)
+        self.assertEqual(e.name, "red")
+
+    @tb.xfail
+    def test_qb_enum_edit_02(self):
+        from models import default
+
+        e = self.client.get(
+            default.EnumTest.filter(
+                name="red",
+            )
+            .update(color=lambda e: default.Color("Violet"))
+            .select("*")
+        )
+
+        self.assertEqual(e.color, default.Color.Violet)
+        self.assertEqual(e.name, "red")
