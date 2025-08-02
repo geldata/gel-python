@@ -18,12 +18,10 @@ from typing import (
 
 from typing_extensions import Self
 
-import dataclasses
 import functools
 import typing
 import weakref
 
-from gel._internal import _edgeql
 from gel._internal import _qb
 from gel._internal._xmethod import hybridmethod
 
@@ -36,16 +34,6 @@ if TYPE_CHECKING:
 
 T = TypeVar("T")
 T_co = TypeVar("T_co", covariant=True)
-
-
-@dataclasses.dataclass(kw_only=True, frozen=True)
-class PointerInfo:
-    computed: bool = False
-    readonly: bool = False
-    has_props: bool = False
-    cardinality: _edgeql.Cardinality = _edgeql.Cardinality.One
-    annotation: type[Any] | None = None
-    kind: _edgeql.PointerKind | None = None
 
 
 if TYPE_CHECKING:
