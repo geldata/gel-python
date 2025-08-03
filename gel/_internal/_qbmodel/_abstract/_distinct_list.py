@@ -69,6 +69,17 @@ class AbstractDistinctList(AbstractTrackedList[_MT_co]):
             __mode__=__mode__,
         )
 
+    def _ensure_value_indexable(self, value: Any) -> _MT_co | None:
+        # ProxyModels are designed to be tranparent and are ignored
+        # in GelModel.__eq__. That said we do want to validate the
+        # wrapped object's type and bail early if it's doesn't match
+        # this collection's type.
+        if isinstance(value, AbstractGelProxyModel):
+            value = value.without_linkprops()
+        if isinstance(value, type(self).type):
+            return value
+        return None
+
     def _check_value(self, value: Any) -> _MT_co:
         cls = type(self)
         t = cls.type
@@ -233,7 +244,10 @@ class AbstractDistinctList(AbstractTrackedList[_MT_co]):
 
     @requires_read("use `in` operator on")
     def __contains__(self, item: object) -> bool:
-        return self._is_tracked(item)  # type: ignore [arg-type]
+        item = self._ensure_value_indexable(item)
+        if item is None:
+            return False
+        return self._is_tracked(item)
 
     def insert(self, index: SupportsIndex, value: _MT_co) -> None:  # type: ignore [misc]
         """Insert item at index if not already present."""
@@ -305,9 +319,11 @@ class AbstractDistinctList(AbstractTrackedList[_MT_co]):
         stop: SupportsIndex | None = None,
     ) -> int:
         """Return first index of value."""
-        value = self._check_value(value)
+        indexable = self._ensure_value_indexable(value)
+        if indexable is None:
+            raise ValueError
         return self._items.index(
-            value,
+            indexable,
             start,
             len(self._items) if stop is None else stop,
         )
@@ -315,11 +331,7 @@ class AbstractDistinctList(AbstractTrackedList[_MT_co]):
     @requires_read("count items of")
     def count(self, value: _MT_co) -> int:  # type: ignore [misc]
         """Return 1 if item is present, else 0."""
-        value = self._check_value(value)
-        if self._is_tracked(value):
-            return 1
-        else:
-            return 0
+        return 1 if value in self else 0
 
 
 class DistinctList(
@@ -461,8 +473,8 @@ class ProxyDistinctList(
     #
     _wrapped_index: dict[int, _PT_co] | None = None
 
-    basetype: ClassVar[type[_BMT_co]]  # type: ignore [misc]
-    type: ClassVar[type[_PT_co]]  # type: ignore [misc]
+    proxytype: ClassVar[type[_PT_co]]  # type: ignore [misc]
+    type: ClassVar[type[_BMT_co]]  # type: ignore [assignment, misc]
 
     def __gel_post_commit_check__(self, path: Path) -> None:
         super().__gel_post_commit_check__(path)
@@ -555,7 +567,7 @@ class ProxyDistinctList(
         self._ensure_snapshot()
 
         cls = type(self)
-        t = cls.type
+        t = cls.proxytype
         proxy_of = t.__proxy_of__
 
         assert self._wrapped_index is not None
@@ -602,7 +614,7 @@ class ProxyDistinctList(
 
     def _cast_value(self, value: Any) -> tuple[_PT_co, _BMT_co]:
         cls = type(self)
-        t = cls.type
+        t = cls.proxytype
 
         bt: type[_BMT_co] = t.__proxy_of__  # pyright: ignore [reportAssignmentType]
         tp_value = type(value)
@@ -642,9 +654,6 @@ class ProxyDistinctList(
             ll_getattr(proxy, "_p__obj__"),
         )
 
-    def _check_values(self, values: Iterable[Any]) -> list[_PT_co]:
-        return [self._check_value(value) for value in values]
-
     def _check_value(self, value: Any) -> _PT_co:
         proxy, _ = self._cast_value(value)
         return proxy
@@ -673,7 +682,7 @@ class ProxyDistinctList(
             (
                 cls.__parametric_origin__,
                 cls.type,
-                cls.basetype,
+                cls.proxytype,
                 self._items,
                 self._wrapped_index.values()
                 if self._wrapped_index is not None
@@ -692,7 +701,7 @@ class ProxyDistinctList(
     def _reconstruct_from_pickle(  # noqa: PLR0917
         origin: type[ProxyDistinctList[_PT_co, _BMT_co]],  # type: ignore [valid-type]
         tp: type[_PT_co],  # type: ignore [valid-type]
-        basetp: type[_BMT_co],  # type: ignore [valid-type]
+        proxytp: type[_BMT_co],  # type: ignore [valid-type]
         items: list[_PT_co],
         wrapped_index: list[_PT_co] | None,
         initial_items: list[_PT_co] | None,
@@ -703,7 +712,7 @@ class ProxyDistinctList(
     ) -> ProxyDistinctList[_PT_co, _BMT_co]:
         cls = cast(
             "type[ProxyDistinctList[_PT_co, _BMT_co]]",
-            origin[tp, basetp],  # type: ignore [index]
+            origin[proxytp, tp],  # type: ignore [index]
         )
         lst = cls.__new__(cls)
 
