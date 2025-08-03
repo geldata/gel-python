@@ -393,8 +393,8 @@ class TestModelGenerator(tb.ModelTestCase):
         pl = sess.players
 
         self.assertIsInstance(pl, ProxyDistinctList)
-        self.assertIs(pl.type, default.GameSession.__links__.players)
-        self.assertIs(pl.basetype, default.User)
+        self.assertIs(pl.proxytype, default.GameSession.__links__.players)
+        self.assertIs(pl.type, default.User)
 
     def test_modelgen_data_init_unfetched_link(self):
         from gel._internal._qbmodel._abstract import (
