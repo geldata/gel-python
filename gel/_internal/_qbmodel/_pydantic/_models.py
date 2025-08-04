@@ -429,51 +429,64 @@ def _process_pydantic_fields(
             unpack_type_aliases="lenient",
         )
 
+        pointer_info: _fields.PointerInfo | None = None
         if _typing_inspect.is_generic_type_alias(field_anno):
-            field_infos = [
-                a
-                for a in anno.metadata
-                if isinstance(a, pydantic.fields.FieldInfo)
-            ]
-            if field_infos:
-                overrides["annotation"] = field_anno
-        else:
-            field_infos = []
+            for metadata in anno.metadata:
+                if isinstance(metadata, _fields.PointerInfo):
+                    if pointer_info is not None:
+                        raise TypeError(
+                            f"found multiple instances of PointerInfo in "
+                            f"{cls.__qualname__}.{fn} annotation"
+                        )
+                    pointer_info = metadata
+
+        if pointer_info is None:
+            # This is not a Gel model pointer field
+            new_fields[fn] = field
+            continue
 
         fdef_is_desc = _qb.is_pointer_descriptor(fdef)
         if (
             ptr is not None
             and ptr.has_default
             and fn != "id"
-            and (fdef_is_desc or fdef in _NO_DEFAULT)
-            and all(
-                fi.default in _NO_DEFAULT and fi.default_factory is None
-                for fi in field_infos
+            and (
+                fdef_is_desc
+                or fdef in _NO_DEFAULT
+                or fdef is _abstract.DEFAULT_VALUE
             )
+            and pointer_info.default in _NO_DEFAULT
+            and pointer_info.default_factory is None
         ):
             # This field's default must come from the database --
             # `db.save()` must not set it to pydantic's default:
             # it must not include the field in the INSERT statement
             # if the field was not initialized with a value explicitly.
             overrides["default"] = _abstract.DEFAULT_VALUE
-        elif fdef_is_desc:
+        else:
             # ... is a special Pydantic marker meaning "the field is required
             # but has no default"
-            has_factory = any(
-                fi.default_factory is not None for fi in field_infos
-            )
-            is_ptr_optional = ptr is not None and ptr.cardinality.is_optional()
-            overrides["default"] = (
-                None if is_ptr_optional and not has_factory else ...
-            )
+            if pointer_info.default is not pydantic_core.PydanticUndefined:
+                overrides["default"] = pointer_info.default
+            else:
+                has_factory = (
+                    field.default_factory is not None
+                    or pointer_info.default_factory is not None
+                )
+                is_ptr_optional = (
+                    ptr is not None and ptr.cardinality.is_optional()
+                )
+                overrides["default"] = (
+                    None if is_ptr_optional and not has_factory else ...
+                )
 
-        if (
+        # This is a schema computed or an ad-hoc computed pointer in a
+        # user-defined variant.
+        if pointer_info.computed or (
             cls.__gel_variant__ is None
             and ptr is None
             and fn != "__linkprops__"
         ):
-            # This is an ad-hoc computed pointer in a user-defined variant.
-
             # Regarding `fn != "__linkprops__"`: see MergedModelMeta --
             # it renames `linkprops____` to `__linkprops__` to circumvent
             # Pydantic's restriction on fields starting with `_`.
@@ -483,23 +496,21 @@ def _process_pydantic_fields(
             overrides["init"] = False
             overrides["frozen"] = True
 
+        if pointer_info.default_factory is not None:
+            overrides["default_factory"] = pointer_info.default_factory
+
+        if pointer_info.validate_default is not None:
+            overrides["validate_default"] = pointer_info.validate_default
+
         if overrides:
             field_attrs = dict(field._attributes_set)
             for override in overrides:
                 field_attrs.pop(override, None)
 
-            if field_infos:
-                merged = pydantic.fields.FieldInfo.merge_field_infos(
-                    field,
-                    *field_infos,
-                    **overrides,
-                )
-            else:
-                merged = pydantic.fields.FieldInfo(
-                    **field_attrs,  # type: ignore [arg-type]
-                    **overrides,
-                )
-            new_fields[fn] = merged
+            new_fields[fn] = pydantic.fields.FieldInfo(
+                **field_attrs,  # type: ignore [arg-type]
+                **overrides,
+            )
         else:
             new_fields[fn] = field
 

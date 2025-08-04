@@ -629,7 +629,7 @@ def make_plan(objs: Iterable[GelModel]) -> SavePlan:
                 and prop.properties
             ):
                 val = getattr(obj, prop.name, _unset)
-                if val is _unset:
+                if val is _unset or val is None:
                     continue
                 assert isinstance(val, ProxyModel)
                 lprops = val.__linkprops__

@@ -15,7 +15,6 @@ from ._base import (
     DefaultValue,
     GelType,
     GelTypeMeta,
-    PointerInfo,
 )
 
 from ._descriptors import (
@@ -145,7 +144,6 @@ __all__ = (
     "OptionalPointerDescriptor",
     "OptionalPropertyDescriptor",
     "PointerDescriptor",
-    "PointerInfo",
     "PropertyDescriptor",
     "ProxyDistinctList",
     "PyConstType",
