@@ -62,15 +62,20 @@ if not SCHEMA_SRC.exists():
 # Helper utilities
 # ---------------------------------------------------------------------------
 
+
 def _run(cmd: list[str] | tuple[str, ...], *, cwd: Path | None = None) -> None:
     """Run *cmd* via :pyfunc:`subprocess.run` with *check=True* and TTY-friendly I/O."""
     try:
         subprocess.run(cmd, cwd=cwd, check=True)
     except FileNotFoundError as exc:  # pragma: no cover
-        sys.stderr.write(f"error: cannot find executable '{cmd[0]}' – is it installed?\n")
+        sys.stderr.write(
+            f"error: cannot find executable '{cmd[0]}' – is it installed?\n"
+        )
         raise SystemExit(1) from exc
     except subprocess.CalledProcessError as exc:  # pragma: no cover
-        sys.stderr.write(f"error: command failed ({' '.join(cmd)}), code {exc.returncode}\n")
+        sys.stderr.write(
+            f"error: command failed ({' '.join(cmd)}), code {exc.returncode}\n"
+        )
         raise
 
 
@@ -78,8 +83,12 @@ def _run(cmd: list[str] | tuple[str, ...], *, cwd: Path | None = None) -> None:
 # Main workflow
 # ---------------------------------------------------------------------------
 
+
 def main() -> None:  # noqa: D401 – simple script entry-point
-    with tempfile.TemporaryDirectory(prefix="gel_codegen_") as tmp:
+    with tempfile.TemporaryDirectory(
+        prefix="gel_codegen_",
+        suffix="_tmp",
+    ) as tmp:
         tmpdir = Path(tmp)
         instance_name = tmpdir.name  # gel derives instance name from dir name
 
@@ -95,37 +104,49 @@ def main() -> None:  # noqa: D401 – simple script entry-point
             shutil.copy2(SCHEMA_SRC, dbschema_dir / "orm.gel")
 
             # 3. Create & apply migration, then generate models.
-            _run(["gel", "migration", "create", "--non-interactive"], cwd=tmpdir)
+            _run(
+                ["gel", "migration", "create", "--non-interactive"], cwd=tmpdir
+            )
             _run(["gel", "migrate"], cwd=tmpdir)
             _run(["gel-generate-py", "--no-cache", "models"], cwd=tmpdir)
 
             # 4. Install models into *site-packages*.
             generated_models = tmpdir / "models"
-            if not generated_models.exists():  # pragma: no cover – sanity check
-                sys.stderr.write("error: models directory not produced by codegen\n")
+            if (
+                not generated_models.exists()
+            ):  # pragma: no cover – sanity check
+                sys.stderr.write(
+                    "error: models directory not produced by codegen\n"
+                )
                 raise SystemExit(1)
 
             if MODELS_DEST.exists():
                 shutil.rmtree(MODELS_DEST)
             shutil.copytree(generated_models, MODELS_DEST)
 
-            print(f"✅  Models have been generated and installed into {MODELS_DEST}")
+            print(
+                f"✅  Models have been generated and installed into {MODELS_DEST}"
+            )
 
         finally:
             # Always attempt cleanup of project & instance so we don't leak them
             if instance_created:
                 try:
-                    subprocess.run(["gel", "project", "unlink"], cwd=tmpdir, check=True)
+                    subprocess.run(
+                        ["gel", "project", "unlink"], cwd=tmpdir, check=True
+                    )
                 finally:
-                    subprocess.run([
-                        "gel",
-                        "instance",
-                        "destroy",
-                        "-I",
-                        instance_name,
-                        "--force",
-                    ], check=True)
-
+                    subprocess.run(
+                        [
+                            "gel",
+                            "instance",
+                            "destroy",
+                            "-I",
+                            instance_name,
+                            "--force",
+                        ],
+                        check=True,
+                    )
 
 
 if __name__ == "__main__":
