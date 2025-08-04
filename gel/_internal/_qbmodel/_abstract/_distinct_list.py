@@ -73,6 +73,14 @@ class AbstractDistinctList(  # noqa: PLW1641 (__hash__ is implemented)
             __mode__=__mode__,
         )
 
+    _allowed_write_only_ops: ClassVar[list[str]] = [
+        ".add()",
+        ".discard()",
+        ".update()",
+        "+=",
+        "-=",
+    ]
+
     def _ensure_value_indexable(self, value: Any) -> _MT_co | None:
         # ProxyModels are designed to be tranparent and are ignored
         # in GelModel.__eq__. That said we do want to validate the
