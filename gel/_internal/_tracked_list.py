@@ -57,7 +57,7 @@ class Mode(StrEnum):
 
 P = ParamSpec("P")
 R = TypeVar("R")
-S = TypeVar("S", bound="AbstractTrackedList[Any]")
+S = TypeVar("S", bound="AbstractCollection[Any]", covariant=True)
 
 
 def requires_read(
@@ -70,7 +70,7 @@ def requires_read(
         func: Callable[Concatenate[S, P], R],
     ) -> Callable[Concatenate[S, P], R]:
         @functools.wraps(func)
-        def wrapper(self: S, *args: P.args, **kwargs: P.kwargs) -> R:
+        def wrapper(self: S, *args: P.args, **kwargs: P.kwargs) -> R:  # type: ignore [misc]
             self._require_read(action, unsafe=unsafe)
             return func(self, *args, **kwargs)
 
@@ -79,29 +79,20 @@ def requires_read(
     return decorator
 
 
-@functools.total_ordering
-class AbstractTrackedList(
-    Sequence[_T_co],
-    Generic[_T_co],
-):
-    """A mutable sequence that enforces element-type covariance at runtime
-    and tracks changes to itself.
-    """
-
+class AbstractCollection(Generic[_T_co]):
     type: ClassVar[type[_T_co]]  # type: ignore [misc]
 
     # Current items in order.
     _items: list[_T_co]
 
-    # Initial snapshot for change tracking
-    _initial_items: list[_T_co] | None
-
-    # Internal "mode" of the list.
+    # Internal "mode" of the collection.
     _mode: Mode
-    # External "mode" for the list, used to guide if save() should
+    # External "mode" for the collection, used to guide if save() should
     # replace the multi-link/multi-prop with the new data or
     # update it with the changes.
     __gel_overwrite_data__: bool = False
+
+    _allowed_write_only_ops: ClassVar[list[str]]
 
     def __init__(
         self,
@@ -111,8 +102,6 @@ class AbstractTrackedList(
         __mode__: Mode,
         __overwrite_data__: bool | None = None,
     ) -> None:
-        self._initial_items = None
-
         if __wrap_list__:
             # __wrap_list__ is set to True inside the codecs pipeline
             # because we can trust that the objects are of the correct
@@ -134,13 +123,15 @@ class AbstractTrackedList(
             )
             assert __mode__ is Mode.ReadWrite
             self._mode = Mode.ReadWrite
+
+            self.__gel_reset_snapshot__()
         else:
-            self._initial_items = []
             self._items = []
 
             # 'extend' is optimized in ProxyDistinctList
             # for use in __init__
-            self.extend(iterable)
+            self.__gel_reset_snapshot__()
+            self.__gel_extend__(iterable)
 
             # This is a new collection set to link/prop explicitly,
             # we want to override the link/prop with this new data
@@ -152,6 +143,51 @@ class AbstractTrackedList(
 
             self._mode = __mode__
 
+            self.__gel_empty_snapshot__()
+
+    def __gel_extend__(self, it: Iterable[_T_co]) -> None:
+        raise NotImplementedError
+
+    def __gel_empty_snapshot__(self) -> None:
+        raise NotImplementedError
+
+    def __gel_reset_snapshot__(self) -> None:
+        raise NotImplementedError
+
+    def __gel_get_added__(self) -> list[_T_co]:
+        raise NotImplementedError
+
+    def __gel_get_removed__(self) -> Iterable[_T_co]:
+        raise NotImplementedError
+
+    def __gel_has_changes__(self) -> bool:
+        raise NotImplementedError
+
+    def __gel_commit__(self) -> None:
+        # Flip "override mode" to False; it can be set back to True
+        # if the user assigns a new list to the field, e.g.
+        # `model.multilink = [ ... ]`. Setting it back to False means
+        # that now we'll be tracking changes and generating update
+        # queries for the collection (not replacement queries.)
+        self.__gel_overwrite_data__ = False
+
+    def __gel_post_commit_check__(self, path: Path) -> None:
+        if self.__gel_overwrite_data__:
+            raise ValueError(
+                f"{path} list did not reset self.__gel_overwrite_data__"
+            )
+
+    def __gel_basetype_iter__(self) -> Iterator[_T_co]:
+        return iter(self._items)
+
+    def unsafe_iter(self) -> Iterator[_T_co]:
+        """Iterate over the list disregarding the access mode."""
+        return iter(self._items)
+
+    def unsafe_len(self) -> int:
+        """Return the length of the list disregarding the access mode."""
+        return len(self._items)
+
     def _require_read(
         self,
         action: str,
@@ -162,11 +198,14 @@ class AbstractTrackedList(
         if self._mode is Mode.ReadWrite:
             return
 
+        allowed_ops = ", ".join(
+            f"`{op}`" for op in self._allowed_write_only_ops
+        )
+
         # XXX Add a link to our docs right here!
         msg = (
             f"Cannot {action} the collection in write-only mode. "
-            f"The only allowed operations are `.append()`, `.extend()`, "
-            f"`.remove()`, and their shortcuts `+=` and `-=` operators."
+            f"The only allowed operations are: {allowed_ops}"
             f"\n\n"
             f"This happens when a collection is accessed without being "
             f"fetched from the database or without an explicit assignment "
@@ -181,9 +220,36 @@ class AbstractTrackedList(
 
         raise RuntimeError(msg)
 
+
+@functools.total_ordering
+class AbstractTrackedList(
+    Sequence[_T_co],
+    AbstractCollection[_T_co],
+):
+    """A mutable sequence that enforces element-type covariance at runtime
+    and tracks changes to itself.
+    """
+
+    _allowed_write_only_ops: ClassVar[list[str]] = [
+        ".append()",
+        ".extend()",
+        ".remove()",
+        "+=",
+        "-=",
+    ]
+
+    # Initial snapshot for change tracking
+    _initial_items: list[_T_co] | None
+
+    def __gel_extend__(self, it: Iterable[_T_co]) -> None:
+        self.extend(it)
+
     def _ensure_snapshot(self) -> None:
         if self._initial_items is None:
             self._initial_items = list(self._items)
+
+    def __gel_empty_snapshot__(self) -> None:
+        self._initial_items = []
 
     def __gel_reset_snapshot__(self) -> None:
         self._initial_items = None
@@ -209,28 +275,19 @@ class AbstractTrackedList(
 
     def __gel_commit__(self) -> None:
         self._initial_items = None
-
-        # Flip "override mode" to False; it can be set back to True
-        # if the user assigns a new list to the field, e.g.
-        # `model.multilink = [ ... ]`. Setting it back to False means
-        # that now we'll be tracking changes and generating update
-        # queries for the collection (not replacement queries.)
-        self.__gel_overwrite_data__ = False
+        super().__gel_commit__()
 
     def __gel_post_commit_check__(self, path: Path) -> None:
         if self._initial_items:
             raise ValueError(f"{path} has non-empty `self._initial_items`")
-        if self.__gel_overwrite_data__:
-            raise ValueError(
-                f"{path} list did not reset self.__gel_overwrite_data__"
-            )
+        super().__gel_post_commit_check__(path)
 
     def _check_value(self, value: Any) -> _T_co:
         """Ensure `value` is of type T and return it."""
         cls = type(self)
 
         if isinstance(value, cls.type):
-            return value  # type: ignore [no-any-return]
+            return value
 
         raise ValueError(
             f"{cls!r} accepts only values of type {cls.type!r}, "
@@ -242,10 +299,6 @@ class AbstractTrackedList(
         if isinstance(values, AbstractTrackedList):
             values = values.__gel_basetype_iter__()
         return [self._check_value(value) for value in values]
-
-    @requires_read("get the length of", unsafe="unsafe_len()")
-    def __len__(self) -> int:
-        return len(self._items)
 
     if TYPE_CHECKING:
 
@@ -278,6 +331,10 @@ class AbstractTrackedList(
     def __delitem__(self, index: SupportsIndex | slice) -> None:
         self._ensure_snapshot()
         del self._items[index]
+
+    @requires_read("get the length of", unsafe="unsafe_len()")
+    def __len__(self) -> int:
+        return len(self._items)
 
     @requires_read("iterate over", unsafe="unsafe_iter()")
     def __iter__(self) -> Iterator[_T_co]:
@@ -365,9 +422,8 @@ class AbstractTrackedList(
         else:
             return repr(self._items)
 
-    @requires_read("add another collection to")
     def __add__(self, other: Iterable[_T_co]) -> Self:
-        new = type(self)(self._items, __mode__=Mode.ReadWrite)
+        new = type(self)(self._items, __mode__=self._mode)
         new.extend(other)
         return new
 
@@ -379,17 +435,6 @@ class AbstractTrackedList(
         for item in other:
             self.remove(item)
         return self
-
-    def __gel_basetype_iter__(self) -> Iterator[_T_co]:
-        return iter(self._items)
-
-    def unsafe_iter(self) -> Iterator[_T_co]:
-        """Iterate over the list disregarding the access mode."""
-        return iter(self._items)
-
-    def unsafe_len(self) -> int:
-        """Return the length of the list disregarding the access mode."""
-        return len(self._items)
 
     if TYPE_CHECKING:  # pragma: no cover
 
