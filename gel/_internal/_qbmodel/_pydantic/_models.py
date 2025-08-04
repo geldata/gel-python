@@ -711,10 +711,10 @@ class GelSourceModel(
             if not ptr.cardinality.is_multi():
                 continue
 
-            wrapped: _tracked_list.AbstractTrackedList[Any]
-            if not isinstance(val, _tracked_list.AbstractTrackedList):
+            wrapped: _tracked_list.AbstractCollection[Any]
+            if not isinstance(val, _tracked_list.AbstractCollection):
                 dlist_ctr = pointer_ctrs[name]
-                assert issubclass(dlist_ctr, _tracked_list.AbstractTrackedList)
+                assert issubclass(dlist_ctr, _tracked_list.AbstractCollection)
                 wrapped = dlist_ctr(
                     val,
                     __wrap_list__=True,
@@ -863,13 +863,13 @@ class GelSourceModel(
                     f"to {type(self).__name__}.{name}; an iterable is expected"
                 )
 
-            assert isinstance(current_value, _tracked_list.AbstractTrackedList)
+            assert isinstance(current_value, _tracked_list.AbstractCollection)
             current_value.clear()
             current_value.__gel_reset_snapshot__()
             if value:
-                current_value.extend(
+                current_value.__gel_extend__(
                     value.__gel_basetype_iter__()
-                    if isinstance(value, _tracked_list.AbstractTrackedList)
+                    if isinstance(value, _tracked_list.AbstractCollection)
                     else value
                 )
 
@@ -1046,8 +1046,8 @@ class GelModel(
                     self, name, field.get_default(call_default_factory=True)
                 )
                 # Fetch the validated/coerced value (`list` will be converted
-                # to a variant of TrackedList.)
-                lst: _tracked_list.AbstractTrackedList[Any] = getattr(
+                # to a variant of AbstractCollection.)
+                lst: _tracked_list.AbstractCollection[Any] = getattr(
                     self, name
                 )
                 lst._mode = _tracked_list.Mode.Write
@@ -1059,7 +1059,7 @@ class GelModel(
                 return lst
 
         # Delegate to the descriptor.
-        return object.__getattribute__(self, name)
+        return ll_getattr(self, name)
 
     def __gel_commit__(self, new_id: uuid.UUID | None = None) -> None:
         if new_id is not None:

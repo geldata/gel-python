@@ -24,6 +24,7 @@ from gel._internal._qbmodel._pydantic._models import (
     ProxyModel,
 )
 from gel._internal._tracked_list import (
+    AbstractCollection,
     AbstractTrackedList,
     TrackedList,
     DowncastingTrackedList,
@@ -446,25 +447,27 @@ def push_change(
 
 
 def has_changes_recursive(
-    val: list[Any] | tuple[Any, ...] | AbstractTrackedList[Any],
+    val: list[Any] | tuple[Any, ...] | AbstractCollection[Any],
 ) -> bool:
     # We have to traverse the entire collection graph to check if
     # there are any changes in it. We can't just check the topmost
     # collection; e.g. consider you have a tuple of arrays -- the tuple
     # can't have changes on it's own, but one of the nested arrays can.
 
-    def walk(collection: Sequence[Any]) -> bool:
-        if isinstance(collection, AbstractTrackedList):
+    def walk(collection: Iterable[Any]) -> bool:
+        if isinstance(collection, AbstractCollection):
             if collection.__gel_has_changes__():
                 return True
 
         for item in collection:
-            if isinstance(item, AbstractTrackedList):
+            if isinstance(item, AbstractCollection):
                 if item.__gel_has_changes__():
                     return True
-            elif isinstance(item, (list, tuple)):
+
+            if isinstance(item, (list, tuple, AbstractCollection)):
                 if walk(item):
                     return True
+
         return False
 
     return walk(val)
@@ -675,7 +678,7 @@ def make_plan(objs: Iterable[GelModel]) -> SavePlan:
             # a non-empty one
             assert linked is not None
             assert is_link_abstract_dlist(linked), (
-                f"`linked` is not dlist, it is {type(linked)}"
+                f"{prop.name!r} is not dlist, it is {type(linked)}"
             )
 
             replace = linked.__gel_overwrite_data__
