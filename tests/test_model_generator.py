@@ -16,6 +16,20 @@
 # limitations under the License.
 #
 
+
+#    ███    ██  ██████  ████████ ███████
+#    ████   ██ ██    ██    ██    ██
+#    ██ ██  ██ ██    ██    ██    █████
+#    ██  ██ ██ ██    ██    ██    ██
+#    ██   ████  ██████     ██    ███████
+#
+#    Run `python tools/gen_models.py` to generate the models
+#    module from the `orm.gel` schema and get your IDE to
+#    recognize `from models import default`.
+#
+#    Don't forget to re-run if you are messing with codegen
+#    implementation or testing different versions of Gel.
+
 from __future__ import annotations
 
 import os
