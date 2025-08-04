@@ -10,14 +10,13 @@ from typing import (
     cast,
 )
 from typing_extensions import Self
-from collections.abc import Iterable
+from collections.abc import Iterable, Collection
 
-import functools
 
 from gel._internal import _typing_parametric as parametric
 from gel._internal._qbmodel._abstract._base import AbstractGelLinkModel
 from gel._internal._tracked_list import (
-    AbstractTrackedList,
+    AbstractCollection,
     DefaultList,
     Mode,
     requires_read,
@@ -36,11 +35,13 @@ ll_getattr = object.__getattribute__
 
 
 _MT_co = TypeVar("_MT_co", bound="AbstractGelSourceModel", covariant=True)
-_ADL_co = TypeVar("_ADL_co", bound=AbstractTrackedList[Any], covariant=True)
+_ADL_co = TypeVar("_ADL_co", bound=AbstractCollection[Any], covariant=True)
 
 
-@functools.total_ordering
-class AbstractDistinctList(AbstractTrackedList[_MT_co]):
+class AbstractDistinctList(  # noqa: PLW1641 (__hash__ is implemented)
+    AbstractCollection[_MT_co],
+    Collection[_MT_co],
+):
     """A mutable, ordered set-like list that enforces element-type covariance
     at runtime and maintains distinctness of elements in insertion order using
     a list and set.
@@ -54,6 +55,8 @@ class AbstractDistinctList(AbstractTrackedList[_MT_co]):
     # checks.
     _unhashables: dict[int, _MT_co] | None
 
+    _initial_items: list[_MT_co] | None
+
     def __init__(
         self,
         iterable: Iterable[_MT_co] = (),
@@ -63,6 +66,7 @@ class AbstractDistinctList(AbstractTrackedList[_MT_co]):
     ) -> None:
         self._set = None
         self._unhashables = None
+        self._initial_items = None
         super().__init__(
             iterable,
             __wrap_list__=__wrap_list__,
@@ -97,15 +101,54 @@ class AbstractDistinctList(AbstractTrackedList[_MT_co]):
         # this is the perfect place to initialize `self._set` and
         # `self._unhashables`.
         self._init_tracking()
-        super()._ensure_snapshot()
+
+        if self._initial_items is None:
+            self._initial_items = list(self._items)
+
+    def __gel_empty_snapshot__(self) -> None:
+        self._initial_items = []
 
     def __gel_reset_snapshot__(self) -> None:
-        super().__gel_reset_snapshot__()
         self._set = None
         self._unhashables = None
+        self._initial_items = None
+
+    def __gel_get_added__(self) -> list[_MT_co]:
+        # XXX optimize for set
+        if self._initial_items is None:
+            return []
+        return [
+            item for item in self._items if item not in self._initial_items
+        ]
+
+    def __gel_get_removed__(self) -> Iterable[_MT_co]:
+        # XXX optimize for set
+        if self._initial_items is None:
+            return ()
+        return [
+            item for item in self._initial_items if item not in self._items
+        ]
+
+    def __gel_has_changes__(self) -> bool:
+        # XXX optimize for set
+        if self._initial_items is None:
+            return False
+        return self._items != self._initial_items
+
+    def __gel_commit__(self) -> None:
+        super().__gel_commit__()
+
+        self._initial_items = None
+
+        if self._unhashables is not None:
+            assert self._set is not None
+            for item in self._unhashables.values():
+                self._set.add(item)
+            self._unhashables.clear()
 
     def __gel_post_commit_check__(self, path: Path) -> None:
         super().__gel_post_commit_check__(path)
+
         if self._unhashables:
             raise ValueError(
                 f"{path} has non-empty `self._unhashables` after save()"
@@ -117,14 +160,11 @@ class AbstractDistinctList(AbstractTrackedList[_MT_co]):
                 f"{path}: `{len(self._set or {})=}` != `{len(self._items)=}`"
             )
 
-    def __gel_commit__(self) -> None:
-        super().__gel_commit__()
-
-        if self._unhashables is not None:
-            assert self._set is not None
-            for item in self._unhashables.values():
-                self._set.add(item)
-            self._unhashables.clear()
+    def _check_values(self, values: Iterable[Any]) -> list[_MT_co]:
+        """Ensure `values` is an iterable of type T and return it as a list."""
+        if isinstance(values, AbstractDistinctList):
+            values = values.__gel_basetype_iter__()
+        return [self._check_value(value) for value in values]
 
     def _init_tracking(self) -> None:
         if self._set is None:
@@ -266,15 +306,22 @@ class AbstractDistinctList(AbstractTrackedList[_MT_co]):
         self._track_item(value)
 
     def extend(self, values: Iterable[_MT_co]) -> None:
+        # XXX remove this method, we're set now
+        self.__gel_extend__(values)
+
+    def __gel_extend__(self, values: Iterable[_MT_co]) -> None:
         if values is self:
             # This is a "unique list" with a set-like behavior, so
             # DistinctList.extend(self) is a no-op.
             return
 
-        if isinstance(values, AbstractTrackedList):
+        if isinstance(values, AbstractDistinctList):
             values = values.__gel_basetype_iter__()
         for v in values:
             self.append(v)
+
+    def update(self, values: Iterable[_MT_co]) -> None:
+        self.__gel_extend__(values)
 
     def append(self, value: _MT_co) -> None:  # type: ignore [misc]
         value = self._check_value(value)
@@ -311,27 +358,55 @@ class AbstractDistinctList(AbstractTrackedList[_MT_co]):
         self._set = None
         self._unhashables = None
 
-    @requires_read("index items of")
-    def index(
-        self,
-        value: _MT_co,  # type: ignore [misc]
-        start: SupportsIndex = 0,
-        stop: SupportsIndex | None = None,
-    ) -> int:
-        """Return first index of value."""
-        indexable = self._ensure_value_indexable(value)
-        if indexable is None:
-            raise ValueError
-        return self._items.index(
-            indexable,
-            start,
-            len(self._items) if stop is None else stop,
-        )
+    @requires_read("get the length of", unsafe="unsafe_len()")
+    def __len__(self) -> int:
+        return len(self._items)
 
-    @requires_read("count items of")
-    def count(self, value: _MT_co) -> int:  # type: ignore [misc]
-        """Return 1 if item is present, else 0."""
-        return 1 if value in self else 0
+    @requires_read("iterate over", unsafe="unsafe_iter()")
+    def __iter__(self) -> Iterator[_MT_co]:
+        return iter(self._items)
+
+    def __iadd__(self, other: Iterable[_MT_co]) -> Self:
+        self.extend(other)
+        return self
+
+    def __isub__(self, other: Iterable[_MT_co]) -> Self:
+        for item in other:
+            self.remove(item)
+        return self
+
+    def __eq__(self, other: object) -> bool:
+        if isinstance(other, AbstractDistinctList):
+            if self._mode is Mode.Write:
+                # __eq__ is pretty fundamental in Python and we don't
+                # want it to crash in all random places where it can
+                # be called from. So we just return False.
+                return False
+            return sorted(self._items, key=id) == sorted(other._items, key=id)
+        elif isinstance(other, set):
+            if self._mode is Mode.Write:
+                return False
+            if self._unhashables is not None:
+                # There are unhashable items in our collection
+                # (added after the link was fetched or this is a new link),
+                # so we're not equal to any possible set.
+                return False
+            if self._set is not None:
+                return self._set == other
+            return set(self._items) == other
+        elif isinstance(other, list):
+            # In an ideal world we'd only allow comparisions with sets.
+            # But in our world we already allow initialization from a list
+            # and an assigment to a list (we can't require users to use
+            # sets because unsaved objects are unhashable).
+            # It's weird if comparison doesn't work with lists, but also
+            # you can't even put unsaved objects in a set (again, they
+            # are unhashable).
+            if self._mode is Mode.Write:
+                return False
+            return self._items == other
+        else:
+            return NotImplemented
 
 
 class DistinctList(
@@ -400,8 +475,10 @@ class DistinctList(
             # GelModel will adjust __mode__ to Write for
             # unfetched multi-link/multi-prop fields.
             return tp(__mode__=Mode.ReadWrite)
-        elif isinstance(value, (list, AbstractTrackedList)):
+        elif isinstance(value, list):
             return tp(value, __mode__=Mode.ReadWrite)
+        elif isinstance(value, AbstractDistinctList):
+            return tp(value._items, __mode__=Mode.ReadWrite)
         else:
             raise TypeError(
                 f"could not convert {type(value)} to {tp.__name__}"
@@ -561,7 +638,7 @@ class ProxyDistinctList(
             # DistinctList.extend(self) is a no-op.
             return
 
-        if isinstance(values, AbstractTrackedList):
+        if isinstance(values, AbstractDistinctList):
             values = list(values.__gel_basetype_iter__())
 
         self._ensure_snapshot()

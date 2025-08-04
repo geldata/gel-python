@@ -39,7 +39,7 @@ from ._base import (
 
 if TYPE_CHECKING:
     import types
-    from collections.abc import Sequence
+    from collections.abc import Sequence, Set as AbstractSet
     from ._distinct_list import AbstractDistinctList, ProxyDistinctList
 
 
@@ -457,7 +457,9 @@ class MultiLinkDescriptor(AnyLinkDescriptor[_MT_co, _BMT_co]):
         def __set__(
             self,
             instance: Any,
-            value: Sequence[_MT_co | _BMT_co],
+            value: Sequence[_MT_co | _BMT_co]
+            | AbstractSet[_MT_co | _BMT_co]
+            | AbstractDistinctList[_MT_co],
             /,
         ) -> None: ...
 
@@ -636,9 +638,12 @@ class MultiLinkWithPropsDescriptor(MultiLinkDescriptor[_PT_co, _BMT_co]):
             /,
         ) -> type[_PT_co] | ProxyDistinctList[_PT_co, _BMT_co]: ...
 
-        def __set__(
+        def __set__(  # pyright: ignore [reportIncompatibleMethodOverride]
             self,
             instance: Any,
-            value: Sequence[_PT_co | _BMT_co],
+            value: Sequence[_PT_co | _BMT_co]  # type: ignore[override]
+            | AbstractSet[_PT_co | _BMT_co]
+            | AbstractDistinctList[_BMT_co]
+            | ProxyDistinctList[_PT_co, _BMT_co],
             /,
         ) -> None: ...

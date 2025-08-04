@@ -441,7 +441,7 @@ cdef class ObjectCodec(BaseNamedRecordCodec):
                         and (
                             issubclass(
                                 ptrtype,
-                                (_tracked_list.AbstractTrackedList, tuple),
+                                (_tracked_list.AbstractCollection, tuple),
                             )
                         )
                     ):

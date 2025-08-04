@@ -79,7 +79,7 @@ def requires_read(
     return decorator
 
 
-class AbstractCollection(Generic[_T_co]):
+class AbstractCollection(Iterable[_T_co], Generic[_T_co]):
     type: ClassVar[type[_T_co]]  # type: ignore [misc]
 
     # Current items in order.
@@ -93,6 +93,10 @@ class AbstractCollection(Generic[_T_co]):
     __gel_overwrite_data__: bool = False
 
     _allowed_write_only_ops: ClassVar[list[str]]
+
+    if not TYPE_CHECKING:
+        # All collections are mutable.
+        __hash__ = None
 
     def __init__(
         self,
@@ -219,6 +223,9 @@ class AbstractCollection(Generic[_T_co]):
             )
 
         raise RuntimeError(msg)
+
+    def clear(self) -> None:
+        raise NotImplementedError
 
 
 @functools.total_ordering

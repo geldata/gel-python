@@ -179,9 +179,10 @@ class TestModelGenerator(tb.ModelTestCase):
         )
 
         self.assertTrue(a == a)
-        self.assertTrue(t.members[0] == t.members[0])
-        self.assertTrue(a == t.members[0])
-        self.assertTrue(t.members[0] == a)
+        fm = next(iter(t.members))
+        self.assertTrue(fm == fm)
+        self.assertTrue(a == fm)
+        self.assertTrue(fm == a)
 
         self.client.save(t)
         t2 = self.client.get(
@@ -191,9 +192,10 @@ class TestModelGenerator(tb.ModelTestCase):
             ).filter(name="Alice's team"),
         )
 
-        self.assertTrue(a == t.members[0])
-        self.assertTrue(a == t2.members[0])
-        self.assertTrue(t.members[0] == t2.members[0])
+        fm2 = next(iter(t2.members))
+        self.assertTrue(a == fm)
+        self.assertTrue(a == fm2)
+        self.assertTrue(fm == fm2)
 
     def test_modelgen_03(self):
         from models import default
@@ -354,9 +356,10 @@ class TestModelGenerator(tb.ModelTestCase):
 
         # Test that links are unpacked into a DistinctList, not a vanilla list
         self.assertIsInstance(d.players, ProxyDistinctList)
-        self.assertIsInstance(d.players[0].groups, tuple)
+        first_player = next(iter(d.players))
+        self.assertIsInstance(first_player.groups, tuple)
 
-        post = default.Post(author=d.players[0], body="test")
+        post = default.Post(author=first_player, body="test")
 
         # Check that validation is enabled for objects created by codecs
 
@@ -787,7 +790,7 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(sl.model_dump(), sl2.model_dump())
 
         sl.num += 1
-        _pl = sl.players[0]
+        _pl = next(iter(sl.players))
         _pl.name += "Alice the 2nd"
         _pl.__linkprops__.is_tall_enough = not _pl.__linkprops__.is_tall_enough
 
@@ -808,12 +811,12 @@ class TestModelGenerator(tb.ModelTestCase):
             sl2.__gel_get_changed_fields__(),
         )
         self.assertEqual(
-            sl.players[0]._p__obj__.__gel_get_changed_fields__(),
-            sl2.players[0]._p__obj__.__gel_get_changed_fields__(),
+            next(iter(sl.players))._p__obj__.__gel_get_changed_fields__(),
+            next(iter(sl2.players))._p__obj__.__gel_get_changed_fields__(),
         )
         self.assertEqual(
-            sl.players[0].__linkprops__.__gel_get_changed_fields__(),
-            sl2.players[0].__linkprops__.__gel_get_changed_fields__(),
+            next(iter(sl.players)).__linkprops__.__gel_get_changed_fields__(),
+            next(iter(sl2.players)).__linkprops__.__gel_get_changed_fields__(),
         )
 
         self.assertIsInstance(sl2.players, type(sl.players))
@@ -894,7 +897,7 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(sl.model_dump(), sl2.model_dump())
 
         sl.name += "aaa"
-        pl = sl.users[0]
+        pl = next(iter(sl.users))
         pl.name += "Alice the 2nd"
 
         sl2 = repickle(sl)
@@ -909,25 +912,28 @@ class TestModelGenerator(tb.ModelTestCase):
             sl2.model_dump(context={"gel_allow_unsaved": True}),
         )
 
+        sl_users = list(sl.users)
+        sl2_users = list(sl2.users)
+
         self.assertEqual(
             sl.__gel_get_changed_fields__(),
             sl2.__gel_get_changed_fields__(),
         )
         self.assertEqual(
-            sl.users[0],
-            sl2.users[0],
+            sl_users[0],
+            sl2_users[0],
         )
         self.assertEqual(
-            sl.users[1],
-            sl2.users[1],
+            sl_users[1],
+            sl2_users[1],
         )
         self.assertEqual(
-            sl.users[0].__gel_get_changed_fields__(),
-            sl2.users[0].__gel_get_changed_fields__(),
+            sl_users[0].__gel_get_changed_fields__(),
+            sl2_users[0].__gel_get_changed_fields__(),
         )
         self.assertEqual(
-            sl.users[1].__gel_get_changed_fields__(),
-            sl2.users[1].__gel_get_changed_fields__(),
+            sl_users[1].__gel_get_changed_fields__(),
+            sl2_users[1].__gel_get_changed_fields__(),
         )
 
         self.assertIsInstance(sl2.users, type(sl.users))
@@ -1269,13 +1275,12 @@ class TestModelGenerator(tb.ModelTestCase):
 
         u1 = default.User(name="aaa")
         ug = default.UserGroup(name="aaa")
-        ug.users.append(
-            default.GameSession.players.link(
-                u1,
-                is_tall_enough=True,
-            )
+        uu = default.GameSession.players.link(
+            u1,
+            is_tall_enough=True,
         )
-        self.assertFalse(hasattr(ug.users[0], "__linkprops__"))
+        ug.users.append(uu)
+        self.assertFalse(hasattr(next(iter(ug.users)), "__linkprops__"))
 
         # case 2: initialize with a list of proxies
 
@@ -1288,30 +1293,33 @@ class TestModelGenerator(tb.ModelTestCase):
 
         ug = default.UserGroup(name="aaa", users=gs.players)
 
-        self.assertFalse(hasattr(ug.users[0], "__linkprops__"))
+        self.assertFalse(hasattr(next(iter(ug.users)), "__linkprops__"))
 
         # case 3: setattr to a list of proxies
 
         ug = default.UserGroup(name="aaa")
         ug.users = gs.players
-        self.assertFalse(hasattr(ug.users[0], "__linkprops__"))
+        ug_users_0 = next(iter(ug.users))
+        self.assertFalse(hasattr(ug_users_0, "__linkprops__"))
 
         # case 4: a list with wrong list props into a list with link props
 
         r = default.Raid(name="r", members=gs.players)
+        r_members_0 = next(iter(r.members))
         self.assertFalse(
-            hasattr(r.members[0].__linkprops__, "is_tall_enough"),
+            hasattr(r_members_0.__linkprops__, "is_tall_enough"),
         )
 
         # case 5: appending a wrong proxy to a list of proxies
 
         r = default.Raid(name="r", members=gs.players)
-        r.members.append(gs.players[0])
+        r.members.append(next(iter(gs.players)))
+        r_members_0 = next(iter(r.members))
         self.assertFalse(
-            hasattr(r.members[0].__linkprops__, "is_tall_enough"),
+            hasattr(r_members_0.__linkprops__, "is_tall_enough"),
         )
         self.assertIsInstance(
-            r.members[0],
+            r_members_0,
             default.Raid.__links__.members,
         )
 
@@ -1320,12 +1328,13 @@ class TestModelGenerator(tb.ModelTestCase):
         r = default.Raid(
             name="r", members=[default.Raid.members.link(u1, role="tank")]
         )
+        r_members_0 = next(iter(r.members))
         self.assertIsInstance(
-            r.members[0],
+            r_members_0,
             default.Raid.__links__.members,
         )
-        self.assertEqual(r.members[0].__linkprops__.role, "tank")
-        self.assertEqual(r.members[0].name, u1.name)
+        self.assertEqual(r_members_0.__linkprops__.role, "tank")
+        self.assertEqual(r_members_0.name, u1.name)
 
     def test_modelgen_pydantic_apis_15(self):
         # Test that GelModel's custom dump is working even
@@ -1725,7 +1734,7 @@ class TestModelGenerator(tb.ModelTestCase):
         )
         self.assertEqual(res.name, "Solo")
         self.assertEqual(len(res.members), 1)
-        m = res.members[0]
+        m = next(iter(res.members))
         self.assertEqual(m.name, "John Smith")
         self.assertEqual(m.nickname, "Hannibal")
 
@@ -1808,7 +1817,7 @@ class TestModelGenerator(tb.ModelTestCase):
         )
         self.assertEqual(res.name, "Solo")
         self.assertEqual(len(res.members), 1)
-        m = res.members[0]
+        m = next(iter(res.members))
         self.assertEqual(m.name, "John Smith")
         self.assertEqual(m.nickname, "Hannibal")
         self.assertEqual(m.__linkprops__.role, "everything")
@@ -1826,7 +1835,7 @@ class TestModelGenerator(tb.ModelTestCase):
             ).filter(name="Solo")
         )
         self.assertEqual(len(res.members), 1)
-        m = res.members[0]
+        m = next(iter(res.members))
         self.assertEqual(m.__linkprops__.rank, 2)
 
     def test_modelgen_save_05(self):
@@ -2627,7 +2636,7 @@ class TestModelGenerator(tb.ModelTestCase):
         )
         self.assertEqual(res.name, "mixed raid")
         self.assertEqual(len(res.members), 1)
-        m = res.members[0]
+        m = next(iter(res.members))
         self.assertEqual(m.name, "Alice")
         self.assertEqual(m.__linkprops__.rank, 1)
 
@@ -2669,7 +2678,7 @@ class TestModelGenerator(tb.ModelTestCase):
         )
         self.assertEqual(res.name, "bad raid")
         self.assertEqual(len(res.members), 1)
-        m = res.members[0]
+        m = next(iter(res.members))
         self.assertEqual(m.name, "Alice")
         self.assertEqual(m.__linkprops__.rank, 1)
 
@@ -2695,7 +2704,7 @@ class TestModelGenerator(tb.ModelTestCase):
         )
         self.assertEqual(res.name, "mixed raid")
         self.assertEqual(len(res.members), 1)
-        m = res.members[0]
+        m = next(iter(res.members))
         self.assertEqual(m.name, "Alice")
         self.assertEqual(m.__linkprops__.rank, 1)
 
@@ -2813,7 +2822,7 @@ class TestModelGenerator(tb.ModelTestCase):
 
         g = default.GameSession(num=909, public=False, players=[])
         self.assertEqual(g.players._mode, Mode.ReadWrite)
-        self.assertEqual(g.players, [])
+        self.assertEqual(g.players, set())
         self.assertTrue(g.players.__gel_overwrite_data__)
         self.assertPydanticChangedFields(g, {"num", "public", "players"})
 
@@ -2837,7 +2846,7 @@ class TestModelGenerator(tb.ModelTestCase):
             ).limit(1)
         )
         self.assertEqual(gdb.players._mode, Mode.ReadWrite)
-        self.assertEqual(gdb.players, [])
+        self.assertEqual(gdb.players, set())
         self.assertFalse(gdb.players.__gel_overwrite_data__)
         gdb.players = []
         self.assertEqual(gdb.players._mode, Mode.ReadWrite)
@@ -2847,7 +2856,7 @@ class TestModelGenerator(tb.ModelTestCase):
 
         g = default.GameSession(id=gdb.id, num=909, public=False, players=[])
         self.assertEqual(g.players._mode, Mode.ReadWrite)
-        self.assertEqual(g.players, [])
+        self.assertEqual(g.players, set())
         self.assertTrue(g.players.__gel_overwrite_data__)
         self.assertPydanticChangedFields(g, {"num", "public", "players"})
 
@@ -2927,7 +2936,7 @@ class TestModelGenerator(tb.ModelTestCase):
 
         # Create new GameSession
         g = default.GameSession(num=1000, public=True)
-        self.assertEqual(g.players, [])
+        self.assertEqual(g.players, set())
         self.assertTrue(g.players.__gel_overwrite_data__)
         self.assertEqual(g.players._mode, Mode.ReadWrite)
 
@@ -2967,7 +2976,7 @@ class TestModelGenerator(tb.ModelTestCase):
             )
         )
         self.assertEqual(len(g_final.players), 1)
-        self.assertEqual(g_final.players[0].name, "TestUser1")
+        self.assertEqual(next(iter(g_final.players)).name, "TestUser1")
 
     def test_modelgen_save_35(self):
         # GameSession with players assignment then clear
@@ -2995,7 +3004,7 @@ class TestModelGenerator(tb.ModelTestCase):
             )
         )
         self.assertEqual(len(g_fetched.players), 1)
-        self.assertEqual(g_fetched.players[0].name, "Elsa")
+        self.assertEqual(next(iter(g_fetched.players)).name, "Elsa")
 
         # Clear players
         g_fetched.players = []
@@ -3084,7 +3093,7 @@ class TestModelGenerator(tb.ModelTestCase):
         )
         session_id = existing_session.id
         self.assertEqual(len(existing_session.players), 1)
-        self.assertEqual(existing_session.players[0].name, "Dana")
+        self.assertEqual(next(iter(existing_session.players)).name, "Dana")
 
         # Create new instance with same id
         new_session = default.GameSession(id=session_id, num=789, public=True)
@@ -3150,7 +3159,7 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(new_session.players._mode, Mode.ReadWrite)
         self.assertTrue(new_session.players.__gel_overwrite_data__)
         self.assertEqual(len(new_session.players), 1)
-        self.assertEqual(new_session.players[0].name, "Elsa")
+        self.assertEqual(next(iter(new_session.players)).name, "Elsa")
 
         # Save the changes
         self.client.save(new_session)
@@ -3164,7 +3173,7 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(final_session.num, 777)
         self.assertEqual(final_session.public, False)
         self.assertEqual(len(final_session.players), 1)
-        self.assertEqual(final_session.players[0].name, "Elsa")
+        self.assertEqual(next(iter(final_session.players)).name, "Elsa")
 
     def test_modelgen_save_39(self):
         # Test defaults
@@ -3781,15 +3790,17 @@ class TestModelGenerator(tb.ModelTestCase):
         # Test all read methods that should raise RuntimeError
         read_methods = [
             ("__len__", lambda: len(session.players), "get the length of"),
-            ("__getitem__", lambda: session.players[0], "index items of"),
+            (
+                "__getitem__",
+                lambda: list(session.players)[0],
+                "index items of",
+            ),
             ("__iter__", lambda: list(session.players), "iterate over"),
             (
                 "__contains__",
                 lambda: None in session.players,
                 "use `in` operator on",
             ),
-            ("index", lambda: session.players.index(None), "index items of"),
-            ("count", lambda: session.players.count(None), "count items of"),
             (
                 "__bool__",
                 lambda: bool(session.players),
@@ -4324,7 +4335,7 @@ class TestModelGenerator(tb.ModelTestCase):
         )
         self.assertEqual(res.num, 1001)
         self.assertEqual(len(res.players), 1)
-        p = res.players[0]
+        p = next(iter(res.players))
 
         self.assertEqual(p.name, "Zoe")
         self.assertEqual(p.__linkprops__.is_tall_enough, True)
@@ -4348,8 +4359,9 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(gs.num, 1002)
         self.assertEqual(gs.public, False)
         self.assertEqual(len(gs.players), 1)
-        self.assertEqual(gs.players[0].__linkprops__.is_tall_enough, None)
-        gs.players[0].__linkprops__.is_tall_enough = False
+        gs_players_0 = next(iter(gs.players))
+        self.assertEqual(gs_players_0.__linkprops__.is_tall_enough, None)
+        gs_players_0.__linkprops__.is_tall_enough = False
         self.client.save(gs)
 
         # Now fetch after update
@@ -4361,7 +4373,8 @@ class TestModelGenerator(tb.ModelTestCase):
         )
         self.assertEqual(res.num, 1002)
         self.assertEqual(len(res.players), 1)
-        p = res.players[0]
+        res_players_0 = next(iter(res.players))
+        p = res_players_0
 
         self.assertEqual(p.name, "Elsa")
         self.assertEqual(p.__linkprops__.is_tall_enough, False)
@@ -4378,7 +4391,7 @@ class TestModelGenerator(tb.ModelTestCase):
 
         self.assertEqual(res.num, 456)
         self.assertEqual(len(res.players), 1)
-        p0 = res.players[0]
+        p0 = next(iter(res.players))
 
         self.assertEqual(p0.name, "Dana")
         self.assertEqual(p0.nickname, None)
@@ -4394,7 +4407,7 @@ class TestModelGenerator(tb.ModelTestCase):
         upd = self.client.get(q)
         self.assertEqual(upd.num, 456)
         self.assertEqual(len(upd.players), 1)
-        p1 = upd.players[0]
+        p1 = next(iter(upd.players))
 
         self.assertEqual(p1.name, "Dana?")
         self.assertEqual(p1.nickname, "HACKED")
@@ -4448,7 +4461,7 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(fetched_sess, sess)
         self.assertEqual(fetched_sess.num, sess_num)
         self.assertEqual(len(fetched_sess.players), 1)
-        self.assertEqual(fetched_sess.players[0].name, "General Global")
+        self.assertEqual(list(fetched_sess.players)[0].name, "General Global")
 
     @tb.skip_typecheck
     def test_modelgen_reflection_1(self):
@@ -5687,8 +5700,9 @@ class TestModelGenerator(tb.ModelTestCase):
         assert res.commit is not None
         self.assertEqual(res.commit.name, "Alice")
         self.assertEqual(len(res.configure), 1)
-        self.assertEqual(res.configure[0].name, "Alice")
-        self.assertEqual(res.configure[0].__linkprops__.create, True)
+        conf = next(iter(res.configure))
+        self.assertEqual(conf.name, "Alice")
+        self.assertEqual(conf.__linkprops__.create, True)
 
     def test_modelgen_escape_02(self):
         from models import default
@@ -5720,8 +5734,9 @@ class TestModelGenerator(tb.ModelTestCase):
         assert res.commit is not None
         self.assertEqual(res.commit.name, "Alice")
         self.assertEqual(len(res.configure), 1)
-        self.assertEqual(res.configure[0].name, "Alice")
-        self.assertEqual(res.configure[0].__linkprops__.create, True)
+        conf = next(iter(res.configure))
+        self.assertEqual(conf.name, "Alice")
+        self.assertEqual(conf.__linkprops__.create, True)
 
 
 @tb.typecheck
