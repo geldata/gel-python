@@ -5,7 +5,6 @@ from typing import (
     Any,
     ClassVar,
     Generic,
-    SupportsIndex,
     TypeVar,
     cast,
 )
@@ -231,91 +230,12 @@ class AbstractDistinctList(  # noqa: PLW1641 (__hash__ is implemented)
         assert self._unhashables is not None
         return id(item) in self._unhashables
 
-    def __setitem__(
-        self,
-        index: SupportsIndex | slice,
-        value: _MT_co | Iterable[_MT_co],
-    ) -> None:
-        self._ensure_snapshot()
-
-        if isinstance(index, slice):
-            start, stop, step = index.indices(len(self._items))
-            if step != 1:
-                raise ValueError(
-                    "Slice assignment with step != 1 not supported",
-                )
-
-            assert isinstance(value, Iterable)
-            new_values = self._check_values(value)
-
-            for item in self._items[start:stop]:
-                self._untrack_item(item)
-
-            new_filtered_values = [
-                v for v in new_values if not self._is_tracked(v)
-            ]
-
-            self._items = [
-                *self._items[:start],
-                *new_filtered_values,
-                *self._items[stop:],
-            ]
-
-            for item in new_values:
-                self._track_item(item)
-
-        else:
-            new_value = self._check_value(value)
-
-            old = self._items[index]
-            self._untrack_item(old)
-            del self._items[index]
-
-            if self._is_tracked(new_value):
-                return
-
-            self._items.insert(index, new_value)
-            self._track_item(new_value)
-
-    def __delitem__(self, index: SupportsIndex | slice) -> None:
-        self._ensure_snapshot()
-
-        if isinstance(index, slice):
-            to_remove = self._items[index]
-            del self._items[index]
-            for item in to_remove:
-                self._untrack_item(item)
-        else:
-            item = self._items[index]
-            del self._items[index]
-            self._untrack_item(item)
-
     @requires_read("use `in` operator on")
     def __contains__(self, item: object) -> bool:
         item = self._ensure_value_indexable(item)
         if item is None:
             return False
         return self._is_tracked(item)
-
-    def insert(self, index: SupportsIndex, value: _MT_co) -> None:  # type: ignore [misc]
-        """Insert item at index if not already present."""
-        value = self._check_value(value)
-
-        if self._is_tracked(value):
-            return
-
-        # clamp index
-        index = int(index)
-        if index < 0:
-            index = max(0, len(self._items) + index + 1)
-        index = min(index, len(self._items))
-
-        self._items.insert(index, value)
-        self._track_item(value)
-
-    def extend(self, values: Iterable[_MT_co]) -> None:
-        # XXX remove this method, we're set now
-        self.__gel_extend__(values)
 
     def __gel_extend__(self, values: Iterable[_MT_co]) -> None:
         if values is self:
@@ -326,12 +246,12 @@ class AbstractDistinctList(  # noqa: PLW1641 (__hash__ is implemented)
         if isinstance(values, AbstractDistinctList):
             values = values.__gel_basetype_iter__()
         for v in values:
-            self.append(v)
+            self.add(v)
 
     def update(self, values: Iterable[_MT_co]) -> None:
         self.__gel_extend__(values)
 
-    def append(self, value: _MT_co) -> None:  # type: ignore [misc]
+    def add(self, value: _MT_co) -> None:  # type: ignore [misc]
         value = self._check_value(value)
         self._ensure_snapshot()
         self._append_no_check(value)
@@ -342,7 +262,7 @@ class AbstractDistinctList(  # noqa: PLW1641 (__hash__ is implemented)
         self._track_item(value)
         self._items.append(value)
 
-    def remove(self, value: _MT_co) -> None:  # type: ignore [misc]
+    def discard(self, value: _MT_co) -> None:  # type: ignore [misc]
         """Remove item; raise ValueError if missing."""
         if not self._is_tracked(value):
             pass
@@ -352,10 +272,16 @@ class AbstractDistinctList(  # noqa: PLW1641 (__hash__ is implemented)
         self._untrack_item(value)
         self._items.remove(value)
 
-    def pop(self, index: SupportsIndex = -1) -> _MT_co:
-        """Remove and return item at index (default last)."""
+    def remove(self, value: _MT_co) -> None:  # type: ignore [misc]
+        """Remove an element. If not a member, raise a KeyError."""
+        if not self._is_tracked(value):
+            raise KeyError(value)
+        self.discard(value)
+
+    def pop(self) -> _MT_co:
+        """Remove and return an item."""
         self._ensure_snapshot()
-        item = self._items.pop(index)
+        item = self._items.pop(-1)
         self._untrack_item(item)
         return item
 
@@ -375,12 +301,12 @@ class AbstractDistinctList(  # noqa: PLW1641 (__hash__ is implemented)
         return iter(self._items)
 
     def __iadd__(self, other: Iterable[_MT_co]) -> Self:
-        self.extend(other)
+        self.__gel_extend__(other)
         return self
 
     def __isub__(self, other: Iterable[_MT_co]) -> Self:
         for item in other:
-            self.remove(item)
+            self.discard(item)
         return self
 
     def __eq__(self, other: object) -> bool:
@@ -634,7 +560,7 @@ class ProxyDistinctList(
         super().__gel_reset_snapshot__()
         self._wrapped_index = None
 
-    def extend(self, values: Iterable[_PT_co | _BMT_co]) -> None:
+    def __gel_extend__(self, values: Iterable[_PT_co | _BMT_co]) -> None:
         # An optimized version of `extend()`
 
         if not values:
@@ -823,24 +749,11 @@ class ProxyDistinctList(
 
     if TYPE_CHECKING:
 
-        def append(self, value: _PT_co | _BMT_co) -> None: ...
-        def insert(
-            self, index: SupportsIndex, value: _PT_co | _BMT_co
-        ) -> None: ...
-        def __setitem__(
-            self,
-            index: SupportsIndex | slice,
-            value: _PT_co | _BMT_co | Iterable[_PT_co | _BMT_co],
-        ) -> None: ...
-        def extend(self, values: Iterable[_PT_co | _BMT_co]) -> None: ...
+        def add(self, value: _PT_co | _BMT_co) -> None: ...
+        def update(self, values: Iterable[_PT_co | _BMT_co]) -> None: ...
+        def discard(self, value: _PT_co | _BMT_co) -> None: ...
         def remove(self, value: _PT_co | _BMT_co) -> None: ...
-        def index(
-            self,
-            value: _PT_co | _BMT_co,
-            start: SupportsIndex = 0,
-            stop: SupportsIndex | None = None,
-        ) -> int: ...
-        def count(self, value: _PT_co | _BMT_co) -> int: ...
+        def pop(self) -> _PT_co: ...
         def __add__(self, other: Iterable[_PT_co | _BMT_co]) -> Self: ...
         def __iadd__(self, other: Iterable[_PT_co | _BMT_co]) -> Self: ...
         def __isub__(self, other: Iterable[_PT_co | _BMT_co]) -> Self: ...

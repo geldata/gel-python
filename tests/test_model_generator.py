@@ -381,7 +381,7 @@ class TestModelGenerator(tb.ModelTestCase):
             ValueError,
             r"(?s)\bplayers\b\n.*dictionary or instance of players",
         ):
-            d.players.append(post)  # type: ignore [arg-type]
+            d.players.add(post)  # type: ignore [arg-type]
 
         with self.assertRaisesRegex(
             ValueError, r"(?s)xxx.*Object has no attribute 'xxx'"
@@ -427,7 +427,7 @@ class TestModelGenerator(tb.ModelTestCase):
         # This is basic usability -- we don't want your code to break
         # at runtime because you changed the query and `.append()` calls
         # stopped working.
-        ug.users.append(m.User(name="test test test"))
+        ug.users.add(m.User(name="test test test"))
         self.assertIsInstance(ug.users, AbstractDistinctList)
 
         # And now we'll test that the data will actually
@@ -1005,7 +1005,7 @@ class TestModelGenerator(tb.ModelTestCase):
         )
 
         u = default.User(name="aaa")
-        ug.users.append(u)
+        ug.users.add(u)
 
         expected = {
             "name": "red",
@@ -1293,7 +1293,7 @@ class TestModelGenerator(tb.ModelTestCase):
             u1,
             is_tall_enough=True,
         )
-        ug.users.append(uu)
+        ug.users.add(uu)
         self.assertFalse(hasattr(next(iter(ug.users)), "__linkprops__"))
 
         # case 2: initialize with a list of proxies
@@ -1327,7 +1327,7 @@ class TestModelGenerator(tb.ModelTestCase):
         # case 5: appending a wrong proxy to a list of proxies
 
         r = default.Raid(name="r", members=gs.players)
-        r.members.append(next(iter(gs.players)))
+        r.members.add(next(iter(gs.players)))
         r_members_0 = next(iter(r.members))
         self.assertFalse(
             hasattr(r_members_0.__linkprops__, "is_tall_enough"),
@@ -1939,7 +1939,7 @@ class TestModelGenerator(tb.ModelTestCase):
         a = self.client.get(default.User.filter(name="Alice"))
         c = self.client.get(default.User.filter(name="Cameron"))
         z = self.client.get(default.User.filter(name="Zoe"))
-        gr.users.extend([a, c, z])
+        gr.users.update([a, c, z])
         self.client.save(gr)
 
         # Fetch and verify
@@ -1963,7 +1963,7 @@ class TestModelGenerator(tb.ModelTestCase):
         a = self.client.get(default.User.filter(name="Alice"))
         c = self.client.get(default.User.filter(name="Cameron"))
         z = self.client.get(default.User.filter(name="Zoe"))
-        gr.users.extend([a, c, z])
+        gr.users.update([a, c, z])
         self.client.save(gr)
 
         # Fetch and verify
@@ -1990,19 +1990,17 @@ class TestModelGenerator(tb.ModelTestCase):
         b = self.client.get(default.User.filter(name="Billie"))
         c = self.client.get(default.User.filter(name="Cameron"))
         z = self.client.get(default.User.filter(name="Zoe"))
-        team.members.extend(
-            [
-                default.Team.members.link(
-                    a,
-                    role="lead",
-                    rank=1,
-                ),
-                default.Team.members.link(
-                    b,
-                    rank=2,
-                ),
-            ]
-        )
+        team.members += [
+            default.Team.members.link(
+                a,
+                role="lead",
+                rank=1,
+            ),
+            default.Team.members.link(
+                b,
+                rank=2,
+            ),
+        ]
         self.client.save(team)
 
         # Fetch and verify
@@ -2031,7 +2029,7 @@ class TestModelGenerator(tb.ModelTestCase):
                 members=True,
             ).filter(name="test team 8")
         )
-        team.members.extend(
+        team.members.update(
             [
                 default.Team.members.link(
                     c,
@@ -2598,21 +2596,21 @@ class TestModelGenerator(tb.ModelTestCase):
         )
 
         # technically this won't change things
-        p.members.extend(p.members)
+        p.members.update(p.members)
         self.client.save(p)
 
         # technically this won't change things
-        p.members.extend(list(p.members))
-        self.client.save(p)
-
-        # technically this won't change things
-        for el in list(p.members):
-            p.members.append(el)
+        p.members.update(list(p.members))
         self.client.save(p)
 
         # technically this won't change things
         for el in list(p.members):
-            p.members.append(el._p__obj__)
+            p.members.add(el)
+        self.client.save(p)
+
+        # technically this won't change things
+        for el in list(p.members):
+            p.members.add(el._p__obj__)
         self.client.save(p)
 
         # Fetch and verify
@@ -2655,7 +2653,7 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(m.__linkprops__.rank, 1)
 
         x = default.CustomUser(name="Xavier")
-        p.members.extend([x])
+        p.members.update([x])
         self.client.save(p)
 
         res2 = self.client.get(
@@ -2913,7 +2911,7 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(g.players.unsafe_len(), 0)
         self.assertFalse(g.players.__gel_overwrite_data__)
         self.assertPydanticChangedFields(g, {"num", "public"})
-        g.players.append(u)
+        g.players.add(u)
         self.assertEqual(g.players._mode, Mode.Write)
         self.assertEqual(g.players.unsafe_len(), 1)
         self.assertFalse(g.players.__gel_overwrite_data__)
@@ -3120,8 +3118,8 @@ class TestModelGenerator(tb.ModelTestCase):
         zoe = self.client.get(default.User.filter(name="Zoe"))
 
         # Append to players (this should use += in EdgeQL)
-        new_session.players.append(elsa)
-        new_session.players.append(zoe)
+        new_session.players.add(elsa)
+        new_session.players += [zoe]
         # Still in write mode because we haven't reassigned the collection
         self.assertEqual(new_session.players._mode, Mode.Write)
         self.assertFalse(new_session.players.__gel_overwrite_data__)
@@ -3331,7 +3329,7 @@ class TestModelGenerator(tb.ModelTestCase):
             )
         )
 
-        team.members.extend(
+        team.members.update(
             [
                 default.Team.members.link(a, role="lead", rank=1),
                 default.Team.members.link(b, rank=2),
@@ -3355,7 +3353,7 @@ class TestModelGenerator(tb.ModelTestCase):
             ).filter(name="test team 8")
         )
 
-        team2.members.append(default.Team.members.link(a, rank=1000))
+        team2.members.add(default.Team.members.link(a, rank=1000))
         self.client.save(team2)
         check(
             {
@@ -3374,7 +3372,7 @@ class TestModelGenerator(tb.ModelTestCase):
             ).filter(name="test team 8")
         )
 
-        team3.members.append(default.Team.members.link(a, rank=None))
+        team3.members.add(default.Team.members.link(a, rank=None))
         self.client.save(team3)
         check(
             {
@@ -3834,11 +3832,11 @@ class TestModelGenerator(tb.ModelTestCase):
         user = self.client.get(default.User.filter(name="Elsa"))
 
         # Test append works
-        session.players.append(user)
+        session.players.add(user)
         self.assertEqual(session.players.unsafe_len(), 1)
 
         # Test extend works
-        session.players.extend([user])
+        session.players.update([user])
         self.assertEqual(session.players.unsafe_len(), 2)
 
         # Test += works
@@ -4360,7 +4358,7 @@ class TestModelGenerator(tb.ModelTestCase):
         # Create a new GameSession and add a player
         u = self.client.get(default.User.filter(name="Elsa"))
         gs = default.GameSession(num=1002)
-        gs.players.append(u)
+        gs.players.add(u)
         self.client.save(gs)
 
         # Now fetch it again snd update
@@ -5731,7 +5729,7 @@ class TestModelGenerator(tb.ModelTestCase):
         self.client.save(obj)
         obj.commit = a
         self.client.save(obj)
-        obj.configure.append(default.limit.configure.link(a, create=True))
+        obj.configure.add(default.limit.configure.link(a, create=True))
         self.client.save(obj)
 
         # Fetch and verify

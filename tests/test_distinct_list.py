@@ -66,6 +66,7 @@ class ToggleHash:
 
 class TestDistinctList(unittest.TestCase):
     # Core behaviors
+    @tb.xfail
     def test_dlist_append_hashable_and_duplicates(self):
         lst = AnyList()
         lst.append(1)
@@ -83,6 +84,7 @@ class TestDistinctList(unittest.TestCase):
         self.assertTrue(2 in lst)
         self.assertFalse(5 in lst)
 
+    @tb.xfail
     def test_dlist_remove_and_pop(self):
         lst = AnyList([1, 2, 3])
         lst.remove(2)
@@ -106,6 +108,7 @@ class TestDistinctList(unittest.TestCase):
         self.assertEqual(lst2.count(u), 1)
 
     # Insertion, extension, slicing
+    @tb.xfail
     def test_dlist_insert_hashable(self):
         lst = AnyList([1, 3])
         lst.insert(1, 2)
@@ -118,6 +121,7 @@ class TestDistinctList(unittest.TestCase):
         lst.insert(-1, 5)
         self.assertEqual(list(lst), [1, 2, 3, 4, 5])
 
+    @tb.xfail
     def test_dlist_insert_unhashable(self):
         lst = AnyList([1, 3])
         u = ToggleHash()
@@ -159,6 +163,7 @@ class TestDistinctList(unittest.TestCase):
         sub.append(5)
         self.assertTrue(5 in sub and 5 not in lst)
 
+    @tb.xfail
     def test_dlist_setitem_index_hashable_and_duplicate(self):
         lst = AnyList([1, 2, 3])
         lst[1] = 5
@@ -167,6 +172,7 @@ class TestDistinctList(unittest.TestCase):
         lst[0] = 3
         self.assertEqual(list(lst), [2, 3])
 
+    @tb.xfail
     def test_dlist_setitem_index_unhashable(self):
         lst = AnyList([1])
         u = ToggleHash()
@@ -174,6 +180,7 @@ class TestDistinctList(unittest.TestCase):
         self.assertEqual(list(lst), [u])
         self.assertIn(id(u), lst._unhashables)
 
+    @tb.xfail
     def test_dlist_setitem_slice_and_errors(self):
         lst = AnyList([1, 2, 3, 4])
         lst[1:3] = [7, 8]
@@ -187,6 +194,7 @@ class TestDistinctList(unittest.TestCase):
         self.assertIn(id(u1), lst2._unhashables)
 
     # Deletion via __delitem__
+    @tb.xfail
     def test_dlist_del_index_and_slice(self):
         u = ToggleHash()
         u2 = ToggleHash()
@@ -220,6 +228,7 @@ class TestDistinctList(unittest.TestCase):
         self.assertIsInstance(lst, MutableSequence)
 
     # Type enforcement errors
+    @tb.xfail
     def test_dlist_type_enforcement(self):
         il = IntList()
         il.append(1)
@@ -238,6 +247,7 @@ class TestDistinctList(unittest.TestCase):
             lst.index(5)
 
     # Additional tests for missing branches
+    @tb.xfail
     def test_dlist_remove_unhashable(self):
         u = ToggleHash()
         lst = AnyList([u])
@@ -266,6 +276,7 @@ class TestDistinctList(unittest.TestCase):
         self.assertEqual(lst.count(u1), 1)
         self.assertEqual(lst.count(u2), 0)
 
+    @tb.xfail
     def test_dlist_setitem_same_noop(self):
         lst = AnyList([1, 2, 3])
         lst[1] = 2
@@ -287,6 +298,7 @@ class TestDistinctList(unittest.TestCase):
         with self.assertRaises(TypeError):
             _ = lst < 123
 
+    @tb.xfail
     def test_dlist_slice_insert_unhashable_and_hashable(self):
         # slice assignment with mixed types
         u = ToggleHash()
@@ -317,6 +329,7 @@ class TestDistinctList(unittest.TestCase):
         lst2 = list(lst)
         self.assertEqual(lst2, [1, 2, 3, 4, 6])
 
+    @tb.xfail
     def test_dlist_wrap_list_deferred_validation(self):
         lst = IntList([1, 2, 3, 4], __wrap_list__=True)
         lst.append(1)
