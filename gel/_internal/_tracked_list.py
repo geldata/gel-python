@@ -471,18 +471,6 @@ class AbstractTrackedList(
             self.remove(item)
         return self
 
-    if TYPE_CHECKING:  # pragma: no cover
-
-        @overload
-        def __set__(self, obj: Any, val: list[_T_co]) -> None: ...
-
-        @overload
-        def __set__(
-            self, obj: Any, val: AbstractTrackedList[_T_co]
-        ) -> None: ...
-
-        def __set__(self, obj: Any, val: Any) -> None: ...
-
 
 MutableSequence.register(AbstractTrackedList)  # pyright: ignore [reportAttributeAccessIssue]
 
