@@ -38,7 +38,7 @@ from ._descriptors import (
     field_descriptor,
 )
 
-from ._distinct_list import (
+from ._link_set import (
     AbstractLinkSet,
     LinkSet,
     LinkWithPropsSet,
