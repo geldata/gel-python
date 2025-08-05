@@ -3,7 +3,7 @@ from collections.abc import MutableSequence
 import unittest
 
 from gel._internal._tracked_list import Mode
-from gel._internal._qbmodel._abstract._distinct_list import LinkSet
+from gel._internal._qbmodel._abstract._link_set import LinkSet
 from gel._internal._qbmodel._abstract import AbstractGelSourceModel
 
 from gel import _testbase as tb

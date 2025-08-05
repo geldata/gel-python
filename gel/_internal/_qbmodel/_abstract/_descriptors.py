@@ -40,7 +40,7 @@ from ._base import (
 if TYPE_CHECKING:
     import types
     from collections.abc import Sequence, Set as AbstractSet
-    from ._distinct_list import AbstractLinkSet, LinkWithPropsSet
+    from ._link_set import AbstractLinkSet, LinkWithPropsSet
 
 
 class ModelFieldDescriptor(_qb.AbstractFieldDescriptor):
