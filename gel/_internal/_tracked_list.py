@@ -132,7 +132,7 @@ class AbstractCollection(Iterable[_T_co], Generic[_T_co]):
         else:
             self._items = []
 
-            # 'extend' is optimized in ProxyDistinctList
+            # 'extend' is optimized in LinkWithPropsSet
             # for use in __init__
             self.__gel_reset_snapshot__()
             self.__gel_extend__(iterable)

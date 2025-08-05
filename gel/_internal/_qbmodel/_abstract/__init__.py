@@ -39,9 +39,9 @@ from ._descriptors import (
 )
 
 from ._distinct_list import (
-    AbstractDistinctList,
-    DistinctList,
-    ProxyDistinctList,
+    AbstractLinkSet,
+    LinkSet,
+    LinkWithPropsSet,
 )
 
 from ._expressions import (
@@ -102,12 +102,12 @@ from ._primitive import (
 __all__ = (
     "DEFAULT_VALUE",
     "MODEL_SUBSTRATE_MODULE",
-    "AbstractDistinctList",
     "AbstractGelLinkModel",
     "AbstractGelModel",
     "AbstractGelModelMeta",
     "AbstractGelProxyModel",
     "AbstractGelSourceModel",
+    "AbstractLinkSet",
     "AnyEnum",
     "AnyEnumMeta",
     "AnyLinkDescriptor",
@@ -125,7 +125,6 @@ __all__ = (
     "DateTimeImpl",
     "DateTimeLike",
     "DefaultValue",
-    "DistinctList",
     "GelLinkModelDescriptor",
     "GelPrimitiveType",
     "GelScalarType",
@@ -134,6 +133,8 @@ __all__ = (
     "Global",
     "JSONImpl",
     "LinkDescriptor",
+    "LinkSet",
+    "LinkWithPropsSet",
     "ModelFieldDescriptor",
     "MultiLinkDescriptor",
     "MultiLinkWithPropsDescriptor",
@@ -145,7 +146,6 @@ __all__ = (
     "OptionalPropertyDescriptor",
     "PointerDescriptor",
     "PropertyDescriptor",
-    "ProxyDistinctList",
     "PyConstType",
     "PyTypeScalar",
     "PyTypeScalarConstraint",

@@ -30,9 +30,9 @@ from gel._internal._tracked_list import (
     DowncastingTrackedList,
 )
 from gel._internal._qbmodel._abstract import (
-    AbstractDistinctList,
-    DistinctList,
-    ProxyDistinctList,
+    AbstractLinkSet,
+    LinkSet,
+    LinkWithPropsSet,
 )
 from gel._internal._edgeql import PointerKind, quote_ident
 
@@ -264,24 +264,22 @@ def is_prop_list(val: object) -> TypeGuard[TrackedList[GelPrimitiveType]]:
     ) and issubclass(type(val).type, GelPrimitiveType)  # type: ignore [misc]
 
 
-def is_link_dlist(val: object) -> TypeGuard[DistinctList[GelModel]]:
-    return isinstance(val, DistinctList) and issubclass(
-        type(val).type, GelModel
-    )
+def is_link_set(val: object) -> TypeGuard[LinkSet[GelModel]]:
+    return isinstance(val, LinkSet) and issubclass(type(val).type, GelModel)
 
 
 def is_link_abstract_dlist(
     val: object,
-) -> TypeGuard[AbstractDistinctList[GelModel]]:
-    return isinstance(val, AbstractDistinctList) and issubclass(
+) -> TypeGuard[AbstractLinkSet[GelModel]]:
+    return isinstance(val, AbstractLinkSet) and issubclass(
         type(val).type, GelModel
     )
 
 
-def is_proxy_link_list(
+def is_link_wprops_set(
     val: object,
-) -> TypeGuard[ProxyDistinctList[ProxyModel[GelModel], GelModel]]:
-    return isinstance(val, ProxyDistinctList)
+) -> TypeGuard[LinkWithPropsSet[ProxyModel[GelModel], GelModel]]:
+    return isinstance(val, LinkWithPropsSet)
 
 
 def unwrap_proxy(val: GelModel) -> GelModel:
@@ -344,11 +342,11 @@ def iter_graph(objs: Iterable[GelModel]) -> Iterable[GelModel]:
                 continue
 
             if prop.cardinality.is_multi():
-                if is_proxy_link_list(linked):
+                if is_link_wprops_set(linked):
                     for proxy in linked._items:
                         yield from _traverse(unwrap_proxy_no_check(proxy))
                 else:
-                    assert is_link_dlist(linked)
+                    assert is_link_set(linked)
                     for lobj in linked._items:
                         yield from _traverse(lobj)
             else:
@@ -379,14 +377,14 @@ def get_linked_new_objects(obj: GelModel) -> Iterable[GelModel]:
             continue
 
         if prop.cardinality.is_multi():
-            if is_proxy_link_list(linked):
+            if is_link_wprops_set(linked):
                 for pmod in linked._items:
                     unwrapped = unwrap_proxy_no_check(pmod)
                     if unwrapped.__gel_new__ and unwrapped not in visited:
                         visited.track(unwrapped)
                         yield unwrapped
             else:
-                assert is_link_dlist(linked)
+                assert is_link_set(linked)
                 for mod in linked._items:
                     if mod.__gel_new__ and mod not in visited:
                         visited.track(mod)
@@ -674,7 +672,7 @@ def make_plan(objs: Iterable[GelModel]) -> SavePlan:
                 # The link wasn't fetched at all
                 continue
 
-            # `linked` should be either an empty DistinctList or
+            # `linked` should be either an empty LinkSet or
             # a non-empty one
             assert linked is not None
             assert is_link_abstract_dlist(linked), (
@@ -688,8 +686,8 @@ def make_plan(objs: Iterable[GelModel]) -> SavePlan:
                 # 'replace' is set for new collections only
                 assert not replace
 
-                # TODO: this should probably be handled in the DistinctList
-                # itself (GelModel and DistinctList are tightly coupled anyway)
+                # TODO: this should probably be handled in the LinkSet
+                # itself (GelModel and LinkSet are tightly coupled anyway)
                 removed = [
                     m
                     for m in unwrap_dlist(removed)
@@ -770,7 +768,7 @@ def make_plan(objs: Iterable[GelModel]) -> SavePlan:
             #
             # First, we iterate through the list of added new objects
             # to the list. All of them should be ProxyModels
-            # (as we use ProxyDistinctList for links with props.)
+            # (as we use LinkWithPropsSet for links with props.)
             # Our goal is to segregate different combinations of
             # set link properties into separate groups.
             link_tp = type(added_proxies[0])
@@ -1031,14 +1029,14 @@ class SaveExecutor:
 
                 if prop.kind is PointerKind.Link:
                     if prop.cardinality.is_multi():
-                        if is_proxy_link_list(linked):
+                        if is_link_wprops_set(linked):
                             for proxy in linked._items:
                                 ll_attr(
                                     proxy, "__linkprops__"
                                 ).__gel_commit__()
                                 _traverse(unwrap_proxy_no_check(proxy))
                         else:
-                            assert is_link_dlist(linked)
+                            assert is_link_set(linked)
                             for model in linked._items:
                                 _traverse(model)
                         linked.__gel_commit__()
@@ -1100,7 +1098,7 @@ class SaveExecutor:
 
                 if prop.kind is PointerKind.Link:
                     if prop.cardinality.is_multi():
-                        if is_proxy_link_list(val):
+                        if is_link_wprops_set(val):
                             val.__gel_post_commit_check__(link_path)
                             for i, proxy in enumerate(val._items):
                                 list_path = link_path / str(i)
@@ -1113,7 +1111,7 @@ class SaveExecutor:
                                 unwrapped = unwrap_proxy_no_check(proxy)
                                 _check_recursive(unwrapped, list_path)
                         else:
-                            assert is_link_dlist(val)
+                            assert is_link_set(val)
                             val.__gel_post_commit_check__(link_path)
                             for i, model in enumerate(val._items):
                                 list_path = link_path / str(i)
