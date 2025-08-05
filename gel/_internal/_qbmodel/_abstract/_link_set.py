@@ -37,16 +37,27 @@ _MT_co = TypeVar("_MT_co", bound="AbstractGelSourceModel", covariant=True)
 _ADL_co = TypeVar("_ADL_co", bound=AbstractCollection[Any], covariant=True)
 
 
-class AbstractLinkSet(
+class AbstractLinkSet(  # noqa: PLW1641 (__hash__ is implemented)
     AbstractCollection[_MT_co],
     Collection[_MT_co],
 ):
     """A mutable, ordered set-like list that enforces element-type covariance
     at runtime and maintains distinctness of elements in insertion order using
-    a list and set.
+
+    There are some differences between LinkSet and normal Python set:
+
+    - LinkSet is ordered
+    - LinkSet does not have the `pop()` method and other non-sensical
+      methods for persisted database objects
+    - LinkSet can be compared to a list (see the __eq__ comments)
+    - LinkSet supports `+=` and `-=` operators to mimic EdgeQL a list and set.
     """
 
-    __slots__ = ()
+    __slots__ = (
+        "_index_snapshot",
+        "_tracking_index",
+        "_tracking_set",
+    )
 
     _allowed_write_only_ops: ClassVar[list[str]] = [
         ".add()",
@@ -55,6 +66,25 @@ class AbstractLinkSet(
         "+=",
         "-=",
     ]
+
+    # Set of (hashable) items to maintain distinctness.
+    _tracking_set: set[_MT_co] | None
+    # Mapping of `self._pyid(item)` to `item`
+    _tracking_index: dict[int, _MT_co] | None
+    # Copy of `_tracking_index` at the moment of `_ensure_snapshot()` call
+    _index_snapshot: dict[int, _MT_co] | None
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        self._tracking_set = None
+        self._tracking_index = None
+        self._index_snapshot = None
+        super().__init__(*args, **kwargs)
+
+    @staticmethod
+    def _pyid(item: _MT_co) -> int:  # type: ignore [misc]
+        # For ListSet it's `id(item)`, but for LinkWithPropsSet
+        # it's `id(item.without_linkprops())`.
+        raise NotImplementedError
 
     def _ensure_value_indexable(self, value: Any) -> _MT_co | None:
         # ProxyModels are designed to be tranparent and are ignored
@@ -66,147 +96,6 @@ class AbstractLinkSet(
         if isinstance(value, type(self).type):
             return value
         return None
-
-    def _check_value(self, value: Any) -> _MT_co:
-        raise NotImplementedError
-
-    def _ensure_snapshot(self) -> None:
-        raise NotImplementedError
-
-    def _init_tracking(self) -> None:
-        raise NotImplementedError
-
-    def _is_tracked(self, item: _MT_co) -> bool:  # type: ignore [misc]
-        raise NotImplementedError
-
-    def _track_item(self, item: _MT_co) -> None:  # type: ignore [misc]
-        raise NotImplementedError
-
-    def _untrack_item(self, item: _MT_co) -> None:  # type: ignore [misc]
-        raise NotImplementedError
-
-    def _check_values(self, values: Iterable[Any]) -> list[_MT_co]:
-        """Ensure `values` is an iterable of type T and return it as a list."""
-        if isinstance(values, AbstractLinkSet):
-            values = values.__gel_basetype_iter__()
-        return [self._check_value(value) for value in values]
-
-    @requires_read("use `in` operator on")
-    def __contains__(self, item: object) -> bool:
-        item = self._ensure_value_indexable(item)
-        if item is None:
-            return False
-        return self._is_tracked(item)
-
-    def update(self, values: Iterable[_MT_co]) -> None:
-        self.__gel_extend__(values)
-
-    def add(self, value: _MT_co) -> None:  # type: ignore [misc]
-        value = self._check_value(value)
-        self._ensure_snapshot()
-        if self._is_tracked(value):
-            return
-        self._track_item(value)
-        self._items.append(value)
-
-    def discard(self, value: _MT_co) -> None:  # type: ignore [misc]
-        """Remove item; raise ValueError if missing."""
-        if not self._is_tracked(value):
-            pass
-
-        self._ensure_snapshot()
-        value = self._check_value(value)
-        self._untrack_item(value)
-        self._items.remove(value)
-
-    def remove(self, value: _MT_co) -> None:  # type: ignore [misc]
-        """Remove an element. If not a member, raise a KeyError."""
-        if not self._is_tracked(value):
-            raise KeyError(value)
-        self.discard(value)
-
-    @requires_read("get the length of", unsafe="unsafe_len()")
-    def __len__(self) -> int:
-        return len(self._items)
-
-    @requires_read("iterate over", unsafe="unsafe_iter()")
-    def __iter__(self) -> Iterator[_MT_co]:
-        return iter(self._items)
-
-    def __iadd__(self, other: Iterable[_MT_co]) -> Self:
-        self.__gel_extend__(other)
-        return self
-
-    def __isub__(self, other: Iterable[_MT_co]) -> Self:
-        for item in other:
-            self.discard(item)
-        return self
-
-    @staticmethod
-    def __gel_validate__(
-        tp: type[_ADL_co],
-        value: Any,
-    ) -> _ADL_co:
-        if type(value) is list:
-            # Optimization for the most common scenario - user passes
-            # a list of objects to the constructor.
-            return tp(value, __mode__=Mode.ReadWrite)
-        elif isinstance(value, DefaultList):
-            assert not value
-            # GelModel will adjust __mode__ to Write for
-            # unfetched multi-link/multi-prop fields.
-            return tp(__mode__=Mode.ReadWrite)
-        elif isinstance(value, list):
-            return tp(value, __mode__=Mode.ReadWrite)
-        elif isinstance(value, AbstractLinkSet):
-            return tp(value._items, __mode__=Mode.ReadWrite)
-        else:
-            raise TypeError(
-                f"could not convert {type(value)} to {tp.__name__}"
-            )
-
-
-class LinkSet(  # noqa: PLW1641 (__hash__ is implemented)
-    parametric.SingleParametricType[_MT_co],
-    AbstractLinkSet[_MT_co],
-):
-    __slots__ = (
-        "_index_snapshot",
-        "_tracking_index",
-        "_tracking_set",
-    )
-
-    def __init__(self, *args: Any, **kwargs: Any) -> None:
-        self._tracking_set = None
-        self._tracking_index = None
-        self._index_snapshot = None
-        super().__init__(*args, **kwargs)
-
-    # There are some differences between LinkSet and normal Python set:
-    #
-    # - LinkSet is ordered
-    # - LinkSet does not have the `pop()` method and other non-sensical
-    #   methods for persisted database objects
-    # - LinkSet can be compared to a list (see the __eq__ comments)
-    # - LinkSet supports `+=` and `-=` operators to mimic EdgeQL
-
-    # Set of (hashable) items to maintain distinctness.
-    _tracking_set: set[_MT_co] | None
-    _tracking_index: dict[int, _MT_co] | None
-
-    _index_snapshot: dict[int, _MT_co] | None
-
-    def _check_value(self, value: Any) -> _MT_co:
-        cls = type(self)
-        t = cls.type
-
-        if isinstance(value, AbstractGelProxyModel):
-            value = value.without_linkprops()
-
-        if isinstance(value, t):
-            return value
-
-        return t.__gel_validate__(value)
 
     def _ensure_snapshot(self) -> None:
         # "_ensure_snapshot" is called right before any mutation:
@@ -239,7 +128,7 @@ class LinkSet(  # noqa: PLW1641 (__hash__ is implemented)
             self._tracking_set = set(self._items)
 
             assert self._tracking_index is None
-            self._tracking_index = {id(o): o for o in self._items}
+            self._tracking_index = {self._pyid(o): o for o in self._items}
         else:
             assert self._tracking_index is not None
 
@@ -275,7 +164,8 @@ class LinkSet(  # noqa: PLW1641 (__hash__ is implemented)
             case True, False:
                 # _index_snapshot has data in it, _tracking_index is empty --
                 # everything was removed
-                return list(self._items)
+                assert self._index_snapshot is not None
+                return list(self._index_snapshot.values())
             case False, True:
                 # _index_snapshot is empty, _tracking_index has data in it --
                 # everything was added
@@ -344,44 +234,201 @@ class LinkSet(  # noqa: PLW1641 (__hash__ is implemented)
 
     def _track_item(self, item: _MT_co) -> None:  # type: ignore [misc]
         assert self._tracking_set is not None
-        try:
+        if not item.__gel_new__:
             self._tracking_set.add(item)
-        except TypeError:
-            # Unhashable
-            pass
 
         assert self._tracking_index is not None
-        self._tracking_index[id(item)] = item
+        self._tracking_index[self._pyid(item)] = item
 
     def _untrack_item(self, item: _MT_co) -> None:  # type: ignore [misc]
         assert self._tracking_set is not None
-        try:
+        if not item.__gel_new__:
             self._tracking_set.remove(item)
-        except (TypeError, KeyError):
-            # Either unhashable or not in the list
-            pass
 
         assert self._tracking_index is not None
-        self._tracking_index.pop(id(item), None)
+        self._tracking_index.pop(self._pyid(item), None)
 
     def _is_tracked(self, item: _MT_co) -> bool:  # type: ignore [misc]
         self._init_tracking()
 
         assert self._tracking_index is not None
-        if id(item) in self._tracking_index:
+        if self._pyid(item) in self._tracking_index:
             # Fast path
             return True
 
         # The item is not in the index, but it might have an equal
         # one in the tracking set.
         assert self._tracking_set is not None
-        try:
+        if not item.__gel_new__:
             return item in self._tracking_set
-        except TypeError:
-            # Unhashable
-            pass
 
         return False
+
+    def clear(self) -> None:
+        """Remove all items but keep element-type enforcement."""
+        self._ensure_snapshot()
+        self._items.clear()
+        assert self._tracking_set is not None
+        self._tracking_set.clear()
+        assert self._tracking_index is not None
+        self._tracking_index.clear()
+
+    def _check_value(self, value: Any) -> _MT_co:
+        raise NotImplementedError
+
+    @requires_read("use `in` operator on")
+    def __contains__(self, item: object) -> bool:
+        item = self._ensure_value_indexable(item)
+        if item is None:
+            return False
+        return self._is_tracked(item)
+
+    def update(self, values: Iterable[_MT_co]) -> None:
+        self.__gel_extend__(values)
+
+    def add(self, value: _MT_co) -> None:  # type: ignore [misc]
+        value = self._check_value(value)
+        self._ensure_snapshot()
+        if self._is_tracked(value):
+            return
+        self._track_item(value)
+        self._items.append(value)
+
+    def discard(self, value: _MT_co) -> None:  # type: ignore [misc]
+        """Remove item; raise ValueError if missing."""
+        if not self._is_tracked(value):
+            pass
+
+        self._ensure_snapshot()
+        value = self._check_value(value)
+        self._untrack_item(value)
+        self._items.remove(value)
+
+    def remove(self, value: _MT_co) -> None:  # type: ignore [misc]
+        """Remove an element. If not a member, raise a KeyError."""
+        if not self._is_tracked(value):
+            raise KeyError(value)
+        self.discard(value)
+
+    @requires_read("get the length of", unsafe="unsafe_len()")
+    def __len__(self) -> int:
+        return len(self._items)
+
+    @requires_read("iterate over", unsafe="unsafe_iter()")
+    def __iter__(self) -> Iterator[_MT_co]:
+        return iter(self._items)
+
+    def __iadd__(self, other: Iterable[_MT_co]) -> Self:
+        self.__gel_extend__(other)
+        return self
+
+    def __isub__(self, other: Iterable[_MT_co]) -> Self:
+        for item in other:
+            self.discard(item)
+        return self
+
+    def __eq__(self, other: object) -> bool:
+        if isinstance(other, AbstractLinkSet):
+            if self._mode is Mode.Write:
+                # __eq__ is pretty fundamental in Python and we don't
+                # want it to crash in all random places where it can
+                # be called from. So we just return False.
+                return False
+
+            if len(self._items) != len(other._items):
+                return False
+
+            if self._tracking_index and other._tracking_index:
+                # Both collections are tracked so we can compare
+                # the indexes -- that's faster
+                return self._tracking_index == other._tracking_index
+
+            if self._tracking_index is None:
+                self._init_tracking()
+            if other._tracking_index is None:
+                other._init_tracking()
+            return self._tracking_index == other._tracking_index
+
+        elif isinstance(other, set):
+            if self._mode is Mode.Write:
+                return False
+
+            if (
+                self._tracking_set is not None
+                and self._tracking_index is not None
+                and len(self._tracking_set) != len(self._tracking_index)
+            ):
+                # There are unhashable items in our collection
+                # (added after the link was fetched or this is a new link),
+                # so we're not equal to any valid Python set.
+                return False
+
+            if self._tracking_set is not None:
+                return self._tracking_set == other
+
+            return set(self._items) == other
+
+        elif isinstance(other, list):
+            # In an ideal world we'd only allow comparisions with sets.
+            # But in our world we already allow initialization from a list
+            # and an assigment to a list (we can't require users to use
+            # sets because unsaved objects are unhashable).
+            # It's weird if comparison doesn't work with lists, but also
+            # you can't even put unsaved objects in a set (again, they
+            # are unhashable).
+            if self._mode is Mode.Write:
+                return False
+
+            return self._items == other
+
+        else:
+            return NotImplemented
+
+    @staticmethod
+    def __gel_validate__(
+        tp: type[_ADL_co],
+        value: Any,
+    ) -> _ADL_co:
+        if type(value) is list:
+            # Optimization for the most common scenario - user passes
+            # a list of objects to the constructor.
+            return tp(value, __mode__=Mode.ReadWrite)
+        elif isinstance(value, DefaultList):
+            assert not value
+            # GelModel will adjust __mode__ to Write for
+            # unfetched multi-link/multi-prop fields.
+            return tp(__mode__=Mode.ReadWrite)
+        elif isinstance(value, list):
+            return tp(value, __mode__=Mode.ReadWrite)
+        elif isinstance(value, AbstractLinkSet):
+            return tp(value._items, __mode__=Mode.ReadWrite)
+        else:
+            raise TypeError(
+                f"could not convert {type(value)} to {tp.__name__}"
+            )
+
+
+class LinkSet(
+    parametric.SingleParametricType[_MT_co],
+    AbstractLinkSet[_MT_co],
+):
+    __slots__ = ()
+
+    def _check_value(self, value: Any) -> _MT_co:
+        cls = type(self)
+        t = cls.type
+
+        if isinstance(value, AbstractGelProxyModel):
+            value = value.without_linkprops()
+
+        if isinstance(value, t):
+            return value
+
+        return t.__gel_validate__(value)
+
+    @staticmethod
+    def _pyid(item: _MT_co) -> int:  # type: ignore [misc]
+        return id(item)
 
     def __gel_extend__(self, values: Iterable[_MT_co]) -> None:
         if values is self:
@@ -393,13 +440,6 @@ class LinkSet(  # noqa: PLW1641 (__hash__ is implemented)
             values = values.__gel_basetype_iter__()
         for v in values:
             self.add(v)
-
-    def clear(self) -> None:
-        """Remove all items but keep element-type enforcement."""
-        self._ensure_snapshot()
-        self._items.clear()
-        self._tracking_set = None
-        self._tracking_index = None
 
     def __reduce__(self) -> tuple[Any, ...]:
         cls = type(self)
@@ -444,43 +484,6 @@ class LinkSet(  # noqa: PLW1641 (__hash__ is implemented)
 
         return lst
 
-    def __eq__(self, other: object) -> bool:
-        if isinstance(other, AbstractLinkSet):
-            if self._mode is Mode.Write:
-                # __eq__ is pretty fundamental in Python and we don't
-                # want it to crash in all random places where it can
-                # be called from. So we just return False.
-                return False
-            return sorted(self._items, key=id) == sorted(other._items, key=id)
-        elif isinstance(other, set):
-            if self._mode is Mode.Write:
-                return False
-            if (
-                self._tracking_set is not None
-                and self._tracking_index is not None
-                and len(self._tracking_set) != len(self._tracking_index)
-            ):
-                # There are unhashable items in our collection
-                # (added after the link was fetched or this is a new link),
-                # so we're not equal to any valid Python set.
-                return False
-            if self._tracking_set is not None:
-                return self._tracking_set == other
-            return set(self._items) == other
-        elif isinstance(other, list):
-            # In an ideal world we'd only allow comparisions with sets.
-            # But in our world we already allow initialization from a list
-            # and an assigment to a list (we can't require users to use
-            # sets because unsaved objects are unhashable).
-            # It's weird if comparison doesn't work with lists, but also
-            # you can't even put unsaved objects in a set (again, they
-            # are unhashable).
-            if self._mode is Mode.Write:
-                return False
-            return self._items == other
-        else:
-            return NotImplemented
-
 
 _BMT_co = TypeVar("_BMT_co", bound=AbstractGelModel, covariant=True)
 """Base model type"""
@@ -493,246 +496,19 @@ _PT_co = TypeVar(
 """Proxy model"""
 
 
-class LinkWithPropsSet(  # noqa: PLW1641 (__hash__ is implemented)
+class LinkWithPropsSet(
     parametric.ParametricType,
     AbstractLinkSet[_PT_co],
     Generic[_PT_co, _BMT_co],
 ):
-    # Mapping of GelModels' id()s to ProxyModels that wrap them.
-    #
-    # We need to ensure that we don't have two proxies wrapping the same
-    # object in `self._items`. So:
-    #
-    # - `self._set`` is a set of hashable proxies
-    #   (proxies over an object with .id)
-    #
-    # - `self._unhashables` is a mapping of unhashable proxies' id()s to
-    #   themselves.
-    #
-    # - `self._wrapped_index` is a mapping of wrapped object's id()s
-    #   to proxies. We need it because "unsaved" objects without `.id`
-    #   can only be tracked by their address. And `self._set` and
-    #   `self._unhashables` are already tasked with tracking ProxyModel's,
-    #   but we need something to track the uniquiness of *unsaved*
-    #   wrapped GelModels.
-    #
-    # Let's look at different cases, for the following example list:
-    #
-    #     `[p1(a), p2(b_new)]`
-    #
-    # where:
-    #
-    # - `a` is an object with `.id`,
-    # - `b_new` is an object without `.id` (not saved yet), and
-    # - `pN(x)` is a `ProxyModel` instance wrapping `x` with Python's
-    #   id() of the *proxy* object equal to `N`.
-    #
-    # Cases:
-    #
-    # - we attempt to add `a` again: `a` will be wrapped in a proxy and
-    #   become `p3(a)`; `p3(a) in self._set` will evaluate to `True`, so
-    #   `a` will not be added again.
-    #
-    # - we attempt to add `p4(a)`: `p4(a) in self._set` will evaluate to
-    #   `True`; `p4(a)` will not be added as we already have `p1(a)`
-    #
-    # - we attempt to add `p2(b_new)`; but it's in `self._unhashables` so we
-    #   won't add it.
-    #
-    # - we attempt to add `b_new`. `id(b_new) in self._wrapped_index` will
-    #   be `True`, so `b_new` won't be added again.
-    #
-    # - we attempt to add `p5(b_new)` -- `b_new` will be unwrapped and since
-    #   it's in the `_wrapped_index` it won't be added again.
-    #
-    _wrapped_index: dict[int, _PT_co] | None = None
-
-    # Set of (hashable) items to maintain distinctness.
-    _set: set[_PT_co] | None
-
-    # Assuming unhashable items compare by object identity,
-    # the dict below is used as an extension for distinctness
-    # checks.
-    _unhashables: dict[int, _PT_co] | None
-
-    _initial_items: list[_PT_co] | None
+    __slots__ = ()
 
     proxytype: ClassVar[type[_PT_co]]  # type: ignore [misc]
     type: ClassVar[type[_BMT_co]]  # type: ignore [assignment, misc]
 
-    def __init__(
-        self,
-        iterable: Iterable[_PT_co | _BMT_co] = (),
-        *,
-        __wrap_list__: bool = False,
-        __mode__: Mode,
-    ) -> None:
-        self._set = None
-        self._unhashables = None
-        self._initial_items = None
-        self._wrapped_index = None
-        super().__init__(
-            cast("Iterable[_PT_co]", iterable),
-            __wrap_list__=__wrap_list__,
-            __mode__=__mode__,
-        )
-
-    def _ensure_snapshot(self) -> None:
-        # "_ensure_snapshot" is called right before any mutation:
-        # this is the perfect place to initialize `self._set` and
-        # `self._unhashables`.
-        self._init_tracking()
-
-        if self._initial_items is None:
-            self._initial_items = list(self._items)
-
-    def __gel_post_commit_check__(self, path: Path) -> None:
-        super().__gel_post_commit_check__(path)
-
-        if self._unhashables:
-            raise ValueError(
-                f"{path} has non-empty `self._unhashables` after save()"
-            )
-
-        if self._set is not None and len(self._set) != len(self._items):
-            # tracked but _set is not agreeing with _items
-            raise ValueError(
-                f"{path}: `{len(self._set or {})=}` != `{len(self._items)=}`"
-            )
-
-        if self._set is None:
-            # This collection isn't tracked.
-            assert self._wrapped_index is None
-            assert self._unhashables is None
-            return
-
-        if len(self._items) != len(self._wrapped_index or {}):
-            raise ValueError(
-                f"{path}: `{len(self._wrapped_index or {})=}` != "
-                f"`{len(self._items)=}`"
-            )
-
-        if self._items:
-            assert self._wrapped_index
-            if set(self._items) != set(self._wrapped_index.values()):
-                raise ValueError(
-                    f"{path}: `self._items` != `self._wrapped_index.values()`"
-                )
-
-    def __gel_commit__(self) -> None:
-        super().__gel_commit__()
-
-        self._initial_items = None
-
-        if self._unhashables is not None:
-            assert self._set is not None
-            for item in self._unhashables.values():
-                self._set.add(item)
-            self._unhashables.clear()
-
-        if self._set is None:
-            # This collection isn't tracked.
-            assert self._wrapped_index is None
-            return
-
-        assert self._wrapped_index is not None
-        if len(self._items) != len(self._wrapped_index):
-            self._wrapped_index = {
-                id(ll_getattr(item, "_p__obj__")): item for item in self._items
-            }
-
-    def _init_tracking(self) -> None:
-        if self._set is None:
-            # Why is `set(self._items)` OK? `self._items` can be
-            # in one of two states:
-            #
-            #  - have 0 elements -- new collection
-            #  - have non-zero elements -- existing collection
-            #    loaded from database (we trust its contents)
-            #    *before any mutations*.
-            #
-            # So it's either no elements or all elements are hashable
-            # (have IDs).
-            self._set = set(self._items)
-
-            assert self._unhashables is None
-            self._unhashables = {}
-        else:
-            assert self._unhashables is not None
-
-        if self._wrapped_index is None:
-            self._wrapped_index = {}
-            for item in self._items:
-                assert isinstance(item, AbstractGelProxyModel)
-                wrapped = ll_getattr(item, "_p__obj__")
-                self._wrapped_index[id(wrapped)] = item
-
-    def _track_item(self, item: _PT_co) -> None:  # type: ignore [misc]
-        assert isinstance(item, AbstractGelProxyModel)
-
-        assert self._set is not None
-        try:
-            self._set.add(item)
-        except TypeError:
-            assert self._unhashables is not None
-            self._unhashables[id(item)] = item
-
-        assert self._wrapped_index is not None
-        wrapped = ll_getattr(item, "_p__obj__")
-        self._wrapped_index[id(wrapped)] = item
-
-    def _untrack_item(self, item: _PT_co) -> None:  # type: ignore [misc]
-        assert isinstance(item, AbstractGelProxyModel)
-
-        assert self._set is not None
-        try:
-            self._set.remove(item)
-        except (TypeError, KeyError):
-            # Either unhashable or not in the list
-            assert self._unhashables is not None
-            self._unhashables.pop(id(item), None)
-
-        assert self._wrapped_index is not None
-        wrapped = ll_getattr(item, "_p__obj__")
-        self._wrapped_index.pop(id(wrapped), None)
-
-    def _is_tracked(self, item: _PT_co | _BMT_co) -> bool:
-        self._init_tracking()
-        assert self._wrapped_index is not None
-
-        if isinstance(item, AbstractGelProxyModel):
-            return id(item._p__obj__) in self._wrapped_index
-        else:
-            return id(item) in self._wrapped_index
-
-    def __gel_replace_with_empty__(self) -> None:
-        self._items.clear()
-        self._initial_items = None
-        self._set = None
-        self._unhashables = None
-        self._wrapped_index = None
-
-    def __gel_get_added__(self) -> list[_PT_co]:
-        # XXX optimize for set
-        if self._initial_items is None:
-            return []
-        return [
-            item for item in self._items if item not in self._initial_items
-        ]
-
-    def __gel_get_removed__(self) -> Iterable[_PT_co]:
-        # XXX optimize for set
-        if self._initial_items is None:
-            return ()
-        return [
-            item for item in self._initial_items if item not in self._items
-        ]
-
-    def __gel_has_changes__(self) -> bool:
-        # XXX optimize for set
-        if self._initial_items is None:
-            return False
-        return self._items != self._initial_items
+    @staticmethod
+    def _pyid(item: _PT_co) -> int:  # type: ignore [misc]
+        return id(item._p__obj__)
 
     def __gel_extend__(self, values: Iterable[_PT_co | _BMT_co]) -> None:
         # An optimized version of `extend()`
@@ -755,9 +531,8 @@ class LinkWithPropsSet(  # noqa: PLW1641 (__hash__ is implemented)
         t = cls.proxytype
         proxy_of = t.__proxy_of__
 
-        assert self._wrapped_index is not None
-        assert self._set is not None
-        assert self._unhashables is not None
+        assert self._tracking_index is not None
+        assert self._tracking_set is not None
 
         # For an empty list we can call one extend() call instead
         # of slow iterative appends.
@@ -780,22 +555,20 @@ class LinkWithPropsSet(  # noqa: PLW1641 (__hash__ is implemented)
                 proxy, obj = self._cast_value(v)
 
             oid = id(obj)
-            if oid in self._wrapped_index:
+            if oid in self._tracking_index:
                 continue
 
-            self._wrapped_index[oid] = proxy
+            self._tracking_index[oid] = proxy
 
-            if obj.__gel_new__:
-                self._unhashables[id(proxy)] = proxy
-            else:
-                self._set.add(proxy)
+            if not obj.__gel_new__:
+                self._tracking_set.add(proxy)
 
             if not empty_items:
                 self._items.append(proxy)
 
         if empty_items:
             # A LOT faster than `extend()` ¯\_(ツ)_/¯
-            self._items = list(self._wrapped_index.values())
+            self._items = list(self._tracking_index.values())
 
     def _cast_value(self, value: Any) -> tuple[_PT_co, _BMT_co]:
         cls = type(self)
@@ -843,26 +616,9 @@ class LinkWithPropsSet(  # noqa: PLW1641 (__hash__ is implemented)
         proxy, _ = self._cast_value(value)
         return proxy
 
-    def _find_proxied_obj(self, item: _PT_co | _BMT_co) -> _PT_co | None:
-        self._init_tracking()
-        assert self._wrapped_index is not None
-
-        if isinstance(item, AbstractGelProxyModel):
-            item = item._p__obj__  # pyright: ignore [reportAssignmentType]
-
-        return self._wrapped_index.get(id(item), None)
-
     def __gel_basetype_iter__(self) -> Iterator[_BMT_co]:  # type: ignore [override]
         for item in self._items:
             yield item._p__obj__  # type: ignore [misc]
-
-    def clear(self) -> None:
-        """Remove all items but keep element-type enforcement."""
-        self._ensure_snapshot()
-        self._items.clear()
-        self._set = set()
-        self._unhashables = {}
-        self._wrapped_index = {}
 
     def __reduce__(self) -> tuple[Any, ...]:
         cls = type(self)
@@ -873,14 +629,11 @@ class LinkWithPropsSet(  # noqa: PLW1641 (__hash__ is implemented)
                 cls.type,
                 cls.proxytype,
                 self._items,
-                self._wrapped_index.values()
-                if self._wrapped_index is not None
+                self._tracking_index.values()
+                if self._tracking_index is not None
                 else None,
-                self._initial_items,
-                self._set,
-                self._unhashables.values()
-                if self._unhashables is not None
-                else None,
+                self._tracking_set,
+                self._index_snapshot,
                 self._mode,
                 self.__gel_overwrite_data__,
             ),
@@ -892,10 +645,9 @@ class LinkWithPropsSet(  # noqa: PLW1641 (__hash__ is implemented)
         tp: type[_PT_co],  # type: ignore [valid-type]
         proxytp: type[_BMT_co],  # type: ignore [valid-type]
         items: list[_PT_co],
-        wrapped_index: list[_PT_co] | None,
-        initial_items: list[_PT_co] | None,
-        hashables: set[_PT_co] | None,
-        unhashables: list[_PT_co] | None,
+        tracking_index: list[_PT_co] | None,
+        tracking_set: set[_PT_co] | None,
+        index_snapshot: list[_PT_co] | None,
         mode: Mode,
         gel_overwrite_data: bool,  # noqa: FBT001
     ) -> LinkWithPropsSet[_PT_co, _BMT_co]:
@@ -906,45 +658,27 @@ class LinkWithPropsSet(  # noqa: PLW1641 (__hash__ is implemented)
         lst = cls.__new__(cls)
 
         lst._items = items
-        if wrapped_index is None:
-            lst._wrapped_index = None
+
+        if tracking_index is None:
+            lst._tracking_index = None
         else:
-            lst._wrapped_index = {
-                id(item._p__obj__): item for item in wrapped_index
+            lst._tracking_index = {
+                cls._pyid(item): item for item in tracking_index
             }
 
-        lst._initial_items = initial_items
-        lst._set = hashables
-        if unhashables is None:
-            lst._unhashables = None
+        lst._tracking_set = tracking_set
+
+        if index_snapshot is None:
+            lst._index_snapshot = None
         else:
-            lst._unhashables = {id(item): item for item in unhashables}
+            lst._index_snapshot = {
+                cls._pyid(item): item for item in index_snapshot
+            }
 
         lst._mode = mode
         lst.__gel_overwrite_data__ = gel_overwrite_data
 
         return lst
-
-    def __eq__(self, other: object) -> bool:
-        # See comments in LinkSet.__eq__ for the details.
-        if isinstance(other, AbstractLinkSet):
-            if self._mode is Mode.Write:
-                return False
-            return sorted(self._items, key=id) == sorted(other._items, key=id)
-        elif isinstance(other, set):
-            if self._mode is Mode.Write:
-                return False
-            if self._unhashables is not None:
-                return False
-            if self._set is not None:
-                return self._set == other
-            return set(self._items) == other
-        elif isinstance(other, list):
-            if self._mode is Mode.Write:
-                return False
-            return self._items == other
-        else:
-            return NotImplemented
 
     if TYPE_CHECKING:
 

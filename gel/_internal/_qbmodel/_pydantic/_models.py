@@ -1456,7 +1456,11 @@ class ProxyModel(
             # instantiation and save() operation)
             return ll_getattr(self, name)
 
-        if name == "id" or not name.startswith(("_", "model_")):
+        if (
+            name == "id"
+            or not name.startswith(("_", "model_"))
+            or name in {"__gel_new__", "__gel_changed_fields__"}
+        ):
             # Faster path for "public-like" attributes
             return ll_getattr(ll_getattr(self, "_p__obj__"), name)
 
