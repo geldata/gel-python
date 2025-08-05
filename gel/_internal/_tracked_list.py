@@ -80,6 +80,8 @@ def requires_read(
 
 
 class AbstractCollection(Iterable[_T_co], Generic[_T_co]):
+    __slots__ = ()
+
     type: ClassVar[type[_T_co]]  # type: ignore [misc]
 
     # Current items in order.
