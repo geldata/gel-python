@@ -526,9 +526,7 @@ def _process_pydantic_fields(
         # This is a schema computed or an ad-hoc computed pointer in a
         # user-defined variant.
         if pointer_info.computed or (
-            cls.__gel_shape__ is None
-            and ptr is None
-            and fn != "__linkprops__"
+            cls.__gel_shape__ is None and ptr is None and fn != "__linkprops__"
         ):
             # Regarding `fn != "__linkprops__"`: see MergedModelMeta --
             # it renames `linkprops____` to `__linkprops__` to circumvent
@@ -987,7 +985,8 @@ class GelModel(
                 if self.__dict__.get("id", _unset) is _unset:
                     raise ValueError(
                         "models do not support setting `id` on construction; "
-                        "`id` is set automatically by the `client.save()` method"
+                        "`id` is set automatically by the `client.save()` "
+                        "method"
                     )
                 else:
                     # The object was created and initialized by __new__,
