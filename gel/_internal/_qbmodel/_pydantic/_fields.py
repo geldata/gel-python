@@ -29,7 +29,7 @@ from gel._internal import _edgeql
 from gel._internal import _typing_inspect
 
 from gel._internal._qbmodel import _abstract
-from gel._internal._qbmodel._abstract import DistinctList, ProxyDistinctList
+from gel._internal._qbmodel._abstract import LinkSet, LinkWithPropsSet
 
 from ._models import GelModel, ProxyModel
 
@@ -287,7 +287,7 @@ class _MultiProperty(
                 generic_args[1],  # type: ignore [valid-type]
             ]
         )
-        return DistinctList.__gel_validate__(lt, value)
+        return LinkSet.__gel_validate__(lt, value)
 
 
 class _ComputedMultiProperty(
@@ -638,19 +638,19 @@ class _MultiLink(
     def __gel_resolve_dlist__(  # type: ignore [override]
         cls,
         type_args: tuple[type[Any]] | tuple[type[Any], type[Any]],
-    ) -> DistinctList[_MT_co]:
-        return DistinctList[type_args[0]]  # type: ignore [return-value, valid-type]
+    ) -> LinkSet[_MT_co]:
+        return LinkSet[type_args[0]]  # type: ignore [return-value, valid-type]
 
     @classmethod
     def _validate(
         cls,
         value: Any,
         generic_args: tuple[type[Any], type[Any]],
-    ) -> DistinctList[_MT_co]:
-        lt: type[DistinctList[_MT_co]] = DistinctList[
+    ) -> LinkSet[_MT_co]:
+        lt: type[LinkSet[_MT_co]] = LinkSet[
             generic_args[0],  # type: ignore [valid-type]
         ]
-        return DistinctList.__gel_validate__(lt, value)
+        return LinkSet.__gel_validate__(lt, value)
 
 
 class _MultiLinkWithProps(
@@ -661,8 +661,8 @@ class _MultiLinkWithProps(
     def __gel_resolve_dlist__(  # type: ignore [override]
         cls,
         type_args: tuple[type[Any]] | tuple[type[Any], type[Any]],
-    ) -> DistinctList[_PT_co]:
-        return ProxyDistinctList[
+    ) -> LinkSet[_PT_co]:
+        return LinkWithPropsSet[
             type_args[0],  # type: ignore [valid-type]
             type_args[1],  # type: ignore [valid-type]
         ]  # type: ignore [return-value]
@@ -672,12 +672,12 @@ class _MultiLinkWithProps(
         cls,
         value: Any,
         generic_args: tuple[type[Any], type[Any]],
-    ) -> ProxyDistinctList[_PT_co, _BMT_co]:
-        lt: type[ProxyDistinctList[_PT_co, _BMT_co]] = ProxyDistinctList[
+    ) -> LinkWithPropsSet[_PT_co, _BMT_co]:
+        lt: type[LinkWithPropsSet[_PT_co, _BMT_co]] = LinkWithPropsSet[
             generic_args[0],  # type: ignore [valid-type]
             generic_args[1],  # type: ignore [valid-type]
         ]
-        return DistinctList.__gel_validate__(lt, value)
+        return LinkSet.__gel_validate__(lt, value)
 
 
 OptionalMultiLink = TypeAliasType(

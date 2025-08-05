@@ -48,7 +48,7 @@ if typing.TYPE_CHECKING:
 from gel import _testbase as tb
 from gel._internal import _dirdiff
 from gel._internal import _typing_inspect
-from gel._internal._qbmodel._abstract import DistinctList, ProxyDistinctList
+from gel._internal._qbmodel._abstract import LinkSet, LinkWithPropsSet
 from gel._internal._edgeql import Cardinality, PointerKind
 from gel._internal._qbmodel._pydantic._models import GelModel
 from gel._internal._schemapath import SchemaPath
@@ -115,26 +115,26 @@ class TestModelGenerator(tb.ModelTestCase):
             if _typing_inspect.is_valid_isinstance_arg(
                 p.type
             ) and _typing_inspect.is_valid_isinstance_arg(e.type):
-                if issubclass(e.type, DistinctList):
-                    if not issubclass(p.type, DistinctList):
+                if issubclass(e.type, LinkSet):
+                    if not issubclass(p.type, LinkSet):
                         self.fail(
                             f"{obj.__name__}.{p.name} eq_type check failed: "
-                            f"p.type is not a DistinctList, but expected "
+                            f"p.type is not a LinkSet, but expected "
                             f"type is {e.type!r}",
                         )
 
-                if issubclass(p.type, ProxyDistinctList):
-                    if not issubclass(e.type, ProxyDistinctList):
+                if issubclass(p.type, LinkWithPropsSet):
+                    if not issubclass(e.type, LinkWithPropsSet):
                         self.fail(
                             f"{obj.__name__}.{p.name} eq_type check "
-                            f" failed: p.type is ProxyDistinctList, "
+                            f" failed: p.type is LinkWithPropsSet, "
                             f"but expected type is {e.type!r}",
                         )
                 else:
-                    if issubclass(e.type, ProxyDistinctList):
+                    if issubclass(e.type, LinkWithPropsSet):
                         self.fail(
                             f"{obj.__name__}.{p.name} eq_type check failed: "
-                            f"p.type is not a ProxyDistinctList, but "
+                            f"p.type is not a LinkWithPropsSet, but "
                             f"expected type is {e.type!r}",
                         )
 
@@ -341,7 +341,7 @@ class TestModelGenerator(tb.ModelTestCase):
     def test_modelgen_data_unpack_3(self):
         from models import default
 
-        from gel._internal._qbmodel._abstract import ProxyDistinctList
+        from gel._internal._qbmodel._abstract import LinkWithPropsSet
 
         q = (
             default.GameSession.select(
@@ -368,8 +368,8 @@ class TestModelGenerator(tb.ModelTestCase):
 
         self.assertIsInstance(d, default.GameSession)
 
-        # Test that links are unpacked into a DistinctList, not a vanilla list
-        self.assertIsInstance(d.players, ProxyDistinctList)
+        # Test that links are unpacked into a LinkSet, not a vanilla list
+        self.assertIsInstance(d.players, LinkWithPropsSet)
         first_player = next(iter(d.players))
         self.assertIsInstance(first_player.groups, tuple)
 
@@ -403,19 +403,19 @@ class TestModelGenerator(tb.ModelTestCase):
     def test_modelgen_pdlist_parametrized(self):
         from models import default
         from gel._internal._qbmodel._abstract import (
-            ProxyDistinctList,
+            LinkWithPropsSet,
         )
 
         sess = default.GameSession(num=1, public=False)
         pl = sess.players
 
-        self.assertIsInstance(pl, ProxyDistinctList)
+        self.assertIsInstance(pl, LinkWithPropsSet)
         self.assertIs(pl.proxytype, default.GameSession.__links__.players)
         self.assertIs(pl.type, default.User)
 
     def test_modelgen_data_init_unfetched_link(self):
         from gel._internal._qbmodel._abstract import (
-            AbstractDistinctList,
+            AbstractLinkSet,
         )
         import models as m
 
@@ -428,7 +428,7 @@ class TestModelGenerator(tb.ModelTestCase):
         # at runtime because you changed the query and `.append()` calls
         # stopped working.
         ug.users.add(m.User(name="test test test"))
-        self.assertIsInstance(ug.users, AbstractDistinctList)
+        self.assertIsInstance(ug.users, AbstractLinkSet)
 
         # And now we'll test that the data will actually
         self.client.save(ug)
@@ -1500,10 +1500,10 @@ class TestModelGenerator(tb.ModelTestCase):
 
         from models import default, std
 
-        from gel._internal._qbmodel._abstract import ProxyDistinctList
+        from gel._internal._qbmodel._abstract import LinkWithPropsSet
 
         gs = default.GameSession(num=7)
-        self.assertIsInstance(gs.players, ProxyDistinctList)
+        self.assertIsInstance(gs.players, LinkWithPropsSet)
 
         with self.assertRaisesRegex(
             ValueError, r"(?s)only instances of User are allowed, got .*int"
@@ -3065,7 +3065,7 @@ class TestModelGenerator(tb.ModelTestCase):
 
         # Override players with new collection
         new_session.players = [elsa, zoe]
-        self.assertIn("ProxyDistinctList", reveal_type(new_session.players))
+        self.assertIn("LinkWithPropsSet", reveal_type(new_session.players))
 
         self.assertEqual(new_session.players._mode, Mode.ReadWrite)
         self.assertTrue(new_session.players.__gel_overwrite_data__)

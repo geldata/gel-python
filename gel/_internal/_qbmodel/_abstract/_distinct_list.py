@@ -37,7 +37,7 @@ _MT_co = TypeVar("_MT_co", bound="AbstractGelSourceModel", covariant=True)
 _ADL_co = TypeVar("_ADL_co", bound=AbstractCollection[Any], covariant=True)
 
 
-class AbstractDistinctList(  # noqa: PLW1641 (__hash__ is implemented)
+class AbstractLinkSet(  # noqa: PLW1641 (__hash__ is implemented)
     AbstractCollection[_MT_co],
     Collection[_MT_co],
 ):
@@ -169,7 +169,7 @@ class AbstractDistinctList(  # noqa: PLW1641 (__hash__ is implemented)
 
     def _check_values(self, values: Iterable[Any]) -> list[_MT_co]:
         """Ensure `values` is an iterable of type T and return it as a list."""
-        if isinstance(values, AbstractDistinctList):
+        if isinstance(values, AbstractLinkSet):
             values = values.__gel_basetype_iter__()
         return [self._check_value(value) for value in values]
 
@@ -240,10 +240,10 @@ class AbstractDistinctList(  # noqa: PLW1641 (__hash__ is implemented)
     def __gel_extend__(self, values: Iterable[_MT_co]) -> None:
         if values is self:
             # This is a "unique list" with a set-like behavior, so
-            # DistinctList.extend(self) is a no-op.
+            # LinkSet.extend(self) is a no-op.
             return
 
-        if isinstance(values, AbstractDistinctList):
+        if isinstance(values, AbstractLinkSet):
             values = values.__gel_basetype_iter__()
         for v in values:
             self.add(v)
@@ -310,7 +310,7 @@ class AbstractDistinctList(  # noqa: PLW1641 (__hash__ is implemented)
         return self
 
     def __eq__(self, other: object) -> bool:
-        if isinstance(other, AbstractDistinctList):
+        if isinstance(other, AbstractLinkSet):
             if self._mode is Mode.Write:
                 # __eq__ is pretty fundamental in Python and we don't
                 # want it to crash in all random places where it can
@@ -343,9 +343,9 @@ class AbstractDistinctList(  # noqa: PLW1641 (__hash__ is implemented)
             return NotImplemented
 
 
-class DistinctList(
+class LinkSet(
     parametric.SingleParametricType[_MT_co],
-    AbstractDistinctList[_MT_co],
+    AbstractLinkSet[_MT_co],
 ):
     def __reduce__(self) -> tuple[Any, ...]:
         cls = type(self)
@@ -367,7 +367,7 @@ class DistinctList(
 
     @staticmethod
     def _reconstruct_from_pickle(  # noqa: PLR0917
-        origin: type[DistinctList[_MT_co]],
+        origin: type[LinkSet[_MT_co]],
         tp: type[_MT_co],  # pyright: ignore [reportGeneralTypeIssues]
         items: list[_MT_co],
         initial_items: list[_MT_co] | None,
@@ -375,9 +375,9 @@ class DistinctList(
         unhashables: list[_MT_co] | None,
         mode: Mode,
         gel_overwrite_data: bool,  # noqa: FBT001
-    ) -> DistinctList[_MT_co]:
+    ) -> LinkSet[_MT_co]:
         cls = cast(
-            "type[DistinctList[_MT_co]]",
+            "type[LinkSet[_MT_co]]",
             origin[tp],  # type: ignore [index]
         )
         lst = cls.__new__(cls)
@@ -411,7 +411,7 @@ class DistinctList(
             return tp(__mode__=Mode.ReadWrite)
         elif isinstance(value, list):
             return tp(value, __mode__=Mode.ReadWrite)
-        elif isinstance(value, AbstractDistinctList):
+        elif isinstance(value, AbstractLinkSet):
             return tp(value._items, __mode__=Mode.ReadWrite)
         else:
             raise TypeError(
@@ -430,9 +430,9 @@ _PT_co = TypeVar(
 """Proxy model"""
 
 
-class ProxyDistinctList(
+class LinkWithPropsSet(
     parametric.ParametricType,
-    AbstractDistinctList[_PT_co],
+    AbstractLinkSet[_PT_co],
     Generic[_PT_co, _BMT_co],
 ):
     # Mapping of GelModels' id()s to ProxyModels that wrap them.
@@ -569,10 +569,10 @@ class ProxyDistinctList(
 
         if values is self:
             # This is a "unique list" with a set-like behavior, so
-            # DistinctList.extend(self) is a no-op.
+            # LinkSet.extend(self) is a no-op.
             return
 
-        if isinstance(values, AbstractDistinctList):
+        if isinstance(values, AbstractLinkSet):
             values = list(values.__gel_basetype_iter__())
 
         self._ensure_snapshot()
@@ -710,7 +710,7 @@ class ProxyDistinctList(
 
     @staticmethod
     def _reconstruct_from_pickle(  # noqa: PLR0917
-        origin: type[ProxyDistinctList[_PT_co, _BMT_co]],  # type: ignore [valid-type]
+        origin: type[LinkWithPropsSet[_PT_co, _BMT_co]],  # type: ignore [valid-type]
         tp: type[_PT_co],  # type: ignore [valid-type]
         proxytp: type[_BMT_co],  # type: ignore [valid-type]
         items: list[_PT_co],
@@ -720,9 +720,9 @@ class ProxyDistinctList(
         unhashables: list[_PT_co] | None,
         mode: Mode,
         gel_overwrite_data: bool,  # noqa: FBT001
-    ) -> ProxyDistinctList[_PT_co, _BMT_co]:
+    ) -> LinkWithPropsSet[_PT_co, _BMT_co]:
         cls = cast(
-            "type[ProxyDistinctList[_PT_co, _BMT_co]]",
+            "type[LinkWithPropsSet[_PT_co, _BMT_co]]",
             origin[proxytp, tp],  # type: ignore [index]
         )
         lst = cls.__new__(cls)

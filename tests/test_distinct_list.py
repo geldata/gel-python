@@ -3,14 +3,14 @@ from collections.abc import MutableSequence
 import unittest
 
 from gel._internal._tracked_list import Mode
-from gel._internal._qbmodel._abstract._distinct_list import DistinctList
+from gel._internal._qbmodel._abstract._distinct_list import LinkSet
 from gel._internal._qbmodel._abstract import AbstractGelSourceModel
 
 from gel import _testbase as tb
 
 
-# A concrete DistinctList that accepts any object
-class AnyList(DistinctList[object]):
+# A concrete LinkSet that accepts any object
+class AnyList(LinkSet[object]):
     # XXX fix this class - should use BoxedInt or something
 
     def __init__(self, *args, **kwargs) -> None:
@@ -31,7 +31,7 @@ class BoxedInt(AbstractGelSourceModel):
         return value
 
 
-class IntList(DistinctList[BoxedInt]):
+class IntList(LinkSet[BoxedInt]):
     def __init__(self, *args, **kwargs) -> None:
         if "__mode__" not in kwargs:
             super().__init__(*args, __mode__=Mode.ReadWrite, **kwargs)
@@ -64,7 +64,7 @@ class ToggleHash:
         self._id = id_
 
 
-class TestDistinctList(unittest.TestCase):
+class TestLinkSet(unittest.TestCase):
     # Core behaviors
     @tb.xfail
     def test_dlist_append_hashable_and_duplicates(self):

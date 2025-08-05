@@ -40,7 +40,7 @@ from ._base import (
 if TYPE_CHECKING:
     import types
     from collections.abc import Sequence, Set as AbstractSet
-    from ._distinct_list import AbstractDistinctList, ProxyDistinctList
+    from ._distinct_list import AbstractLinkSet, LinkWithPropsSet
 
 
 class ModelFieldDescriptor(_qb.AbstractFieldDescriptor):
@@ -445,21 +445,21 @@ class MultiLinkDescriptor(AnyLinkDescriptor[_MT_co, _BMT_co]):
             instance: Any,
             owner: type[Any] | None = None,
             /,
-        ) -> AbstractDistinctList[_MT_co]: ...
+        ) -> AbstractLinkSet[_MT_co]: ...
 
         def __get__(
             self,
             instance: Any,
             owner: type[Any] | None = None,
             /,
-        ) -> type[_MT_co] | AbstractDistinctList[_MT_co]: ...
+        ) -> type[_MT_co] | AbstractLinkSet[_MT_co]: ...
 
         def __set__(
             self,
             instance: Any,
             value: Sequence[_MT_co | _BMT_co]
             | AbstractSet[_MT_co | _BMT_co]
-            | AbstractDistinctList[_MT_co],
+            | AbstractLinkSet[_MT_co],
             /,
         ) -> None: ...
 
@@ -629,21 +629,21 @@ class MultiLinkWithPropsDescriptor(MultiLinkDescriptor[_PT_co, _BMT_co]):
             instance: Any,
             owner: type[Any] | None = None,
             /,
-        ) -> ProxyDistinctList[_PT_co, _BMT_co]: ...
+        ) -> LinkWithPropsSet[_PT_co, _BMT_co]: ...
 
         def __get__(
             self,
             instance: Any,
             owner: type[Any] | None = None,
             /,
-        ) -> type[_PT_co] | ProxyDistinctList[_PT_co, _BMT_co]: ...
+        ) -> type[_PT_co] | LinkWithPropsSet[_PT_co, _BMT_co]: ...
 
         def __set__(  # pyright: ignore [reportIncompatibleMethodOverride]
             self,
             instance: Any,
             value: Sequence[_PT_co | _BMT_co]  # type: ignore[override]
             | AbstractSet[_PT_co | _BMT_co]
-            | AbstractDistinctList[_BMT_co]
-            | ProxyDistinctList[_PT_co, _BMT_co],
+            | AbstractLinkSet[_BMT_co]
+            | LinkWithPropsSet[_PT_co, _BMT_co],
             /,
         ) -> None: ...
