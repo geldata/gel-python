@@ -241,53 +241,54 @@ class AbstractTrackedList(
         "-=",
     ]
 
+    __slots__ = (
+        "_added_items",
+        "_removed_items",
+    )
+
     # Initial snapshot for change tracking
-    _initial_items: list[_T_co] | None
+    _added_items: list[_T_co] | None
+    _removed_items: list[_T_co] | None
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
-        self._initial_items = None
+        self._added_items = None
+        self._removed_items = None
         super().__init__(*args, **kwargs)
 
     def __gel_extend__(self, it: Iterable[_T_co]) -> None:
         self.extend(it)
 
     def _ensure_snapshot(self) -> None:
-        if self._initial_items is None:
-            self._initial_items = list(self._items)
+        if self._added_items is None:
+            self._added_items = []
+        if self._removed_items is None:
+            self._removed_items = []
 
     def __gel_replace_with_empty__(self) -> None:
         self._items.clear()
-        self._initial_items = None
+        self._added_items = None
+        self._removed_items = None
 
     def __gel_get_added__(self) -> list[_T_co]:
-        # TODO: this implementation has quadratic complexity.
-        # We should track the added/removed items in two
-        # separate lists and just return them.
-        if self._initial_items is None:
-            return []
-        return [
-            item for item in self._items if item not in self._initial_items
-        ]
+        return [] if self._added_items is None else list(self._added_items)
 
     def __gel_get_removed__(self) -> Iterable[_T_co]:
-        if self._initial_items is None:
-            return ()
-        return [
-            item for item in self._initial_items if item not in self._items
-        ]
+        return () if self._removed_items is None else self._removed_items
 
     def __gel_has_changes__(self) -> bool:
-        if self._initial_items is None:
+        if self._added_items is None:
             return False
-        return self._items != self._initial_items
+        return bool(self._added_items) or bool(self._removed_items)
 
     def __gel_commit__(self) -> None:
-        self._initial_items = None
+        self._added_items = self._removed_items = None
         super().__gel_commit__()
 
     def __gel_post_commit_check__(self, path: Path) -> None:
-        if self._initial_items:
-            raise ValueError(f"{path} has non-empty `self._initial_items`")
+        if self._added_items is not None:
+            raise ValueError(f"{path} has non-empty `self._added_items`")
+        if self._removed_items is not None:
+            raise ValueError(f"{path} has non-empty `self._removed_items`")
         super().__gel_post_commit_check__(path)
 
     def _check_value(self, value: Any) -> _T_co:
@@ -332,13 +333,26 @@ class AbstractTrackedList(
         if isinstance(index, slice):
             new_values = self._check_values(value)  # type: ignore [arg-type]
             self._items[index] = new_values
+            assert self._added_items is not None
+            self._added_items.extend(new_values)
         else:
             new_value = self._check_value(value)
             self._items[index] = new_value
+            assert self._added_items is not None
+            self._added_items.append(new_value)
 
     def __delitem__(self, index: SupportsIndex | slice) -> None:
         self._ensure_snapshot()
-        del self._items[index]
+        assert self._removed_items is not None
+
+        if isinstance(index, slice):
+            items = self._items[index]
+            del self._items[index]
+            self._removed_items.extend(items)
+        else:
+            item = self._items[index]
+            del self._items[index]
+            self._removed_items.append(item)
 
     @requires_read("get the length of", unsafe="unsafe_len()")
     def __len__(self) -> int:
@@ -356,6 +370,8 @@ class AbstractTrackedList(
         value = self._check_value(value)
         self._ensure_snapshot()
         self._items.insert(index, value)
+        assert self._added_items is not None
+        self._added_items.append(value)
 
     def extend(self, values: Iterable[_T_co]) -> None:
         if values is self:
@@ -363,25 +379,36 @@ class AbstractTrackedList(
         values = self._check_values(values)
         self._ensure_snapshot()
         self._items.extend(values)
+        assert self._added_items is not None
+        self._added_items.extend(values)
 
     def append(self, value: _T_co) -> None:  # type: ignore [misc]
         value = self._check_value(value)
         self._ensure_snapshot()
         self._items.append(value)
+        assert self._added_items is not None
+        self._added_items.append(value)
 
     def remove(self, value: _T_co) -> None:  # type: ignore [misc]
         """Remove item; raise ValueError if missing."""
         self._ensure_snapshot()
         self._items.remove(value)
+        assert self._removed_items is not None
+        self._removed_items.append(value)
 
     def pop(self, index: SupportsIndex = -1) -> _T_co:
         """Remove and return item at index (default last)."""
         self._ensure_snapshot()
-        return self._items.pop(index)
+        item = self._items.pop(index)
+        assert self._removed_items is not None
+        self._removed_items.append(item)
+        return item
 
     def clear(self) -> None:
         """Remove all items but keep element-type enforcement."""
         self._ensure_snapshot()
+        assert self._removed_items is not None
+        self._removed_items.extend(self._items)
         self._items.clear()
 
     @requires_read("index items of")
@@ -533,7 +560,8 @@ class DowncastingTrackedList(
                 cls.type,
                 cls.supertype,
                 self._items,
-                self._initial_items,
+                self._added_items,
+                self._removed_items,
                 self._mode,
                 self.__gel_overwrite_data__,
             ),
@@ -545,7 +573,8 @@ class DowncastingTrackedList(
         tp: type[_T_co],  # pyright: ignore [reportGeneralTypeIssues]
         supertp: type[_BT],
         items: list[_T_co],
-        initial_items: list[_T_co] | None,
+        added_items: list[_T_co] | None,
+        removed_items: list[_T_co] | None,
         mode: Mode,
         gel_overwrite_data: bool,  # noqa: FBT001
     ) -> DowncastingTrackedList[_T_co, _BT]:
@@ -556,7 +585,8 @@ class DowncastingTrackedList(
         lst = cls.__new__(cls)
 
         lst._items = items
-        lst._initial_items = initial_items
+        lst._added_items = added_items
+        lst._removed_items = removed_items
 
         lst._mode = mode
         lst.__gel_overwrite_data__ = gel_overwrite_data
