@@ -4331,6 +4331,94 @@ class TestModelGenerator(tb.ModelTestCase):
             ),
         )
 
+    def test_modelgen_json_schema_2(self):
+        # Test the behavior of id shapes
+
+        import textwrap
+        import json
+
+        from models import default
+        from gel._testbase_schema import render_schema_from_json
+
+        class CreateUser(default.User.__shapes__.Create):
+            pass
+
+        schema = render_schema_from_json(
+            json.dumps(
+                CreateUser.model_json_schema(mode="validation"),
+                indent=2,
+            )
+        )
+
+        self.assertEqual(
+            schema.strip(),
+            textwrap.dedent(
+                """\
+                class CreateUser:
+                    name: str
+                    nickname: None | str = None"""
+            ),
+        )
+
+        schema = render_schema_from_json(
+            json.dumps(
+                CreateUser.model_json_schema(mode="serialization"),
+                indent=2,
+            )
+        )
+
+        self.assertEqual(
+            schema.strip(),
+            textwrap.dedent(
+                """\
+                class CreateUser:
+                    groups: list[UserGroup]  # readonly
+                    id: UUID  # readonly
+                    name: str
+                    name_len: Any  # readonly
+                    nickname: None | str = None
+                    nickname_len: None | int  # readonly
+
+                class User:
+                    groups: list[UserGroup]  # readonly
+                    id: UUID
+                    name: str
+                    name_len: Any  # readonly
+                    nickname: None | str = None
+                    nickname_len: None | int  # readonly
+
+                class UserGroup:
+                    id: UUID
+                    mascot: None | str = None
+                    name: str
+                    name_len: Any  # readonly
+                    nickname: None | str = None
+                    nickname_len: None | int  # readonly
+                    users: list[User] = ..."""
+            ),
+        )
+
+        class UpdateUser(default.User.__shapes__.Update):
+            pass
+
+        schema = render_schema_from_json(
+            json.dumps(
+                UpdateUser.model_json_schema(mode="validation"),
+                indent=2,
+            )
+        )
+
+        self.assertEqual(
+            schema.strip(),
+            textwrap.dedent(
+                """\
+                class UpdateUser:
+                    id: None | UUID = None
+                    name: None | str = None
+                    nickname: None | str = None"""
+            ),
+        )
+
     def test_modelgen_function_overloads_01(self):
         """Test basic function overloads with different parameter types"""
         from models import default

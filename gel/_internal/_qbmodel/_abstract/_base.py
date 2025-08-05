@@ -147,7 +147,7 @@ class AbstractGelModelMeta(GelTypeMeta):
         namespace: dict[str, Any],
         *,
         __gel_type_id__: uuid.UUID | None = None,
-        __gel_variant__: str | None = None,
+        __gel_shape__: str | None = None,
         **kwargs: Any,
     ) -> AbstractGelModelMeta:
         cls = cast(
@@ -156,7 +156,7 @@ class AbstractGelModelMeta(GelTypeMeta):
         )
         if __gel_type_id__ is not None:
             mcls.__gel_class_registry__[__gel_type_id__] = cls
-        cls.__gel_variant__ = __gel_variant__
+        cls.__gel_shape__ = __gel_shape__
         return cls
 
     @classmethod
@@ -181,12 +181,12 @@ class AbstractGelModel(
     _qb.GelObjectTypeMetadata,
     metaclass=AbstractGelModelMeta,
 ):
-    __gel_variant__: ClassVar[str | None] = None
+    __gel_shape__: ClassVar[str | None] = None
     """Auto-reflected model variant marker."""
 
     def __init_subclass__(cls) -> None:
         super().__init_subclass__()
-        cls.__gel_variant__ = None
+        cls.__gel_shape__ = None
 
     @classmethod
     def __edgeql_qb_expr__(cls) -> _qb.Expr:  # pyright: ignore [reportIncompatibleMethodOverride]
@@ -240,7 +240,7 @@ def maybe_collapse_object_type_variant_union(
         elif typename != union_arg.__gel_reflection__.name:
             # Reflections of different object types, cannot collapse.
             return None
-        if union_arg.__gel_variant__ == "Default" and default_variant is None:
+        if union_arg.__gel_shape__ == "Default" and default_variant is None:
             default_variant = union_arg
 
     return default_variant
