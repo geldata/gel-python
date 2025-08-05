@@ -17,7 +17,10 @@ from typing import (
 )
 from typing_extensions import TypeAliasType, dataclass_transform
 
-from gel._internal._qbmodel._abstract import GelPrimitiveType
+from gel._internal._qbmodel._abstract import (
+    GelPrimitiveType,
+    get_proxy_linkprops,
+)
 from gel._internal._qbmodel._pydantic._models import (
     GelModel,
     GelSourceModel,
@@ -536,8 +539,8 @@ def make_plan(objs: Iterable[GelModel]) -> SavePlan:
                     if prop.properties:
                         assert isinstance(val, ProxyModel)
                         link_prop_variant = bool(
-                            ll_attr(
-                                val, "__linkprops__"
+                            get_proxy_linkprops(
+                                val
                             ).__gel_get_changed_fields__()
                         )
 
@@ -546,11 +549,9 @@ def make_plan(objs: Iterable[GelModel]) -> SavePlan:
                         # Link with link properties
                         ptrs = get_pointers(type(val).__linkprops__)
 
+                        val_lp = get_proxy_linkprops(val)
                         props = {
-                            p.name: getattr(
-                                ll_attr(val, "__linkprops__"), p.name, None
-                            )
-                            for p in ptrs
+                            p.name: getattr(val_lp, p.name, None) for p in ptrs
                         }
 
                         sch = SingleLinkChange(
@@ -634,7 +635,7 @@ def make_plan(objs: Iterable[GelModel]) -> SavePlan:
                 if val is _unset or val is None:
                     continue
                 assert isinstance(val, ProxyModel)
-                lprops = val.__linkprops__
+                lprops = get_proxy_linkprops(val)
                 if not lprops.__gel_changed_fields__:
                     continue
 
@@ -729,7 +730,7 @@ def make_plan(objs: Iterable[GelModel]) -> SavePlan:
                     if el in added_index:
                         continue
 
-                    lp = ll_attr(el, "__linkprops__")
+                    lp = get_proxy_linkprops(el)
                     if lp.__gel_get_changed_fields__():
                         added.append(el)
 
@@ -753,7 +754,7 @@ def make_plan(objs: Iterable[GelModel]) -> SavePlan:
 
             # Simple case -- no link props!
             if not prop.properties or all(
-                not ll_attr(link, "__linkprops__").__gel_get_changed_fields__()
+                not get_proxy_linkprops(link).__gel_get_changed_fields__()
                 for link in added_proxies
             ):
                 mch = MultiLinkAdd(
@@ -782,14 +783,13 @@ def make_plan(objs: Iterable[GelModel]) -> SavePlan:
                 added=list(unwrap_dlist(added)),
                 added_props=[
                     {
-                        p: getattr(ll_attr(link, "__linkprops__"), p, None)
-                        for p in (
-                            ll_attr(
-                                link, "__linkprops__"
-                            ).__gel_get_changed_fields__()
-                        )
+                        p: getattr(link_lp, p, None)
+                        for p in (link_lp.__gel_get_changed_fields__())
                     }
-                    for link in cast("list[ProxyModel[GelModel]]", added)
+                    for link_lp in (
+                        get_proxy_linkprops(link)
+                        for link in cast("list[ProxyModel[GelModel]]", added)
+                    )
                 ],
                 props_info={p.name: p for p in props_info},
                 replace=replace,
@@ -1032,9 +1032,7 @@ class SaveExecutor:
                     if prop.cardinality.is_multi():
                         if is_link_wprops_set(linked):
                             for proxy in linked._items:
-                                ll_attr(
-                                    proxy, "__linkprops__"
-                                ).__gel_commit__()
+                                get_proxy_linkprops(proxy).__gel_commit__()
                                 _traverse(unwrap_proxy_no_check(proxy))
                         else:
                             assert is_link_set(linked)
@@ -1043,7 +1041,7 @@ class SaveExecutor:
                         linked.__gel_commit__()
                     else:
                         if isinstance(linked, ProxyModel):
-                            ll_attr(linked, "__linkprops__").__gel_commit__()
+                            get_proxy_linkprops(linked).__gel_commit__()
                             _traverse(unwrap_proxy_no_check(linked))
                         else:
                             _traverse(cast("GelModel", linked))
@@ -1103,7 +1101,7 @@ class SaveExecutor:
                             val.__gel_post_commit_check__(link_path)
                             for i, proxy in enumerate(val._items):
                                 list_path = link_path / str(i)
-                                lps = proxy.__linkprops__
+                                lps = get_proxy_linkprops(proxy)
                                 if lps.__gel_get_changed_fields__():
                                     raise ValueError(
                                         f"{list_path} has changed link props "
@@ -1119,7 +1117,9 @@ class SaveExecutor:
                                 _check_recursive(model, list_path)
                     else:
                         if isinstance(val, ProxyModel):
-                            if val.__linkprops__.__gel_get_changed_fields__():
+                            if get_proxy_linkprops(
+                                val
+                            ).__gel_get_changed_fields__():
                                 raise ValueError(
                                     f"{link_path} has changed link props "
                                     f"after save"

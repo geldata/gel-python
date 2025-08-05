@@ -12,9 +12,11 @@ from typing import (
     Generic,
     TypeVar,
     overload,
+    cast,
 )
 from typing_extensions import Self, Never
 
+import copy
 import dataclasses
 import typing
 
@@ -596,11 +598,22 @@ class AbstractGelProxyModel(AbstractGelModel, Generic[_MT_co, _LM_co]):
     def __gel_proxy_construct__(
         cls,
         obj: _MT_co,  # type: ignore [misc]
-        lprops: dict[str, Any],
+        lprops: dict[str, Any] | _LM_co,
+        *,
+        linked: bool = False,
     ) -> Self:
         raise NotImplementedError
 
     def without_linkprops(self) -> _MT_co:
+        raise NotImplementedError
+
+    def __gel_merge_other_proxy__(self, other: Self) -> None:
+        raise NotImplementedError
+
+    def __gel_replace_wrapped_model__(
+        self,
+        new: _MT_co,  # type: ignore [misc]
+    ) -> None:
         raise NotImplementedError
 
 
@@ -647,3 +660,115 @@ class MultiLinkWithPropsDescriptor(MultiLinkDescriptor[_PT_co, _BMT_co]):
             | LinkWithPropsSet[_PT_co, _BMT_co],
             /,
         ) -> None: ...
+
+
+ll_getattr = object.__getattribute__
+
+
+def get_proxy_linkprops(
+    obj: AbstractGelProxyModel[_MT_co, _LM_co],
+) -> _LM_co:
+    """Return obj.__linkprops__ without triggering copy of __linkprops__"""
+    try:
+        # Try fast access first (bypass ProxyModel.__getattribute__)
+        lp = ll_getattr(
+            obj,
+            "__linkprops__",
+        )
+    except AttributeError:
+        # Slow path in case __linkprops__ needs to be constructed by
+        # the descriptor
+        return obj.__linkprops__
+    else:
+        return lp  # type: ignore [no-any-return]
+
+
+def is_proxy_linked(
+    obj: AbstractGelProxyModel[_MT_co, _LM_co],
+) -> bool:
+    try:
+        gl = ll_getattr(
+            obj,
+            "__gel_linked__",
+        )
+    except AttributeError:
+        return False
+    else:
+        return gl  # type: ignore [no-any-return]
+
+
+def copy_or_ref_lprops(lp: _LM_co) -> _LM_co:  # type: ignore [misc]
+    if lp.__gel_has_mutable_props__:
+        return copy.deepcopy(lp)
+    else:
+        lp.__gel_copied_by_ref__ = True
+        return lp
+
+
+def proxy_link(
+    *,
+    existing: AbstractGelProxyModel[_MT_co, _LM_co] | None,
+    new: AbstractGelProxyModel[_MT_co, _LM_co] | _MT_co,
+    proxy_type: type[AbstractGelProxyModel[_MT_co, _LM_co]],
+) -> AbstractGelProxyModel[_MT_co, _LM_co]:
+    tp_new = type(new)
+
+    if tp_new is proxy_type:
+        # Fast path for the same proxy type.
+
+        new_proxy = cast("AbstractGelProxyModel[_MT_co, _LM_co]", new)
+
+        if existing is not None:
+            existing.__gel_merge_other_proxy__(new_proxy)
+            return existing
+        else:
+            if is_proxy_linked(new_proxy):
+                return proxy_type.__gel_proxy_construct__(
+                    new_proxy.without_linkprops(),
+                    {},
+                    linked=True,
+                )
+            else:
+                return proxy_type.__gel_proxy_construct__(
+                    new_proxy.without_linkprops(),
+                    copy_or_ref_lprops(get_proxy_linkprops(new_proxy)),
+                    linked=True,
+                )
+
+    model_type = proxy_type.__proxy_of__
+
+    if tp_new is model_type or (
+        not isinstance(new, AbstractGelProxyModel)
+        and isinstance(new, model_type)
+    ):
+        # It's not a proxy, but the object is of the correct type --
+        # re-wrap it in a correct proxy.
+
+        new_base = cast("_MT_co", new)
+
+        if existing is not None:
+            existing.__gel_replace_wrapped_model__(new_base)
+            return existing
+        else:
+            return proxy_type.__gel_proxy_construct__(
+                new_base,
+                {},
+                linked=True,
+            )
+
+    if isinstance(new, AbstractGelProxyModel):
+        # We unwrap different kinds of proxies - we can't inherit their
+        # linkprops
+        return proxy_link(
+            existing=existing,
+            new=new.without_linkprops(),
+            proxy_type=proxy_type,
+        )
+
+    # Theoretically `new` can be a dict (that's pydantic's semantics),
+    # so let's attempt to validate it and repeat the process.
+    return proxy_link(
+        existing=existing,
+        new=proxy_type.__gel_validate__(new),
+        proxy_type=proxy_type,
+    )
