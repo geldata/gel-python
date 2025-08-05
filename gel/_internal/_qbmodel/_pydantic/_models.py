@@ -864,8 +864,7 @@ class GelSourceModel(
                 )
 
             assert isinstance(current_value, _tracked_list.AbstractCollection)
-            current_value.clear()
-            current_value.__gel_reset_snapshot__()
+            current_value.__gel_replace_with_empty__()
             if value:
                 current_value.__gel_extend__(
                     value.__gel_basetype_iter__()

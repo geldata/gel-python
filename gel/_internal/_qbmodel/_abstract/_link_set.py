@@ -76,9 +76,6 @@ class AbstractLinkSet(
     def _init_tracking(self) -> None:
         raise NotImplementedError
 
-    def _reset_tracking(self) -> None:
-        raise NotImplementedError
-
     def _is_tracked(self, item: _MT_co) -> bool:  # type: ignore [misc]
         raise NotImplementedError
 
@@ -128,12 +125,6 @@ class AbstractLinkSet(
             raise KeyError(value)
         self.discard(value)
 
-    def clear(self) -> None:
-        """Remove all items but keep element-type enforcement."""
-        self._ensure_snapshot()
-        self._items.clear()
-        self._reset_tracking()
-
     @requires_read("get the length of", unsafe="unsafe_len()")
     def __len__(self) -> int:
         return len(self._items)
@@ -180,11 +171,16 @@ class LinkSet(  # noqa: PLW1641 (__hash__ is implemented)
     AbstractLinkSet[_MT_co],
 ):
     __slots__ = (
-        "_initial_set",
-        "_initial_unhashables",
-        "_set",
-        "_unhashables",
+        "_index_snapshot",
+        "_tracking_index",
+        "_tracking_set",
     )
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        self._tracking_set = None
+        self._tracking_index = None
+        self._index_snapshot = None
+        super().__init__(*args, **kwargs)
 
     # There are some differences between LinkSet and normal Python set:
     #
@@ -195,15 +191,10 @@ class LinkSet(  # noqa: PLW1641 (__hash__ is implemented)
     # - LinkSet supports `+=` and `-=` operators to mimic EdgeQL
 
     # Set of (hashable) items to maintain distinctness.
-    _set: set[_MT_co] | None
+    _tracking_set: set[_MT_co] | None
+    _tracking_index: dict[int, _MT_co] | None
 
-    # Assuming unhashable items compare by object identity,
-    # the dict below is used as an extension for distinctness
-    # checks.
-    _unhashables: dict[int, _MT_co] | None
-
-    _initial_set: set[_MT_co] | None
-    _initial_unhashables: dict[int, _MT_co] | None
+    _index_snapshot: dict[int, _MT_co] | None
 
     def _check_value(self, value: Any) -> _MT_co:
         cls = type(self)
@@ -219,109 +210,22 @@ class LinkSet(  # noqa: PLW1641 (__hash__ is implemented)
 
     def _ensure_snapshot(self) -> None:
         # "_ensure_snapshot" is called right before any mutation:
-        # this is the perfect place to initialize `self._set` and
-        # `self._unhashables`.
+        # this is the perfect place to init tracking, as it's required
+        # for making a snapshot.
         self._init_tracking()
 
-        if self._initial_set is None:
-            assert self._set is not None
-            self._initial_set = set(self._set)
-            assert self._unhashables is not None
-            self._initial_unhashables = dict(self._unhashables)
-        else:
-            assert self._initial_unhashables is not None
+        if self._index_snapshot is None:
+            assert self._tracking_index is not None
+            self._index_snapshot = dict(self._tracking_index)
 
-    def __gel_empty_snapshot__(self) -> None:
-        self._initial_set = set()
-        self._initial_unhashables = {}
-
-    def __gel_reset_snapshot__(self) -> None:
-        self._set = None
-        self._unhashables = None
-        self._initial_set = None
-        self._initial_unhashables = None
-
-    def __gel_get_added__(self) -> list[_MT_co]:
-        if not self._set and not self._unhashables:
-            return []
-
-        assert self._set is not None
-        assert self._unhashables is not None
-        assert self._initial_set is not None
-        assert self._initial_unhashables is not None
-
-        return [
-            item for item in self._set if item not in self._initial_set
-        ] + [
-            item
-            for item_id, item in self._unhashables.items()
-            if item_id not in self._initial_unhashables
-        ]
-
-    def __gel_get_removed__(self) -> Iterable[_MT_co]:
-        if not self._set and not self._unhashables:
-            return []
-
-        assert self._set is not None
-        assert self._unhashables is not None
-        assert self._initial_set is not None
-        assert self._initial_unhashables is not None
-
-        return [
-            item for item in self._initial_set if item not in self._set
-        ] + [
-            item
-            for item_id, item in self._initial_unhashables.items()
-            if item_id not in self._unhashables
-        ]
-
-    def __gel_has_changes__(self) -> bool:
-        if self._initial_set is None:
-            return False
-        return (
-            self._set != self._initial_set
-            or self._unhashables != self._initial_unhashables
-        )
-
-    def __gel_commit__(self) -> None:
-        super().__gel_commit__()
-
-        if self._unhashables is not None:
-            assert self._set is not None
-            for item in self._unhashables.values():
-                self._set.add(item)
-            self._unhashables.clear()
-
-        if self._initial_set is not None:
-            if self._set:
-                self._initial_set = set(self._set)
-            else:
-                self._initial_set = set()
-            assert self._initial_unhashables is not None
-            self._initial_unhashables.clear()
-
-    def __gel_post_commit_check__(self, path: Path) -> None:
-        super().__gel_post_commit_check__(path)
-
-        if self._unhashables:
-            raise ValueError(
-                f"{path} has non-empty `self._unhashables` after save()"
-            )
-
-        if self._initial_unhashables:
-            raise ValueError(
-                f"{path} has non-empty `self._initial_unhashables` "
-                f"after save()"
-            )
-
-        if self._set is not None and len(self._set) != len(self._items):
-            # tracked but _set is not agreeing with _items
-            raise ValueError(
-                f"{path}: `{len(self._set or {})=}` != `{len(self._items)=}`"
-            )
+    def __gel_replace_with_empty__(self) -> None:
+        self._items.clear()
+        self._index_snapshot = None
+        self._tracking_set = None
+        self._tracking_index = None
 
     def _init_tracking(self) -> None:
-        if self._set is None:
+        if self._tracking_set is None:
             # Why is `set(self._items)` OK? `self._items` can be
             # in one of two states:
             #
@@ -332,54 +236,152 @@ class LinkSet(  # noqa: PLW1641 (__hash__ is implemented)
             #
             # So it's either no elements or all elements are hashable
             # (have IDs).
-            self._set = set(self._items)
+            self._tracking_set = set(self._items)
 
-            assert self._unhashables is None
-            self._unhashables = {}
+            assert self._tracking_index is None
+            self._tracking_index = {id(o): o for o in self._items}
         else:
-            assert self._unhashables is not None
+            assert self._tracking_index is not None
 
-    def _reset_tracking(self) -> None:
-        self._set = None
-        self._unhashables = None
+    def __gel_get_added__(self) -> list[_MT_co]:
+        match bool(self._index_snapshot), bool(self._tracking_index):
+            case True, False:
+                # _index_snapshot has data in it, _tracking_index is empty --
+                # everything was removed
+                return []
+            case False, True:
+                # _index_snapshot is empty, _tracking_index has data in it --
+                # everything was added
+                return list(self._items)
+            case True, True:
+                # _index_snapshot and _tracking_index have data in it --
+                # some items were added, some were removed
+                assert self._index_snapshot is not None
+                assert self._tracking_index is not None
+                return [
+                    item
+                    for item_id, item in self._tracking_index.items()
+                    if item_id not in self._index_snapshot
+                ]
+            case False, False:
+                # _index_snapshot and _tracking_index are empty -- no changes
+                return []
+
+        raise AssertionError("unreachable")
+
+    def __gel_get_removed__(self) -> Iterable[_MT_co]:
+        # See the comment in __gel_get_added__
+        match bool(self._index_snapshot), bool(self._tracking_index):
+            case True, False:
+                # _index_snapshot has data in it, _tracking_index is empty --
+                # everything was removed
+                return list(self._items)
+            case False, True:
+                # _index_snapshot is empty, _tracking_index has data in it --
+                # everything was added
+                return ()
+            case True, True:
+                # _index_snapshot and _tracking_index have data in it --
+                # some items were added, some were removed
+                assert self._index_snapshot is not None
+                assert self._tracking_index is not None
+                return [
+                    item
+                    for item_id, item in self._index_snapshot.items()
+                    if item_id not in self._tracking_index
+                ]
+            case False, False:
+                # _index_snapshot and _tracking_index are empty -- no changes
+                return []
+
+        raise AssertionError("unreachable")
+
+    def __gel_has_changes__(self) -> bool:
+        if self._index_snapshot is None:
+            # We don't even have a snapshot -- no changes
+            return False
+        return self._tracking_index != self._index_snapshot
+
+    def __gel_commit__(self) -> None:
+        super().__gel_commit__()
+
+        if self._tracking_index is not None:
+            assert self._tracking_set is not None
+            if len(self._tracking_set) != len(self._tracking_index):
+                # There are unhashable items in our collection
+                # which are now hashable after save().
+                self._tracking_set.update(self._tracking_index.values())
+
+        if self._index_snapshot is not None:
+            assert self._tracking_index is not None
+            if len(self._tracking_index) != len(self._index_snapshot):
+                self._index_snapshot = dict(self._tracking_index)
+
+    def __gel_post_commit_check__(self, path: Path) -> None:
+        super().__gel_post_commit_check__(path)
+
+        if self._index_snapshot != self._tracking_index:
+            raise ValueError(
+                f"{path} `self._index_snapshot` != `self._tracking_index` "
+                f"after save()"
+            )
+
+        if self._tracking_set is not None and len(self._tracking_set) != len(
+            self._items
+        ):
+            raise ValueError(
+                f"{path}: `{len(self._tracking_set or {})=}` != "
+                f"`{len(self._items)=}`"
+            )
+
+        if self._tracking_index is not None and len(
+            self._tracking_index
+        ) != len(self._items):
+            raise ValueError(
+                f"{path}: `{len(self._tracking_index or {})=}` != "
+                f"`{len(self._items)=}`"
+            )
 
     def _track_item(self, item: _MT_co) -> None:  # type: ignore [misc]
-        assert self._set is not None
+        assert self._tracking_set is not None
         try:
-            self._set.add(item)
+            self._tracking_set.add(item)
         except TypeError:
+            # Unhashable
             pass
-        else:
-            return
 
-        assert self._unhashables is not None
-        self._unhashables[id(item)] = item
+        assert self._tracking_index is not None
+        self._tracking_index[id(item)] = item
 
     def _untrack_item(self, item: _MT_co) -> None:  # type: ignore [misc]
-        assert self._set is not None
+        assert self._tracking_set is not None
         try:
-            self._set.remove(item)
+            self._tracking_set.remove(item)
         except (TypeError, KeyError):
             # Either unhashable or not in the list
             pass
-        else:
-            return
 
-        assert self._unhashables is not None
-        self._unhashables.pop(id(item), None)
+        assert self._tracking_index is not None
+        self._tracking_index.pop(id(item), None)
 
     def _is_tracked(self, item: _MT_co) -> bool:  # type: ignore [misc]
         self._init_tracking()
-        assert self._set is not None
 
+        assert self._tracking_index is not None
+        if id(item) in self._tracking_index:
+            # Fast path
+            return True
+
+        # The item is not in the index, but it might have an equal
+        # one in the tracking set.
+        assert self._tracking_set is not None
         try:
-            return item in self._set
+            return item in self._tracking_set
         except TypeError:
-            # unhashable
+            # Unhashable
             pass
 
-        assert self._unhashables is not None
-        return id(item) in self._unhashables
+        return False
 
     def __gel_extend__(self, values: Iterable[_MT_co]) -> None:
         if values is self:
@@ -392,6 +394,13 @@ class LinkSet(  # noqa: PLW1641 (__hash__ is implemented)
         for v in values:
             self.add(v)
 
+    def clear(self) -> None:
+        """Remove all items but keep element-type enforcement."""
+        self._ensure_snapshot()
+        self._items.clear()
+        self._tracking_set = None
+        self._tracking_index = None
+
     def __reduce__(self) -> tuple[Any, ...]:
         cls = type(self)
         return (
@@ -400,12 +409,9 @@ class LinkSet(  # noqa: PLW1641 (__hash__ is implemented)
                 cls.__parametric_origin__,
                 cls.type,
                 self._items,
-                self._initial_set,
-                self._initial_unhashables,
-                self._set,
-                self._unhashables.values()
-                if self._unhashables is not None
-                else None,
+                self._tracking_set,
+                self._tracking_index,
+                self._index_snapshot,
                 self._mode,
                 self.__gel_overwrite_data__,
             ),
@@ -416,10 +422,9 @@ class LinkSet(  # noqa: PLW1641 (__hash__ is implemented)
         origin: type[LinkSet[_MT_co]],
         tp: type[_MT_co],  # pyright: ignore [reportGeneralTypeIssues]
         items: list[_MT_co],
-        initial_set: set[_MT_co] | None,
-        initial_unhashables: dict[int, _MT_co] | None,
-        hashables: set[_MT_co] | None,
-        unhashables: list[_MT_co] | None,
+        tracking_set: set[_MT_co] | None,
+        tracking_index: dict[int, _MT_co] | None,
+        index_snapshot: dict[int, _MT_co] | None,
         mode: Mode,
         gel_overwrite_data: bool,  # noqa: FBT001
     ) -> LinkSet[_MT_co]:
@@ -430,13 +435,9 @@ class LinkSet(  # noqa: PLW1641 (__hash__ is implemented)
         lst = cls.__new__(cls)
 
         lst._items = items
-        lst._initial_set = initial_set
-        lst._initial_unhashables = initial_unhashables
-        lst._set = hashables
-        if unhashables is None:
-            lst._unhashables = None
-        else:
-            lst._unhashables = {id(item): item for item in unhashables}
+        lst._tracking_set = tracking_set
+        lst._tracking_index = tracking_index
+        lst._index_snapshot = index_snapshot
 
         lst._mode = mode
         lst.__gel_overwrite_data__ = gel_overwrite_data
@@ -454,13 +455,17 @@ class LinkSet(  # noqa: PLW1641 (__hash__ is implemented)
         elif isinstance(other, set):
             if self._mode is Mode.Write:
                 return False
-            if self._unhashables is not None:
+            if (
+                self._tracking_set is not None
+                and self._tracking_index is not None
+                and len(self._tracking_set) != len(self._tracking_index)
+            ):
                 # There are unhashable items in our collection
                 # (added after the link was fetched or this is a new link),
-                # so we're not equal to any possible set.
+                # so we're not equal to any valid Python set.
                 return False
-            if self._set is not None:
-                return self._set == other
+            if self._tracking_set is not None:
+                return self._tracking_set == other
             return set(self._items) == other
         elif isinstance(other, list):
             # In an ideal world we'd only allow comparisions with sets.
@@ -565,6 +570,7 @@ class LinkWithPropsSet(  # noqa: PLW1641 (__hash__ is implemented)
         self._set = None
         self._unhashables = None
         self._initial_items = None
+        self._wrapped_index = None
         super().__init__(
             cast("Iterable[_PT_co]", iterable),
             __wrap_list__=__wrap_list__,
@@ -661,11 +667,6 @@ class LinkWithPropsSet(  # noqa: PLW1641 (__hash__ is implemented)
                 wrapped = ll_getattr(item, "_p__obj__")
                 self._wrapped_index[id(wrapped)] = item
 
-    def _reset_tracking(self) -> None:
-        self._set = set()
-        self._unhashables = {}
-        self._wrapped_index = {}
-
     def _track_item(self, item: _PT_co) -> None:  # type: ignore [misc]
         assert isinstance(item, AbstractGelProxyModel)
 
@@ -704,13 +705,11 @@ class LinkWithPropsSet(  # noqa: PLW1641 (__hash__ is implemented)
         else:
             return id(item) in self._wrapped_index
 
-    def __gel_empty_snapshot__(self) -> None:
-        self._initial_items = []
-
-    def __gel_reset_snapshot__(self) -> None:
+    def __gel_replace_with_empty__(self) -> None:
+        self._items.clear()
+        self._initial_items = None
         self._set = None
         self._unhashables = None
-        self._initial_items = None
         self._wrapped_index = None
 
     def __gel_get_added__(self) -> list[_PT_co]:
@@ -856,6 +855,14 @@ class LinkWithPropsSet(  # noqa: PLW1641 (__hash__ is implemented)
     def __gel_basetype_iter__(self) -> Iterator[_BMT_co]:  # type: ignore [override]
         for item in self._items:
             yield item._p__obj__  # type: ignore [misc]
+
+    def clear(self) -> None:
+        """Remove all items but keep element-type enforcement."""
+        self._ensure_snapshot()
+        self._items.clear()
+        self._set = set()
+        self._unhashables = {}
+        self._wrapped_index = {}
 
     def __reduce__(self) -> tuple[Any, ...]:
         cls = type(self)

@@ -129,14 +129,11 @@ class AbstractCollection(Iterable[_T_co], Generic[_T_co]):
             )
             assert __mode__ is Mode.ReadWrite
             self._mode = __mode__
-
-            self.__gel_reset_snapshot__()
         else:
             self._items = []
 
             # 'extend' is optimized in LinkWithPropsSet
             # for use in __init__
-            self.__gel_reset_snapshot__()
             self.__gel_extend__(iterable)
 
             # This is a new collection set to link/prop explicitly,
@@ -149,15 +146,12 @@ class AbstractCollection(Iterable[_T_co], Generic[_T_co]):
 
             self._mode = __mode__
 
-            self.__gel_empty_snapshot__()
-
     def __gel_extend__(self, it: Iterable[_T_co]) -> None:
         raise NotImplementedError
 
-    def __gel_empty_snapshot__(self) -> None:
-        raise NotImplementedError
-
-    def __gel_reset_snapshot__(self) -> None:
+    def __gel_replace_with_empty__(self) -> None:
+        # Clear the list and reset the snapshot -- as if the collection
+        # was just created.
         raise NotImplementedError
 
     def __gel_get_added__(self) -> list[_T_co]:
@@ -250,6 +244,10 @@ class AbstractTrackedList(
     # Initial snapshot for change tracking
     _initial_items: list[_T_co] | None
 
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        self._initial_items = None
+        super().__init__(*args, **kwargs)
+
     def __gel_extend__(self, it: Iterable[_T_co]) -> None:
         self.extend(it)
 
@@ -257,13 +255,14 @@ class AbstractTrackedList(
         if self._initial_items is None:
             self._initial_items = list(self._items)
 
-    def __gel_empty_snapshot__(self) -> None:
-        self._initial_items = []
-
-    def __gel_reset_snapshot__(self) -> None:
+    def __gel_replace_with_empty__(self) -> None:
+        self._items.clear()
         self._initial_items = None
 
     def __gel_get_added__(self) -> list[_T_co]:
+        # TODO: this implementation has quadratic complexity.
+        # We should track the added/removed items in two
+        # separate lists and just return them.
         if self._initial_items is None:
             return []
         return [
