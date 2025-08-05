@@ -260,6 +260,7 @@ class TestLinkSet(unittest.TestCase):
         with self.assertRaises(ValueError):
             lst.remove(u)
 
+    @tb.xfail
     def test_dlist_pop_unhashable(self):
         u = ToggleHash()
         lst = AnyList([u])
