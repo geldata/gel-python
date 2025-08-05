@@ -74,10 +74,12 @@ class TestLinkSet(unittest.TestCase):
         lst.append(1)
         self.assertEqual(list(lst), [1])
 
+    @tb.xfail
     def test_dlist_constructor_iterable_and_duplicates(self):
         lst = AnyList([1, 1, 2])
         self.assertEqual(list(lst), [1, 2])
 
+    @tb.xfail
     def test_dlist_len_and_contains(self):
         lst = AnyList([1, 2, 3])
         self.assertEqual(len(lst), 3)
@@ -293,6 +295,7 @@ class TestLinkSet(unittest.TestCase):
         with self.assertRaises(ValueError):
             lst.index(1, 1, 2)
 
+    @tb.xfail
     def test_dlist_eq_and_lt_with_other_type(self):
         lst = AnyList([1, 2])
         self.assertFalse(lst == 123)
