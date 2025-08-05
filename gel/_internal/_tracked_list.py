@@ -126,7 +126,7 @@ class AbstractCollection(Iterable[_T_co], Generic[_T_co]):
                 False if __overwrite_data__ is None else __overwrite_data__
             )
             assert __mode__ is Mode.ReadWrite
-            self._mode = Mode.ReadWrite
+            self._mode = __mode__
 
             self.__gel_reset_snapshot__()
         else:

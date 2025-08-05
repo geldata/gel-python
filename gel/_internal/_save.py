@@ -295,8 +295,9 @@ def unwrap_proxy_no_check(val: ProxyModel[GelModel]) -> GelModel:
     return ll_attr(val, "_p__obj__")  # type: ignore [no-any-return]
 
 
-def unwrap_dlist(val: Iterable[GelModel]) -> list[GelModel]:
-    return [unwrap_proxy(o) for o in val]
+def unwrap_dlist(val: Iterable[GelModel]) -> Iterable[GelModel]:
+    for o in val:
+        yield unwrap_proxy(o)
 
 
 def get_pointers(tp: type[GelSourceModel]) -> Iterable[GelPointerReflection]:
@@ -758,7 +759,7 @@ def make_plan(objs: Iterable[GelModel]) -> SavePlan:
                 mch = MultiLinkAdd(
                     name=prop.name,
                     info=prop,
-                    added=unwrap_dlist(added),
+                    added=list(unwrap_dlist(added)),
                     replace=replace,
                 )
                 push_change(requireds, sched, mch)
@@ -778,7 +779,7 @@ def make_plan(objs: Iterable[GelModel]) -> SavePlan:
             mch = MultiLinkAdd(
                 name=prop.name,
                 info=prop,
-                added=unwrap_dlist(added),
+                added=list(unwrap_dlist(added)),
                 added_props=[
                     {
                         p: getattr(ll_attr(link, "__linkprops__"), p, None)
