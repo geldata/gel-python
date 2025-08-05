@@ -46,6 +46,8 @@ class AbstractLinkSet(
     a list and set.
     """
 
+    __slots__ = ()
+
     _allowed_write_only_ops: ClassVar[list[str]] = [
         ".add()",
         ".discard()",
@@ -149,11 +151,41 @@ class AbstractLinkSet(
             self.discard(item)
         return self
 
+    @staticmethod
+    def __gel_validate__(
+        tp: type[_ADL_co],
+        value: Any,
+    ) -> _ADL_co:
+        if type(value) is list:
+            # Optimization for the most common scenario - user passes
+            # a list of objects to the constructor.
+            return tp(value, __mode__=Mode.ReadWrite)
+        elif isinstance(value, DefaultList):
+            assert not value
+            # GelModel will adjust __mode__ to Write for
+            # unfetched multi-link/multi-prop fields.
+            return tp(__mode__=Mode.ReadWrite)
+        elif isinstance(value, list):
+            return tp(value, __mode__=Mode.ReadWrite)
+        elif isinstance(value, AbstractLinkSet):
+            return tp(value._items, __mode__=Mode.ReadWrite)
+        else:
+            raise TypeError(
+                f"could not convert {type(value)} to {tp.__name__}"
+            )
+
 
 class LinkSet(  # noqa: PLW1641 (__hash__ is implemented)
     parametric.SingleParametricType[_MT_co],
     AbstractLinkSet[_MT_co],
 ):
+    __slots__ = (
+        "_initial_set",
+        "_initial_unhashables",
+        "_set",
+        "_unhashables",
+    )
+
     # There are some differences between LinkSet and normal Python set:
     #
     # - LinkSet is ordered
@@ -170,23 +202,8 @@ class LinkSet(  # noqa: PLW1641 (__hash__ is implemented)
     # checks.
     _unhashables: dict[int, _MT_co] | None
 
-    _initial_items: list[_MT_co] | None
-
-    def __init__(
-        self,
-        iterable: Iterable[_MT_co] = (),
-        *,
-        __wrap_list__: bool = False,
-        __mode__: Mode,
-    ) -> None:
-        self._set = None
-        self._unhashables = None
-        self._initial_items = None
-        super().__init__(
-            iterable,
-            __wrap_list__=__wrap_list__,
-            __mode__=__mode__,
-        )
+    _initial_set: set[_MT_co] | None
+    _initial_unhashables: dict[int, _MT_co] | None
 
     def _check_value(self, value: Any) -> _MT_co:
         cls = type(self)
@@ -206,43 +223,68 @@ class LinkSet(  # noqa: PLW1641 (__hash__ is implemented)
         # `self._unhashables`.
         self._init_tracking()
 
-        if self._initial_items is None:
-            self._initial_items = list(self._items)
+        if self._initial_set is None:
+            assert self._set is not None
+            self._initial_set = set(self._set)
+            assert self._unhashables is not None
+            self._initial_unhashables = dict(self._unhashables)
+        else:
+            assert self._initial_unhashables is not None
 
     def __gel_empty_snapshot__(self) -> None:
-        self._initial_items = []
+        self._initial_set = set()
+        self._initial_unhashables = {}
 
     def __gel_reset_snapshot__(self) -> None:
         self._set = None
         self._unhashables = None
-        self._initial_items = None
+        self._initial_set = None
+        self._initial_unhashables = None
 
     def __gel_get_added__(self) -> list[_MT_co]:
-        # XXX optimize for set
-        if self._initial_items is None:
+        if not self._set and not self._unhashables:
             return []
+
+        assert self._set is not None
+        assert self._unhashables is not None
+        assert self._initial_set is not None
+        assert self._initial_unhashables is not None
+
         return [
-            item for item in self._items if item not in self._initial_items
+            item for item in self._set if item not in self._initial_set
+        ] + [
+            item
+            for item_id, item in self._unhashables.items()
+            if item_id not in self._initial_unhashables
         ]
 
     def __gel_get_removed__(self) -> Iterable[_MT_co]:
-        # XXX optimize for set
-        if self._initial_items is None:
-            return ()
+        if not self._set and not self._unhashables:
+            return []
+
+        assert self._set is not None
+        assert self._unhashables is not None
+        assert self._initial_set is not None
+        assert self._initial_unhashables is not None
+
         return [
-            item for item in self._initial_items if item not in self._items
+            item for item in self._initial_set if item not in self._set
+        ] + [
+            item
+            for item_id, item in self._initial_unhashables.items()
+            if item_id not in self._unhashables
         ]
 
     def __gel_has_changes__(self) -> bool:
-        # XXX optimize for set
-        if self._initial_items is None:
+        if self._initial_set is None:
             return False
-        return self._items != self._initial_items
+        return (
+            self._set != self._initial_set
+            or self._unhashables != self._initial_unhashables
+        )
 
     def __gel_commit__(self) -> None:
         super().__gel_commit__()
-
-        self._initial_items = None
 
         if self._unhashables is not None:
             assert self._set is not None
@@ -250,12 +292,26 @@ class LinkSet(  # noqa: PLW1641 (__hash__ is implemented)
                 self._set.add(item)
             self._unhashables.clear()
 
+        if self._initial_set is not None:
+            if self._set:
+                self._initial_set = set(self._set)
+            else:
+                self._initial_set = set()
+            assert self._initial_unhashables is not None
+            self._initial_unhashables.clear()
+
     def __gel_post_commit_check__(self, path: Path) -> None:
         super().__gel_post_commit_check__(path)
 
         if self._unhashables:
             raise ValueError(
                 f"{path} has non-empty `self._unhashables` after save()"
+            )
+
+        if self._initial_unhashables:
+            raise ValueError(
+                f"{path} has non-empty `self._initial_unhashables` "
+                f"after save()"
             )
 
         if self._set is not None and len(self._set) != len(self._items):
@@ -344,7 +400,8 @@ class LinkSet(  # noqa: PLW1641 (__hash__ is implemented)
                 cls.__parametric_origin__,
                 cls.type,
                 self._items,
-                self._initial_items,
+                self._initial_set,
+                self._initial_unhashables,
                 self._set,
                 self._unhashables.values()
                 if self._unhashables is not None
@@ -359,7 +416,8 @@ class LinkSet(  # noqa: PLW1641 (__hash__ is implemented)
         origin: type[LinkSet[_MT_co]],
         tp: type[_MT_co],  # pyright: ignore [reportGeneralTypeIssues]
         items: list[_MT_co],
-        initial_items: list[_MT_co] | None,
+        initial_set: set[_MT_co] | None,
+        initial_unhashables: dict[int, _MT_co] | None,
         hashables: set[_MT_co] | None,
         unhashables: list[_MT_co] | None,
         mode: Mode,
@@ -372,7 +430,8 @@ class LinkSet(  # noqa: PLW1641 (__hash__ is implemented)
         lst = cls.__new__(cls)
 
         lst._items = items
-        lst._initial_items = initial_items
+        lst._initial_set = initial_set
+        lst._initial_unhashables = initial_unhashables
         lst._set = hashables
         if unhashables is None:
             lst._unhashables = None
@@ -383,29 +442,6 @@ class LinkSet(  # noqa: PLW1641 (__hash__ is implemented)
         lst.__gel_overwrite_data__ = gel_overwrite_data
 
         return lst
-
-    @staticmethod
-    def __gel_validate__(
-        tp: type[_ADL_co],
-        value: Any,
-    ) -> _ADL_co:
-        if type(value) is list:
-            # Optimization for the most common scenario - user passes
-            # a list of objects to the constructor.
-            return tp(value, __mode__=Mode.ReadWrite)
-        elif isinstance(value, DefaultList):
-            assert not value
-            # GelModel will adjust __mode__ to Write for
-            # unfetched multi-link/multi-prop fields.
-            return tp(__mode__=Mode.ReadWrite)
-        elif isinstance(value, list):
-            return tp(value, __mode__=Mode.ReadWrite)
-        elif isinstance(value, AbstractLinkSet):
-            return tp(value._items, __mode__=Mode.ReadWrite)
-        else:
-            raise TypeError(
-                f"could not convert {type(value)} to {tp.__name__}"
-            )
 
     def __eq__(self, other: object) -> bool:
         if isinstance(other, AbstractLinkSet):
@@ -626,9 +662,9 @@ class LinkWithPropsSet(  # noqa: PLW1641 (__hash__ is implemented)
                 self._wrapped_index[id(wrapped)] = item
 
     def _reset_tracking(self) -> None:
-        self._set = None
-        self._unhashables = None
-        self._wrapped_index = None
+        self._set = set()
+        self._unhashables = {}
+        self._wrapped_index = {}
 
     def _track_item(self, item: _PT_co) -> None:  # type: ignore [misc]
         assert isinstance(item, AbstractGelProxyModel)
