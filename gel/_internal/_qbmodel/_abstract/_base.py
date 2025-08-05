@@ -122,12 +122,19 @@ class AbstractGelSourceModel(_qb.GelSourceMetadata):
         # an `.id` corresponding to a database object.
         __gel_new__: bool
 
+        # Set of fields that have been changed since the last commit;
+        # used by `client.save()`.
+        __gel_changed_fields__: set[str] | None
+
     @classmethod
     def __gel_validate__(cls, value: Any) -> Self:
         raise NotImplementedError
 
     @classmethod
     def __gel_model_construct__(cls, __dict__: dict[str, Any] | None) -> Self:
+        raise NotImplementedError
+
+    def __gel_get_changed_fields__(self) -> set[str]:
         raise NotImplementedError
 
 
@@ -216,7 +223,14 @@ class AbstractGelModel(
 
 
 class AbstractGelLinkModel(AbstractGelSourceModel):
-    pass
+    if TYPE_CHECKING:
+        # Whether the model was copied by reference and must
+        # be copied by value before being accessed by the user.
+        __gel_copied_by_ref__: bool
+
+        # Whether the model has mutable properties; determined
+        # at the codegen time.
+        __gel_has_mutable_props__: ClassVar[bool]
 
 
 def is_gel_model(t: Any) -> TypeGuard[type[AbstractGelModel]]:

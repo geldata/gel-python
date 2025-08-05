@@ -22,7 +22,7 @@ from gel._internal._tracked_list import (
 )
 
 from ._base import AbstractGelSourceModel, AbstractGelModel
-from ._descriptors import AbstractGelProxyModel
+from ._descriptors import AbstractGelProxyModel, proxy_link
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -68,7 +68,7 @@ class AbstractLinkSet(  # noqa: PLW1641 (__hash__ is implemented)
     ]
 
     # Set of (hashable) items to maintain distinctness.
-    _tracking_set: set[_MT_co] | None
+    _tracking_set: dict[_MT_co, _MT_co] | None
     # Mapping of `self._pyid(item)` to `item`
     _tracking_index: dict[int, _MT_co] | None
     # Copy of `_tracking_index` at the moment of `_ensure_snapshot()` call
@@ -87,7 +87,7 @@ class AbstractLinkSet(  # noqa: PLW1641 (__hash__ is implemented)
         raise NotImplementedError
 
     def _ensure_value_indexable(self, value: Any) -> _MT_co | None:
-        # ProxyModels are designed to be tranparent and are ignored
+        # ProxyModels are designed to be transparent and are ignored
         # in GelModel.__eq__. That said we do want to validate the
         # wrapped object's type and bail early if it's doesn't match
         # this collection's type.
@@ -125,7 +125,9 @@ class AbstractLinkSet(  # noqa: PLW1641 (__hash__ is implemented)
             #
             # So it's either no elements or all elements are hashable
             # (have IDs).
-            self._tracking_set = set(self._items)
+            self._tracking_set = dict(
+                zip(self._items, self._items, strict=True)
+            )
 
             assert self._tracking_index is None
             self._tracking_index = {self._pyid(o): o for o in self._items}
@@ -200,7 +202,13 @@ class AbstractLinkSet(  # noqa: PLW1641 (__hash__ is implemented)
             if len(self._tracking_set) != len(self._tracking_index):
                 # There are unhashable items in our collection
                 # which are now hashable after save().
-                self._tracking_set.update(self._tracking_index.values())
+                self._tracking_set.update(
+                    zip(
+                        self._tracking_index.values(),
+                        self._tracking_index.values(),
+                        strict=True,
+                    )
+                )
 
         if self._index_snapshot is not None:
             assert self._tracking_index is not None
@@ -235,7 +243,7 @@ class AbstractLinkSet(  # noqa: PLW1641 (__hash__ is implemented)
     def _track_item(self, item: _MT_co) -> None:  # type: ignore [misc]
         assert self._tracking_set is not None
         if not item.__gel_new__:
-            self._tracking_set.add(item)
+            self._tracking_set[item] = item
 
         assert self._tracking_index is not None
         self._tracking_index[self._pyid(item)] = item
@@ -243,7 +251,7 @@ class AbstractLinkSet(  # noqa: PLW1641 (__hash__ is implemented)
     def _untrack_item(self, item: _MT_co) -> None:  # type: ignore [misc]
         assert self._tracking_set is not None
         if not item.__gel_new__:
-            self._tracking_set.remove(item)
+            self._tracking_set.pop(item)
 
         assert self._tracking_index is not None
         self._tracking_index.pop(self._pyid(item), None)
@@ -273,42 +281,35 @@ class AbstractLinkSet(  # noqa: PLW1641 (__hash__ is implemented)
         assert self._tracking_index is not None
         self._tracking_index.clear()
 
-    def _check_value(self, value: Any) -> _MT_co:
-        raise NotImplementedError
-
     @requires_read("use `in` operator on")
     def __contains__(self, item: object) -> bool:
-        item = self._ensure_value_indexable(item)
-        if item is None:
+        if isinstance(item, AbstractGelProxyModel):
+            item = item.without_linkprops()
+        if not isinstance(item, type(self).type):
             return False
         return self._is_tracked(item)
+
+    def __gel_add__(self, value: _MT_co) -> None:  # type: ignore [misc]
+        raise NotImplementedError
+
+    def __gel_remove__(self, value: _MT_co) -> _MT_co | None:  # type: ignore [misc]
+        raise NotImplementedError
 
     def update(self, values: Iterable[_MT_co]) -> None:
         self.__gel_extend__(values)
 
     def add(self, value: _MT_co) -> None:  # type: ignore [misc]
-        value = self._check_value(value)
-        self._ensure_snapshot()
-        if self._is_tracked(value):
-            return
-        self._track_item(value)
-        self._items.append(value)
+        self.__gel_add__(value)
 
     def discard(self, value: _MT_co) -> None:  # type: ignore [misc]
         """Remove item; raise ValueError if missing."""
-        if not self._is_tracked(value):
-            pass
-
-        self._ensure_snapshot()
-        value = self._check_value(value)
-        self._untrack_item(value)
-        self._items.remove(value)
+        self.__gel_remove__(value)
 
     def remove(self, value: _MT_co) -> None:  # type: ignore [misc]
         """Remove an element. If not a member, raise a KeyError."""
-        if not self._is_tracked(value):
+        existing = self.__gel_remove__(value)
+        if existing is None:
             raise KeyError(value)
-        self.discard(value)
 
     @requires_read("get the length of", unsafe="unsafe_len()")
     def __len__(self) -> int:
@@ -324,7 +325,7 @@ class AbstractLinkSet(  # noqa: PLW1641 (__hash__ is implemented)
 
     def __isub__(self, other: Iterable[_MT_co]) -> Self:
         for item in other:
-            self.discard(item)
+            self.__gel_remove__(item)
         return self
 
     def __eq__(self, other: object) -> bool:
@@ -364,7 +365,7 @@ class AbstractLinkSet(  # noqa: PLW1641 (__hash__ is implemented)
                 return False
 
             if self._tracking_set is not None:
-                return self._tracking_set == other
+                return self._tracking_set.keys() == other
 
             return set(self._items) == other
 
@@ -414,6 +415,25 @@ class LinkSet(
 ):
     __slots__ = ()
 
+    def __gel_add__(self, value: _MT_co) -> None:  # type: ignore [misc]
+        value = self._check_value(value)
+        self._ensure_snapshot()
+        if self._is_tracked(value):
+            return
+        self._track_item(value)
+        self._items.append(value)
+
+    def __gel_remove__(self, value: _MT_co) -> _MT_co | None:  # type: ignore [misc]
+        """Remove item; raise ValueError if missing."""
+        value = self._check_value(value)
+        self._ensure_snapshot()
+        if not self._is_tracked(value):
+            return None
+
+        self._untrack_item(value)
+        self._items.remove(value)
+        return value
+
     def _check_value(self, value: Any) -> _MT_co:
         cls = type(self)
         t = cls.type
@@ -462,7 +482,7 @@ class LinkSet(
         origin: type[LinkSet[_MT_co]],
         tp: type[_MT_co],  # pyright: ignore [reportGeneralTypeIssues]
         items: list[_MT_co],
-        tracking_set: set[_MT_co] | None,
+        tracking_set: dict[_MT_co, _MT_co] | None,
         tracking_index: dict[int, _MT_co] | None,
         index_snapshot: dict[int, _MT_co] | None,
         mode: Mode,
@@ -508,11 +528,39 @@ class LinkWithPropsSet(
 
     @staticmethod
     def _pyid(item: _PT_co) -> int:  # type: ignore [misc]
-        return id(item._p__obj__)
+        return id(item.without_linkprops())
+
+    def _find_proxy(self, item: _PT_co | _BMT_co) -> _PT_co | None:
+        assert self._tracking_index is not None
+        assert self._tracking_set is not None
+
+        cls = type(self)
+        t = type(item)
+
+        if t is cls.proxytype:
+            oid = id(cast("_PT_co", item).without_linkprops())
+
+        elif t is cls.type:
+            oid = id(item)
+
+        elif isinstance(item, AbstractGelProxyModel):
+            oid = id(item.without_linkprops())
+
+        else:
+            # We don't know what `v` is, but...
+            # what's the worst that can happen?
+            oid = id(item)
+
+        existing = self._tracking_index.get(oid)
+        if existing is not None:
+            return existing
+
+        if item.__gel_new__:
+            return None
+
+        return self._tracking_set.get(item)  # type: ignore [arg-type]
 
     def __gel_extend__(self, values: Iterable[_PT_co | _BMT_co]) -> None:
-        # An optimized version of `extend()`
-
         if not values:
             # Empty list => early return
             return
@@ -527,9 +575,7 @@ class LinkWithPropsSet(
 
         self._ensure_snapshot()
 
-        cls = type(self)
-        t = cls.proxytype
-        proxy_of = t.__proxy_of__
+        proxy_type = type(self).proxytype
 
         assert self._tracking_index is not None
         assert self._tracking_set is not None
@@ -538,83 +584,63 @@ class LinkWithPropsSet(
         # of slow iterative appends.
         empty_items = not self._items
 
-        proxy: _PT_co
         for v in values:
-            tv = type(v)
-            if tv is proxy_of:
-                # Fast path -- `v` is an instance of the base type.
-                # It has no link props, wrap it in a proxy in
-                # a fast way.
-                proxy = t.__gel_proxy_construct__(v, {})
-                obj = v
-            elif tv is t:
-                # Another fast path -- `v` is already the correct proxy.
-                proxy = v  # type: ignore [assignment]  # typecheckers unable to cope
-                obj = ll_getattr(v, "_p__obj__")
-            else:
-                proxy, obj = self._cast_value(v)
+            existing = self._find_proxy(v)
 
-            oid = id(obj)
-            if oid in self._tracking_index:
-                continue
+            proxy = cast(
+                "_PT_co",
+                proxy_link(
+                    existing=existing,
+                    new=v,
+                    proxy_type=proxy_type,
+                ),
+            )
 
-            self._tracking_index[oid] = proxy
+            if proxy is not existing:
+                assert existing is None
+                self._track_item(proxy)
 
-            if not obj.__gel_new__:
-                self._tracking_set.add(proxy)
-
-            if not empty_items:
-                self._items.append(proxy)
+                if not empty_items:
+                    self._items.append(proxy)
 
         if empty_items:
             # A LOT faster than `extend()` ¯\_(ツ)_/¯
             self._items = list(self._tracking_index.values())
 
-    def _cast_value(self, value: Any) -> tuple[_PT_co, _BMT_co]:
-        cls = type(self)
-        t = cls.proxytype
+    def __gel_add__(self, value: _PT_co | _BMT_co) -> None:
+        self._ensure_snapshot()
 
-        bt: type[_BMT_co] = t.__proxy_of__  # pyright: ignore [reportAssignmentType]
-        tp_value = type(value)
-
-        if tp_value is bt:
-            # Fast path before we make all expensive isinstance calls.
-            return (
-                t.__gel_proxy_construct__(value, {}),
-                value,
-            )
-
-        if tp_value is t:
-            # It's a correct proxy for this link... return as is.
-            return (
-                value,
-                ll_getattr(value, "_p__obj__"),
-            )
-
-        if not isinstance(value, AbstractGelProxyModel) and isinstance(
-            value, bt
-        ):
-            # It's not a proxy, but the object is of the correct type --
-            # re-wrap it in a correct proxy.
-            return (
-                t.__gel_proxy_construct__(value, {}),
-                value,
-            )
-
-        if isinstance(value, AbstractGelProxyModel):
-            # We unwrap different kinds of proxies - we can't inherit their
-            # linkprops
-            value = ll_getattr(value, "_p__obj__")
-
-        proxy = t.__gel_validate__(value)
-        return (
-            proxy,
-            ll_getattr(proxy, "_p__obj__"),
+        existing = self._find_proxy(value)
+        proxy = cast(
+            "_PT_co",
+            proxy_link(
+                existing=existing,
+                new=value,
+                proxy_type=type(self).proxytype,
+            ),
         )
 
-    def _check_value(self, value: Any) -> _PT_co:
-        proxy, _ = self._cast_value(value)
-        return proxy
+        if proxy is not existing:
+            assert existing is None
+            self._track_item(proxy)
+            self._items.append(proxy)
+
+    def __gel_remove__(self, value: _PT_co | _BMT_co) -> _PT_co | None:
+        """Remove item; raise ValueError if missing."""
+
+        self._ensure_snapshot()
+
+        existing = self._find_proxy(value)
+        if existing is None:
+            return None
+
+        self._untrack_item(existing)
+
+        # TODO: Maybe there's a faster way to do this?
+        # __eq__ on ProxyModels isn't cheap.
+        self._items.remove(existing)
+
+        return existing
 
     def __gel_basetype_iter__(self) -> Iterator[_BMT_co]:  # type: ignore [override]
         for item in self._items:
@@ -646,7 +672,7 @@ class LinkWithPropsSet(
         proxytp: type[_BMT_co],  # type: ignore [valid-type]
         items: list[_PT_co],
         tracking_index: list[_PT_co] | None,
-        tracking_set: set[_PT_co] | None,
+        tracking_set: dict[_PT_co, _PT_co] | None,
         index_snapshot: list[_PT_co] | None,
         mode: Mode,
         gel_overwrite_data: bool,  # noqa: FBT001

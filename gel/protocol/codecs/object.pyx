@@ -316,7 +316,13 @@ cdef class ObjectCodec(BaseNamedRecordCodec):
 
         if return_type_proxy is not None:
             nested = current_ret_type.__gel_model_construct__(result_dict)
-            result = return_type_proxy.__gel_proxy_construct__(nested, lprops_dict)
+
+            # ProxyModel instances are passed straight to LinkSet.__init__
+            # with __wrap_list__=True. It's important that all proxies
+            # coming from the codec will be "owned" by the link.
+            result = return_type_proxy.__gel_proxy_construct__(
+                nested, lprops_dict, linked=True,
+            )
         else:
             result = current_ret_type.__gel_model_construct__(result_dict)
 

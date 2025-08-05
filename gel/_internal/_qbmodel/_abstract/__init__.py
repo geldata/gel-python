@@ -36,6 +36,9 @@ from ._descriptors import (
     PointerDescriptor,
     PropertyDescriptor,
     field_descriptor,
+    get_proxy_linkprops,
+    is_proxy_linked,
+    copy_or_ref_lprops,
 )
 
 from ._link_set import (
@@ -156,10 +159,12 @@ __all__ = (
     "Tuple",
     "TupleMeta",
     "UUIDImpl",
+    "copy_or_ref_lprops",
     "empty_set_if_none",
     "field_descriptor",
     "get_base_scalars_backed_by_py_type",
     "get_overlapping_py_types",
+    "get_proxy_linkprops",
     "get_py_base_for_scalar",
     "get_py_type_for_scalar",
     "get_py_type_for_scalar_hierarchy",
@@ -169,5 +174,6 @@ __all__ = (
     "get_scalar_type_disambiguation_for_mod",
     "get_scalar_type_disambiguation_for_py_type",
     "is_generic_type",
+    "is_proxy_linked",
     "maybe_get_protocol_for_py_type",
 )

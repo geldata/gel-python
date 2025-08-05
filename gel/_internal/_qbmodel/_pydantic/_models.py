@@ -53,7 +53,6 @@ if TYPE_CHECKING:
     from collections.abc import (
         Iterator,
         Mapping,
-        Set as AbstractSet,
     )
     from gel._internal._qbmodel._abstract import GelType
 
@@ -622,10 +621,6 @@ class GelSourceModel(
     __gel_has_id_field__: ClassVar[bool] = False
 
     if TYPE_CHECKING:
-        # Set of fields that have been changed since the last commit;
-        # used by `client.save()`.
-        __gel_changed_fields__: set[str] | None
-
         # Whether the model uses DEFAULT_MODEL_CONFIG or not.
         __gel_default_model_config__: ClassVar[bool]
 
@@ -814,10 +809,10 @@ class GelSourceModel(
             self, "__gel_changed_fields__", set(self.__pydantic_fields_set__)
         )
 
-    def __gel_get_changed_fields__(self) -> AbstractSet[str]:
+    def __gel_get_changed_fields__(self) -> set[str]:
         dirty: set[str] | None = ll_getattr(self, "__gel_changed_fields__")
         if dirty is None:
-            return _empty_str_set
+            return _empty_str_set  # type: ignore [return-value]
         return dirty
 
     def __gel_commit__(self) -> None:
@@ -1307,7 +1302,7 @@ class GelLinkModel(
     __gel_root_class__=True,
 ):
     # Base class for __linkprops__ classes.
-    __slots__ = ()
+    __slots__ = ("__gel_copied_by_ref__",)
 
 
 _MT_co = TypeVar("_MT_co", bound=GelModel, covariant=True)
@@ -1375,7 +1370,7 @@ class ProxyModel(
     # NB: __linkprops__ is not in slots because it is managed by
     #     GelLinkModelDescriptor.
 
-    __slots__ = ("_p__obj__",)
+    __slots__ = ("__gel_linked__", "_p__obj__")
 
     __gel_proxied_dunders__: ClassVar[frozenset[str]] = frozenset(
         {
@@ -1387,7 +1382,9 @@ class ProxyModel(
         __linkprops__: _abstract.GelLinkModelDescriptor[GelLinkModel]
 
     def __new__(cls, *args: Any, **kwargs: Any) -> Self:
-        return cls.__gel_model_construct__(None)
+        self = cls.__gel_model_construct__(None)
+        ll_setattr(self, "__gel_linked__", False)  # noqa: FBT003
+        return self
 
     def __init__(
         self,
@@ -1439,17 +1436,15 @@ class ProxyModel(
         self = cls.__new__(cls)
         lprops = cls.__linkprops__(**link_props)
         ll_setattr(self, "__linkprops__", lprops)
-
         ll_setattr(self, "_p__obj__", obj)
-
         return self
 
     def __getattribute__(self, name: str) -> Any:
         if name in {
             "_p__obj__",
-            "__linkprops__",
             "__proxy_of__",
             "__class__",
+            "__gel_linked__",
         }:
             # Fast path for the wrapped object itself / linkprops model
             # (this optimization is informed by profiling model
@@ -1463,6 +1458,22 @@ class ProxyModel(
         ):
             # Faster path for "public-like" attributes
             return ll_getattr(ll_getattr(self, "_p__obj__"), name)
+
+        if name == "__linkprops__":
+            lp = _abstract.get_proxy_linkprops(self)
+            if getattr(lp, "__gel_copied_by_ref__", False):
+                # save() and other internal machinery can use
+                # `object.__getattribute__` to request __linkprops__ without
+                # triggering this code.
+                # But when it is triggered - it's called by the user, and in
+                # this case, if __linkprops__ object is copied by ref we want
+                # to do an actual hard copy of it.
+                # No need to do deep copy, as copying by ref can only happen
+                # when __linkprops__ only has immutable properties in it.
+                lp = lp.model_copy()
+                # __gel_copied_by_ref__ won't be copied by model_copy()
+                ll_setattr(self, "__linkprops__", lp)
+                return lp
 
         model_fields = type(self).__proxy_of__.model_fields
         if name in model_fields:
@@ -1603,16 +1614,51 @@ class ProxyModel(
     def __gel_proxy_construct__(
         cls,
         obj: _MT_co,  # type: ignore [misc]
-        lprops: dict[str, Any],
+        lprops: dict[str, Any] | GelLinkModel,
+        *,
+        linked: bool = False,
     ) -> Self:
         pnv = cls.__gel_model_construct__(None)
-        object.__setattr__(pnv, "_p__obj__", obj)
-        object.__setattr__(
+        ll_setattr(pnv, "_p__obj__", obj)
+
+        if type(lprops) is dict:
+            lp_obj = cls.__linkprops__.__gel_model_construct__(lprops)
+        else:
+            lp_obj = lprops  # type: ignore [assignment]
+
+        ll_setattr(
             pnv,
             "__linkprops__",
-            cls.__linkprops__.__gel_model_construct__(lprops),
+            lp_obj,
         )
+        ll_setattr(pnv, "__gel_linked__", linked)
         return pnv
+
+    def __gel_merge_other_proxy__(  # pyright: ignore [reportIncompatibleMethodOverride]
+        self,
+        other: Self,
+    ) -> None:
+        cls = type(self)
+        assert type(other) is cls
+
+        if not _abstract.is_proxy_linked(other):
+            # `other` isn't link, so it must be a new proxy created
+            # by instantiating the model or calling the `ProxyModel.link()`
+            # classmethod.
+            lp = _abstract.copy_or_ref_lprops(other.__linkprops__)
+        else:
+            lp = cls.__linkprops__.__gel_model_construct__({})
+
+        ll_setattr(self, "__linkprops__", lp)
+        ll_setattr(self, "_p__obj__", ll_getattr(other, "_p__obj__"))
+
+    def __gel_replace_wrapped_model__(
+        self,
+        new: _MT_co,  # type: ignore [misc]
+    ) -> None:
+        existing = ll_getattr(self, "_p__obj__")
+        assert type(existing) is type(new)
+        ll_setattr(self, "_p__obj__", new)
 
     def __eq__(self, other: object) -> bool:
         if self is other:
@@ -1718,7 +1764,7 @@ class ProxyModel(
             ll_setattr(merged, attr, ll_getattr(wrapped, attr))
 
         assert "__linkprops__" not in merged.__dict__
-        merged.__dict__["__linkprops__"] = ll_getattr(self, "__linkprops__")
+        merged.__dict__["__linkprops__"] = _abstract.get_proxy_linkprops(self)
         try:
             if to_json:
                 return merged.model_dump_json(context=context, **kwargs)
