@@ -20,7 +20,7 @@ gel/
 │   │   └── _models/            # Model generation
 │   │       └── _pydantic.py    # Main generator (~6000 lines)
 │   ├── _save.py                # Save/persistence implementation
-│   └── _tracked_list.py        # Multi property tracking for changes
+│   ├── _tracked_list.py        # Multi property tracking for changes
 │   └── _link_set.py            # Multi links & multi links with props
 ```
 
@@ -122,9 +122,31 @@ Run `python tools/gen_models.py` to generate test models into your virtual envir
 
 1. gel development VM with gel server binary in PATH
 2. Install with: `pip install -e .`
-3. **Critical**: Edit `.pth` files if pip editable install is broken
+3. **Critical**: Edit `.pth` files because editable wheel install is broken:
+
+   ```bash
+   python -c 'import pathlib, gel; print(pathlib.Path(gel.__path__[0]).parent)' > \
+     $(python -c 'import site; print(site.getsitepackages()[0])')/gel.pth
+   ```
+
 4. Set environment variables for gel server path if needed
-5. In a venv with `gel-server` run pytest with `$ env __EDGEDB_DEVMODE=1 pytest`
+
+   * If you want to use the dev server in your dev Gel environment:
+
+     ```
+     export GEL_SERVER_BINARY=<your-server-venv>/bin/gel-server
+     ```
+
+     then run `pytest` with `$ env __EDGEDB_DEVMODE=1 pytest`
+
+   * or
+
+     ```
+     export GEL_SERVER_BINARY=$(gel server info --bin-path --version '6')
+     ```
+
+     and you should be able to just run `$ pytest`.
+
 
 ### Running Tests
 
