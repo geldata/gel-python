@@ -40,6 +40,9 @@ class Operator(Callable):
     py_magic: tuple[str, ...] | None
     operator_kind: OperatorKind
 
+    def __str__(self) -> str:
+        return f"operator {self.edgeql_signature}"
+
     @functools.cached_property
     def ident(self) -> str:
         if self.py_magic is not None:

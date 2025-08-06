@@ -4,7 +4,7 @@
 #
 
 from __future__ import annotations
-from typing import TYPE_CHECKING, NamedTuple, TypeVar
+from typing import NamedTuple, TypeVar
 from typing_extensions import Self, TypeAliasType
 
 import dataclasses
@@ -23,17 +23,9 @@ from collections.abc import (
     Set as AbstractSet,
 )
 
-from gel._internal import _dataclass_extras
-
-from . import _query
-
 from ._base import sobject, struct, SchemaObject
 from ._types import Indirection, TypeRef, Type, Schema, compare_type_generality
-from ._enums import CallableParamKind, SchemaPart, TypeModifier
-
-
-if TYPE_CHECKING:
-    from gel import abstract
+from ._enums import CallableParamKind, TypeModifier
 
 
 CallableParamKey = TypeAliasType("CallableParamKey", int | str)
@@ -62,6 +54,27 @@ class CallableParam:
     typemod: TypeModifier
     index: int
     default: str | None
+
+    def __str__(self) -> str:
+        if self.typemod is TypeModifier.Optional:
+            typespec = f"optional {self.type}"
+        elif self.typemod is TypeModifier.SetOf:
+            typespec = f"set of {self.type}"
+        else:
+            typespec = f"{self.type}"
+
+        if self.kind is CallableParamKind.NamedOnly:
+            name = f"named only {self.name}"
+        elif self.kind is CallableParamKind.Variadic:
+            name = f"variadic {self.name}"
+        else:
+            name = self.name
+
+        sig = f"{name}: {typespec}"
+        if self.default is not None:
+            sig = f"{sig} = {self.default}"
+
+        return sig
 
     @functools.cached_property
     def key(self) -> CallableParamKey:
@@ -319,11 +332,282 @@ def compare_callable_generality(
     return 0
 
 
+class _CallableSignatureMatcher:
+    def __init__(
+        self,
+        *,
+        left: _Callable_T,
+        left_param_types: CallableParamTypeMap | None = None,
+        right: _Callable_T,
+        right_param_types: CallableParamTypeMap | None = None,
+        schema: Schema,
+    ) -> None:
+        self._left = left
+        self._right = right
+
+        def _param_generics(
+            param_key: CallableParamKey,
+            *,
+            genmap: CallableGenericPositions,
+        ) -> dict[Indirection, Type] | None:
+            if (pgenerics := genmap.get(param_key)) is not None:
+                return {
+                    path: gt
+                    for gt, paths in pgenerics.items()
+                    for path in paths
+                }
+            else:
+                return None
+
+        left_generics = left.generics(schema)
+        right_generics = right.generics(schema)
+
+        self._get_left_param_generics = functools.partial(
+            _param_generics,
+            genmap=left_generics,
+        )
+        self._get_right_param_generics = functools.partial(
+            _param_generics,
+            genmap=right_generics,
+        )
+
+        def _param_type(
+            param: CallableParam,
+            *,
+            typemap: CallableParamTypeMap | None,
+        ) -> Collection[Type | PyTypeName]:
+            if typemap is not None:
+                types = typemap.get(param.key)
+                if types is None:
+                    types = [param.get_type(schema)]
+            else:
+                types = [param.get_type(schema)]
+
+            return types
+
+        self._get_left_param_type = functools.partial(
+            _param_type, typemap=left_param_types
+        )
+        self._get_right_param_type = functools.partial(
+            _param_type, typemap=right_param_types
+        )
+
+        self._generic_bindings: dict[Type, Type] = {}
+        self._schema = schema
+
+    def is_param_compatible(
+        self,
+        key: CallableParamKey,
+        *,
+        two_way: bool = False,
+        consider_py_inheritance: bool = False,
+    ) -> bool:
+        right_param = self._right.param_map[key]
+        left_param = self._left.param_map.get(key)
+        if left_param is None:
+            return False
+        left_types = self._get_left_param_type(left_param)
+        right_types = self._get_right_param_type(right_param)
+        left_generics = self._get_left_param_generics(left_param.key)
+
+        return all(
+            any(
+                self._is_assignable_from(
+                    left_type=left_type,
+                    right_type=right_type,
+                    left_generics=left_generics,
+                    left_typemod=left_param.typemod,
+                    right_typemod=right_param.typemod,
+                    consider_py_inheritance=consider_py_inheritance,
+                )
+                for left_type in left_types
+            )
+            for right_type in right_types
+        ) or (
+            two_way
+            and all(
+                any(
+                    self._is_assignable_from(
+                        left_type=right_type,
+                        right_type=left_type,
+                        left_typemod=right_param.typemod,
+                        right_typemod=left_param.typemod,
+                        consider_py_inheritance=consider_py_inheritance,
+                    )
+                    for right_type in right_types
+                )
+                for left_type in left_types
+            )
+        )
+
+    def is_param_overlapping(
+        self,
+        key: CallableParamKey,
+        *,
+        two_way: bool = False,
+        consider_py_inheritance: bool = False,
+        consider_optionality: bool = True,
+    ) -> bool:
+        right_param = self._right.param_map[key]
+        left_param = self._left.param_map.get(key)
+        if left_param is None:
+            return False
+        left_types = self._get_left_param_type(left_param)
+        right_types = self._get_right_param_type(right_param)
+        left_generics = self._get_left_param_generics(left_param.key)
+        left_typemod = left_param.typemod
+        right_typemod = right_param.typemod
+
+        if (
+            consider_optionality
+            and left_typemod is TypeModifier.Optional
+            and right_typemod is TypeModifier.Optional
+        ):
+            return True
+
+        return any(
+            self._is_assignable_from(
+                left_type=left_type,
+                right_type=right_type,
+                left_generics=left_generics,
+                left_typemod=left_typemod,
+                right_typemod=right_typemod,
+                consider_py_inheritance=consider_py_inheritance,
+                proper_subtype=True,
+            )
+            for left_type in left_types
+            for right_type in right_types
+        ) or (
+            two_way
+            and any(
+                self._is_assignable_from(
+                    left_type=right_type,
+                    right_type=left_type,
+                    left_typemod=right_typemod,
+                    right_typemod=left_typemod,
+                    consider_py_inheritance=consider_py_inheritance,
+                    proper_subtype=True,
+                )
+                for right_type in right_types
+                for left_type in left_types
+            )
+        )
+
+    def is_return_compatible(
+        self,
+        *,
+        two_way: bool = False,
+        consider_py_inheritance: bool = False,
+    ) -> bool:
+        return self._is_assignable_from(
+            left_type=self._left.get_return_type(self._schema),
+            right_type=self._right.get_return_type(self._schema),
+            left_generics=self._get_left_param_generics("__return__"),
+            left_typemod=self._left.return_typemod,
+            right_typemod=self._right.return_typemod,
+            two_way=two_way,
+            consider_py_inheritance=consider_py_inheritance,
+        )
+
+    def _is_assignable_from(
+        self,
+        *,
+        left_type: Type | PyTypeName,
+        right_type: Type | PyTypeName,
+        left_generics: dict[Indirection, Type] | None = None,
+        left_typemod: TypeModifier,
+        right_typemod: TypeModifier,
+        two_way: bool = False,
+        consider_py_inheritance: bool = False,
+        proper_subtype: bool = False,
+    ) -> bool:
+        if isinstance(left_type, Type):
+            if isinstance(right_type, Type):
+                return left_type.assignable_from(
+                    right_type,
+                    schema=self._schema,
+                    generics=left_generics,
+                    generic_bindings=self._generic_bindings,
+                    proper_subtype=proper_subtype,
+                ) or (
+                    two_way
+                    and right_type.assignable_from(
+                        left_type,
+                        schema=self._schema,
+                        proper_subtype=proper_subtype,
+                    )
+                )
+            else:
+                return False
+        else:
+            if isinstance(right_type, Type):
+                return False
+            elif consider_py_inheritance:
+                return self._is_strict_py_sub_type(
+                    left_type=left_type,
+                    right_type=right_type,
+                    left_typemod=left_typemod,
+                    right_typemod=right_typemod,
+                ) or (
+                    two_way
+                    and self._is_strict_py_sub_type(
+                        left_type=right_type,
+                        right_type=left_type,
+                        left_typemod=right_typemod,
+                        right_typemod=left_typemod,
+                    )
+                )
+            else:
+                return left_type == right_type
+
+    def _is_strict_py_sub_type(
+        self,
+        *,
+        left_type: PyTypeName,
+        right_type: PyTypeName,
+        left_typemod: TypeModifier,
+        right_typemod: TypeModifier,
+    ) -> bool:
+        if right_type == left_type:
+            return False
+        else:
+            return issubclass(
+                _get_py_type(right_type), _get_py_type(left_type)
+            ) or (
+                # bytes is a subclass of Sequence[int]
+                left_type == ("builtins", "int")
+                and left_typemod is TypeModifier.SetOf
+                and right_type == ("builtins", "bytes")
+            )
+
+
 @sobject
 class Callable(SchemaObject):
     return_type: TypeRef | Type
     return_typemod: TypeModifier
     params: list[CallableParam]
+
+    @functools.cached_property
+    def edgeql_signature(self) -> str:
+        named_only = []
+        positional = []
+        variadic = []
+        for param in self.params:
+            if param.kind is CallableParamKind.NamedOnly:
+                named_only.append(str(param))
+            elif param.kind is CallableParamKind.Variadic:
+                variadic.append(str(param))
+            else:
+                positional.append(str(param))
+
+        params = ", ".join(positional + variadic + named_only)
+        if self.return_typemod is TypeModifier.SetOf:
+            ret = f"set of {self.return_type}"
+        elif self.return_typemod is TypeModifier.Optional:
+            ret = f"optional {self.return_type}"
+        else:
+            ret = f"{self.return_type}"
+        return f"{self.name}({params}) -> {ret}"
 
     @functools.cached_property
     def ident(self) -> str:
@@ -462,93 +746,31 @@ class Callable(SchemaObject):
             "params"
         ),
         schema: Mapping[str, Type],
+        ignore_return: bool = False,
     ) -> bool:
         """Check if this callable subsumes (is more general than)
         *other* function.
         """
-        general = self
-        gen_param_types = param_types
-        specific = other
-        spec_param_types = other_param_types
-
-        # General's signature must contain specific signature.
-        if not general.signature.contains(specific.signature):
+        # Self signature must contain other's signature.
+        if not self.signature.contains(other.signature):
             return False
 
-        gen_generics = general.generics(schema)
-        spec_generics = specific.generics(schema)
+        sig_matcher = _CallableSignatureMatcher(
+            left=self,
+            right=other,
+            left_param_types=param_types,
+            right_param_types=other_param_types,
+            schema=schema,
+        )
 
-        if spec_generics and not gen_generics:
-            # A generic callable is always more general than a non-generic
-            return False
-
-        generic_bindings: dict[Type, Type] = {}
-
-        # Check each parameter
-        for gen_param, spec_param in zip(
-            param_getter(general),
-            param_getter(specific),
-            strict=False,
+        # Check each parameter: self must accept all params of other...
+        if not all(
+            sig_matcher.is_param_compatible(p.key) for p in param_getter(other)
         ):
-            gen_type = gen_param.get_type(schema)
-            if gen_param_types is not None:
-                gen_types = gen_param_types.get(gen_param.key, [gen_type])
-            else:
-                gen_types = [gen_type]
-
-            spec_type = spec_param.get_type(schema)
-            if spec_param_types is not None:
-                spec_types = spec_param_types.get(spec_param.key, [spec_type])
-            else:
-                spec_types = [spec_type]
-
-            if (pgenerics := gen_generics.get(gen_param.key)) is not None:
-                generics = {
-                    path: gt
-                    for gt, paths in pgenerics.items()
-                    for path in paths
-                }
-            else:
-                generics = None
-
-            def is_assignable(
-                gen_type: Type | PyTypeName,
-                spec_type: Type | PyTypeName,
-                generics: dict[Indirection, Type] | None = generics,
-            ) -> bool:
-                if isinstance(spec_type, Type) and isinstance(gen_type, Type):
-                    return gen_type.assignable_from(
-                        spec_type,
-                        schema=schema,
-                        generics=generics,
-                        generic_bindings=generic_bindings,
-                    )
-                else:
-                    return spec_type == gen_type
-
-            # For parameters, specific must be assignable to general
-            for st in spec_types:
-                if not any(is_assignable(gt, st) for gt in gen_types):
-                    return False
+            return False
 
         # Check if return types are compatible
-        gen_return = general.get_return_type(schema)
-        spec_return = specific.get_return_type(schema)
-
-        if (retgenerics := gen_generics.get("__return__")) is not None:
-            ret_generics = {
-                path: gt for gt, paths in retgenerics.items() for path in paths
-            }
-        else:
-            ret_generics = None
-
-        # For return type, general must be assignable to specific
-        return spec_return.assignable_from(
-            gen_return,
-            schema=schema,
-            generics=ret_generics,
-            generic_bindings=generic_bindings,
-        )
+        return ignore_return or sig_matcher.is_return_compatible()
 
     def overlaps(
         self,
@@ -561,136 +783,41 @@ class Callable(SchemaObject):
         ),
         schema: Mapping[str, Type],
         consider_py_inheritance: bool = False,
+        consider_optionality: bool = True,
     ) -> bool:
-        """Check if this callable overlaps the *other* callable
-        in signature (regardless of the return type).
+        """Check if this callable overlaps the *other* callable.  Assumes
+        that *self* appears _after_ *other* in the list of overloads.
         """
         # First quick check for type agnostic signature overlap.
         if not self.signature.overlaps(other.signature):
             return False
 
-        self_generics = self.generics(schema)
-        other_generics = other.generics(schema)
+        sig_matcher = _CallableSignatureMatcher(
+            left=self,
+            right=other,
+            left_param_types=param_types,
+            right_param_types=other_param_types,
+            schema=schema,
+        )
 
-        def _param_type(
-            param: CallableParam, typemap: CallableParamTypeMap | None
-        ) -> Collection[Type | PyTypeName]:
-            if typemap is not None:
-                types = typemap.get(param.key)
-                if types is None:
-                    types = [param.get_type(schema)]
-            else:
-                types = [param.get_type(schema)]
-
-            return types
-
-        self_type = functools.partial(_param_type, typemap=param_types)
-        other_type = functools.partial(_param_type, typemap=other_param_types)
-
-        def _generics(
-            param: CallableParam,
-            genmap: CallableGenericPositions,
-        ) -> dict[Indirection, Type] | None:
-            if (pgenerics := genmap.get(param.key)) is not None:
-                return {
-                    path: gt
-                    for gt, paths in pgenerics.items()
-                    for path in paths
-                }
-            else:
-                return None
-
-        generic_bindings: dict[Type, Type] = {}
-
-        get_self_gen = functools.partial(_generics, genmap=self_generics)
-        get_other_gen = functools.partial(_generics, genmap=other_generics)
-
-        def is_assignable(
-            self_type: Type | PyTypeName,
-            other_type: Type | PyTypeName,
-            self_generics: dict[Indirection, Type] | None,
-            other_generics: dict[Indirection, Type] | None,
-        ) -> bool:
-            if isinstance(self_type, Type):
-                if isinstance(other_type, Type):
-                    return self_type.assignable_from(
-                        other_type,
-                        schema=schema,
-                        generics=self_generics,
-                        generic_bindings=generic_bindings,
-                    ) or other_type.assignable_from(
-                        self_type,
-                        schema=schema,
-                        generics=other_generics,
-                        generic_bindings=generic_bindings,
-                    )
-                else:
-                    return False
-            else:
-                if isinstance(other_type, Type):
-                    return False
-                elif consider_py_inheritance:
-                    self_py_type = _get_py_type(self_type)
-                    other_py_type = _get_py_type(other_type)
-                    return issubclass(
-                        self_py_type, other_py_type
-                    ) or issubclass(other_py_type, self_py_type)
-                else:
-                    return self_type == other_type
-
-        # Check overlaps on positional parameters
-        def params_overlap(
-            pairs: Iterable[tuple[CallableParam, CallableParam]],
-        ) -> bool:
-            num_overlapping = 0
-            num_total = 0
-            for self_param, other_param in pairs:
-                self_types = self_type(self_param)
-                other_types = other_type(other_param)
-                self_gen = get_self_gen(self_param)
-                other_gen = get_other_gen(other_param)
-
-                num_overlapping += any(
-                    is_assignable(st, ot, self_gen, other_gen)
-                    for st in self_types
-                    for ot in other_types
-                )
-
-                num_total += 1
-
-            return num_overlapping == num_total
-
-        self_pos = [
-            param
-            for param in param_getter(self)
-            if param.kind is CallableParamKind.Positional
-            and param.default is None
-        ]
-        other_pos = [
-            param
-            for param in param_getter(other)
-            if param.kind is CallableParamKind.Positional
-            and param.default is None
-        ]
-
-        if not params_overlap(zip(self_pos, other_pos, strict=False)):
+        if sig_matcher.is_return_compatible():
+            # Overloads with compatible return types are not considered
+            # to be overlapping by type checkers.
             return False
 
-        self_kw = {
-            param.name: param
+        return all(
+            sig_matcher.is_param_overlapping(
+                param.key,
+                two_way=True,
+                consider_py_inheritance=consider_py_inheritance,
+                consider_optionality=consider_optionality,
+            )
             for param in param_getter(self)
-            if param.kind is CallableParamKind.NamedOnly
+            if (
+                param.kind is CallableParamKind.Positional
+                or param.kind is CallableParamKind.NamedOnly
+            )
             and param.default is None
-        }
-        other_kw = {
-            param.name: param
-            for param in param_getter(other)
-            if param.kind is CallableParamKind.NamedOnly
-            and param.default is None
-        }
-        return params_overlap(
-            (self_kw[name], other_kw[name])
-            for name in set(self_kw) & set(other_kw)
         )
 
 
@@ -700,22 +827,3 @@ CallableParamGetter = TypeAliasType(
     typing.Callable[[_Callable_T], Iterable[CallableParam]],
     type_params=(_Callable_T,),
 )
-
-
-@sobject
-class Function(Callable):
-    pass
-
-
-def fetch_functions(
-    db: abstract.ReadOnlyExecutor,
-    schema_part: SchemaPart,
-) -> list[Function]:
-    builtin = schema_part is SchemaPart.STD
-    fns: list[Function] = [
-        _dataclass_extras.coerce_to_dataclass(
-            Function, fn, cast_map={str: (uuid.UUID,)}
-        )
-        for fn in db.query(_query.FUNCTIONS, builtin=builtin)
-    ]
-    return fns
