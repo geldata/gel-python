@@ -1136,7 +1136,7 @@ class SaveExecutor:
 
                 else:
                     assert prop.kind is PointerKind.Property
-                    if prop.cardinality.is_multi():
+                    if prop.cardinality.is_multi() and not prop.computed:
                         assert is_prop_list(val)
                         val.__gel_post_commit_check__(link_path)
 

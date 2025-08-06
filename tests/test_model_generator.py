@@ -3695,7 +3695,6 @@ class TestModelGenerator(tb.ModelTestCase):
             fresh.next.__linkprops__.steps, path.next.__linkprops__.steps
         )
 
-    @tb.xfail
     def test_modelgen_save_computed_multiprops_01(self):
         from models import default
 
