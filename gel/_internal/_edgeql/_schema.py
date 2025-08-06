@@ -43,6 +43,9 @@ class PointerKind(StrEnum):
     Link = "Link"
     Property = "Property"
 
+    def is_link(self) -> bool:
+        return self is PointerKind.Link
+
 
 def _mangle_name(name: str) -> str:
     return (

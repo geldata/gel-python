@@ -163,7 +163,7 @@ class AbstractCollection(Iterable[_T_co], Generic[_T_co]):
     def __gel_has_changes__(self) -> bool:
         raise NotImplementedError
 
-    def __gel_commit__(self) -> None:
+    def __gel_commit__(self, *, refetch_mode: bool) -> None:
         # Flip "override mode" to False; it can be set back to True
         # if the user assigns a new list to the field, e.g.
         # `model.multilink = [ ... ]`. Setting it back to False means
@@ -280,9 +280,9 @@ class AbstractTrackedList(
             return False
         return bool(self._added_items) or bool(self._removed_items)
 
-    def __gel_commit__(self) -> None:
+    def __gel_commit__(self, *, refetch_mode: bool) -> None:
         self._added_items = self._removed_items = None
-        super().__gel_commit__()
+        super().__gel_commit__(refetch_mode=refetch_mode)
 
     def __gel_post_commit_check__(self, path: Path) -> None:
         if self._added_items is not None:

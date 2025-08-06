@@ -194,8 +194,8 @@ class AbstractLinkSet(  # noqa: PLW1641 (__hash__ is implemented)
             return False
         return self._tracking_index != self._index_snapshot
 
-    def __gel_commit__(self) -> None:
-        super().__gel_commit__()
+    def __gel_commit__(self, *, refetch_mode: bool) -> None:
+        super().__gel_commit__(refetch_mode=refetch_mode)
 
         if self._tracking_index is not None:
             assert self._tracking_set is not None
