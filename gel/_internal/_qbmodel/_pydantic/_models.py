@@ -1456,6 +1456,7 @@ class ProxyModel(
             "__proxy_of__",
             "__class__",
             "__gel_linked__",
+            "without_linkprops",
         }:
             # Fast path for the wrapped object itself / linkprops model
             # (this optimization is informed by profiling model
