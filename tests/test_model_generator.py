@@ -1405,6 +1405,77 @@ class TestModelGenerator(tb.ModelTestCase):
         def select_everything(model: type[T]) -> Any:
             return model.select("*")
 
+    def test_modelgen_pydantic_apis_17(self):
+        from models import default
+
+        client = self.client
+
+        u = client.get(default.User.filter(name="Alice"))
+        u_link = default.Image.author.link(u, caption="zzz")
+
+        u_lp_1 = object.__getattribute__(u_link, "__linkprops__")
+
+        im1 = default.Image(
+            file="aaa",
+            author=u_link,
+            # should copy linkprops, as they're coming from
+            # the `.link()` call -- that's the API to set linkprops
+        )
+
+        im2 = default.Image(
+            file="aaa",
+            author=im1.author,
+            # should not copy linkprops (!!!)
+            # linkprops would be copied from another
+            # link which would be confusing
+        )
+
+        u_lp_2 = object.__getattribute__(u_link, "__linkprops__")
+        im1_alp = object.__getattribute__(im1.author, "__linkprops__")
+        im2_alp = object.__getattribute__(im2.author, "__linkprops__")
+
+        self.assertIs(u_lp_1, u_lp_2)
+
+        # Validate that linkprops are copied by ref
+        self.assertTrue(getattr(u_lp_1, "__gel_copied_by_ref__", False))
+
+        self.assertIsNot(im1_alp, im2_alp)
+        self.assertEqual(
+            im1_alp.model_dump(), {"caption": "zzz", "year": None}
+        )
+
+        # validate that linkprops are still copied by red
+        # even after model_dump()
+        self.assertTrue(
+            getattr(
+                object.__getattribute__(im1.author, "__linkprops__"),
+                "__gel_copied_by_ref__",
+                False,
+            )
+        )
+
+        client.save(im1, im2)
+
+        # validate that linkprops are still copied by red
+        # even after save()
+        self.assertTrue(
+            getattr(
+                object.__getattribute__(im1.author, "__linkprops__"),
+                "__gel_copied_by_ref__",
+                False,
+            )
+        )
+
+        self.assertIs(im1_alp, u_lp_1)
+        self.assertEqual(im2_alp.model_dump(), {})
+
+        # validate that linkprops are "materialized" after
+        # accessing the __linkprops__ attribute
+        self.assertIsNot(u_lp_1, u_link.__linkprops__)
+        self.assertFalse(
+            getattr(u_link.__linkprops__, "__gel_copied_by_ref__", False)
+        )
+
     def test_modelgen_data_unpack_polymorphic(self):
         from models import default
 

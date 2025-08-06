@@ -1304,6 +1304,17 @@ class GelLinkModel(
     # Base class for __linkprops__ classes.
     __slots__ = ("__gel_copied_by_ref__",)
 
+    def __getstate__(self) -> dict[Any, Any]:
+        state = super().__getstate__()
+        state["__gel_copied_by_ref__"] = getattr(
+            self, "__gel_copied_by_ref__", False
+        )
+        return state
+
+    def __setstate__(self, state: dict[Any, Any]) -> None:
+        super().__setstate__(state)
+        self.__gel_copied_by_ref__ = state["__gel_copied_by_ref__"]
+
 
 _MT_co = TypeVar("_MT_co", bound=GelModel, covariant=True)
 
@@ -1813,14 +1824,16 @@ class ProxyModel(
         return {
             "obj": ll_getattr(self, "_p__obj__"),
             "linkprops": ll_getattr(self, "__linkprops__"),
+            "linked": ll_getattr(self, "__gel_linked__"),
         }
 
     def __setstate__(self, state: dict[Any, Any]) -> None:
         ll_setattr(self, "_p__obj__", state["obj"])
         ll_setattr(self, "__linkprops__", state["linkprops"])
+        ll_setattr(self, "__gel_linked__", state["linked"])
 
     def without_linkprops(self) -> _MT_co:
-        return self._p__obj__
+        return ll_getattr(self, "_p__obj__")  # type: ignore [no-any-return]
 
 
 #
