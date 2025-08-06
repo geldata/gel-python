@@ -3730,6 +3730,269 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(alice.nickname, "magical unicorn")
 
     @tb.xfail
+    # error from saving tsl2
+    # more than one row returned by a subquery used as an expression
+    def test_modelgen_save_reload_links_04(self):
+        from models import default
+
+        # Test that what happens to computed links after saving a new object
+        # TestSingleLinks has computed versions of all its links
+
+        alice = self.client.get(default.User.filter(name="Alice"))
+        tsl = default.TestSingleLinks(
+            req_wprop_friend=default.TestSingleLinks.req_wprop_friend.link(
+                alice, strength=100
+            ),
+            req_friend=alice,
+            opt_friend=alice,
+            opt_wprop_friend=default.TestSingleLinks.opt_wprop_friend.link(
+                alice, strength=50
+            ),
+        )
+
+        self.client.save(tsl)
+
+        # Computed links should not be set after save
+        with self.assertRaisesRegex(
+            AttributeError, "'comp_req_wprop_friend' is not set"
+        ):
+            assert tsl.comp_req_wprop_friend is not None  # access field
+
+        with self.assertRaisesRegex(
+            AttributeError, "'comp_req_friend' is not set"
+        ):
+            assert tsl.comp_req_friend is not None  # access field
+
+        with self.assertRaisesRegex(
+            AttributeError, "'comp_opt_friend' is not set"
+        ):
+            assert tsl.comp_opt_friend is not None  # access field
+
+        with self.assertRaisesRegex(
+            AttributeError, "'comp_opt_wprop_friend' is not set"
+        ):
+            assert tsl.comp_opt_wprop_friend is not None  # access field
+
+        # Make mypy happy
+        assert tsl.opt_friend is not None
+        assert tsl.opt_wprop_friend is not None
+
+        # The links should still be there
+        self.assertEqual(tsl.req_wprop_friend.name, "Alice")
+        self.assertEqual(tsl.req_friend.name, "Alice")
+        self.assertEqual(tsl.opt_friend.name, "Alice")
+        self.assertEqual(tsl.opt_wprop_friend.name, "Alice")
+
+        # Now refetch the object with all links explicitly
+        billie = self.client.get(default.User.filter(name="Billie"))
+        tsl2 = self.client.get(
+            default.TestSingleLinks.select(
+                "*",
+                req_wprop_friend=True,
+                req_friend=True,
+                opt_friend=True,
+                opt_wprop_friend=True,
+                comp_req_wprop_friend=True,
+                comp_req_friend=True,
+                comp_opt_friend=True,
+                comp_opt_wprop_friend=True,
+            ).filter(id=tsl.id)
+        )
+
+        # Make mypy happy
+        assert tsl2.opt_wprop_friend is not None
+        assert tsl2.opt_friend is not None
+        assert tsl2.comp_opt_friend is not None
+        assert tsl2.comp_opt_wprop_friend is not None
+
+        self.assertEqual(tsl2.comp_req_wprop_friend.name, "Alice")
+        self.assertEqual(tsl2.comp_req_friend.name, "Alice")
+        self.assertEqual(tsl2.comp_opt_friend.name, "Alice")
+        self.assertEqual(tsl2.comp_opt_wprop_friend.name, "Alice")
+        # Check the ids as well
+        self.assertEqual(
+            tsl2.comp_req_wprop_friend.id, tsl.req_wprop_friend.id
+        )
+        self.assertEqual(tsl2.comp_req_friend.id, tsl.req_friend.id)
+        self.assertEqual(tsl2.comp_opt_friend.id, tsl.opt_friend.id)
+        self.assertEqual(
+            tsl2.comp_opt_wprop_friend.id, tsl.opt_wprop_friend.id
+        )
+
+        # Change all links to Billie
+        tsl2.req_wprop_friend = default.TestSingleLinks.req_wprop_friend.link(
+            billie
+        )
+        tsl2.req_friend = billie
+        tsl2.opt_friend = billie
+        tsl2.opt_wprop_friend = default.TestSingleLinks.opt_wprop_friend.link(
+            billie
+        )
+
+        # Save the changes
+        self.client.save(tsl2)
+
+        # After save, the main links should be updated to Billie
+        self.assertEqual(tsl2.req_wprop_friend.name, "Billie")
+        self.assertEqual(tsl2.req_friend.name, "Billie")
+        self.assertEqual(tsl2.opt_friend.name, "Billie")
+        self.assertEqual(tsl2.opt_wprop_friend.name, "Billie")
+
+        # But computed links should no longer be set after the save
+        with self.assertRaisesRegex(
+            AttributeError, "'comp_req_wprop_friend' is not set"
+        ):
+            assert tsl2.comp_req_wprop_friend is not None  # access field
+
+        with self.assertRaisesRegex(
+            AttributeError, "'comp_req_friend' is not set"
+        ):
+            assert tsl2.comp_req_friend is not None  # access field
+
+        with self.assertRaisesRegex(
+            AttributeError, "'comp_opt_friend' is not set"
+        ):
+            assert tsl2.comp_opt_friend is not None  # access field
+
+        with self.assertRaisesRegex(
+            AttributeError, "'comp_opt_wprop_friend' is not set"
+        ):
+            assert tsl2.comp_opt_wprop_friend is not None  # access field
+
+    def test_modelgen_save_reload_links_05(self):
+        from models import default
+
+        # Test that backlinks become unset after save operations
+        # User.groups is a computed backlink to UserGroup.users
+
+        # Fetch Alice with her groups backlink
+        alice = self.client.get(
+            default.User.select(
+                name=True,
+                groups=True,
+            ).filter(name="Alice")
+        )
+
+        # Alice should have her groups backlink available after fetch
+        # (even if empty, it should not be None)
+        self.assertIsNotNone(alice.groups)
+
+        # Create a new UserGroup with Alice as a member
+        gr = default.UserGroup(
+            name="Dancing Banana Enthusiasts", users=[alice]
+        )
+        self.client.save(gr)
+
+        # After saving the group, Alice's groups backlink should be unset
+        # because Alice wasn't explicitly fetched with groups after the change
+        with self.assertRaisesRegex(AttributeError, "'groups' is not set"):
+            assert alice.groups is not None  # access field
+
+        with self.assertRaisesRegex(AttributeError, "'groups' is not set"):
+            a = [u for u in gr.users if u.id == alice.id][0]
+            assert a.groups is not None  # access field
+
+        # But Alice herself should still be accessible
+        self.assertEqual(alice.name, "Alice")
+
+    @tb.xfail
+    # "remove" seems to cause issues with the "save".
+    # Also, removing user does not invalidate the backlink.
+    # Possibly nothing can be done to fix this.
+    def test_modelgen_save_reload_links_06(self):
+        from models import default
+
+        # Test backlink invalidation when removing a user from existing group
+        # Fetch an existing group with users and their backlinks
+
+        red = self.client.get(
+            default.UserGroup.select(
+                name=True,
+                users=lambda g: g.users.select(
+                    name=True,
+                    groups=True,
+                ),
+            ).filter(name="red")
+        )
+
+        self.assertEqual(red.name, "red")
+        self.assertEqual(
+            {u.name for u in red.users},
+            {"Alice", "Billie", "Cameron", "Dana"},
+        )
+
+        orig_ids = {u.id for u in red.users}
+        # Find Alice in the group
+        alice = [u for u in red.users if u.name == "Alice"][0]
+        self.assertIn("red", {g.name for g in alice.groups})
+
+        # Modify and save the group
+        red.users.remove(alice)
+        self.client.save(red)
+
+        # After saving, Alice's groups backlink should be unset
+        with self.assertRaisesRegex(AttributeError, "'groups' is not set"):
+            assert alice.groups is not None  # access field
+
+        # But we should still have some valid data
+        self.assertEqual(alice.name, "Alice")
+        self.assertEqual({u.id for u in red.users}, orig_ids - {alice.id})
+
+    @tb.xfail
+    # Damned if I do, damned if I don't.
+    # use "add":
+    #   AttributeError: 'list' object has no attribute 'add'
+    # use "append":
+    #   mypy error: "AbstractLinkSet[User]" has no attribute "append"
+    def test_modelgen_save_reload_links_07(self):
+        from models import default
+
+        # Test backlink invalidation when adding a user to a different group
+        # Fetch red and blue groups with nested user data and their groups
+
+        red = self.client.get(
+            default.UserGroup.select(
+                name=True,
+                users=lambda g: g.users.select(
+                    name=True,
+                    groups=True,
+                ),
+            ).filter(name="red")
+        )
+
+        blue = self.client.get(
+            default.UserGroup.select(
+                name=True,
+                users=lambda g: g.users.select(
+                    name=True,
+                    groups=True,
+                ),
+            ).filter(name="blue")
+        )
+
+        self.assertEqual(red.name, "red")
+        self.assertEqual(blue.name, "blue")
+        self.assertEqual(len(blue.users), 0)  # Should be empty initially
+
+        orig_ids = {u.id for u in red.users}
+        # Find Alice in the red group
+        alice = [u for u in red.users if u.name == "Alice"][0]
+        self.assertIn("red", {g.name for g in alice.groups})
+
+        # Add Alice to the blue group
+        blue.users.append(alice)
+        self.client.save(blue)
+
+        # After saving, Alice's groups backlink should be invalidated
+        with self.assertRaisesRegex(AttributeError, "'groups' is not set"):
+            assert alice.groups is not None  # access field
+
+        # But we should still have some valid data
+        self.assertEqual(alice.name, "Alice")
+        self.assertEqual({u.id for u in red.users}, orig_ids)
+        self.assertEqual({u.id for u in blue.users}, {alice.id})
+
+    @tb.xfail
     # link props aren't reloaded after save
     def test_modelgen_save_reload_linkprops_01(self):
         from models import default
@@ -4386,7 +4649,7 @@ class TestModelGenerator(tb.ModelTestCase):
             MultiRange([Range(dt.date(2025, 3, 4), dt.date(2025, 11, 21))]),
         )
 
-    def test_modelgen_linkprops_1(self):
+    def test_modelgen_linkprops_01(self):
         from models import default
 
         # Create a new GameSession and add a player
@@ -4412,7 +4675,7 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(p.name, "Zoe")
         self.assertEqual(p.__linkprops__.is_tall_enough, True)
 
-    def test_modelgen_linkprops_2(self):
+    def test_modelgen_linkprops_02(self):
         from models import default
 
         # Create a new GameSession and add a player
@@ -4451,7 +4714,7 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(p.name, "Elsa")
         self.assertEqual(p.__linkprops__.is_tall_enough, False)
 
-    def test_modelgen_linkprops_3(self):
+    def test_modelgen_linkprops_03(self):
         from models import default
 
         # This one only has a single player
