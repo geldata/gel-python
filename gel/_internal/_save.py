@@ -1013,7 +1013,10 @@ class SaveExecutor:
             assert not isinstance(obj, ProxyModel)
 
             visited.track(obj)
-            obj.__gel_commit__(self.object_ids.get(id(obj)))
+            obj.__gel_commit__(
+                new_id=self.object_ids.get(id(obj)),
+                refetch_mode=self.refetch,
+            )
 
             for prop in get_pointers(type(obj)):
                 if prop.computed:
@@ -1036,16 +1039,20 @@ class SaveExecutor:
                     if prop.cardinality.is_multi():
                         if is_link_wprops_set(linked):
                             for proxy in linked._items:
-                                get_proxy_linkprops(proxy).__gel_commit__()
+                                get_proxy_linkprops(proxy).__gel_commit__(
+                                    refetch_mode=self.refetch
+                                )
                                 _traverse(unwrap_proxy_no_check(proxy))
                         else:
                             assert is_link_set(linked)
                             for model in linked._items:
                                 _traverse(model)
-                        linked.__gel_commit__()
+                        linked.__gel_commit__(refetch_mode=self.refetch)
                     else:
                         if isinstance(linked, ProxyModel):
-                            get_proxy_linkprops(linked).__gel_commit__()
+                            get_proxy_linkprops(linked).__gel_commit__(
+                                refetch_mode=self.refetch
+                            )
                             _traverse(unwrap_proxy_no_check(linked))
                         else:
                             _traverse(cast("GelModel", linked))
@@ -1054,7 +1061,7 @@ class SaveExecutor:
                     assert prop.kind is PointerKind.Property
                     if prop.cardinality.is_multi():
                         assert is_prop_list(linked)
-                        linked.__gel_commit__()
+                        linked.__gel_commit__(refetch_mode=self.refetch)
 
         for o in self.objs:
             _traverse(o)
