@@ -479,7 +479,12 @@ class ConnectedTestCaseMixin:
                 if cls.is_client_async
                 else blocking_client.BlockingIOConnection
             )
-        return (TestAsyncIOClient if cls.is_client_async else TestClient)(
+        client_class = (
+            TestAsyncIOClient
+            if issubclass(connection_class, asyncio_client.AsyncIOConnection)
+            else TestClient
+        )
+        return client_class(
             connection_class=connection_class,
             max_concurrency=1,
             **conargs,
@@ -526,13 +531,15 @@ class DatabaseTestCase(ClusterTestCase, ConnectedTestCaseMixin):
             testdb = "_" + hashlib.sha1(testdb.encode()).hexdigest()
             self.__testdb__ = testdb
 
-            cls.admin_client.query(f"""
-                create data branch {testdb} from {root};
-            """)
+            self.adapt_call(
+                cls.admin_client.query(f"""
+                    create data branch {testdb} from {root};
+                """)
+            )
             self.client = cls.make_test_client(database=testdb)._with_debug(
                 save_postcheck=True,
             )
-            self.client.ensure_connected()
+            self.adapt_call(self.client.ensure_connected())
 
         if self.SETUP_METHOD:
             self.adapt_call(self.client.execute(self.SETUP_METHOD))
@@ -559,9 +566,11 @@ class DatabaseTestCase(ClusterTestCase, ConnectedTestCaseMixin):
                     self.client.terminate()
                     self.client = None
 
-                    type(self).admin_client.query(f"""
-                        drop branch {self.__testdb__};
-                    """)
+                    self.adapt_call(
+                        type(self).admin_client.query(f"""
+                            drop branch {self.__testdb__};
+                        """)
+                    )
 
                 super().tearDown()
 
@@ -713,6 +722,7 @@ class DatabaseTestCase(ClusterTestCase, ConnectedTestCaseMixin):
 
 class AsyncQueryTestCase(DatabaseTestCase):
     BASE_TEST_CLASS = True
+    is_client_async = True
 
 
 class SyncQueryTestCase(DatabaseTestCase):
@@ -725,7 +735,7 @@ class SyncQueryTestCase(DatabaseTestCase):
         return result
 
 
-class ModelTestCase(SyncQueryTestCase):
+class BaseModelTestCase(DatabaseTestCase):
     DEFAULT_MODULE = "default"
 
     client: typing.ClassVar[gel.Client]
@@ -749,20 +759,28 @@ class ModelTestCase(SyncQueryTestCase):
 
         from gel._internal._codegen._models import PydanticModelsGenerator
 
-        cls.gen = PydanticModelsGenerator(
-            argparse.Namespace(no_cache=True, quiet=True, output=None),
-            project_dir=pathlib.Path(cls.tmp_model_dir.name),
-            client=cls.client,
-            interactive=False,
+        gen_client = cls.make_test_client(
+            connection_class=blocking_client.BlockingIOConnection,
+            database=cls.get_database_name(),
         )
-
         try:
-            cls.gen.run()
-        except Exception as e:
-            raise RuntimeError(
-                f"error running model codegen, its stderr:\n"
-                f"{cls.gen.get_error_output()}"
-            ) from e
+            gen_client.ensure_connected()
+            cls.gen = PydanticModelsGenerator(
+                argparse.Namespace(no_cache=True, quiet=True, output=None),
+                project_dir=pathlib.Path(cls.tmp_model_dir.name),
+                client=gen_client,
+                interactive=False,
+            )
+
+            try:
+                cls.gen.run()
+            except Exception as e:
+                raise RuntimeError(
+                    f"error running model codegen, its stderr:\n"
+                    f"{cls.gen.get_error_output()}"
+                ) from e
+        finally:
+            gen_client.terminate()
 
         sys.path.insert(0, cls.tmp_model_dir.name)
 
@@ -910,6 +928,14 @@ class ModelTestCase(SyncQueryTestCase):
             getattr(model, "__gel_changed_fields__", ...),
             getattr(model2, "__gel_changed_fields__", ...),
         )
+
+
+class ModelTestCase(SyncQueryTestCase, BaseModelTestCase):
+    client: gel.Client
+
+
+class AsyncModelTestCase(AsyncQueryTestCase, BaseModelTestCase):
+    client: gel.AsyncIOClient
 
 
 class ORMTestCase(SyncQueryTestCase):
@@ -1075,7 +1101,7 @@ def _typecheck(func, *, xfail=False):
     lines = source_code.splitlines()
     body_offset: int
     for lineno, line in enumerate(lines):
-        if line.strip().startswith("def "):
+        if line.strip().startswith("async def " if is_async else "def "):
             body_offset = lineno
             break
     else:
@@ -1083,6 +1109,7 @@ def _typecheck(func, *, xfail=False):
 
     source_code = "\n".join(lines[body_offset + 1 :])
     dedented_body = textwrap.dedent(source_code)
+    base_class_name = "AsyncModelTestCase" if is_async else "ModelTestCase"
 
     source_code = f"""\
 import unittest
@@ -1090,13 +1117,13 @@ import typing
 
 import gel
 
-from gel._testbase import ModelTestCase
+from gel import _testbase
 
 if not typing.TYPE_CHECKING:
     def reveal_type(_: typing.Any) -> str:
         return ''
 
-class TestModel(ModelTestCase):
+class TestModel(_testbase.{base_class_name}):
     if typing.TYPE_CHECKING:
     {
         "      client: typing.ClassVar[gel.AsyncIOClient] = "
@@ -1187,16 +1214,25 @@ class TestModel(ModelTestCase):
             except IndexError:
                 return None
 
-        func.__globals__["reveal_type"] = reveal_type
-        return func(self)
+        if is_async:
+            # `func` is the result of `TestCaseMeta.wrap()`, so we
+            # want to use the coroutine function that was there in
+            # the beginning, so let's use `wrapped`
+            wrapped.__globals__["reveal_type"] = reveal_type
+            return wrapped(self)
+        else:
+            func.__globals__["reveal_type"] = reveal_type
+            return func(self)
 
     if is_async:
 
-        @functools.wraps(func)
-        async def runner(run=run):
-            await run()
+        @functools.wraps(wrapped)
+        async def runner(self, run=run):
+            coro = run(self)
+            await coro
 
-        return unittest.expectedFailure(runner) if xfail else runner
+        rewrapped = TestCaseMeta.wrap(runner)
+        return unittest.expectedFailure(rewrapped) if xfail else rewrapped
 
     else:
         run = functools.wraps(func)(run)
