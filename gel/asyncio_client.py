@@ -498,7 +498,7 @@ class AsyncIOBatchIteration(transaction.BaseTransaction):
     ) -> None:
         self._batched_ops.append(
             abstract.QueryContext(
-                query=abstract.QueryWithArgs(query, None, args, kwargs),
+                query=abstract.QueryWithArgs.from_query(query, args, kwargs),
                 cache=self._client._get_query_cache(),
                 retry_options=None,
                 state=self._client._get_state(),
@@ -516,7 +516,7 @@ class AsyncIOBatchIteration(transaction.BaseTransaction):
     ) -> None:
         self._batched_ops.append(
             abstract.QuerySingleContext(
-                query=abstract.QueryWithArgs(query, None, args, kwargs),
+                query=abstract.QueryWithArgs.from_query(query, args, kwargs),
                 cache=self._client._get_query_cache(),
                 retry_options=None,
                 state=self._client._get_state(),
@@ -534,7 +534,7 @@ class AsyncIOBatchIteration(transaction.BaseTransaction):
     ) -> None:
         self._batched_ops.append(
             abstract.QueryRequiredSingleContext(
-                query=abstract.QueryWithArgs(query, None, args, kwargs),
+                query=abstract.QueryWithArgs.from_query(query, args, kwargs),
                 cache=self._client._get_query_cache(),
                 retry_options=None,
                 state=self._client._get_state(),
