@@ -33,6 +33,7 @@ from gel._internal._tracked_list import (
     DowncastingTrackedList,
 )
 from gel._internal._qbmodel._abstract import (
+    DEFAULT_VALUE,
     AbstractLinkSet,
     LinkSet,
     LinkWithPropsSet,
@@ -55,6 +56,7 @@ T_co = TypeVar("T_co", covariant=True)
 V = TypeVar("V")
 
 _unset = object()
+_STOP_LINK_TRAVERSAL = (None, _unset, DEFAULT_VALUE)
 
 _sorted_pointers_cache: weakref.WeakKeyDictionary[
     type[GelSourceModel], Iterable[GelPointerReflection]
@@ -338,7 +340,7 @@ def iter_graph(objs: Iterable[GelModel]) -> Iterable[GelModel]:
                 continue
 
             linked = getattr(obj, prop.name, _unset)
-            if linked is _unset or linked is None:
+            if linked in _STOP_LINK_TRAVERSAL:
                 # If users mess-up with user-defined types and smoe
                 # of the data isn't fetched, we don't want to crash
                 # with an AttributeErorr, it's not critical here.
@@ -376,8 +378,7 @@ def get_linked_new_objects(obj: GelModel) -> Iterable[GelModel]:
             continue
 
         linked = getattr(obj, prop.name, _unset)
-        if linked is _unset:
-            # See _get_all_deps for explanation.
+        if linked in _STOP_LINK_TRAVERSAL:
             continue
 
         if prop.cardinality.is_multi():
@@ -577,7 +578,7 @@ def make_plan(objs: Iterable[GelModel]) -> SavePlan:
                 and prop.cardinality.is_multi()
             ):
                 val = getattr(obj, prop.name, _unset)
-                if val is None or val is _unset:
+                if val in _STOP_LINK_TRAVERSAL:
                     continue
 
                 assert is_prop_list(val)
@@ -612,6 +613,9 @@ def make_plan(objs: Iterable[GelModel]) -> SavePlan:
                 # as modifying them does not require touching their host
                 # GelModel instance. Check them for changes manually.
                 val = getattr(obj, prop.name, _unset)
+                if val in _STOP_LINK_TRAVERSAL:
+                    continue
+
                 if isinstance(
                     val, (tuple, list, AbstractTrackedList)
                 ) and has_changes_recursive(val):
@@ -632,7 +636,7 @@ def make_plan(objs: Iterable[GelModel]) -> SavePlan:
                 and prop.properties
             ):
                 val = getattr(obj, prop.name, _unset)
-                if val is _unset or val is None:
+                if val in _STOP_LINK_TRAVERSAL:
                     continue
                 assert isinstance(val, ProxyModel)
                 lprops = get_proxy_linkprops(val)
@@ -670,7 +674,7 @@ def make_plan(objs: Iterable[GelModel]) -> SavePlan:
             # Let's unwind multi link changes.
 
             linked = getattr(obj, prop.name, _unset)
-            if linked is _unset:
+            if linked is _unset or linked is DEFAULT_VALUE:
                 # The link wasn't fetched at all
                 continue
 
@@ -1021,7 +1025,7 @@ class SaveExecutor:
                     continue
 
                 linked = getattr(obj, prop.name, _unset)
-                if linked is _unset or linked is None:
+                if linked in _STOP_LINK_TRAVERSAL:
                     # If users mess-up with user-defined types and some
                     # of the data isn't fetched, we don't want to crash
                     # with an AttributeErorr, it's not critical here.
@@ -1090,7 +1094,7 @@ class SaveExecutor:
 
             for prop in get_pointers(type(obj)):
                 val = getattr(obj, prop.name, _unset)
-                if val is _unset or val is None:
+                if val in _STOP_LINK_TRAVERSAL:
                     continue
 
                 link_path = path / prop.name
