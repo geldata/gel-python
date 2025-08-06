@@ -35,6 +35,10 @@ def maybe_patch_fastapi_cli() -> None:
         # Not being imported by fastapi.cli
         return
 
+    if fastapi_cli_import_site.f_locals.get("command") != "dev":
+        # Don't patch in production mode.
+        return
+
     def _patched_uvicorn_run(*args: Any, **kwargs: Any) -> None:
         from . import _lifespan  # noqa: PLC0415
 
