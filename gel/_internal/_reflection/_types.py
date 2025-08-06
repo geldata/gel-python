@@ -40,6 +40,10 @@ Schema = TypeAliasType("Schema", Mapping[str, "Type"])
 @struct
 class TypeRef:
     id: str
+    name: str
+
+    def __str__(self) -> str:
+        return self.name
 
 
 @sobject
@@ -47,6 +51,9 @@ class Type(SchemaObject, abc.ABC):
     kind: TypeKind
     builtin: bool
     internal: bool
+
+    def __str__(self) -> str:
+        return self.name
 
     @functools.cached_property
     def edgeql(self) -> str:
@@ -68,6 +75,7 @@ class Type(SchemaObject, abc.ABC):
         schema: Mapping[str, Type],
         generics: Mapping[Indirection, Type] | None = None,
         generic_bindings: dict[Type, Type] | None = None,
+        proper_subtype: bool = False,
         _path: Indirection = (),
     ) -> bool:
         if generics is None:
@@ -92,6 +100,7 @@ class Type(SchemaObject, abc.ABC):
                 generics=generics,
                 generic_bindings=generic_bindings,
                 path=_path,
+                proper_subtype=proper_subtype,
             )
             if assignable and generic is not None:
                 previous = generic_bindings.get(generic)
@@ -111,6 +120,7 @@ class Type(SchemaObject, abc.ABC):
         generics: Mapping[Indirection, Type],
         generic_bindings: dict[Type, Type],
         path: Indirection,
+        proper_subtype: bool,
     ) -> bool:
         raise NotImplementedError("_assignable_from()")
 
@@ -172,6 +182,7 @@ class InheritingType(Type):
         generics: Mapping[Indirection, Type],
         generic_bindings: dict[Type, Type],
         path: Indirection = (),
+        proper_subtype: bool,
     ) -> bool:
         return self == other or (
             isinstance(other, InheritingType)
@@ -224,8 +235,9 @@ class PseudoType(Type):
         generics: Mapping[Indirection, Type],
         generic_bindings: dict[Type, Type],
         path: Indirection = (),
+        proper_subtype: bool = False,
     ) -> bool:
-        return (
+        return not proper_subtype and (
             self.name == "anytype"
             or (self.name == "anytuple" and isinstance(other, _TupleType))
             or (self.name == "anyobject" and isinstance(other, ObjectType))
@@ -345,6 +357,7 @@ class HomogeneousCollectionType(CollectionType):
         generics: Mapping[Indirection, Type],
         generic_bindings: dict[Type, Type],
         path: Indirection = (),
+        proper_subtype: bool,
     ) -> bool:
         return isinstance(other, type(self)) and self.get_element_type(
             schema
@@ -353,6 +366,7 @@ class HomogeneousCollectionType(CollectionType):
             schema=schema,
             generics=generics,
             generic_bindings=generic_bindings,
+            proper_subtype=proper_subtype,
             _path=(*path, "__element_type__"),
         )
 
@@ -441,6 +455,36 @@ class HeterogeneousCollectionType(CollectionType):
 
         return el_types
 
+    def _assignable_from(
+        self,
+        other: Type,
+        *,
+        schema: Mapping[str, Type],
+        generics: Mapping[Indirection, Type],
+        generic_bindings: dict[Type, Type],
+        path: Indirection = (),
+        proper_subtype: bool,
+    ) -> bool:
+        if not isinstance(other, type(self)):
+            return False
+
+        self_types = self.get_element_types(schema)
+        other_types = other.get_element_types(schema)
+
+        return len(self_types) == len(other_types) and all(
+            self_el_type.assignable_from(
+                other_el_type,
+                schema=schema,
+                generics=generics,
+                generic_bindings=generic_bindings,
+                proper_subtype=proper_subtype,
+                _path=(*path, ("__element_types__", i)),
+            )
+            for i, (self_el_type, other_el_type) in enumerate(
+                zip(self_types, other_types, strict=True)
+            )
+        )
+
 
 @struct
 class ArrayType(HomogeneousCollectionType):
@@ -497,32 +541,6 @@ class _TupleType(HeterogeneousCollectionType):
     @functools.cached_property
     def _element_type_ids(self) -> list[str]:
         return [el.type_id for el in self.tuple_elements]
-
-    def _assignable_from(
-        self,
-        other: Type,
-        *,
-        schema: Mapping[str, Type],
-        generics: Mapping[Indirection, Type],
-        generic_bindings: dict[Type, Type],
-        path: Indirection = (),
-    ) -> bool:
-        return (
-            isinstance(other, _TupleType)
-            and len(self.tuple_elements) == len(other.tuple_elements)
-            and all(
-                schema[self_el.type_id].assignable_from(
-                    schema[other_el.type_id],
-                    schema=schema,
-                    generics=generics,
-                    generic_bindings=generic_bindings,
-                    _path=(*path, ("__element_types__", i)),
-                )
-                for i, (self_el, other_el) in enumerate(
-                    zip(self.tuple_elements, other.tuple_elements, strict=True)
-                )
-            )
-        )
 
 
 @struct

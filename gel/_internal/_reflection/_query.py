@@ -48,7 +48,7 @@ SELECT schema::Global {
         IF .target.from_alias AND .target IS InheritingObject
         THEN assert_single(.target[IS InheritingObject].bases)
         ELSE .target
-    ),
+    ) {id, name},
     required,
     cardinality,
 }
@@ -64,8 +64,8 @@ WITH
     MODULE schema
 SELECT Cast {
     id,
-    from_type,
-    to_type,
+    from_type: {id, name},
+    to_type: {id, name},
     allow_assignment,
     allow_implicit,
 }
@@ -101,11 +101,11 @@ SELECT Operator {
         } FILTER .id = tid
     ).identifier.value),
     operator_kind,
-    return_type,
+    return_type: {id, name},
     return_typemod,
     params: {
         name,
-        type,
+        type: {id, name},
         kind,
         typemod,
         default,
@@ -133,11 +133,11 @@ SELECT Function {
             } FILTER .name = "std::description"),
         } FILTER .id = tid
     ).description.value),
-    return_type,
+    return_type: {id, name},
     return_typemod,
     params: {
         name,
-        type,
+        type: {id, name},
         kind,
         typemod,
         default,
@@ -215,16 +215,18 @@ SELECT Type {
     ).id,
 
     [IS InheritingObject].bases: {
-        id
+        id,
+        name,
     } ORDER BY @index ASC,
 
     [IS InheritingObject].ancestors: {
-        id
+        id,
+        name,
     } ORDER BY @index ASC,
 
     [IS ObjectType].compound_type,
-    [IS ObjectType].union_of,
-    [IS ObjectType].intersection_of,
+    [IS ObjectType].union_of: {id, name},
+    [IS ObjectType].intersection_of: {id, name},
     [IS ObjectType].pointers: {
         id,
         card := ("One" IF .required ELSE "AtMostOne")

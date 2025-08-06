@@ -539,8 +539,12 @@ _py_type_to_scalar_type: dict[tuple[str, str], tuple[str, ...]] = {
 #     more specific to less specific.
 #
 _overlapping_py_types = (
+    # bool is a subclass of int
     ("builtins", "bool"),
     ("builtins", "int"),
+    # bytes is a Sequence[int] and would collide
+    # with set-valued ints.
+    ("builtins", "bytes"),
 )
 
 _generic_scalar_type_to_py_type: dict[str, list[tuple[str, str] | str]] = {

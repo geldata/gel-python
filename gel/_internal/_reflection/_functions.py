@@ -21,7 +21,8 @@ if TYPE_CHECKING:
 
 @sobject
 class Function(Callable):
-    pass
+    def __str__(self) -> str:
+        return f"function {self.edgeql_signature}"
 
 
 def fetch_functions(
