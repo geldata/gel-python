@@ -130,6 +130,7 @@ module = [
     "tests.test_dis_bool",
     "tests.test_is_overload",
     "tests.test_parametric",
+    "tests.test_typing_dispatch",
 ]
 strict = true
 ignore_errors = false
@@ -153,6 +154,7 @@ include = [
     "gel/models/**",
     "gel/fastapi/**",
     "gel/_internal/**",
+    "tests/test_typing_dispatch.py",
 ]
 pythonVersion = "3.10"
 typeCheckingMode = "standard"
