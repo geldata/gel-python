@@ -12,6 +12,7 @@ from typing import (
     ClassVar,
     Generic,
     TypeVar,
+    cast,
 )
 from typing_extensions import (
     TypeAliasType,
@@ -397,10 +398,23 @@ class _AnyLink(Generic[_MT_co, _BMT_co]):
         else:
             # link or optional link *with* props
             if isinstance(value, mt):
-                # Same proxy type -- we can't do anything but to return
-                # the value as is; otherwise `obj.link = LinkWithProps.link()`
-                # wouldn't work.
-                return value  # type: ignore [no-any-return]
+                mt_val = cast("ProxyModel[_MT_co]", value)
+                if mt_val.__gel_linked__:
+                    # Proxy is coming from another link -- reset linkprops
+                    return mt_val.__gel_proxy_construct__(
+                        mt_val.without_linkprops(),
+                        {},
+                        linked=True,
+                    )  # type: ignore [return-value]
+                else:
+                    # Proxy is coming from `.link()` -- copy linkprops
+                    return mt_val.__gel_proxy_construct__(
+                        mt_val.without_linkprops(),
+                        _abstract.copy_or_ref_lprops(
+                            _abstract.get_proxy_linkprops(mt_val)
+                        ),
+                        linked=True,
+                    )  # type: ignore [return-value]
             elif isinstance(value, (bmt, ProxyModel)):
                 # Naked target type or another proxy model are not accepted
                 raise ValueError(
