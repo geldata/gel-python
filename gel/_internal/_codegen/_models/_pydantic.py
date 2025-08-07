@@ -3914,7 +3914,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         builtin_str = self.import_name("builtins", "str")
         callable_ = self.import_name("collections.abc", "Callable")
         literal_ = self.import_name("typing", "Literal")
-        literal_star = f'{literal_}["*"]'
+        literal_star = f'{literal_}["*", "**"]'
         tuple_ = self.import_name("builtins", "tuple")
         expr_proto = self.import_name(BASE_IMPL, "ExprCompatible")
         py_const = self.import_name(BASE_IMPL, "PyConstType")

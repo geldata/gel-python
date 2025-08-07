@@ -50,10 +50,7 @@ from . import _utils as _pydantic_utils
 from . import _fields
 
 if TYPE_CHECKING:
-    from collections.abc import (
-        Iterator,
-        Mapping,
-    )
+    from collections.abc import Mapping
     from gel._internal._qbmodel._abstract import GelType
 
 
@@ -275,12 +272,6 @@ class GelModelMeta(
 
         else:
             super().__setattr__(name, value)
-
-    # Splat qb protocol
-    def __iter__(cls) -> Iterator[_qb.ShapeElement]:  # noqa: N805
-        cls = cast("type[GelModel]", cls)
-        shape = _qb.get_object_type_splat(cls)
-        return iter(shape.elements)
 
     def __gel_pointers__(cls) -> Mapping[str, type[GelType]]:  # noqa: N805
         cls = cast("type[GelModel]", cls)
