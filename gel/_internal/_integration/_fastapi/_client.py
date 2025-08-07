@@ -19,6 +19,7 @@ import asyncio
 import importlib.util
 import inspect
 import logging
+import os
 import sys
 
 import fastapi
@@ -34,6 +35,7 @@ if TYPE_CHECKING:
     import types
     from collections.abc import Callable, Iterator, Sequence
     from ._auth import GelAuth
+    from ._cli._smtpd import SMTPServer
 
 
 _logger = logging.getLogger("gel.fastapi")
@@ -154,6 +156,7 @@ class GelLifespan:
     _bio_client_creator: Callable[..., gel.Client]
     _bio_client: gel.Client
     _client_accessed: bool = False
+    _smtp_server: Optional[SMTPServer] = None
 
     _auth: ExtensionShell[GelAuth]
 
@@ -189,6 +192,8 @@ class GelLifespan:
             if ext is not None:
                 await ext.on_startup(self._app)
 
+        if self._smtp_server is not None:
+            await self._smtp_server.maybe_start(self._client)
         self.installed = True
         return {
             self.state_name.value: self._client,
@@ -205,6 +210,8 @@ class GelLifespan:
         exc_val: Optional[BaseException],
         exc_tb: Optional[types.TracebackType],
     ) -> None:
+        if self._smtp_server is not None:
+            await self._smtp_server.stop()
         for shell in self._shells:
             if shell.extension is not None:
                 await shell.extension.on_shutdown(self._app)
@@ -354,7 +361,12 @@ class GelLifespan:
         return self
 
 
-def gelify(app: fastapi.FastAPI, **kwargs: Any) -> GelLifespan:
+def gelify(
+    app: fastapi.FastAPI,
+    *,
+    disable_testing_smtp_server: bool = False,
+    **kwargs: Any,
+) -> GelLifespan:
     rv = GelLifespan(
         app,
         client_creator=gel.create_async_client,
@@ -365,7 +377,27 @@ def gelify(app: fastapi.FastAPI, **kwargs: Any) -> GelLifespan:
             getattr(rv, key)(value)
         else:
             raise ValueError(f"Unknown configuration option: {key}")
-    _cli.maybe_patch_fastapi_cli()
+
+    # Patch FastAPI CLI when started with `fastapi dev`. Without `--no-reload`,
+    # `fastapi dev` will import the FastAPI application object twice: first
+    # in the reloader main process where we can do the patching successfully,
+    # then in the subprocess that actually runs the application, where there
+    # is no CLI to patch so `patched` would be `False`.
+    patched = _cli.maybe_patch_fastapi_cli()
+    if not disable_testing_smtp_server:
+        # The SMTP server requires the Gel client to load the SMTP
+        # configuration (in `__aenter__`), so we have to ensure that the
+        # subprocess that runs the FastAPI application knows that we
+        # are in `fastapi dev` mode through the `_GEL_FASTAPI_CLI_PATCH`.
+        if patched:
+            os.environ["_GEL_FASTAPI_CLI_PATCH"] = "patched"
+        if os.environ.get("_GEL_FASTAPI_CLI_PATCH") == "patched":
+            # Note: this is an `if` branch instead of an `elif` because we
+            # also need an SMTP server under `fastapi dev --no-reload`.
+            from ._cli._smtpd import SMTPServer  # noqa: PLC0415
+
+            rv._smtp_server = SMTPServer()
+
     return rv
 
 
