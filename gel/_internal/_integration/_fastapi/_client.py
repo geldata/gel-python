@@ -364,7 +364,7 @@ class GelLifespan:
 def gelify(
     app: fastapi.FastAPI,
     *,
-    disable_testing_smtp_server: bool = True,
+    disable_testing_smtp_server: bool = False,
     **kwargs: Any,
 ) -> GelLifespan:
     rv = GelLifespan(
