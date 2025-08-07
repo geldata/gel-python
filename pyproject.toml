@@ -43,7 +43,7 @@ test = [
 
     'pytest>=3.6.0',
     'uvloop>=0.15.1; platform_system != "Windows"',
-    'fastapi',
+    'fastapi[standard]',
     'pyjwt',
     'httpx',
 ]
