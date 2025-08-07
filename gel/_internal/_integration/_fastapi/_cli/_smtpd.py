@@ -3,15 +3,15 @@
 # SPDX-FileCopyrightText: Copyright Gel Data Inc. and the contributors.
 
 from __future__ import annotations
-from typing import Optional, TYPE_CHECKING
+from typing import cast, Optional, TYPE_CHECKING
 
 import asyncio
 import email.message
 import email.parser
 import email.policy
+import signal
 
 import gel
-from fastapi_cli.utils.cli import get_rich_toolkit
 
 if TYPE_CHECKING:
     import rich_toolkit
@@ -30,9 +30,9 @@ class SMTPServerProtocol(asyncio.Protocol):
         self._reset()
 
     def connection_made(self, transport: asyncio.BaseTransport) -> None:
-        assert isinstance(transport, asyncio.Transport)
-        self._transport = transport
-        transport.write(b"220 localhost Simple SMTP server\r\n")
+        trans = cast("asyncio.Transport", transport)
+        self._transport = trans
+        trans.write(b"220 localhost Simple SMTP server\r\n")
 
     def connection_lost(self, exc: Optional[Exception]) -> None:
         del self._transport
@@ -86,9 +86,44 @@ class SMTPServerProtocol(asyncio.Protocol):
         self._cli.print(f"  From: {self._mail_from}", tag="gel")
         self._cli.print(f"  To: {', '.join(self._rcpt_to)}", tag="gel")
         self._cli.print(f"  Subject: {message.get('Subject')}", tag="gel")
+        has_gel_header = False
         for key in message:
             if key.lower().startswith("x-gel-"):
                 self._cli.print(f"  {key}: {message[key]}", tag="gel")
+                has_gel_header = True
+        if not has_gel_header:
+            text_parts = []
+            if message.is_multipart():
+                for part in message.walk():
+                    content_type = part.get_content_type()
+                    content_disposition = part.get("Content-Disposition", "")
+                    if (
+                        content_type == "text/plain"
+                        and "attachment" not in content_disposition
+                    ):
+                        charset = part.get_content_charset() or "utf-8"
+                        payload = part.get_payload(decode=True)
+                        if isinstance(payload, bytes):
+                            text = payload.decode(charset, errors="replace")
+                            text_parts.append(text)
+            else:
+                if message.get_content_type() == "text/plain":
+                    charset = message.get_content_charset() or "utf-8"
+                    payload = message.get_payload(decode=True)
+                    if isinstance(payload, bytes):
+                        text_parts.append(
+                            payload.decode(charset, errors="replace")
+                        )
+            self._cli.print(
+                "No X-Gel-* headers found, email content:", tag="gel"
+            )
+            if text_parts:
+                for text in text_parts:
+                    self._cli.print(text, tag="gel")
+            else:
+                self._cli.print(
+                    repr(message.get_payload(decode=True)), tag="gel"
+                )
 
     def _reset(self) -> None:
         self._mail_from = None
@@ -105,56 +140,64 @@ class SMTPServer:
         self,
         client: gel.AsyncIOClient,
     ) -> None:
-        with get_rich_toolkit() as toolkit:
-            try:
-                config = await client.query_single("""
-                    select cfg::SMTPProviderConfig {
-                        host,
-                        port,
-                        security
-                    } filter .name =
-                        assert_single(cfg::Config).current_email_provider_name;
-                """)
-            except gel.QueryError as ex:
-                toolkit.print(
-                    f"Skipping SMTP server startup due to "
-                    f"error reading configuration: {ex}",
-                    tag="gel",
-                )
-                return None
+        from fastapi_cli.utils.cli import get_rich_toolkit  # noqa: PLC0415
 
-            if config is None:
-                toolkit.print(
-                    "No SMTP configuration found, "
-                    "skipping SMTP server startup",
-                    tag="gel",
-                )
-                return None
-            if config.security not in {"PlainText", "STARTTLSOrPlainText"}:
-                toolkit.print(
-                    "SMTP server only supports security=PlainText or "
-                    "STARTTLSOrPlainText, skipping SMTP server startup",
-                    tag="gel",
-                )
-                return None
+        # get_rich_toolkit() installs a SIGTERM handler underneath, which
+        # causes unnecessary noise in the logs at CTRL + C shutdown.
+        orig_handler = signal.getsignal(signal.SIGTERM)
+        try:
+            toolkit = get_rich_toolkit()
+        finally:
+            signal.signal(signal.SIGTERM, orig_handler)
 
-            try:
-                self._server = await asyncio.get_running_loop().create_server(
-                    lambda: SMTPServerProtocol(toolkit),
-                    host=config.host,
-                    port=config.port,
-                )
-            except Exception as ex:
-                toolkit.print(
-                    f"Skipping SMTP server startup due to error: {ex}",
-                    tag="gel",
-                )
-            else:
-                toolkit.print(
-                    f"Started SMTP server on {config.host}:{config.port} "
-                    f"for testing purposes.",
-                    tag="gel",
-                )
+        try:
+            config = await client.query_single("""
+                select cfg::SMTPProviderConfig {
+                    host,
+                    port,
+                    security
+                } filter .name =
+                    assert_single(cfg::Config).current_email_provider_name;
+            """)
+        except gel.QueryError as ex:
+            toolkit.print(
+                f"Skipping SMTP server startup due to "
+                f"error reading configuration: {ex}",
+                tag="gel",
+            )
+            return None
+
+        if config is None:
+            toolkit.print(
+                "No SMTP configuration found, skipping SMTP server startup",
+                tag="gel",
+            )
+            return None
+        if config.security not in {"PlainText", "STARTTLSOrPlainText"}:
+            toolkit.print(
+                "SMTP server only supports security=PlainText or "
+                "STARTTLSOrPlainText, skipping SMTP server startup",
+                tag="gel",
+            )
+            return None
+
+        try:
+            self._server = await asyncio.get_running_loop().create_server(
+                lambda: SMTPServerProtocol(toolkit),
+                host=config.host,
+                port=config.port,
+            )
+        except Exception as ex:
+            toolkit.print(
+                f"Skipping SMTP server startup due to error: {ex}",
+                tag="gel",
+            )
+        else:
+            toolkit.print(
+                f"Started SMTP server on {config.host}:{config.port} "
+                f"for testing purposes.",
+                tag="gel",
+            )
 
     async def stop(self) -> None:
         if hasattr(self, "_server"):
