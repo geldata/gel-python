@@ -42,12 +42,27 @@ CallableParamTypeMap = TypeAliasType(
 
 @functools.cache
 def _get_py_type(name: PyTypeName) -> type:
+    """Import and return a Python type from its fully-qualified name.
+
+    Args:
+        name: A tuple of (module_name, type_name) identifying the type.
+
+    Returns:
+        The imported Python type.
+    """
     mod = importlib.import_module(name[0])
     return getattr(mod, name[1])  # type: ignore [no-any-return]
 
 
 @struct
 class CallableParam:
+    """Represents a parameter in a callable's signature.
+
+    Contains all metadata about a parameter including its name, type,
+    kind (positional/named-only/variadic), type modifiers, position,
+    and default value if any.
+    """
+
     name: str
     type: TypeRef | Type
     kind: CallableParamKind
@@ -56,6 +71,7 @@ class CallableParam:
     default: str | None
 
     def __str__(self) -> str:
+        """Return a human-readable string representation of the parameter."""
         if self.typemod is TypeModifier.Optional:
             typespec = f"optional {self.type}"
         elif self.typemod is TypeModifier.SetOf:
@@ -86,13 +102,23 @@ class CallableParam:
 
     @functools.cached_property
     def sort_key(self) -> str:
+        """String representation of the parameter key for sorting purposes."""
         return str(self.key)
 
     @functools.cached_property
     def is_variadic(self) -> bool:
+        """Whether this parameter accepts a variable number of arguments."""
         return self.kind is CallableParamKind.Variadic
 
     def get_type(self, schema: Schema) -> Type:
+        """Resolve the parameter's type using the provided schema.
+
+        Args:
+            schema: The schema to resolve TypeRef objects against.
+
+        Returns:
+            The resolved Type object.
+        """
         t = self.type
         return schema[t.id] if isinstance(t, TypeRef) else t
 
@@ -102,6 +128,15 @@ class CallableParam:
         *,
         schema: Mapping[str, Type],
     ) -> Self:
+        """Create a specialized version with concrete types for generics.
+
+        Args:
+            spec: Mapping from type indirections to (generic, concrete) pairs.
+            schema: The schema containing type definitions.
+
+        Returns:
+            A new CallableParam with specialized types.
+        """
         return dataclasses.replace(
             self,
             type=self.get_type(schema).specialize(spec, schema=schema),
@@ -163,10 +198,12 @@ the position mapping would be:
 
 
 class CallableSignature(NamedTuple):
-    """A 4-tuple type containing the callable's fully-qualified schema
-    path, the number of positional parameters, a boolean indicating the
-    presence if a variadic argument and a frozenset of names of named-only
-    parameters.
+    """Represents a callable's signature for type checking and overload
+    resolution.
+
+    Contains the callable's name, positional parameter counts, variadic
+    parameter presence, and named-only parameter information needed for
+    signature comparison and overlap detection.
     """
 
     name: str
@@ -177,10 +214,7 @@ class CallableSignature(NamedTuple):
     kwargs_with_defaults: frozenset[str]
 
     def contains(self, other: CallableSignature) -> bool:
-        """Determine if this signature contains the *other* signature,
-        i.e that any permissible combination of this signature's params
-        overlaps with other's from the standpoint of typing.overload
-        logic.
+        """Determine if this signature contains the other signature.
 
         For self to contain other, every call that matches other must also
         match self. This means self must be at least as permissive as other
@@ -197,16 +231,15 @@ class CallableSignature(NamedTuple):
                                                  # other also requires x
 
         Containment logic:
-
         1. Positional args: self's acceptable range must contain other's range.
         2. Named args: all of other's named args must be acceptable to self.
         3. Required args: self cannot require args that other doesn't require.
 
         Args:
-            other: The signature to check for containment
+            other: The signature to check for containment.
 
         Returns:
-            True if self can handle all calls that other can handle
+            True if self can handle all calls that other can handle.
         """
         if self.name != other.name:
             return False
@@ -241,7 +274,7 @@ class CallableSignature(NamedTuple):
         return self_required_kwargs.issubset(other_required_kwargs)
 
     def overlaps(self, other: CallableSignature) -> bool:
-        """Determine if this callable overlaps with *other*.
+        """Determine if this signature overlaps with the other signature.
 
         Two signatures overlap if there exists at least one call that would
         match both signatures. This is different from containment where one
@@ -292,6 +325,14 @@ class CallableSignature(NamedTuple):
         ) and combined_required.issubset(sig2.kwargs)
 
     def iter_param_keys(self) -> Iterator[CallableParamKey]:
+        """Iterate over all parameter keys in this signature.
+
+        Yields positional parameter indices first (including variadic if
+        present), then named-only parameter names.
+
+        Returns:
+            Iterator over parameter keys (int for positional, str for named).
+        """
         yield from range(self.num_pos + self.has_variadic)
         yield from self.kwargs
 
@@ -299,8 +340,17 @@ class CallableSignature(NamedTuple):
 def compare_callable_generality(
     a: Callable, b: Callable, *, schema: Schema
 ) -> int:
-    """Return 1 if a is more general than b, -1 if a is more specific
-    than b, and 0 if a and b are considered of equal generality."""
+    """Compare the generality of two callables for overload resolution.
+
+    Args:
+        a: First callable to compare.
+        b: Second callable to compare.
+        schema: Schema containing type definitions.
+
+    Returns:
+        1 if a is more general than b, -1 if a is more specific than b,
+        and 0 if a and b are considered of equal generality.
+    """
     if a == b:
         return 0
     elif a.assignable_from(b, schema=schema):
@@ -333,6 +383,13 @@ def compare_callable_generality(
 
 
 class _CallableSignatureMatcher:
+    """Helper class for comparing callable signatures and parameters.
+
+    Provides methods to check parameter compatibility, overlap, and return
+    type compatibility between two callables, with support for generic
+    type matching and Python inheritance checking.
+    """
+
     def __init__(
         self,
         *,
@@ -342,6 +399,15 @@ class _CallableSignatureMatcher:
         right_param_types: CallableParamTypeMap | None = None,
         schema: Schema,
     ) -> None:
+        """Initialize signature matcher for two callables.
+
+        Args:
+            left: Left callable in comparison.
+            left_param_types: Optional type map override for left callable.
+            right: Right callable in comparison.
+            right_param_types: Optional type map override for right callable.
+            schema: Schema containing type definitions.
+        """
         self._left = left
         self._right = right
 
@@ -402,6 +468,16 @@ class _CallableSignatureMatcher:
         two_way: bool = False,
         consider_py_inheritance: bool = False,
     ) -> bool:
+        """Check if parameters at the given key are type-compatible.
+
+        Args:
+            key: Parameter key to check compatibility for.
+            two_way: If True, check compatibility in both directions.
+            consider_py_inheritance: If True, consider Python inheritance.
+
+        Returns:
+            True if the parameters are compatible.
+        """
         right_param = self._right.param_map[key]
         left_param = self._left.param_map.get(key)
         if left_param is None:
@@ -448,6 +524,17 @@ class _CallableSignatureMatcher:
         consider_py_inheritance: bool = False,
         consider_optionality: bool = True,
     ) -> bool:
+        """Check if parameters at the given key have overlapping types.
+
+        Args:
+            key: Parameter key to check overlap for.
+            two_way: If True, check overlap in both directions.
+            consider_py_inheritance: If True, consider Python inheritance.
+            consider_optionality: If True, treat optional params as overlapping
+
+        Returns:
+            True if the parameters have overlapping types.
+        """
         right_param = self._right.param_map[key]
         left_param = self._left.param_map.get(key)
         if left_param is None:
@@ -499,6 +586,15 @@ class _CallableSignatureMatcher:
         two_way: bool = False,
         consider_py_inheritance: bool = False,
     ) -> bool:
+        """Check if return types of both callables are compatible.
+
+        Args:
+            two_way: If True, check compatibility in both directions.
+            consider_py_inheritance: If True, consider Python inheritance.
+
+        Returns:
+            True if return types are compatible.
+        """
         return self._is_assignable_from(
             left_type=self._left.get_return_type(self._schema),
             right_type=self._right.get_return_type(self._schema),
@@ -521,6 +617,21 @@ class _CallableSignatureMatcher:
         consider_py_inheritance: bool = False,
         proper_subtype: bool = False,
     ) -> bool:
+        """Check if left type can be assigned from right type.
+
+        Args:
+            left_type: The target type for assignment.
+            right_type: The source type for assignment.
+            left_generics: Generic type bindings for the left type.
+            left_typemod: Type modifier for the left type.
+            right_typemod: Type modifier for the right type.
+            two_way: If True, also check assignability in reverse direction.
+            consider_py_inheritance: If True, consider Python inheritance.
+            proper_subtype: If True, require proper subtype relationship.
+
+        Returns:
+            True if assignment is valid.
+        """
         if isinstance(left_type, Type):
             if isinstance(right_type, Type):
                 return left_type.assignable_from(
@@ -568,6 +679,17 @@ class _CallableSignatureMatcher:
         left_typemod: TypeModifier,
         right_typemod: TypeModifier,
     ) -> bool:
+        """Check if right_type is a strict Python subtype of left_type.
+
+        Args:
+            left_type: The supertype to check against.
+            right_type: The subtype candidate.
+            left_typemod: Type modifier for the left type.
+            right_typemod: Type modifier for the right type.
+
+        Returns:
+            True if right_type is a strict subtype of left_type.
+        """
         if right_type == left_type:
             return False
         else:
@@ -583,12 +705,20 @@ class _CallableSignatureMatcher:
 
 @sobject
 class Callable(SchemaObject):
+    """Represents a callable schema object (function, operator, etc.).
+
+    Contains the complete signature including parameters, return type,
+    and type modifiers. Provides methods for signature analysis,
+    specialization, and compatibility checking.
+    """
+
     return_type: TypeRef | Type
     return_typemod: TypeModifier
     params: list[CallableParam]
 
     @functools.cached_property
     def edgeql_signature(self) -> str:
+        """Return the EdgeQL signature representation of this callable."""
         named_only = []
         positional = []
         variadic = []
@@ -611,19 +741,22 @@ class Callable(SchemaObject):
 
     @functools.cached_property
     def ident(self) -> str:
+        """Return the local identifier (name) of this callable."""
         return self.schemapath.name
 
     @functools.cached_property
     def param_map(self) -> Mapping[CallableParamKey, CallableParam]:
+        """Return a mapping from parameter keys to CallableParam objects."""
         return {p.key: p for p in self.params}
 
     @functools.cached_property
     def signature(self) -> CallableSignature:
-        """Callable signature.
+        """Extract and return the callable's signature information.
 
-        Returns a 4-tuple containing the callable's loxal identifier, the
-        number of positional parameters, a boolean indicating the presence if
-        a variadic argument and a frozenset of names of named-only parameters.
+        Returns:
+            CallableSignature containing the callable's local identifier,
+            positional parameter counts, variadic parameter presence, and
+            named-only parameter information.
         """
         if not self.params:
             # Short-circuit for parameterless functions.
@@ -666,13 +799,32 @@ class Callable(SchemaObject):
             )
 
     def get_return_type(self, schema: Schema) -> Type:
+        """Resolve and return the callable's return type.
+
+        Args:
+            schema: The schema to resolve TypeRef objects against.
+
+        Returns:
+            The resolved return Type object.
+        """
         t = self.return_type
         return schema[t.id] if isinstance(t, TypeRef) else t
 
     def generics(self, schema: Mapping[str, Type]) -> CallableGenericPositions:
-        """Return generic types that appear in multiple positions across
-        callable's parameters and return type.  See comment on
-        CallableGenericPositions about the structure of the return type.
+        """Extract generic type positions across callable parameters and return
+        type.
+
+        Analyzes the callable to find generic types that appear in multiple
+        positions, which is essential for proper generic type inference and
+        specialization.
+
+        Args:
+            schema: Mapping from type IDs to Type objects for resolution.
+
+        Returns:
+            Mapping from parameter keys to generic type positions within
+            those parameters. See CallableGenericPositions documentation
+            for detailed structure information.
         """
         result = getattr(self, "_generic_params", None)
         if result is not None:
@@ -718,6 +870,15 @@ class Callable(SchemaObject):
         *,
         schema: Mapping[str, Type],
     ) -> Self:
+        """Create a specialized version with concrete types for generics.
+
+        Args:
+            spec: Mapping from parameter keys to type specializations.
+            schema: Schema containing type definitions.
+
+        Returns:
+            A new Callable with specialized parameter and return types.
+        """
         return dataclasses.replace(
             self,
             id=str(uuid.uuid4()),
@@ -748,8 +909,22 @@ class Callable(SchemaObject):
         schema: Mapping[str, Type],
         ignore_return: bool = False,
     ) -> bool:
-        """Check if this callable subsumes (is more general than)
-        *other* function.
+        """Check if this callable can be assigned from another callable.
+
+        Determines if this callable is more general than the other callable,
+        meaning it can handle all call patterns that the other callable
+        accepts.
+
+        Args:
+            other: The callable to check assignability from.
+            param_types: Optional type override map for this callable's params.
+            other_param_types: Optional type override map for other's params.
+            param_getter: Function to extract parameters from callables.
+            schema: Schema containing type definitions for resolution.
+            ignore_return: If True, skip return type compatibility checking.
+
+        Returns:
+            True if this callable can be assigned from the other callable.
         """
         # Self signature must contain other's signature.
         if not self.signature.contains(other.signature):
@@ -785,8 +960,24 @@ class Callable(SchemaObject):
         consider_py_inheritance: bool = False,
         consider_optionality: bool = True,
     ) -> bool:
-        """Check if this callable overlaps the *other* callable.  Assumes
-        that *self* appears _after_ *other* in the list of overloads.
+        """Check if this callable overlaps with another callable.
+
+        Determines if there exists at least one call pattern that would
+        match both callables. Used for overload validation where overlapping
+        overloads may cause ambiguity.
+
+        Args:
+            other: The callable to check for overlap with.
+            param_types: Optional type override map for this callable's params.
+            other_param_types: Optional type override map for other's params.
+            param_getter: Function to extract parameters from callables.
+            schema: Schema containing type definitions for resolution.
+            consider_py_inheritance: If True, consider Python inheritance.
+            consider_optionality: If True, treat optional parameters as
+                                  overlapping.
+
+        Returns:
+            True if the callables have overlapping call patterns.
         """
         # First quick check for type agnostic signature overlap.
         if not self.signature.overlaps(other.signature):
