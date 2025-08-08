@@ -1487,6 +1487,47 @@ class TestModelGenerator(tb.ModelTestCase):
             getattr(u_link.__linkprops__, "__gel_copied_by_ref__", False)
         )
 
+    def test_modelgen_pydantic_apis_18(self):
+        from models import default
+
+        # test that __pydantic_fields_set__ is correct and is
+        # only updated when the field is set by the user, not by
+        # using any of Pydantic read APIs or Gel's own APIs.
+
+        g = self.client.get(
+            default.UserGroup.select(
+                name=True,
+                mascot=True,
+            ).filter(name="red")
+        )
+
+        expected = {"id", "name", "mascot"}
+
+        self.assertEqual(g.__pydantic_fields_set__, expected)
+
+        g.model_dump()
+        self.assertEqual(g.__pydantic_fields_set__, expected)
+
+        repr(g)
+        self.assertEqual(g.__pydantic_fields_set__, expected)
+
+        with self.assertRaises(AttributeError):
+            object.__getattribute__(g, "users")
+        self.assertEqual(g.__pydantic_fields_set__, expected)
+
+        self.client.save(g)
+        self.assertEqual(g.__pydantic_fields_set__, expected)
+
+        self.client.sync(g)
+        self.assertEqual(g.__pydantic_fields_set__, expected)
+
+        g.name = "zzzzzzz"
+        self.client.sync(g)
+        self.assertEqual(g.__pydantic_fields_set__, expected)
+
+        g.users
+        self.assertEqual(g.__pydantic_fields_set__, expected | {"users"})
+
     def test_modelgen_data_unpack_polymorphic(self):
         from models import default
 
@@ -3709,8 +3750,6 @@ class TestModelGenerator(tb.ModelTestCase):
         assert tlr2.user is not None
         self.assertEqual(tlr2.user.name, "Cameron")
 
-    @tb.xfail
-    # See XXX comments
     def test_modelgen_save_reload_links_03(self):
         from models import default
 
@@ -3733,11 +3772,11 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(updated_alice.nickname, "magical unicorn")
         self.assertNotEqual(updated_alice.nickname, original_nickname)
 
-        # XXX: tlt.user was modified and saved, so maybe it's auto-reloaded?
+        # tlt.user was modified and saved
         self.assertEqual(tlt.user.name, "Alice")
         self.assertEqual(tlt.user.nickname, "magical unicorn")
 
-        # XXX: Was alice reloaded? After all that's the object used in tlt.user
+        # Was alice reloaded? That's the object used in tlt.user
         self.assertEqual(alice.nickname, "magical unicorn")
 
     @tb.xfail
@@ -3984,9 +4023,20 @@ class TestModelGenerator(tb.ModelTestCase):
         blue.users.add(alice)
         self.client.sync(blue)
 
-        # After saving, Alice's groups backlink should be invalidated
-        with self.assertRaisesRegex(AttributeError, "'groups' is not set"):
-            assert alice.groups is not None  # access field
+        # Check that the Alice's groups computed backlink is updated
+        # after sync()
+        self.assertEqual(
+            {g.id for g in alice.groups},
+            set(
+                self.client.query(
+                    """
+                        with w := (select User{groups} filter .id=<uuid>$0)
+                        select w.groups.id
+                    """,
+                    alice.id,
+                )
+            ),
+        )
 
         # But we should still have some valid data
         self.assertEqual(alice.name, "Alice")
@@ -4487,6 +4537,20 @@ class TestModelGenerator(tb.ModelTestCase):
         # Re-fetch and verify
         ks2 = self.client.get(default.KitchenSink.filter(str="hello world"))
         self.assertEqual(ks2.p_opt_str, "silly goose")
+
+    def test_modelgen_save_collections_07(self):
+        from models import default
+
+        ks = self.client.get(default.KitchenSink.filter(str="hello world"))
+        self.assertEqual(ks.array, ["foo"])
+
+        ks.array.append("bar")
+
+        # here we test that save() will traverse the mutable prop `ks.array`
+        # and recursively call `__gel_commit__` on it.
+        # sync() does not do that, the data would be refetched, so we need
+        # a separate test for save() specifically.
+        self.client.save(ks)
 
     def test_modelgen_save_range_01(self):
         import datetime as dt

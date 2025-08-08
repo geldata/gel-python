@@ -677,6 +677,17 @@ class Client(
                     for ids, batch in zip(batch_ids, batches, strict=True):
                         batch.feed_db_data(ids)
 
+                if refetch:
+                    ref_queries = executor.get_refetch_queries()
+                    for ref in ref_queries:
+                        tx.send_query(ref.query, **ref.args)
+
+                    refetch_data = tx.wait()
+                    for ref_data, ref in zip(
+                        refetch_data, ref_queries, strict=True
+                    ):
+                        ref.feed_db_data(ref_data)
+
                 executor.commit()
 
     def save(

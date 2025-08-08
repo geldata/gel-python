@@ -24,6 +24,7 @@ class GelPointerReflection:
     readonly: bool
     has_default: bool
     properties: dict[str, GelPointerReflection] | None
+    mutable: bool
 
 
 class GelReflectionProto(Protocol):
