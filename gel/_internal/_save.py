@@ -1310,10 +1310,7 @@ class SaveExecutor:
             assert not isinstance(obj, ProxyModel)
 
             visited.track(obj)
-            obj.__gel_commit__(
-                new_id=self.object_ids.get(id(obj)),
-                refetch_mode=self.refetch,
-            )
+            obj.__gel_commit__(new_id=self.object_ids.get(id(obj)))
 
             for prop in get_pointers(type(obj)):
                 if prop.computed:
@@ -1336,20 +1333,16 @@ class SaveExecutor:
                     if prop.cardinality.is_multi():
                         if is_link_wprops_set(linked):
                             for proxy in linked._items:
-                                get_proxy_linkprops(proxy).__gel_commit__(
-                                    refetch_mode=self.refetch
-                                )
+                                get_proxy_linkprops(proxy).__gel_commit__()
                                 _traverse(unwrap_proxy_no_check(proxy))
                         else:
                             assert is_link_set(linked)
                             for model in linked._items:
                                 _traverse(model)
-                        linked.__gel_commit__(refetch_mode=self.refetch)
+                        linked.__gel_commit__()
                     else:
                         if isinstance(linked, ProxyModel):
-                            get_proxy_linkprops(linked).__gel_commit__(
-                                refetch_mode=self.refetch
-                            )
+                            get_proxy_linkprops(linked).__gel_commit__()
                             _traverse(unwrap_proxy_no_check(linked))
                         else:
                             _traverse(cast("GelModel", linked))
@@ -1364,18 +1357,14 @@ class SaveExecutor:
                             # nested tracked lists will not get "committed"
                             # (nothing will call "__gel_commit__" on them),
                             # so we have to commit them manually.
-                            multi_prop_commit_recursive(
-                                linked, refetch_mode=self.refetch
-                            )
+                            multi_prop_commit_recursive(linked)
                         else:
-                            linked.__gel_commit__(refetch_mode=self.refetch)
+                            linked.__gel_commit__()
                     elif prop.mutable and not self.refetch:
                         # Single property can be an array -- in this case
                         # we still need to commit it recursively;
                         # see the above comment.
-                        multi_prop_commit_recursive(
-                            linked, refetch_mode=self.refetch
-                        )
+                        multi_prop_commit_recursive(linked)
 
         for o in self.objs:
             _traverse(o)
@@ -1434,7 +1423,7 @@ class SaveExecutor:
                                     )
                                 unwrapped = unwrap_proxy_no_check(proxy)
                                 _check_recursive(unwrapped, list_path)
-                        else:
+                        elif not prop.computed:
                             assert is_link_set(val)
                             val.__gel_post_commit_check__(link_path)
                             for i, model in enumerate(val._items):

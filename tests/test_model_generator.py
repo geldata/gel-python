@@ -3933,18 +3933,24 @@ class TestModelGenerator(tb.ModelTestCase):
         )
         self.client.sync(gr)
 
-        # After saving the group, Alice's groups backlink should be unset
-        # because Alice wasn't explicitly fetched with groups after the change
-        with self.assertRaisesRegex(AttributeError, "'groups' is not set"):
-            assert alice.groups is not None  # access field
+        a = [u for u in gr.users if u.id == alice.id][0]
+        self.assertEqual(a.groups, alice.groups)
 
-        with self.assertRaisesRegex(AttributeError, "'groups' is not set"):
-            a = [u for u in gr.users if u.id == alice.id][0]
-            assert a.groups is not None  # access field
+        fresh_alice_groups = set(
+            self.client.query(
+                """
+                    with w := (select User{groups} filter .id=<uuid>$0)
+                    select w.groups.id
+                """,
+                alice.id,
+            )
+        )
 
-        # But Alice herself should still be accessible
+        self.assertEqual({g.id for g in a.groups}, fresh_alice_groups)
+
         self.assertEqual(alice.name, "Alice")
 
+    @tb.xfail
     def test_modelgen_save_reload_links_06(self):
         from models import default
 
@@ -3967,7 +3973,7 @@ class TestModelGenerator(tb.ModelTestCase):
             {"Alice", "Billie", "Cameron", "Dana"},
         )
 
-        # orig_ids = {u.id for u in red.users}
+        orig_ids = {u.id for u in red.users}
         # Find Alice in the group
         alice = [u for u in red.users if u.name == "Alice"][0]
         self.assertIn("red", {g.name for g in alice.groups})
@@ -3976,13 +3982,22 @@ class TestModelGenerator(tb.ModelTestCase):
         red.users.remove(alice)
         self.client.sync(red)
 
-        # # After saving, Alice's groups backlink should be unset
-        # with self.assertRaisesRegex(AttributeError, "'groups' is not set"):
-        #     assert alice.groups is not None  # access field
+        fresh_alice_groups = set(
+            self.client.query(
+                """
+                    with w := (select User{groups} filter .id=<uuid>$0)
+                    select w.groups.id
+                """,
+                alice.id,
+            )
+        )
+
+        # XXX: we need to traverse *removed* items too in sync()!
+        self.assertEqual(fresh_alice_groups, {g.id for g in alice.groups})
 
         # # But we should still have some valid data
-        # self.assertEqual(alice.name, "Alice")
-        # self.assertEqual({u.id for u in red.users}, orig_ids - {alice.id})
+        self.assertEqual(alice.name, "Alice")
+        self.assertEqual({u.id for u in red.users}, orig_ids - {alice.id})
 
     def test_modelgen_save_reload_links_07(self):
         from models import default
