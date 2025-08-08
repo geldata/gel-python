@@ -633,10 +633,11 @@ class AsyncIOClient(
             )
         )
 
-    async def save(
+    async def _save_impl(
         self,
-        *objs: GelModel,
-        refetch: bool = True,
+        *,
+        refetch: bool,
+        objs: tuple[GelModel, ...],
     ) -> None:
         opts = self._get_debug_options()
 
@@ -658,6 +659,23 @@ class AsyncIOClient(
                         batch.feed_db_data(ids)
 
                 executor.commit()
+
+    async def save(
+        self,
+        *objs: GelModel,
+    ) -> None:
+        """Persist objects without refetching updated data back.
+
+        This is a subset of `sync()`, optimized to avoid refetching.
+        """
+        await self._save_impl(refetch=False, objs=objs)
+
+    async def sync(
+        self,
+        *objs: GelModel,
+    ) -> None:
+        """Persist objects and refetch updated data back into them."""
+        await self._save_impl(refetch=True, objs=objs)
 
     async def __aenter__(self) -> Self:
         return await self.ensure_connected()
