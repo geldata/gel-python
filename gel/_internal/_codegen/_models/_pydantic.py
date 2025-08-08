@@ -949,7 +949,6 @@ class BaseGeneratedModule:
         base_types: Iterable[str] = (),
         base_metadata_class: str = "GelSchemaMetadata",
     ) -> None:
-        uuid = self.import_name("uuid", "UUID")
         schemapath = self.import_name(BASE_IMPL, "SchemaPath")
         base_types = list(base_types)
         if not base_types:
@@ -967,7 +966,6 @@ class BaseGeneratedModule:
                 base_types,
             ),
         ):
-            self.write(f"id = {uuid}(int={sobj.uuid.int})")
             self.write(f"name = {sobj.schemapath.as_code(schemapath)}")
 
     def write_object_type_reflection(
@@ -1006,7 +1004,6 @@ class BaseGeneratedModule:
             "__gel_reflection__",
             _map_name(lambda s: f"{s}.__gel_reflection__", class_bases),
         ):
-            self.write(f"id = {uuid_}(int={objtype.uuid.int})")
             self.write(f"name = {objtype.schemapath.as_code(sp)}")
             # Need a cheap at runtime way to check if the type is abstract
             # in GelModel.__new__
@@ -1042,14 +1039,12 @@ class BaseGeneratedModule:
         bases: list[str],
     ) -> None:
         sp = self.import_name(BASE_IMPL, "SchemaPath")
-        uuid_ = self.import_name("uuid", "UUID")
 
         class_bases = bases or [self.import_name(BASE_IMPL, "GelLinkModel")]
         with self._class_def(
             "__gel_reflection__",
             _map_name(lambda s: f"{s}.__gel_reflection__", class_bases),
         ):
-            self.write(f"id = {uuid_}(int={link.uuid.int})")
             self.write(f"name = {sp}({link.name!r})")
             self._write_pointers_reflection(link.pointers, bases)
 
@@ -3580,7 +3575,6 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             aspect=ModuleAspect.MAIN,
         )
         assert objecttype_import is not None
-        uuid = self.import_name("uuid", "UUID")
         with self._class_def(base_shape_class, base_shape_bases):
             if not objtype.abstract:
                 with self.type_checking():
@@ -3741,7 +3735,6 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                     self.write(f'raise {attribute_error}("id") from None')
 
         class_r_kwargs = {
-            "__gel_type_id__": f"{uuid}(int={objtype.uuid.int})",
             "__gel_shape__": '"RequiredId"',
         }
         with self._class_def(
@@ -4145,27 +4138,6 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         self,
         objtype: reflection.ObjectType,
     ) -> None:
-        if objtype.name == "std::BaseObject":
-            gmm = self.import_name(BASE_IMPL, "GelModelMeta")
-            for ptr in objtype.pointers:
-                if ptr.name == "__type__":
-                    ptr_type = self.get_ptr_type(
-                        objtype,
-                        ptr,
-                        aspect=ModuleAspect.MAIN,
-                        cardinality=reflection.Cardinality.One,
-                    )
-                    with self._property_def(ptr.name, [], ptr_type):
-                        self.write(
-                            "tid = self.__class__.__gel_reflection__.id"
-                        )
-                        self.write(f"actualcls = {gmm}.get_class_by_id(tid)")
-                        self.write(
-                            "return actualcls.__gel_reflection__.object"
-                            "  # type: ignore [attr-defined, no-any-return]"
-                        )
-                self.write()
-
         with self.type_checking():
             render_id_variant = False
 

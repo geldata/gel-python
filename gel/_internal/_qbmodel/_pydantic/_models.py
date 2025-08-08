@@ -74,7 +74,6 @@ class GelModelMeta(
         bases: tuple[type[Any], ...],
         namespace: dict[str, Any],
         *,
-        __gel_type_id__: uuid.UUID | None = None,
         __gel_shape__: str | None = None,
         __gel_root_class__: bool = False,
         **kwargs: Any,
@@ -173,8 +172,9 @@ class GelModelMeta(
                 )
                 setattr(cls, fname, desc)
 
-        if __gel_type_id__ is not None:
-            mcls.register_class(__gel_type_id__, cls)
+        reflection = cls.__gel_reflection__
+        if (tname := getattr(reflection, "name", None)) is not None:
+            mcls.__gel_class_registry__[tname] = cls
 
         cls.__gel_shape__ = __gel_shape__
 
