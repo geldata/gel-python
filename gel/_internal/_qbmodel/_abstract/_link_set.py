@@ -184,7 +184,7 @@ class AbstractLinkSet(  # noqa: PLW1641 (__hash__ is implemented)
                 ]
             case False, False:
                 # _index_snapshot and _tracking_index are empty -- no changes
-                return []
+                return ()
 
         raise AssertionError("unreachable")
 

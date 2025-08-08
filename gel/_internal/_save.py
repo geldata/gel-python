@@ -562,6 +562,24 @@ def model_attr(
         return dct.get(name, default)
 
 
+def push_refetch(obj: GelModel, refetch_ops: RefetchBatch) -> None:
+    tp_obj: type[GelModel] = type(obj)
+    tp_pointers = tp_obj.__gel_reflection__.pointers
+    ref_shape = refetch_ops[tp_obj]
+    ref_shape.models.append(obj)
+    for field_name in obj.__pydantic_fields_set__:
+        if field_name in ref_shape.fields or field_name in _STOP_FIELDS:
+            continue
+
+        try:
+            ptr_info = tp_pointers[field_name]
+        except KeyError:
+            # ad-hoc computed
+            pass
+        else:
+            ref_shape.fields[field_name] = ptr_info
+
+
 def make_plan(
     objs: Iterable[GelModel],
     /,
@@ -571,6 +589,7 @@ def make_plan(
     insert_ops: ChangeBatch = []
     update_ops: ChangeBatch = []
     refetch_ops: RefetchBatch = collections.defaultdict(RefetchShape)
+    removed_objects: list[Iterable[GelModel]] = []
 
     iter_graph_tracker: IDTracker[GelModel, None] = IDTracker()
 
@@ -587,23 +606,7 @@ def make_plan(
         sched: FieldChangeLists = collections.defaultdict(list)
 
         if refetch and not obj.__gel_new__:
-            tp_pointers = tp_obj.__gel_reflection__.pointers
-            ref_shape = refetch_ops[tp_obj]
-            ref_shape.models.append(obj)
-            for field_name in obj.__pydantic_fields_set__:
-                if (
-                    field_name in ref_shape.fields
-                    or field_name in _STOP_FIELDS
-                ):
-                    continue
-
-                try:
-                    ptr_info = tp_pointers[field_name]
-                except KeyError:
-                    # ad-hoc computed
-                    pass
-                else:
-                    ref_shape.fields[field_name] = ptr_info
+            push_refetch(obj, refetch_ops)
 
         for prop in pointers:
             # Skip computeds, we can't update them.
@@ -826,6 +829,9 @@ def make_plan(
 
                     push_change(requireds, sched, m_rem)
 
+                    if refetch:
+                        removed_objects.append(removed)
+
             # __gel_get_added__() will return *new* links, but we also
             # have to take care about link property updates on *existing*
             # links too. So we first get the list of the new ones, and then
@@ -947,6 +953,16 @@ def make_plan(
         while sched:
             change = ModelChange(model=obj, fields=shift_dict_list(sched))
             update_ops.append(change)
+
+    if refetch:
+        # If we are refetching, we also want to traverse objects in
+        # the sync() graph that are on the way out of the graph, but
+        # are still part of this sync() call.
+        for removed in removed_objects:
+            for m in removed:
+                if m not in iter_graph_tracker:
+                    iter_graph_tracker.track(m)
+                    push_refetch(m, refetch_ops)
 
     # Plan batch inserts of new objects -- we have to insert objects
     # in batches respecting their required cross-dependencies.

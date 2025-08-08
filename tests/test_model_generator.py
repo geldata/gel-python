@@ -3950,7 +3950,6 @@ class TestModelGenerator(tb.ModelTestCase):
 
         self.assertEqual(alice.name, "Alice")
 
-    @tb.xfail
     def test_modelgen_save_reload_links_06(self):
         from models import default
 
@@ -3992,7 +3991,7 @@ class TestModelGenerator(tb.ModelTestCase):
             )
         )
 
-        # XXX: we need to traverse *removed* items too in sync()!
+        # We are traversing *removed* items too in sync()!
         self.assertEqual(fresh_alice_groups, {g.id for g in alice.groups})
 
         # # But we should still have some valid data
