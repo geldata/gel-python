@@ -806,7 +806,7 @@ class GelSourceModel(
             return _empty_str_set  # type: ignore [return-value]
         return dirty
 
-    def __gel_commit__(self, *, refetch_mode: bool) -> None:
+    def __gel_commit__(self) -> None:
         ll_setattr(self, "__gel_changed_fields__", None)
 
     def __setattr__(self, name: str, value: Any) -> None:
@@ -905,7 +905,6 @@ class GelModel(
     if TYPE_CHECKING:
         __gel_new__: bool
         __gel_custom_serializer__: ClassVar[pydantic_core.SchemaSerializer]
-        __gel_computed_link_fields__: ClassVar[frozenset[str]]
 
     def __new__(
         cls,
@@ -1051,7 +1050,6 @@ class GelModel(
         self,
         *,
         new_id: uuid.UUID | None = None,
-        refetch_mode: bool,
     ) -> None:
         if new_id is not None:
             if not self.__gel_new__:
@@ -1061,20 +1059,8 @@ class GelModel(
             self.__gel_new__ = False
             self.__dict__["id"] = new_id
 
-        if refetch_mode:
-            # When we refetch after save() we will automatically refetch all
-            # properties and computed properties, but not links (every modified
-            # object will be refetched individually by virtue of being in the
-            # data graph passed to save(); but link *values* for every object
-            # are not refetched.)
-            #
-            # So we want to clear computed links, as they can go stale
-            # (especially true for backlinks)
-            for computed in self.__gel_get_computed_link_fields__():
-                self.__dict__.pop(computed, None)
-
         assert not self.__gel_new__
-        super().__gel_commit__(refetch_mode=refetch_mode)
+        super().__gel_commit__()
 
     def __eq__(self, other: object) -> bool:
         # We make two models equal to each other if they:
@@ -1303,22 +1289,6 @@ class GelModel(
         if update:
             ll_setattr(copied, "__gel_new__", ll_getattr(self, "__gel_new__"))
         return copied
-
-    @classmethod
-    def __gel_get_computed_link_fields__(cls) -> frozenset[str]:
-        try:
-            return cls.__dict__["__gel_computed_link_fields__"]  # type: ignore [no-any-return]
-        except KeyError:
-            pass
-
-        ret: set[str] = set()
-        for ptr in cls.__gel_reflection__.pointers.values():
-            if ptr.computed and ptr.kind.is_link():
-                ret.add(ptr.name)
-
-        fret = frozenset(ret)
-        cls.__gel_computed_link_fields__ = fret
-        return fret
 
 
 class GelLinkModel(
