@@ -48,6 +48,14 @@ class TestAsyncQuery(tb.AsyncQueryTestCase):
         CREATE SCALAR TYPE test::MyType EXTENDING int32;
         CREATE SCALAR TYPE test::MyType2 EXTENDING int64;
         CREATE SCALAR TYPE test::MyType3 EXTENDING int16;
+
+        CREATE TYPE test::Obj {
+            CREATE REQUIRED PROPERTY name -> std::str;
+            CREATE REQUIRED PROPERTY val -> std::int64;
+        };
+        INSERT test::Obj { name := "foo", val := 0 };
+        INSERT test::Obj { name := "bar", val := 1 };
+
     '''
 
     TEARDOWN = '''
@@ -55,6 +63,7 @@ class TestAsyncQuery(tb.AsyncQueryTestCase):
         DROP SCALAR TYPE test::MyType2;
         DROP SCALAR TYPE test::MyType;
         DROP TYPE test::Tmp;
+        DROP TYPE test::Obj;
     '''
 
     def setUp(self):
@@ -1169,6 +1178,30 @@ class TestAsyncQuery(tb.AsyncQueryTestCase):
 
         res = await self.client.query_sql("SELECT FROM generate_series(0, 1)")
         self.assertEqual(res[0].as_dict(), {})
+
+    async def test_async_query_graphql_01(self):
+        if self.server_version.major < 7:
+            self.skipTest("GraphQL added in 7.0")
+
+        res = json.loads(await self.client.query_graphql_json('''
+            query($name: String!) {
+                test__Obj(filter: {name: {eq: $name}}) {
+                    name
+                    val
+                }
+            }
+        ''', name='foo'))
+        self.assertEqual(
+            res,
+            dict(
+                test__Obj=[
+                    dict(
+                        name='foo',
+                        val=0,
+                    ),
+                ]
+            ),
+        )
 
     async def test_retry_mismatch_input_typedesc(self):
         # Cache the input type descriptor first

@@ -43,6 +43,7 @@ ctypedef object (*decode_row_method)(BaseCodec, object return_type, FRBuffer *bu
 cpdef enum InputLanguage:
     EDGEQL = 0x45  # b'E'
     SQL = 0x53  # b'S'
+    GRAPHQL = 0x47  # b'G'
 
 
 cpdef enum OutputFormat:

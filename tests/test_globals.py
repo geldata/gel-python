@@ -16,6 +16,7 @@
 # limitations under the License.
 #
 
+import json
 
 from gel import _testbase as tb
 from gel import errors
@@ -23,24 +24,30 @@ from gel import errors
 
 class TestGlobals(tb.AsyncQueryTestCase):
 
+    SETUP = '''
+        CREATE GLOBAL glob -> str;
+        CREATE REQUIRED GLOBAL req_glob -> str {
+            SET default := '!';
+        };
+        CREATE GLOBAL def_glob -> str {
+            SET default := '!';
+        };
+        CREATE GLOBAL computed := '!';
+        CREATE MODULE foo;
+        CREATE MODULE foo::bar;
+        CREATE GLOBAL foo::bar::baz -> str;
+
+        CREATE ALIAS GlobalTest := {
+            glob := global glob,
+            req_glob := global req_glob,
+            def_glob := global def_glob,
+        };
+    '''
+
     async def test_globals_01(self):
         db = self.client
         if db.is_proto_lt_1_0:
             self.skipTest("Global is added in EdgeDB 2.0")
-
-        await db.execute('''
-            CREATE GLOBAL glob -> str;
-            CREATE REQUIRED GLOBAL req_glob -> str {
-                SET default := '!';
-            };
-            CREATE GLOBAL def_glob -> str {
-                SET default := '!';
-            };
-            CREATE GLOBAL computed := '!';
-            CREATE MODULE foo;
-            CREATE MODULE foo::bar;
-            CREATE GLOBAL foo::bar::baz -> str;
-        ''')
 
         async with db.with_globals(glob='test') as gdb:
             x = await gdb.query_single('select global glob')
@@ -73,6 +80,63 @@ class TestGlobals(tb.AsyncQueryTestCase):
         async with db.with_globals({'foo::bar::baz': 'asdf'}) as gdb:
             x = await gdb.query_single('select global foo::bar::baz')
             self.assertEqual(x, 'asdf')
+
+    async def test_global_graphql_01(self):
+        if self.server_version.major < 7:
+            self.skipTest("GraphQL added in 7.0")
+
+        db = self.client
+
+        query = '''
+            query {
+                GlobalTest {
+                    glob
+                    req_glob
+                    def_glob
+                }
+            }
+        '''
+
+        async with db.with_globals(glob='test') as gdb:
+            x = json.loads(await gdb.query_graphql_json(query))
+            self.assertEqual(
+                x,
+                dict(GlobalTest=[
+                    dict(
+                        glob='test',
+                        req_glob='!',
+                        def_glob='!',
+                    )
+                ]),
+            )
+
+        async with db.with_globals(
+            req_glob='test1', def_glob='test2'
+        ) as gdb:
+            x = json.loads(await gdb.query_graphql_json(query))
+            self.assertEqual(
+                x,
+                dict(GlobalTest=[
+                    dict(
+                        glob=None,
+                        req_glob='test1',
+                        def_glob='test2',
+                    )
+                ]),
+            )
+
+        async with db.with_globals(def_glob=None) as gdb:
+            x = json.loads(await gdb.query_graphql_json(query))
+            self.assertEqual(
+                x,
+                dict(GlobalTest=[
+                    dict(
+                        glob=None,
+                        req_glob='!',
+                        def_glob=None,
+                    )
+                ]),
+            )
 
     async def test_client_state_mismatch(self):
         db = self.client
