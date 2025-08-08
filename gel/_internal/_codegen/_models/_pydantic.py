@@ -1125,6 +1125,7 @@ class BaseGeneratedModule:
             "computed": str(ptr.is_computed),
             "readonly": str(ptr.is_readonly),
             "has_default": str(ptr.has_default),
+            "mutable": str(target_type.mutable(self._types)),
         }
 
         if ptr.pointers is not None:

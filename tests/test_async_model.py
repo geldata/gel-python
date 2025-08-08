@@ -89,3 +89,65 @@ class TestAsyncModelGenerator(tb.AsyncModelTestCase):
         u2 = default.User(name="Al")
         await self.client.save(u2)
         self.assertFalse(hasattr(u2, "name_len"))
+
+    async def test_async_modelgen_save_reload_links_07(self):
+        # This is a copy if test_async_modelgen_save_reload_links_07
+        # ensuring the sync() is fully supported in async mode.
+
+        from models import default
+
+        # Test backlink invalidation when adding a user to a different group
+        # Fetch red and blue groups with nested user data and their groups
+
+        red = await self.client.get(
+            default.UserGroup.select(
+                name=True,
+                users=lambda g: g.users.select(
+                    name=True,
+                    groups=True,
+                ),
+            ).filter(name="red")
+        )
+
+        blue = await self.client.get(
+            default.UserGroup.select(
+                name=True,
+                users=lambda g: g.users.select(
+                    name=True,
+                    groups=True,
+                ),
+            ).filter(name="blue")
+        )
+
+        self.assertEqual(red.name, "red")
+        self.assertEqual(blue.name, "blue")
+        self.assertEqual(len(blue.users), 0)  # Should be empty initially
+
+        orig_ids = {u.id for u in red.users}
+        # Find Alice in the red group
+        alice = [u for u in red.users if u.name == "Alice"][0]
+        self.assertIn("red", {g.name for g in alice.groups})
+
+        # Add Alice to the blue group
+        blue.users.add(alice)
+        await self.client.sync(blue)
+
+        # Check that the Alice's groups computed backlink is updated
+        # after sync()
+        self.assertEqual(
+            {g.id for g in alice.groups},
+            set(
+                await self.client.query(
+                    """
+                        with w := (select User{groups} filter .id=<uuid>$0)
+                        select w.groups.id
+                    """,
+                    alice.id,
+                )
+            ),
+        )
+
+        # But we should still have some valid data
+        self.assertEqual(alice.name, "Alice")
+        self.assertEqual({u.id for u in red.users}, orig_ids)
+        self.assertEqual({u.id for u in blue.users}, {alice.id})

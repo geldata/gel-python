@@ -273,6 +273,12 @@ class ObjectType(InheritingType):
 
 
 class CollectionType(Type):
+    if TYPE_CHECKING:
+        _mutable_cached: bool | None
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "_mutable_cached", None)
+
     @functools.cached_property
     def edgeql(self) -> str:
         return str(self.schemapath)
@@ -287,9 +293,14 @@ class HomogeneousCollectionType(CollectionType):
     element_type: Type | None = None
 
     def mutable(self, schema: Schema) -> bool:
-        return super().mutable(schema) or self.get_element_type(
+        if self._mutable_cached is not None:
+            return self._mutable_cached
+
+        mut = super().mutable(schema) or self.get_element_type(schema).mutable(
             schema
-        ).mutable(schema)
+        )
+        object.__setattr__(self, "_mutable_cached", mut)  # noqa: PLC2801
+        return mut
 
     def get_id_and_name(self, element_type: Type) -> tuple[str, str]:
         cls = type(self)
@@ -376,9 +387,14 @@ class HeterogeneousCollectionType(CollectionType):
     element_types: tuple[Type, ...] | None = None
 
     def mutable(self, schema: Schema) -> bool:
-        return super().mutable(schema) or (
+        if self._mutable_cached is not None:
+            return self._mutable_cached
+
+        mut = super().mutable(schema) or (
             any(mt.mutable(schema) for mt in self.get_element_types(schema))
         )
+        object.__setattr__(self, "_mutable_cached", mut)  # noqa: PLC2801
+        return mut
 
     def get_id_and_name(
         self, element_types: tuple[Type, ...]
