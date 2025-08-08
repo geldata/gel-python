@@ -63,7 +63,7 @@ class TestAsyncModelGenerator(tb.AsyncModelTestCase):
                 ),
             ],
         )
-        await self.client.save(party)
+        await self.client.sync(party)
 
         # Fetch and verify
         raw_id = uuid.UUID(str(party.id))
@@ -78,3 +78,14 @@ class TestAsyncModelGenerator(tb.AsyncModelTestCase):
         m = next(iter(res.members))
         self.assertEqual(m.name, "John Smith")
         self.assertEqual(m.nickname, "Hannibal")
+
+    async def test_async_modelgen_save_refetch_modes(self):
+        from models import default
+
+        u1 = default.User(name="Al")
+        await self.client.sync(u1)
+        self.assertTrue(hasattr(u1, "name_len"))
+
+        u2 = default.User(name="Al")
+        await self.client.save(u2)
+        self.assertFalse(hasattr(u2, "name_len"))
