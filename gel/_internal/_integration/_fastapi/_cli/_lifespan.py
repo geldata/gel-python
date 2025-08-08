@@ -1,5 +1,4 @@
 from __future__ import annotations
-
 from typing import TYPE_CHECKING
 
 
@@ -7,6 +6,7 @@ import contextlib
 import functools
 import pathlib
 import subprocess
+import sys
 import tempfile
 import textwrap
 import threading
@@ -113,7 +113,7 @@ def _gel_toml(app_path: pathlib.Path) -> Iterator[tuple[str, str]]:
         content = textwrap.dedent(f"""\
             [hooks-extend]
             schema.update.after="gel-generate-py models --output={output}"
-            config.update.after="python -c '{reload_code}'"
+            config.update.after="{sys.executable} -c '{reload_code}'"
         """)
 
         with (path / "gel.extend.toml").open("w+t", encoding="utf8") as f:
