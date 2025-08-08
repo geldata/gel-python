@@ -9,7 +9,6 @@ import dataclasses
 
 if TYPE_CHECKING:
     import abc
-    import uuid
     from gel._internal import _edgeql
     from gel._internal._schemapath import SchemaPath
 
@@ -28,13 +27,11 @@ class GelPointerReflection:
 
 
 class GelReflectionProto(Protocol):
-    id: ClassVar[uuid.UUID]
     name: ClassVar[SchemaPath]
 
 
 class GelSchemaMetadata:
     class __gel_reflection__:  # noqa: N801
-        id: ClassVar[uuid.UUID]
         name: ClassVar[SchemaPath]
 
 

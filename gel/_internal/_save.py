@@ -966,7 +966,7 @@ class SaveExecutor:
         # Queries must be independent of each other within the same
         # ChangeBatch, so we can sort them to group queries.
         compiled.sort(
-            key=lambda x: (x[0].__gel_reflection__.id, x[1].single_query)
+            key=lambda x: (x[0].__gel_reflection__.name, x[1].single_query)
         )
 
         icomp = iter(compiled)
