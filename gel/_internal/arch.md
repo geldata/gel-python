@@ -148,6 +148,43 @@ Run `python tools/gen_models.py` to generate test models into your virtual envir
      and you should be able to just run `$ pytest`.
 
 
+### Setup gotchas
+
+#### Using a system-wide `pytest` install
+
+Errors like `ModuleNotFoundError: No module named typing_inspection’` can
+occur when using a system wide pytest installation.
+
+This can be caused by having run either `pip install pytest` outside a venv
+or `apt install python3-pytest`.
+
+If you want to keep these installations, you can still run tests locally by
+running `python -m pytest`.
+
+#### `make clean && make` to fix binary incompatibilities
+
+Errors such as:
+```bash
+gel.protocol.protocol.ExecuteContext size changed, may indicate binary
+incompatibility. Expected 152 from C header, got 184 from PyObject
+```
+
+Indicate that a `pyx` file has changed. A clean rebuild is necessary.
+
+#### Other errors
+
+Some other errors that are caused by a weird environment, but more details are
+needed. If you see one of these, please note the steps used to fix them!
+
+```bash
+Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+  File "/home/dnwpark/work/dev-3.12/edgedb-python/gel/__init__.py", line 32,
+  in <module>
+    from gel.datatypes.datatypes import Record, Set, Object, Array
+ImportError: cannot import name 'Record' from 'gel.datatypes.datatypes'
+```
+
 ### Running Tests
 
 ```bash
