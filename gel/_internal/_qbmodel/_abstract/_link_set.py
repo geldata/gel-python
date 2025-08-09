@@ -302,7 +302,7 @@ class AbstractLinkSet(  # noqa: PLW1641 (__hash__ is implemented)
         self.__gel_add__(value)
 
     def discard(self, value: _MT_co) -> None:  # type: ignore [misc]
-        """Remove item; raise ValueError if missing."""
+        """Remove item; do nothing if missing."""
         self.__gel_remove__(value)
 
     def remove(self, value: _MT_co) -> None:  # type: ignore [misc]
@@ -353,19 +353,6 @@ class AbstractLinkSet(  # noqa: PLW1641 (__hash__ is implemented)
         elif isinstance(other, set):
             if self._mode is Mode.Write:
                 return False
-
-            if (
-                self._tracking_set is not None
-                and self._tracking_index is not None
-                and len(self._tracking_set) != len(self._tracking_index)
-            ):
-                # There are unhashable items in our collection
-                # (added after the link was fetched or this is a new link),
-                # so we're not equal to any valid Python set.
-                return False
-
-            if self._tracking_set is not None:
-                return self._tracking_set.keys() == other
 
             return set(self._items) == other
 
@@ -424,7 +411,7 @@ class LinkSet(
         self._items.append(value)
 
     def __gel_remove__(self, value: _MT_co) -> _MT_co | None:  # type: ignore [misc]
-        """Remove item; raise ValueError if missing."""
+        """Remove item; return None if missing."""
         value = self._check_value(value)
         self._ensure_snapshot()
         if not self._is_tracked(value):
@@ -626,7 +613,7 @@ class LinkWithPropsSet(
             self._items.append(proxy)
 
     def __gel_remove__(self, value: _PT_co | _BMT_co) -> _PT_co | None:
-        """Remove item; raise ValueError if missing."""
+        """Remove item; return None if missing."""
 
         self._ensure_snapshot()
 
