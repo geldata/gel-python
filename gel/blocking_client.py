@@ -657,6 +657,7 @@ class Client(
         *,
         refetch: bool,
         objs: tuple[GelModel, ...],
+        warn_on_large_sync_set: bool = False,
     ) -> None:
         opts = self._get_debug_options()
 
@@ -664,6 +665,7 @@ class Client(
             objs,
             refetch=refetch,
             save_postcheck=opts.save_postcheck,
+            warn_on_large_sync_set=warn_on_large_sync_set,
         )
 
         for tx in self._batch():
@@ -703,9 +705,14 @@ class Client(
     def sync(
         self,
         *objs: GelModel,
+        warn_on_large_sync: bool = True,
     ) -> None:
         """Persist objects and refetch updated data back into them."""
-        self._save_impl(refetch=True, objs=objs)
+        self._save_impl(
+            refetch=True,
+            objs=objs,
+            warn_on_large_sync_set=warn_on_large_sync,
+        )
 
     def __debug_save__(self, *objs: GelModel) -> SaveDebug:
         ns = time.monotonic_ns()

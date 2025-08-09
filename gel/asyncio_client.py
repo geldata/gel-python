@@ -638,6 +638,7 @@ class AsyncIOClient(
         *,
         refetch: bool,
         objs: tuple[GelModel, ...],
+        warn_on_large_sync_set: bool = False,
     ) -> None:
         opts = self._get_debug_options()
 
@@ -645,6 +646,7 @@ class AsyncIOClient(
             objs,
             refetch=refetch,
             save_postcheck=opts.save_postcheck,
+            warn_on_large_sync_set=warn_on_large_sync_set,
         )
 
         async for tx in self._batch():
@@ -684,9 +686,14 @@ class AsyncIOClient(
     async def sync(
         self,
         *objs: GelModel,
+        warn_on_large_sync: bool = True,
     ) -> None:
         """Persist objects and refetch updated data back into them."""
-        await self._save_impl(refetch=True, objs=objs)
+        await self._save_impl(
+            refetch=True,
+            objs=objs,
+            warn_on_large_sync_set=warn_on_large_sync,
+        )
 
     async def __aenter__(self) -> Self:
         return await self.ensure_connected()

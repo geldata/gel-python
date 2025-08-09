@@ -151,3 +151,27 @@ class TestAsyncModelGenerator(tb.AsyncModelTestCase):
         self.assertEqual(alice.name, "Alice")
         self.assertEqual({u.id for u in red.users}, orig_ids)
         self.assertEqual({u.id for u in blue.users}, {alice.id})
+
+    async def test_async_modelgen_sync_warning(self):
+        from models import default
+
+        g = default.UserGroup(
+            name="Pickle Pirates",
+            users=[default.User(name="{i}") for i in range(200)],
+        )
+
+        with self.assertWarns(msg_part="`sync()` is creating") as fn:
+            await self.client.sync(g)
+            self.assertEqual(fn, __file__)  # just a sanity check
+
+        for u in g.users:
+            u.name += "aaa"
+
+        with self.assertWarns(msg_part="`sync()` is refetching"):
+            await self.client.sync(g)
+
+        for u in g.users:
+            u.name += "bbb"
+
+        with self.assertNotWarns():
+            await self.client.sync(g, warn_on_large_sync=False)

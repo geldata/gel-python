@@ -3,12 +3,14 @@ from __future__ import annotations
 import collections
 import dataclasses
 import pathlib
+import warnings
 import weakref
 import uuid
 
 from typing import (
     TYPE_CHECKING,
     Any,
+    Literal,
     NamedTuple,
     TypeGuard,
     TypeVar,
@@ -65,6 +67,15 @@ else:
         raise RuntimeError(
             "getattr() is not allowed on GelModel in save(), use model_attr()"
         )
+
+
+# Warn if sync() is creating more than this many objects and suggest
+# using save() instead.
+SYNC_NEW_THRESHOLD = 50
+# Ditto for refetching.
+SYNC_REFETCH_THRESHOLD = 100
+# Base stacklevel for the above sync() warnings
+SYNC_BASE_STACKLEVEL = 6
 
 
 T = TypeVar("T")
@@ -585,6 +596,7 @@ def make_plan(
     /,
     *,
     refetch: bool,
+    warn_on_large_sync_set: bool,
 ) -> SavePlan:
     insert_ops: ChangeBatch = []
     update_ops: ChangeBatch = []
@@ -994,6 +1006,13 @@ def make_plan(
         inserted.track_many(ready)
         remaining_to_make.untrack_many(ready)
 
+    if (
+        refetch
+        and warn_on_large_sync_set
+        and len(inserted) > SYNC_NEW_THRESHOLD
+    ):
+        _warn_on_large_sync("new", stacklevel=0, num_objects=len(inserted))
+
     return SavePlan(
         insert_batches,
         update_ops,
@@ -1006,10 +1025,13 @@ def make_save_executor_constructor(
     objs: tuple[GelModel, ...],
     *,
     refetch: bool,
+    warn_on_large_sync_set: bool = False,
     save_postcheck: bool = False,
 ) -> Callable[[], SaveExecutor]:
     create_batches, updates, refetch_batch, graph_ids_to_model = make_plan(
-        objs, refetch=refetch
+        objs,
+        refetch=refetch,
+        warn_on_large_sync_set=warn_on_large_sync_set,
     )
     return lambda: SaveExecutor(
         objs=objs,
@@ -1019,6 +1041,7 @@ def make_save_executor_constructor(
         graph_ids_to_model=graph_ids_to_model,
         refetch=refetch,
         save_postcheck=save_postcheck,
+        warn_on_large_sync_set=warn_on_large_sync_set,
     )
 
 
@@ -1115,6 +1138,7 @@ class SaveExecutor:
     graph_ids_to_model: IDTracker[GelModel, None]
     refetch: bool
     save_postcheck: bool
+    warn_on_large_sync_set: bool
 
     object_ids: dict[int, uuid.UUID] = dataclasses.field(init=False)
 
@@ -1125,6 +1149,8 @@ class SaveExecutor:
         self,
     ) -> list[tuple[type[GelModel], TypeWrapper[type[GelModel]], list[Any]]]:
         ret = []
+
+        total_refetch_obj_count = 0
 
         for tp, shape in self.refetch_batch.items():
             spec_arg: list[
@@ -1137,6 +1163,8 @@ class SaveExecutor:
             ]
 
             link_arg_order: list[str] = []
+
+            total_refetch_obj_count += len(shape.models)
 
             for ptr in shape.fields.values():
                 if ptr.kind.is_link():
@@ -1245,6 +1273,17 @@ class SaveExecutor:
             """
 
             ret.append((tp, TypeWrapper(tp, query), spec_arg))
+
+        if (
+            self.refetch
+            and self.warn_on_large_sync_set
+            and total_refetch_obj_count > SYNC_REFETCH_THRESHOLD
+        ):
+            _warn_on_large_sync(
+                "refetch",
+                stacklevel=0,
+                num_objects=total_refetch_obj_count,
+            )
 
         return ret  # type: ignore [return-value]
 
@@ -1472,7 +1511,9 @@ class SaveExecutor:
         # Final check: make sure that the save plan is empty
         # in case we've missed something in `_check_recursive()`.
         create_batches, updates, _, _ = make_plan(
-            self.objs, refetch=self.refetch
+            self.objs,
+            refetch=self.refetch,
+            warn_on_large_sync_set=False,
         )
         if create_batches or updates:
             raise ValueError("non-empty save plan after save()")
@@ -1944,3 +1985,43 @@ class SaveExecutor:
             arg=ret_args,
             change=change,
         )
+
+
+def _warn_on_large_sync(
+    case: Literal["new", "refetch"],
+    *,
+    stacklevel: int,
+    num_objects: int,
+) -> None:
+    warning_body = (
+        "* `save()` is much faster than `sync()` if you do not need "
+        "to re-fetch all objects from the database\n\n"
+        "* in application code you usually want to use `sync()` to make "
+        "sure your objects are up to date\n\n"
+        "* for data loading scripts `save()` is often preferrable "
+        "over `sync()`\n\n"
+        "This warning can be silenced by passing "
+        "`warn_on_large_sync=False` to `sync()`"
+    )
+
+    match case:
+        case "new":
+            warnings.warn(
+                f"`sync()` is creating {num_objects} objects (the threshold "
+                f"for this warning is {SYNC_NEW_THRESHOLD}), "
+                f"consider the following:\n\n"
+                f"{warning_body}",
+                UserWarning,
+                stacklevel=stacklevel + SYNC_BASE_STACKLEVEL,
+            )
+        case "refetch":
+            warnings.warn(
+                f"`sync()` is refetching {num_objects} objects (the threshold "
+                f"for this warning is {SYNC_REFETCH_THRESHOLD}), "
+                f"consider the following:\n\n"
+                f"{warning_body}",
+                UserWarning,
+                stacklevel=stacklevel + SYNC_BASE_STACKLEVEL,
+            )
+        case _:
+            raise AssertionError("unreachable")

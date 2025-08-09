@@ -6310,6 +6310,30 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(conf.name, "Alice")
         self.assertEqual(conf.__linkprops__.create, True)
 
+    def test_modelgen_sync_warning(self):
+        from models import default
+
+        g = default.UserGroup(
+            name="Pickle Pirates",
+            users=[default.User(name="{i}") for i in range(200)],
+        )
+
+        with self.assertWarns(msg_part="`sync()` is creating") as fn:
+            self.client.sync(g)
+            self.assertEqual(fn, __file__)  # just a sanity check
+
+        for u in g.users:
+            u.name += "aaa"
+
+        with self.assertWarns(msg_part="`sync()` is refetching"):
+            self.client.sync(g)
+
+        for u in g.users:
+            u.name += "bbb"
+
+        with self.assertNotWarns():
+            self.client.sync(g, warn_on_large_sync=False)
+
 
 @tb.typecheck
 class TestEmptyModelGenerator(tb.ModelTestCase):
