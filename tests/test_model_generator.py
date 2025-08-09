@@ -4827,6 +4827,155 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(p1.nickname, "HACKED")
         self.assertEqual(p1.__linkprops__.is_tall_enough, False)
 
+    def test_modelgen_linkprops_04(self):
+        from models import default
+
+        # Test reusing the same anonymous link proxy for multiple objects
+
+        u = self.client.get(default.User.filter(name="Zoe"))
+        link = default.GameSession.players.link(u, is_tall_enough=True)
+
+        gs0 = default.GameSession(num=0)
+        gs1 = default.GameSession(num=1)
+
+        # Single use link, should copy all linkprops
+        gs0.players.add(link)
+        gs0_link = list(gs0.players)[0]
+
+        self.assertIsNot(gs0_link.__linkprops__, link.__linkprops__)
+        self.assertEqual(gs0_link.__linkprops__.is_tall_enough, True)
+        self.assertEqual(link.__linkprops__.is_tall_enough, True)
+
+        # Add it to another GameSession, should copy the linkprops again
+        link.__linkprops__.is_tall_enough = False
+        gs1.players.add(link)
+        gs1_link = list(gs1.players)[0]
+
+        self.assertIsNot(gs0_link.__linkprops__, link.__linkprops__)
+        self.assertIsNot(gs1_link.__linkprops__, link.__linkprops__)
+        self.assertIsNot(gs0_link.__linkprops__, gs1_link.__linkprops__)
+        self.assertEqual(gs0_link.__linkprops__.is_tall_enough, True)
+        self.assertEqual(gs1_link.__linkprops__.is_tall_enough, False)
+        self.assertEqual(link.__linkprops__.is_tall_enough, False)
+
+        link.__linkprops__.is_tall_enough = None
+        self.assertEqual(gs0_link.__linkprops__.is_tall_enough, True)
+        self.assertEqual(gs1_link.__linkprops__.is_tall_enough, False)
+        self.assertEqual(link.__linkprops__.is_tall_enough, None)
+
+    def test_modelgen_linkprops_05(self):
+        from models import default
+
+        # Test reusing the same linked link proxy for multiple objects
+
+        u = self.client.get(default.User.filter(name="Zoe"))
+        gs0 = default.GameSession(num=0, players=[u])
+        gs1 = default.GameSession(num=1)
+
+        # Add it to another GameSession, should strip the linkprops
+        gs0_link = list(gs0.players)[0]
+        gs0_link.__linkprops__.is_tall_enough = True
+        gs1.players.add(gs0_link)
+        gs1_link = list(gs1.players)[0]
+
+        self.assertIsNot(gs0_link.__linkprops__, gs1_link.__linkprops__)
+        self.assertEqual(gs0_link.__linkprops__.is_tall_enough, True)
+        self.assertFalse(hasattr(gs1_link.__linkprops__, "is_tall_enough"))
+
+        gs1_link.__linkprops__.is_tall_enough = False
+        self.assertEqual(gs0_link.__linkprops__.is_tall_enough, True)
+        self.assertEqual(gs1_link.__linkprops__.is_tall_enough, False)
+
+    @tb.xfail
+    # merge doesn't happen
+    def test_modelgen_linkprops_06(self):
+        from models import default
+
+        # Try to merge link props
+        u = self.client.get(default.User.filter(name="Zoe"))
+        team = default.Team(name="Pickle Pirates", members=[u])
+        member = list(team.members)[0]
+        member.__linkprops__.rank = 1
+        member.__linkprops__.role = "captain"
+        # Merge the existing and this new link (rank is "unset", so we don't
+        # expect it to change)
+        team.members.add(default.Team.members.link(u, role="first mate"))
+
+        self.assertEqual(member.name, "Zoe")
+        self.assertEqual(member.__linkprops__.rank, 1)
+        self.assertEqual(member.__linkprops__.role, "first mate")
+
+    def test_modelgen_linkprops_07(self):
+        from models import default
+
+        # Try to merge link props
+        u = self.client.get(default.User.filter(name="Zoe"))
+        team0 = default.Team(
+            name="Taco Wizards",
+            members=[default.Team.members.link(u, rank=1, role="magister")],
+        )
+        self.client.save(team0)
+
+        # Fetch the team
+        team1 = self.client.get(default.Team.filter(name="Taco Wizards"))
+        # Merge this new link (rank is "unset", so we don't expect it to
+        # change)
+        team1.members.add(default.Team.members.link(u, role="sorceress"))
+        self.client.save(team1)
+
+        # Re-fetch the team
+        team2 = self.client.get(
+            default.Team.select("*", members=True).filter(name="Taco Wizards")
+        )
+
+        member = list(team2.members)[0]
+        self.assertEqual(member.name, "Zoe")
+        self.assertEqual(member.__linkprops__.rank, 1)
+        self.assertEqual(member.__linkprops__.role, "sorceress")
+
+    @tb.xfail
+    # merge doesn't happen
+    def test_modelgen_linkprops_08(self):
+        from models import default
+
+        # Try to merge link props
+        u = self.client.get(default.User.filter(name="Zoe"))
+        team = default.Team(
+            name="Taco Wizards",
+            members=[default.Team.members.link(u, rank=1, role="magister")],
+        )
+        self.client.save(team)
+
+        # Fetch the team
+        team2 = self.client.get(
+            default.Team.select("*", members=True).filter(name="Taco Wizards")
+        )
+        # Merge the existing and this new link (rank is "unset", so we don't
+        # expect it to change)
+        team2.members.add(default.Team.members.link(u, role="sorceress"))
+
+        member = list(team2.members)[0]
+        self.assertEqual(member.name, "Zoe")
+        self.assertEqual(member.__linkprops__.rank, 1)
+        self.assertEqual(member.__linkprops__.role, "sorceress")
+
+    def test_modelgen_linkprops_09(self):
+        from models import default
+
+        # Change a fetched link property (targeting __gel_has_changes__)
+
+        gs = self.client.get(
+            default.GameSession.select("*", players=True).filter(num=123)
+        )
+        for p in gs.players:
+            if p.name == "Alice":
+                alice = p
+                self.assertEqual(alice.__linkprops__.is_tall_enough, False)
+                alice.__linkprops__.is_tall_enough = True
+
+        self.client.sync(gs)
+        self.assertEqual(alice.__linkprops__.is_tall_enough, True)
+
     def test_modelgen_globals_01(self):
         """Test reflection of globals"""
         from models import default
