@@ -4887,7 +4887,15 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(gs1_link.__linkprops__.is_tall_enough, False)
 
     @tb.xfail
-    # merge doesn't happen
+    # victor: merge doesn't happen
+    # yury: this is probably OK -- we decided that the Gel server should
+    #       "merge things". When a ProxyModel is assigned to a single link
+    #       or added to a link set, it should just replace the existing one
+    #       there.  Whatever __linkprops__ are coming in after the assignment
+    #       will be sent to Gel in save() / sync() -- they both are only saving
+    #       the __gel_changed_fields__.
+    #       I'm keeping the test here, but I think we'll remove it later
+    #       once we discuss this one more time.
     def test_modelgen_linkprops_06(self):
         from models import default
 
@@ -4934,7 +4942,8 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(member.__linkprops__.role, "sorceress")
 
     @tb.xfail
-    # merge doesn't happen
+    # victor: merge doesn't happen
+    # yury: read the comment in test_modelgen_linkprops_06
     def test_modelgen_linkprops_08(self):
         from models import default
 
