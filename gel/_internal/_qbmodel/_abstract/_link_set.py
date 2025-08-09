@@ -62,6 +62,8 @@ class AbstractLinkSet(  # noqa: PLW1641 (__hash__ is implemented)
         "_tracking_set",
     )
 
+    _allowed_write_only_ops: ClassVar[list[str]] = []
+
     # Set of (hashable) items to maintain distinctness.
     _tracking_set: dict[_MT_co, _MT_co] | None
     # Mapping of `self._pyid(item)` to `item`
@@ -616,6 +618,22 @@ class AbstractMutableLinkSet(
             assert self._tracking_index is not None
             self._index_snapshot = dict(self._tracking_index)
 
+    def _ensure_snapshot_then_track(self, value: _MT_co) -> None:  # type: ignore [misc]
+        self._ensure_snapshot()
+        if self._is_tracked(value):
+            return
+        self._track_item(value)
+        self._items.append(value)
+
+    def _ensure_snapshot_then_untrack(self, value: _MT_co) -> _MT_co | None:  # type: ignore [misc]
+        self._ensure_snapshot()
+        if not self._is_tracked(value):
+            return None
+
+        self._untrack_item(value)
+        self._items.remove(value)
+        return value
+
     def __gel_get_added__(self) -> list[_MT_co]:
         match bool(self._index_snapshot), bool(self._tracking_index):
             case True, False:
@@ -752,7 +770,7 @@ class AbstractMutableLinkSet(
         self.__gel_add__(value)
 
     def discard(self, value: _MT_co) -> None:  # type: ignore [misc]
-        """Remove item; raise ValueError if missing."""
+        """Remove item; do nothing if missing."""
         self.__gel_remove__(value)
 
     def remove(self, value: _MT_co) -> None:  # type: ignore [misc]
@@ -854,22 +872,12 @@ class LinkSet(
 
     def __gel_add__(self, value: _MT_co) -> None:  # type: ignore [misc]
         value = self._check_value(value)
-        self._ensure_snapshot()
-        if self._is_tracked(value):
-            return
-        self._track_item(value)
-        self._items.append(value)
+        self._ensure_snapshot_then_track(value)
 
     def __gel_remove__(self, value: _MT_co) -> _MT_co | None:  # type: ignore [misc]
-        """Remove item; raise ValueError if missing."""
+        """Remove item; return None if missing."""
         value = self._check_value(value)
-        self._ensure_snapshot()
-        if not self._is_tracked(value):
-            return None
-
-        self._untrack_item(value)
-        self._items.remove(value)
-        return value
+        return self._ensure_snapshot_then_untrack(value)
 
     def _check_value(self, value: Any) -> _MT_co:
         cls = type(self)
@@ -997,7 +1005,7 @@ class LinkWithPropsSet(
             self._items.append(proxy)
 
     def __gel_remove__(self, value: _PT_co | _BMT_co) -> _PT_co | None:
-        """Remove item; raise ValueError if missing."""
+        """Remove item; return None if missing."""
 
         self._ensure_snapshot()
 
