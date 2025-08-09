@@ -172,6 +172,8 @@ class AbstractCollection(Iterable[_T_co], Generic[_T_co]):
         self.__gel_overwrite_data__ = False
 
     def __gel_post_commit_check__(self, path: Path) -> None:
+        # This hook is only run in tests, when the client is configured with
+        # `client._with_debug(save_postcheck=True)`.
         if self.__gel_overwrite_data__:
             raise ValueError(
                 f"{path} list did not reset self.__gel_overwrite_data__"

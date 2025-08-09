@@ -824,6 +824,50 @@ class BaseModelTestCase(DatabaseTestCase):
             f"property {prop!r} value does not match",
         )
 
+    @contextlib.contextmanager
+    def assertWarns(
+        self,
+        *,
+        msg_part: str,
+        exp_category: type[Warning] = UserWarning,
+    ):
+        frame = sys._getframe(2)
+        exp_filename = frame.f_code.co_filename
+
+        try:
+            with warnings.catch_warnings(record=True) as w:
+                warnings.simplefilter("always")
+                expected_line = frame.f_lineno + 1
+                yield exp_filename
+
+            self.assertTrue(w, "No warning captured")
+
+            wm = w[0]  # warnings.WarningMessage
+            self.assertEqual(
+                pathlib.Path(wm.filename).resolve(),
+                pathlib.Path(exp_filename).resolve(),
+            )
+            self.assertEqual(wm.lineno, expected_line)
+            self.assertIs(wm.category, exp_category)
+            self.assertIn(msg_part, str(wm.message))
+        finally:
+            del frame
+
+    @contextlib.contextmanager
+    def assertNotWarns(self):
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            yield
+
+        if w:
+            captured_warnings = [
+                f"{wm.category.__name__}: {wm.message}" for wm in w
+            ]
+            self.fail(
+                f"Unexpected warning(s) captured:\n"
+                + "\n".join(captured_warnings)
+            )
+
     def assertPydanticChangedFields(
         self,
         model: pydantic.BaseModel,
