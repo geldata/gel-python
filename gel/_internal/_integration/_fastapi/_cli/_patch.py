@@ -4,6 +4,7 @@ from typing import (
 
 import inspect
 import importlib.util
+import pathlib
 import types
 
 
@@ -46,7 +47,15 @@ def maybe_patch_fastapi_cli() -> bool:
         cli = fastapi_cli_import_site.f_locals.get("toolkit")
         if import_data is not None and cli is not None:
             app_path = import_data.module_data.module_paths[-1].parent
-            with _lifespan.fastapi_cli_lifespan(cli, app_path):
+            with _lifespan.fastapi_cli_lifespan(cli, app_path) as reload_watch:
+                dirs = kwargs.get("reload_dirs")
+                if dirs is None:
+                    kwargs["reload_dirs"] = [pathlib.Path.cwd(), reload_watch]
+                elif isinstance(dirs, str):
+                    kwargs["reload_dirs"] = [dirs, reload_watch]
+                else:
+                    assert isinstance(dirs, list)
+                    kwargs["reload_dirs"].append(reload_watch)
                 uvicorn.run(*args, **kwargs)
         else:
             uvicorn.run(*args, **kwargs)
