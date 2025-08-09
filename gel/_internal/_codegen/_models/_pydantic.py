@@ -2786,8 +2786,14 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         Returns:
             True if any operator functions were generated, False otherwise
         """
+
+        special_cases: set[str] = {"std::AND", "std::OR"}
+
         # Filter to operators without Python magic method equivalents
-        bin_ops = [op for op in ops if op.py_magic is None]
+        bin_ops = [op
+            for op in ops
+            if op.py_magic is None and op.name not in special_cases
+        ]
         if not bin_ops:
             return False
         else:
@@ -2802,6 +2808,8 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                 style="function",
                 node_ctor=self._write_infix_op_func_node_ctor,
             )
+            self._write_std_and()
+            self._write_std_or()
             return True
 
     def _write_infix_op_method_node_ctor(
@@ -5833,6 +5841,90 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                 )
 
         return result
+
+    def _write_std_and(self):
+        self.write(textwrap.dedent("""\
+            def and_(  # type: ignore [override, unused-ignore]
+                a: base_shapes.bool | builtins.bool | type[base_shapes.bool],
+                b: base_shapes.bool | builtins.bool | type[base_shapes.bool],
+                *args: Sequence[
+                    base_shapes.bool | builtins.bool | type[base_shapes.bool
+                ]],
+            ) -> type[base_shapes.bool]:
+                match a:
+                    case builtins.bool():
+                        a = base_shapes.bool(a)
+                match b:
+                    case builtins.bool():
+                        b = base_shapes.bool(b)
+                __rtype__ = base_shapes.bool
+                res = AnnotatedExpr(  # type: ignore [return-value]
+                    __rtype__,
+                    InfixOp(
+                        lexpr=a,
+                        op="AND",
+                        rexpr=b,
+                        type_=__rtype__.__gel_reflection__.name,
+                    ),
+                )
+                for arg in args:
+                    match arg:
+                        case builtins.bool():
+                            arg = base_shapes.bool(a)
+                    res = AnnotatedExpr(  # type: ignore [return-value]
+                        __rtype__,
+                        InfixOp(
+                            lexpr=res,
+                            op="AND",
+                            rexpr=arg,
+                            type_=__rtype__.__gel_reflection__.name,
+                        ),
+                    )
+                return res
+
+            """))
+
+    def _write_std_or(self):
+        self.write(textwrap.dedent("""\
+            def or_(  # type: ignore [override, unused-ignore]
+                a: base_shapes.bool | builtins.bool | type[base_shapes.bool],
+                b: base_shapes.bool | builtins.bool | type[base_shapes.bool],
+                *args: Sequence[
+                    base_shapes.bool | builtins.bool | type[base_shapes.bool
+                ]],
+            ) -> type[base_shapes.bool]:
+                match a:
+                    case builtins.bool():
+                        a = base_shapes.bool(a)
+                match b:
+                    case builtins.bool():
+                        b = base_shapes.bool(b)
+                __rtype__ = base_shapes.bool
+                res = AnnotatedExpr(  # type: ignore [return-value]
+                    __rtype__,
+                    InfixOp(
+                        lexpr=a,
+                        op="OR",
+                        rexpr=b,
+                        type_=__rtype__.__gel_reflection__.name,
+                    ),
+                )
+                for arg in args:
+                    match arg:
+                        case builtins.bool():
+                            arg = base_shapes.bool(a)
+                    res = AnnotatedExpr(  # type: ignore [return-value]
+                        __rtype__,
+                        InfixOp(
+                            lexpr=res,
+                            op="OR",
+                            rexpr=arg,
+                            type_=__rtype__.__gel_reflection__.name,
+                        ),
+                    )
+                return res
+
+            """))
 
 
 class GeneratedGlobalModule(BaseGeneratedModule):
