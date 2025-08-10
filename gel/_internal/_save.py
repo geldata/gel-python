@@ -17,7 +17,7 @@ from typing import (
     Generic,
     cast,
 )
-from typing_extensions import TypeAliasType, dataclass_transform
+from typing_extensions import TypeAliasType, dataclass_transform, Self
 
 from gel._internal._qbmodel._abstract import (
     GelPrimitiveType,
@@ -44,6 +44,8 @@ from gel._internal._qbmodel._abstract import (
 from gel._internal._edgeql import PointerKind, quote_ident
 
 if TYPE_CHECKING:
+    from types import TracebackType
+
     from collections.abc import (
         Iterable,
         Iterator,
@@ -86,7 +88,8 @@ _unset = object()
 _missing_arg = object()
 
 _STOP_LINK_TRAVERSAL = (None, _unset, DEFAULT_VALUE)
-_STOP_FIELDS = ("id", "__tid__", "__tname__")
+_STOP_FIELDS_NO_ID = ("__tid__", "__tname__")
+_STOP_FIELDS = ("id", *_STOP_FIELDS_NO_ID)
 
 _sorted_pointers_cache: weakref.WeakKeyDictionary[
     type[GelSourceModel], Iterable[GelPointerReflection]
@@ -255,6 +258,11 @@ class SavePlan(NamedTuple):
     # So we use Python `id(obj): obj` mapping make an individual
     # refetch select for each unique Python object.
     graph_ids_to_model: IDTracker[GelModel, None]
+
+    # When we refetch computed links we also need to know which
+    # objects were in the sync() graph that theoretically can end
+    # up in the computed link. So we track then in this dict.
+    existing_objects: dict[uuid.UUID, GelModel]
 
 
 class IDTracker(Generic[T, V]):
@@ -579,7 +587,7 @@ def push_refetch(obj: GelModel, refetch_ops: RefetchBatch) -> None:
     ref_shape = refetch_ops[tp_obj]
     ref_shape.models.append(obj)
     for field_name in obj.__pydantic_fields_set__:
-        if field_name in ref_shape.fields or field_name in _STOP_FIELDS:
+        if field_name in ref_shape.fields or field_name in _STOP_FIELDS_NO_ID:
             continue
 
         try:
@@ -604,6 +612,7 @@ def make_plan(
     removed_objects: list[Iterable[GelModel]] = []
 
     iter_graph_tracker: IDTracker[GelModel, None] = IDTracker()
+    existing_objects: dict[uuid.UUID, GelModel] = {}
 
     for obj in iter_graph(objs, iter_graph_tracker):
         tp_obj: type[GelModel] = type(obj)
@@ -619,6 +628,7 @@ def make_plan(
 
         if refetch and not obj.__gel_new__:
             push_refetch(obj, refetch_ops)
+            existing_objects[obj.id] = obj
 
         for prop in pointers:
             # Skip computeds, we can't update them.
@@ -1018,6 +1028,7 @@ def make_plan(
         update_ops,
         refetch_ops,
         iter_graph_tracker,
+        existing_objects,
     )
 
 
@@ -1028,7 +1039,13 @@ def make_save_executor_constructor(
     warn_on_large_sync_set: bool = False,
     save_postcheck: bool = False,
 ) -> Callable[[], SaveExecutor]:
-    create_batches, updates, refetch_batch, graph_ids_to_model = make_plan(
+    (
+        create_batches,
+        updates,
+        refetch_batch,
+        graph_ids_to_model,
+        existing_objects,
+    ) = make_plan(
         objs,
         refetch=refetch,
         warn_on_large_sync_set=warn_on_large_sync_set,
@@ -1039,6 +1056,7 @@ def make_save_executor_constructor(
         updates=updates,
         refetch_batch=refetch_batch,
         graph_ids_to_model=graph_ids_to_model,
+        existing_objects=existing_objects,
         refetch=refetch,
         save_postcheck=save_postcheck,
         warn_on_large_sync_set=warn_on_large_sync_set,
@@ -1082,7 +1100,7 @@ class QueryBatch:
                 for obj_upd, change in zip(
                     obj_data, self.changes, strict=True
                 ):
-                    self.executor.object_ids[id(change.model)] = obj_upd
+                    self.executor.new_object_ids[id(change.model)] = obj_upd
 
             case True, True:
                 # in this case `obj_data` is a list of GelModel instances
@@ -1093,8 +1111,10 @@ class QueryBatch:
                         if field in _STOP_FIELDS:
                             continue
                         change.model.__dict__[field] = obj_upd.__dict__[field]
+                        change.model.__pydantic_fields_set__.add(field)
 
-                    self.executor.object_ids[id(change.model)] = obj_upd.id
+                    self.executor.new_object_ids[id(change.model)] = obj_upd.id
+                    self.executor.new_objects[obj_upd.id] = obj_upd
 
             case _, _:
                 # TODO: Implement a check that ids from updates
@@ -1107,6 +1127,7 @@ class QueryRefetch:
     executor: SaveExecutor
     query: TypeWrapper[type[GelModel]]
     args: dict[str, Any]
+    shape: RefetchShape
 
     def feed_db_data(self, obj_data: Iterable[Any]) -> None:
         for obj in obj_data:
@@ -1116,8 +1137,49 @@ class QueryRefetch:
             model = self.executor.graph_ids_to_model.get_tracked_by_hash(py_id)
             assert model.id == gel_id
             model_dict = model.__dict__
+            model_pydantic_fields_set = model.__pydantic_fields_set__
             for field in model.__pydantic_fields_set__:
-                model_dict[field] = obj_dict[field]
+                shape_field = self.shape.fields[field]
+                if (
+                    shape_field.kind.is_link()
+                    # XXX handle single too
+                    and shape_field.cardinality.is_multi()
+                ):
+                    link = model_dict[field]
+                    new_link = obj_dict[field]
+                    if shape_field.computed:
+                        # This is basically a re-implementation of
+                        # `AbstractLinkSet.__gel_reconcile__()` method.
+                        # See the comments in that method for more details
+                        # on the logic of this update.
+                        # TODO: move this to a separate function helper
+                        # in `_link_set.py`
+                        assert type(link) is tuple
+                        assert type(new_link) is tuple
+                        link_map = {m: m for m in link}
+                        updated_computed_link = []
+                        for m in new_link:
+                            if m in link_map:
+                                updated_computed_link.append(m)
+                            elif m.id in self.executor.existing_objects:
+                                updated_computed_link.append(
+                                    self.executor.existing_objects[m.id]
+                                )
+                            else:
+                                updated_computed_link.append(
+                                    self.executor.new_objects[m.id]
+                                )
+                        model_dict[field] = tuple(updated_computed_link)
+                    else:
+                        assert is_link_abstract_dlist(link)
+                        assert type(new_link) is type(link)
+                        link.__gel_reconcile__(
+                            new_link,
+                            self.executor.new_objects,
+                        )
+                else:
+                    model_dict[field] = obj_dict[field]
+                model_pydantic_fields_set.add(field)
 
 
 @_struct
@@ -1136,14 +1198,20 @@ class SaveExecutor:
     updates: ChangeBatch
     refetch_batch: RefetchBatch
     graph_ids_to_model: IDTracker[GelModel, None]
+    existing_objects: dict[uuid.UUID, GelModel]
     refetch: bool
     save_postcheck: bool
     warn_on_large_sync_set: bool
 
-    object_ids: dict[int, uuid.UUID] = dataclasses.field(init=False)
+    new_object_ids: dict[int, uuid.UUID] = dataclasses.field(init=False)
+    new_objects: dict[uuid.UUID, GelModel] = dataclasses.field(init=False)
 
     def __post_init__(self) -> None:
-        self.object_ids = {}
+        self.new_object_ids = {}
+        if self.refetch:
+            # Let it crash with AttributeError if we try to access this
+            # without refetch -- that should be caught by tests.
+            self.new_objects = {}
 
     def __enter__(self) -> Self:
         return self
@@ -1168,7 +1236,14 @@ class SaveExecutor:
 
     def _compile_refetch(
         self,
-    ) -> list[tuple[type[GelModel], TypeWrapper[type[GelModel]], list[Any]]]:
+    ) -> list[
+        tuple[
+            type[GelModel],
+            TypeWrapper[type[GelModel]],
+            list[Any],
+            RefetchShape,
+        ]
+    ]:
         ret = []
 
         total_refetch_obj_count = 0
@@ -1179,7 +1254,6 @@ class SaveExecutor:
             ] = []
 
             select_shape: list[str] = [
-                "id",
                 "__py_id := __obj_data.1",
             ]
 
@@ -1196,29 +1270,40 @@ class SaveExecutor:
                         props = ",".join(
                             f"@{quote_ident(p)}" for p in ptr.properties
                         )
-
-                        maybe_assert = maybe_assert_end = ""
-
-                        if not ptr.cardinality.is_optional():
-                            maybe_assert = "(select assert_exists("
-                            maybe_assert_end = "))"
-
-                        select_shape.append(f"""
-                            {quote_ident(ptr.name)} := {maybe_assert}(
-                                with
-                                    __link := __obj_data.2[{link_num}]
-                                select .{quote_ident(ptr.name)} {{
-                                    {props}
-                                }}
-                                filter __link.0 and (
-                                    .id in array_unpack(__link.1)
-                                    or .id in __new
-                                )
-                            ){maybe_assert_end}
-                        """)
-
+                        props = f"{{ {props} }}"
                     else:
-                        select_shape.append(quote_ident(ptr.name))
+                        props = ""
+
+                    maybe_assert = maybe_assert_end = ""
+
+                    if not ptr.cardinality.is_optional():
+                        maybe_assert = "(select assert_exists("
+                        maybe_assert_end = "))"
+
+                    computed_filter = ""
+                    if ptr.computed:
+                        computed_filter = "or .id in __existing"
+
+                    # The logic of the `filter` clause is:
+                    # - first test if the link was fetched for this object
+                    #   at all - if not - we don't need to update it
+                    # - if the link was fetched for this particular GelModel --
+                    #   filter it by all existing objects prior to sync() in
+                    #   this link PLUS all new objects that were inserted
+                    #   during sync().
+                    select_shape.append(f"""
+                        {quote_ident(ptr.name)} := {maybe_assert}(
+                            with
+                                __link := __obj_data.2[{link_num}]
+                            select .{quote_ident(ptr.name)} {props}
+                            filter __link.0 and (
+                                .id in array_unpack(__link.1)
+                                or .id in __new
+                                {computed_filter}
+                            )
+                        ){maybe_assert_end}
+                    """)
+
                 else:
                     select_shape.append(quote_ident(ptr.name))
 
@@ -1283,7 +1368,10 @@ class SaveExecutor:
                         std::uuid,
                         std::int64,
                         array<tuple<std::bool,array<std::uuid>>>
-                    >>>$spec
+                    >>>$spec,
+                    __existing := std::array_unpack(
+                        <array<std::uuid>>$existing
+                    )
 
                 for __obj_data in std::array_unpack(__spec) union (
                     select {tp_ql_name} {{
@@ -1293,7 +1381,7 @@ class SaveExecutor:
                 )
             """
 
-            ret.append((tp, TypeWrapper(tp, query), spec_arg))
+            ret.append((tp, TypeWrapper(tp, query), spec_arg, shape))
 
         if (
             self.refetch
@@ -1311,7 +1399,7 @@ class SaveExecutor:
     def get_refetch_queries(
         self,
     ) -> list[QueryRefetch]:
-        new_ids = list(self.object_ids.values())
+        new_ids = list(self.new_object_ids.values())
 
         return [
             QueryRefetch(
@@ -1320,7 +1408,9 @@ class SaveExecutor:
                 args={
                     "spec": q[2],
                     "new": new_ids,
+                    "existing": list(self.existing_objects),
                 },
+                shape=q[3],
             )
             for q in self._compile_refetch()
         ]
@@ -1386,7 +1476,7 @@ class SaveExecutor:
             assert not isinstance(obj, ProxyModel)
 
             visited.track(obj)
-            obj.__gel_commit__(new_id=self.object_ids.get(id(obj)))
+            obj.__gel_commit__(new_id=self.new_object_ids.get(id(obj)))
 
             for prop in get_pointers(type(obj)):
                 if prop.computed:
@@ -1531,7 +1621,7 @@ class SaveExecutor:
 
         # Final check: make sure that the save plan is empty
         # in case we've missed something in `_check_recursive()`.
-        create_batches, updates, _, _ = make_plan(
+        create_batches, updates, _, _, _ = make_plan(
             self.objs,
             refetch=self.refetch,
             warn_on_large_sync_set=False,
@@ -1541,7 +1631,7 @@ class SaveExecutor:
 
     def _get_id(self, obj: GelModel) -> uuid.UUID:
         if obj.__gel_new__:
-            return self.object_ids[id(obj)]
+            return self.new_object_ids[id(obj)]
         else:
             return obj.id  # type: ignore [no-any-return]
 
