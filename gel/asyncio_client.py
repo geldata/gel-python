@@ -653,25 +653,24 @@ class AsyncIOClient(
             async with tx:
                 executor = make_executor()
 
-                for batches in executor:
-                    for batch in batches:
-                        await tx.send_query(batch.query, batch.args)
-                    batch_ids = await tx.wait()
-                    for ids, batch in zip(batch_ids, batches, strict=True):
-                        batch.feed_db_data(ids)
+                with executor:
+                    for batches in executor:
+                        for batch in batches:
+                            await tx.send_query(batch.query, batch.args)
+                        batch_ids = await tx.wait()
+                        for ids, batch in zip(batch_ids, batches, strict=True):
+                            batch.feed_db_data(ids)
 
-                if refetch:
-                    ref_queries = executor.get_refetch_queries()
-                    for ref in ref_queries:
-                        await tx.send_query(ref.query, **ref.args)
+                    if refetch:
+                        ref_queries = executor.get_refetch_queries()
+                        for ref in ref_queries:
+                            await tx.send_query(ref.query, **ref.args)
 
-                    refetch_data = await tx.wait()
-                    for ref_data, ref in zip(
-                        refetch_data, ref_queries, strict=True
-                    ):
-                        ref.feed_db_data(ref_data)
-
-                executor.commit()
+                        refetch_data = await tx.wait()
+                        for ref_data, ref in zip(
+                            refetch_data, ref_queries, strict=True
+                        ):
+                            ref.feed_db_data(ref_data)
 
     async def save(
         self,

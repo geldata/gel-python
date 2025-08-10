@@ -1145,6 +1145,27 @@ class SaveExecutor:
     def __post_init__(self) -> None:
         self.object_ids = {}
 
+    def __enter__(self) -> Self:
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_value: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> None:
+        try:
+            self._commit()
+        finally:
+            # Make things GC faster
+            self.objs = None  # type: ignore [assignment]
+            self.create_batches = None  # type: ignore [assignment]
+            self.updates = None  # type: ignore [assignment]
+            self.refetch_batch = None  # type: ignore [assignment]
+            self.graph_ids_to_model = None  # type: ignore [assignment]
+            self.new_object_ids = None  # type: ignore [assignment]
+            self.new_objects = None  # type: ignore [assignment]
+
     def _compile_refetch(
         self,
     ) -> list[tuple[type[GelModel], TypeWrapper[type[GelModel]], list[Any]]]:
@@ -1355,7 +1376,7 @@ class SaveExecutor:
         if self.updates:
             yield self._compile_batch(self.updates, for_insert=False)
 
-    def commit(self) -> None:
+    def _commit(self) -> None:
         visited: IDTracker[GelModel, None] = IDTracker()
 
         def _traverse(obj: GelModel) -> None:
