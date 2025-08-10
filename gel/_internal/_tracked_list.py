@@ -455,7 +455,7 @@ class AbstractTrackedList(
 
     def __repr__(self) -> str:
         if self._mode is Mode.Write:
-            return f"[WRITE-ONLY {self._items!r}]"
+            return f"<WRITE-ONLY{self._items!r}>"
         else:
             return repr(self._items)
 

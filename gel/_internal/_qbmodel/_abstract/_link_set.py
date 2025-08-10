@@ -408,6 +408,12 @@ class AbstractLinkSet(  # noqa: PLW1641 (__hash__ is implemented)
                 f"could not convert {type(value)} to {tp.__name__}"
             )
 
+    def __repr__(self) -> str:
+        if self._mode is Mode.Write:
+            return f"<WRITE-ONLY{self._items!r}>"
+        else:
+            return repr(self._items)
+
 
 class LinkSet(
     parametric.SingleParametricType[_MT_co],
