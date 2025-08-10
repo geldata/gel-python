@@ -616,6 +616,9 @@ class AbstractGelProxyModel(AbstractGelModel, Generic[_MT_co, _LM_co]):
     ) -> None:
         raise NotImplementedError
 
+    def __gel_replace_linkprops__(self, new: _LM_co) -> None:  # type: ignore [misc]
+        raise NotImplementedError
+
 
 _PT_co = TypeVar(
     "_PT_co",

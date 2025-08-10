@@ -25,6 +25,7 @@ from ._base import AbstractGelSourceModel, AbstractGelModel
 from ._descriptors import AbstractGelProxyModel, proxy_link
 
 if TYPE_CHECKING:
+    import uuid
     from pathlib import Path
     from collections.abc import Iterator
     from ._base import AbstractGelSourceModel
@@ -133,6 +134,13 @@ class AbstractLinkSet(  # noqa: PLW1641 (__hash__ is implemented)
             self._tracking_index = {self._pyid(o): o for o in self._items}
         else:
             assert self._tracking_index is not None
+
+    def __gel_reconcile__(
+        self,
+        updated: AbstractLinkSet[_MT_co],
+        new_objects: dict[uuid.UUID, _MT_co],
+    ) -> None:
+        raise NotImplementedError
 
     def __gel_get_added__(self) -> list[_MT_co]:
         match bool(self._index_snapshot), bool(self._tracking_index):
@@ -456,6 +464,74 @@ class LinkSet(
     def _pyid(item: _MT_co) -> int:  # type: ignore [misc]
         return id(item)
 
+    def __gel_reconcile__(  # pyright: ignore [reportIncompatibleMethodOverride]
+        self,
+        updated: LinkSet[_MT_co],  # type: ignore [override]
+        new_objects: dict[uuid.UUID, _MT_co],
+    ) -> None:
+        # This method is called by sync() when it refetches the link.
+        #
+        # - `updated` is a collection of GelModels that only have the `id`
+        #   field set, but no other data. It is the latest state of the link:
+        #
+        #   - right after we run EdgeQL `update` command we refetch the link
+        #     with a 'select' command
+        #   - that select command would be filtering the link by all model
+        #     IDs that were in the link prior to calling sync() PLUS ALL
+        #     IDs of all objects that the sync() call inserted.
+        #
+        # - `new_objects` is a collection of all newly inserted GelModels
+        #   by sync().
+        #
+        # When we look through `.id` attributes of objects in the `updated`
+        # collection we can have two situations:
+        #
+        # - this `id` is in `self._tracking_set` -- we had this object before
+        #   sync() call; it was not a new object.
+        # - this `id` is not in `self._tracking_set` -- it was one of the
+        #   objects that was new.
+        #
+        # Mind that we can have *fewer* `updated` objects than `self._items`
+        # because there are situations when objects that were submitted to
+        # sync() would not be refetched:
+        #
+        # - an existing object could be concurrently removed while
+        #   between the time it was fetched and then synced.
+        # - an object could be intercepted by a trigger while it was being
+        #   synced.
+        #
+        # So we know that `updated` is the new `_items` of this collection,
+        # with just one caveat: if an item in `updated` has an `.id` that we
+        # already have -- we keep that original object (it will be updated
+        # separately with freshly refetched data), and if it's a *new* `.id`
+        # we get the new object from `new_objects`.
+
+        existing_set = self._tracking_set
+        if existing_set is None:
+            # `self._init_tracking()` wasn't called on this model prior to
+            # sync() -- there were no modifications. But we need a quick
+            # way of checking if an updated object was one of the existing
+            # objects in this link before to keep it, so let's build an
+            # index of them.
+            existing_set = {m: m for m in self._items if not m.__gel_new__}
+
+        updated_items = []
+        for obj in updated:
+            try:
+                # This works because `GelModel` hashes and compares by `.id`
+                existing = existing_set[obj]
+            except KeyError:  # noqa: PERF203
+                updated_items.append(new_objects[obj.id])  # type: ignore [attr-defined]
+            else:
+                updated_items.append(existing)
+
+        self._items = updated_items
+
+        # Let's reset tracking -- it will likely be not needed. Typically there
+        # should be just one `sync()` call with no modifications of anything
+        # after it.
+        self._tracking_index = self._tracking_set = self._index_snapshot = None
+
     def __gel_extend__(self, values: Iterable[_MT_co]) -> None:
         if values is self:
             # This is a "unique list" with a set-like behavior, so
@@ -670,6 +746,39 @@ class LinkWithPropsSet(
                 self.__gel_overwrite_data__,
             ),
         )
+
+    def __gel_reconcile__(  # pyright: ignore [reportIncompatibleMethodOverride]
+        self,
+        updated: LinkWithPropsSet[_PT_co, _BMT_co],  # type: ignore [override]
+        new_objects: dict[uuid.UUID, _BMT_co],  # type: ignore [override]
+    ) -> None:
+        # See comments in `LinkSet.__gel_reconcile__()` for most implementation
+        # details.
+        #
+        # This implementaion has a couple differences w.r.t. how ProxyModels
+        # are handled.
+
+        existing_set = self._tracking_set
+        if existing_set is None:
+            existing_set = {m: m for m in self._items if not m.__gel_new__}
+
+        updated_items = []
+        for obj in updated:
+            try:
+                existing = existing_set[obj]
+            except KeyError:  # noqa: PERF203
+                # `obj` will have updated __linkprops__ but the wrapped
+                # model will be coming from new_objects
+                obj.__gel_replace_wrapped_model__(new_objects[obj.id])  # type: ignore [attr-defined]
+                updated_items.append(obj)
+            else:
+                # updated will have newly refetched __linkprops__, so
+                # copy them
+                existing.__gel_replace_linkprops__(obj.__linkprops__)
+                updated_items.append(existing)
+
+        self._items = updated_items
+        self._tracking_index = self._tracking_set = self._index_snapshot = None
 
     @staticmethod
     def _reconstruct_from_pickle(  # noqa: PLR0917
