@@ -36,6 +36,7 @@ from gel._internal._tracked_list import (
 )
 from gel._internal._qbmodel._abstract import (
     DEFAULT_VALUE,
+    AbstractLinkSet,
     AbstractMutableLinkSet,
     LinkSet,
     LinkWithPropsSet,
@@ -342,6 +343,14 @@ def is_link_set(val: object) -> TypeGuard[LinkSet[GelModel]]:
 
 
 def is_link_abstract_dlist(
+    val: object,
+) -> TypeGuard[AbstractLinkSet[GelModel]]:
+    return isinstance(val, AbstractLinkSet) and issubclass(
+        type(val).type, GelModel
+    )
+
+
+def is_link_abstract_mutable_dlist(
     val: object,
 ) -> TypeGuard[AbstractMutableLinkSet[GelModel]]:
     return isinstance(val, AbstractMutableLinkSet) and issubclass(
@@ -824,7 +833,7 @@ def make_plan(
             # `linked` should be either an empty LinkSet or
             # a non-empty one
             assert linked is not None
-            assert is_link_abstract_dlist(linked), (
+            assert is_link_abstract_mutable_dlist(linked), (
                 f"{prop.name!r} is not dlist, it is {type(linked)}"
             )
 
@@ -1147,38 +1156,17 @@ class QueryRefetch:
                 ):
                     link = model_dict[field]
                     new_link = obj_dict[field]
-                    if shape_field.computed:
-                        # This is basically a re-implementation of
-                        # `AbstractLinkSet.__gel_reconcile__()` method.
-                        # See the comments in that method for more details
-                        # on the logic of this update.
-                        # TODO: move this to a separate function helper
-                        # in `_link_set.py`
-                        assert type(link) is tuple
-                        assert type(new_link) is tuple
-                        link_map = {m: m for m in link}
-                        updated_computed_link = []
-                        for m in new_link:
-                            if m in link_map:
-                                updated_computed_link.append(m)
-                            elif m.id in self.executor.existing_objects:
-                                updated_computed_link.append(
-                                    self.executor.existing_objects[m.id]
-                                )
-                            else:
-                                updated_computed_link.append(
-                                    self.executor.new_objects[m.id]
-                                )
-                        model_dict[field] = tuple(updated_computed_link)
-                    else:
-                        assert is_link_abstract_dlist(link)
-                        assert type(new_link) is type(link)
-                        link.__gel_reconcile__(
-                            new_link,
-                            self.executor.new_objects,
-                        )
+
+                    assert is_link_abstract_dlist(link)
+                    assert type(new_link) is type(link)
+                    model_dict[field] = link.__gel_reconcile__(
+                        new_link,
+                        self.executor.existing_objects,  # type: ignore [arg-type]
+                        self.executor.new_objects,  # type: ignore [arg-type]
+                    )
                 else:
                     model_dict[field] = obj_dict[field]
+
                 model_pydantic_fields_set.add(field)
 
 

@@ -22,6 +22,7 @@ from ._descriptors import (
     AnyLinkDescriptor,
     AnyPropertyDescriptor,
     ComputedMultiLinkDescriptor,
+    ComputedMultiLinkWithPropsDescriptor,
     ComputedMultiPropertyDescriptor,
     ComputedPropertyDescriptor,
     GelLinkModelDescriptor,
@@ -44,6 +45,8 @@ from ._descriptors import (
 from ._link_set import (
     AbstractLinkSet,
     AbstractMutableLinkSet,
+    ComputedLinkSet,
+    ComputedLinkWithPropsSet,
     LinkSet,
     LinkWithPropsSet,
 )
@@ -123,7 +126,10 @@ __all__ = (
     "Array",
     "ArrayMeta",
     "BaseGelModel",
+    "ComputedLinkSet",
+    "ComputedLinkWithPropsSet",
     "ComputedMultiLinkDescriptor",
+    "ComputedMultiLinkWithPropsDescriptor",
     "ComputedMultiPropertyDescriptor",
     "ComputedPropertyDescriptor",
     "DateImpl",

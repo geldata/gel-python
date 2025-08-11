@@ -42,7 +42,13 @@ from ._base import (
 if TYPE_CHECKING:
     import types
     from collections.abc import Sequence, Set as AbstractSet
-    from ._link_set import AbstractLinkSet, LinkSet, LinkWithPropsSet
+    from ._link_set import (
+        AbstractLinkSet,
+        ComputedLinkSet,
+        ComputedLinkWithPropsSet,
+        LinkSet,
+        LinkWithPropsSet,
+    )
 
 
 class ModelFieldDescriptor(_qb.AbstractFieldDescriptor):
@@ -483,13 +489,13 @@ class ComputedMultiLinkDescriptor(
             instance: Any,
             owner: type[Any] | None = None,
             /,
-        ) -> tuple[_MT_co, ...]: ...
+        ) -> ComputedLinkSet[_MT_co]: ...
 
         def __get__(
             self,
             instance: Any,
             owner: type[Any] | None = None,
-        ) -> type[_MT_co] | tuple[_MT_co, ...]: ...
+        ) -> type[_MT_co] | ComputedLinkSet[_MT_co]: ...
 
 
 class OptionalLinkDescriptor(
@@ -626,6 +632,32 @@ _PT_co = TypeVar(
     covariant=True,
 )
 """Proxy model"""
+
+
+class ComputedMultiLinkWithPropsDescriptor(
+    ComputedPointerDescriptor[_PT_co, _BMT_co],
+    AnyLinkDescriptor[_PT_co, _BMT_co],
+):
+    if TYPE_CHECKING:
+
+        @overload
+        def __get__(
+            self, instance: None, owner: type[Any], /
+        ) -> type[_PT_co]: ...
+
+        @overload
+        def __get__(
+            self,
+            instance: Any,
+            owner: type[Any] | None = None,
+            /,
+        ) -> ComputedLinkWithPropsSet[_PT_co, _BMT_co]: ...
+
+        def __get__(
+            self,
+            instance: Any,
+            owner: type[Any] | None = None,
+        ) -> type[_PT_co] | ComputedLinkWithPropsSet[_PT_co, _BMT_co]: ...
 
 
 class MultiLinkWithPropsDescriptor(AnyLinkDescriptor[_PT_co, _BMT_co]):
