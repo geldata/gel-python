@@ -1528,6 +1528,19 @@ class TestModelGenerator(tb.ModelTestCase):
         g.users
         self.assertEqual(g.__pydantic_fields_set__, expected | {"users"})
 
+    def test_modelgen_pydantic_apis_19(self):
+        from models import default
+
+        g = default.GameSession(num=1, public=True)
+        self.assertEqual(
+            g.model_dump(context={"gel_allow_unsaved": True}),
+            {"num": 1, "public": True, "players": []},
+        )
+        self.assertEqual(
+            g.model_dump_json(context={"gel_allow_unsaved": True}),
+            '{"num":1,"public":true,"players":[]}',
+        )
+
     def test_modelgen_data_unpack_polymorphic(self):
         from models import default
 
