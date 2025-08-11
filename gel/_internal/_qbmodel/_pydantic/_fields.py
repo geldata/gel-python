@@ -113,8 +113,6 @@ class _BaseMultiProperty(_MultiPointer[_T_co, _BT_co]):
 
 
 class _BaseMultiLink(_MultiPointer[_T_co, _BT_co]):
-    constructor: ClassVar[type] = list
-
     @classmethod
     def __get_pydantic_core_schema__(
         cls,
@@ -132,14 +130,14 @@ class _BaseMultiLink(_MultiPointer[_T_co, _BT_co]):
                     functools.partial(cls._validate, generic_args=args),
                 ),
                 serialization=core_schema.wrap_serializer_function_ser_schema(
-                    lambda els, _ser, info: cls.constructor(
+                    lambda els, _ser, info: [
                         obj.model_dump(
                             **_pydantic_utils.serialization_info_to_dump_kwargs(
                                 info
                             )
                         )
                         for obj in els
-                    ),
+                    ],
                     info_arg=True,
                     when_used="always",
                 ),
@@ -295,8 +293,6 @@ class _ComputedMultiProperty(
     _abstract.ComputedMultiPropertyDescriptor[_T_co, _BT_co],
     _BaseMultiProperty[_T_co, _BT_co],
 ):
-    constructor = tuple
-
     @classmethod
     def __gel_resolve_dlist__(  # type: ignore [override]
         cls,
@@ -634,14 +630,24 @@ class _ComputedMultiLink(
     _abstract.ComputedMultiLinkDescriptor[_MT_co, _BMT_co],
     _BaseMultiLink[_MT_co, _BMT_co],
 ):
-    constructor = tuple
-
     @classmethod
     def __gel_resolve_dlist__(  # type: ignore [override]
         cls,
         type_args: tuple[type[Any]] | tuple[type[Any], type[Any]],
-    ) -> tuple[_BMT_co, ...]:
-        return tuple[type_args[0], ...]  # type: ignore [return-value, valid-type]
+    ) -> _abstract.ComputedLinkSet[_MT_co]:
+        return _abstract.ComputedLinkSet[type_args[0]]  # type: ignore [return-value, valid-type]
+
+
+class _ComputedMultiLinkWithProps(
+    _abstract.ComputedMultiLinkDescriptor[_PT_co, _MT_co],
+    _BaseMultiLink[_PT_co, _MT_co],
+):
+    @classmethod
+    def __gel_resolve_dlist__(  # type: ignore [override]
+        cls,
+        type_args: tuple[type[Any]] | tuple[type[Any], type[Any]],
+    ) -> _abstract.ComputedLinkWithPropsSet[_PT_co, _MT_co]:
+        return _abstract.ComputedLinkWithPropsSet[type_args[0], type_args[1]]  # type: ignore [return-value, valid-type]
 
 
 class _MultiLink(
@@ -778,7 +784,7 @@ RequiredMultiLinkWithProps = TypeAliasType(
 ComputedMultiLinkWithProps = TypeAliasType(
     "ComputedMultiLinkWithProps",
     Annotated[
-        _ComputedMultiLink[_PT_co, _MT_co],
+        _ComputedMultiLinkWithProps[_PT_co, _MT_co],
         PointerInfo(
             default_factory=tuple,
             computed=True,

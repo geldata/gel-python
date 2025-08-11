@@ -222,9 +222,6 @@ class AbstractCollection(Iterable[_T_co], Generic[_T_co]):
 
         raise RuntimeError(msg)
 
-    def clear(self) -> None:
-        raise NotImplementedError
-
 
 @functools.total_ordering
 class AbstractTrackedList(

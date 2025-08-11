@@ -189,9 +189,9 @@ class TestModelGenerator(tb.ModelTestCase):
             default.User.select(groups=True).limit(1)
         )
 
-        self.assertEqual(
+        self.assertIn(
+            "ComputedLinkSet[models.default.UserGroup]",
             reveal_type(q.groups),
-            "builtins.tuple[models.default.UserGroup, ...]",
         )
 
     def test_modelgen_02(self):
@@ -352,7 +352,10 @@ class TestModelGenerator(tb.ModelTestCase):
     def test_modelgen_data_unpack_3(self):
         from models import default
 
-        from gel._internal._qbmodel._abstract import LinkWithPropsSet
+        from gel._internal._qbmodel._abstract import (
+            LinkWithPropsSet,
+            ComputedLinkSet,
+        )
 
         q = (
             default.GameSession.select(
@@ -382,7 +385,7 @@ class TestModelGenerator(tb.ModelTestCase):
         # Test that links are unpacked into a LinkSet, not a vanilla list
         self.assertIsInstance(d.players, LinkWithPropsSet)
         first_player = next(iter(d.players))
-        self.assertIsInstance(first_player.groups, tuple)
+        self.assertIsInstance(first_player.groups, ComputedLinkSet)
 
         post = default.Post(author=first_player, body="test")
 
@@ -813,6 +816,9 @@ class TestModelGenerator(tb.ModelTestCase):
 
         sl2 = repickle(sl)
         self.assertEqual(sl.model_dump(), sl2.model_dump())
+
+        self.assertIsInstance(sl2.players, type(sl.players))
+        self.assertIs(sl2.players.type, type(sl.players).type)
 
         sl.num += 1
         _pl = next(iter(sl.players))
@@ -1539,6 +1545,27 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(
             g.model_dump_json(context={"gel_allow_unsaved": True}),
             '{"num":1,"public":true,"players":[]}',
+        )
+
+    def test_modelgen_pydantic_apis_20(self):
+        # Test that ComputedLinkSet can be pickled / dumped
+
+        from models import default
+        from gel._testbase import repickle
+
+        alice = self.client.get(
+            default.User.select(
+                name=True, groups=lambda s: s.groups.select("*")
+            ).filter(name="Alice")
+        )
+
+        alice2 = repickle(alice)
+        self.assertIsInstance(alice2.groups, type(alice.groups))
+        self.assertIs(alice2.groups.type, type(alice.groups).type)
+
+        self.assertEqual(
+            {g["name"] for g in alice.model_dump()["groups"]},
+            {"red", "green"},
         )
 
     def test_modelgen_data_unpack_polymorphic(self):

@@ -40,12 +40,12 @@ class TestAsyncModelGenerator(tb.AsyncModelTestCase):
             .limit(1)
         )
 
-        self.assertEqual(
+        self.assertIn(
+            "ComputedLinkSet[models.default.UserGroup]",
             reveal_type(alice.groups),
-            "builtins.tuple[models.default.UserGroup, ...]",
         )
 
-        self.assertEqual(alice.groups[0].name, "green")
+        self.assertEqual(next(iter(alice.groups)).name, "green")
 
     async def test_async_modelgen_02(self):
         import uuid

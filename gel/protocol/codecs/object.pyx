@@ -273,6 +273,7 @@ cdef class ObjectCodec(BaseNamedRecordCodec):
             else:
                 dlist_factory = self.cached_return_type_dlists[i]
                 if dlist_factory is tuple:
+                    # must be a computed multi-prop
                     elem = tuple(elem)
                 elif dlist_factory is not None:
                     elem = dlist_factory(

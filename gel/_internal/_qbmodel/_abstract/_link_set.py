@@ -21,21 +21,32 @@ from gel._internal._tracked_list import (
     requires_read,
 )
 
-from ._base import AbstractGelSourceModel, AbstractGelModel
+from ._base import AbstractGelModel
 from ._descriptors import AbstractGelProxyModel, proxy_link
 
 if TYPE_CHECKING:
     import uuid
     from pathlib import Path
     from collections.abc import Iterator
-    from ._base import AbstractGelSourceModel
+    from typing_extensions import Self
 
 
 ll_getattr = object.__getattribute__
 
 
-_MT_co = TypeVar("_MT_co", bound="AbstractGelSourceModel", covariant=True)
+_MT_co = TypeVar("_MT_co", bound="AbstractGelModel", covariant=True)
+
 _ADL_co = TypeVar("_ADL_co", bound=AbstractCollection[Any], covariant=True)
+
+_BMT_co = TypeVar("_BMT_co", bound=AbstractGelModel, covariant=True)
+"""Base model type"""
+
+_PT_co = TypeVar(
+    "_PT_co",
+    bound=AbstractGelProxyModel[AbstractGelModel, AbstractGelLinkModel],
+    covariant=True,
+)
+"""Proxy model"""
 
 
 class AbstractLinkSet(  # noqa: PLW1641 (__hash__ is implemented)
@@ -66,8 +77,9 @@ class AbstractLinkSet(  # noqa: PLW1641 (__hash__ is implemented)
     def __gel_reconcile__(
         self,
         updated: AbstractLinkSet[_MT_co],
-        new_objects: dict[uuid.UUID, _MT_co],
-    ) -> None:
+        existing_objects: dict[uuid.UUID, AbstractGelModel],
+        new_objects: dict[uuid.UUID, AbstractGelModel],
+    ) -> Self:
         raise NotImplementedError
 
     @requires_read("use `in` operator on")
@@ -101,6 +113,16 @@ class AbstractLinkSet(  # noqa: PLW1641 (__hash__ is implemented)
             return item in self._tracking_set
 
         return False
+
+    def _reconcile(
+        self,
+        updated: AbstractLinkSet[_MT_co],
+        existing_objects: dict[uuid.UUID, AbstractGelModel],
+        new_objects: dict[uuid.UUID, AbstractGelModel],
+        *,
+        is_computed: bool,
+    ) -> list[_MT_co]:
+        raise NotImplementedError
 
     def _init_tracking(self) -> None:
         if self._tracking_set is None:
@@ -178,7 +200,7 @@ class AbstractLinkSet(  # noqa: PLW1641 (__hash__ is implemented)
         ):
             # A comparison with a computed link.
 
-            if self._mode is Mode.Write or other._mode is Mode.Write:
+            if self._mode is Mode.Write:
                 return False
 
             self_len = len(self._items)
@@ -216,11 +238,296 @@ class AbstractLinkSet(  # noqa: PLW1641 (__hash__ is implemented)
         else:
             return NotImplemented
 
+    def __len__(self) -> int:
+        return len(self._items)
+
+    def __iter__(self) -> Iterator[_MT_co]:
+        return iter(self._items)
+
     def __repr__(self) -> str:
         if self._mode is Mode.Write:
             return f"<WRITE-ONLY{self._items!r}>"
         else:
             return repr(self._items)
+
+
+class ComputedLinkSet(
+    parametric.SingleParametricType[_MT_co],
+    AbstractLinkSet[_MT_co],
+):
+    """A read-only, ordered set-like list that is computed from a query"""
+
+    __slots__ = ()
+
+    @staticmethod
+    def _pyid(item: _MT_co) -> int:  # type: ignore [misc]
+        return id(item)
+
+    def _reconcile(
+        self,
+        updated: AbstractLinkSet[_MT_co],
+        existing_objects: dict[uuid.UUID, AbstractGelModel],
+        new_objects: dict[uuid.UUID, AbstractGelModel],
+        *,
+        is_computed: bool,
+    ) -> list[_MT_co]:
+        # This method is called by sync() when it refetches the link.
+        #
+        # - `updated` is a collection of GelModels that only have the `id`
+        #   field set, but no other data. It is the latest state of the link:
+        #
+        #   - right after we run EdgeQL `update` command we refetch the link
+        #     with a 'select' command
+        #   - that select command would be filtering the link by all model
+        #     IDs that were in the link prior to calling sync() PLUS ALL
+        #     IDs of all objects that the sync() call inserted.
+        #
+        # - `new_objects` is a collection of all newly inserted GelModels
+        #   by sync().
+        #
+        # When we look through `.id` attributes of objects in the `updated`
+        # collection we can have two situations:
+        #
+        # - this `id` is in `self._tracking_set` -- we had this object before
+        #   sync() call; it was not a new object.
+        # - this `id` is not in `self._tracking_set` -- it was one of the
+        #   objects that was new.
+        #
+        # Mind that we can have *fewer* `updated` objects than `self._items`
+        # because there are situations when objects that were submitted to
+        # sync() would not be refetched:
+        #
+        # - an existing object could be concurrently removed while
+        #   between the time it was fetched and then synced.
+        # - an object could be intercepted by a trigger while it was being
+        #   synced.
+        #
+        # So we know that `updated` is the new `_items` of this collection,
+        # with just one caveat: if an item in `updated` has an `.id` that we
+        # already have -- we keep that original object (it will be updated
+        # separately with freshly refetched data), and if it's a *new* `.id`
+        # we get the new object from `new_objects`.
+
+        existing_set = self._tracking_set
+        if existing_set is None:
+            # `self._init_tracking()` wasn't called on this model prior to
+            # sync() -- there were no modifications. But we need a quick
+            # way of checking if an updated object was one of the existing
+            # objects in this link before to keep it, so let's build an
+            # index of them.
+            existing_set = {m: m for m in self._items if not m.__gel_new__}
+
+        updated_items: list[_MT_co] = []
+        for obj in updated:
+            obj_id: uuid.UUID = obj.id  # type: ignore [attr-defined]
+
+            try:
+                # This works because `GelModel` hashes and compares by `.id`
+                existing = existing_set[obj]
+            except KeyError:
+                if is_computed and obj_id in existing_objects:
+                    updated_items.append(existing_objects[obj_id])  # type: ignore [arg-type]
+                else:
+                    updated_items.append(new_objects[obj_id])  # type: ignore [arg-type]
+            else:
+                updated_items.append(existing)
+
+        return updated_items
+
+    def __gel_reconcile__(  # pyright: ignore [reportIncompatibleMethodOverride]
+        self,
+        updated: AbstractLinkSet[_MT_co],
+        existing_objects: dict[uuid.UUID, AbstractGelModel],
+        new_objects: dict[uuid.UUID, AbstractGelModel],
+    ) -> Self:
+        new_items = self._reconcile(
+            updated, existing_objects, new_objects, is_computed=True
+        )
+        return type(self)(
+            new_items,
+            __mode__=self._mode,
+            __wrap_list__=True,
+            __overwrite_data__=False,
+        )
+
+    def __reduce__(self) -> tuple[Any, ...]:
+        cls = type(self)
+        return (
+            cls._reconstruct_from_pickle,
+            (
+                cls.__parametric_origin__,
+                cls.type,
+                self._items,
+                self._tracking_set,
+                self._tracking_index,
+                self._index_snapshot,
+                self._mode,
+                self.__gel_overwrite_data__,
+            ),
+        )
+
+    @staticmethod
+    def _reconstruct_from_pickle(  # noqa: PLR0917
+        origin: type[ComputedLinkSet[_MT_co]],
+        tp: type[_MT_co],  # pyright: ignore [reportGeneralTypeIssues]
+        items: list[_MT_co],
+        tracking_set: dict[_MT_co, _MT_co] | None,
+        tracking_index: dict[int, _MT_co] | None,
+        index_snapshot: dict[int, _MT_co] | None,
+        mode: Mode,
+        gel_overwrite_data: bool,  # noqa: FBT001
+    ) -> ComputedLinkSet[_MT_co]:
+        cls = cast(
+            "type[ComputedLinkSet[_MT_co]]",
+            origin[tp],  # type: ignore [index]
+        )
+        lst = cls.__new__(cls)
+
+        lst._items = items
+        lst._tracking_set = tracking_set
+        lst._tracking_index = tracking_index
+        lst._index_snapshot = index_snapshot
+
+        lst._mode = mode
+        lst.__gel_overwrite_data__ = gel_overwrite_data
+
+        return lst
+
+
+class ComputedLinkWithPropsSet(
+    parametric.ParametricType,
+    AbstractLinkSet[_PT_co],
+    Generic[_PT_co, _BMT_co],
+):
+    __slots__ = ()
+
+    proxytype: ClassVar[type[_PT_co]]  # type: ignore [misc]
+    type: ClassVar[type[_BMT_co]]  # type: ignore [assignment, misc]
+
+    @staticmethod
+    def _pyid(item: _PT_co) -> int:  # type: ignore [misc]
+        return id(item.without_linkprops())
+
+    def __gel_basetype_iter__(self) -> Iterator[_BMT_co]:  # type: ignore [override]
+        for item in self._items:
+            yield item._p__obj__  # type: ignore [misc]
+
+    def _reconcile(  # pyright: ignore [reportIncompatibleMethodOverride]
+        self,
+        updated: LinkWithPropsSet[_PT_co, _BMT_co],  # type: ignore [override]
+        existing_objects: dict[uuid.UUID, AbstractGelModel],
+        new_objects: dict[uuid.UUID, AbstractGelModel],
+        *,
+        is_computed: bool,
+    ) -> list[_PT_co]:
+        # See comments in `LinkSet._reconcile()` for most implementation
+        # details.
+        #
+        # This implementaion has a couple differences w.r.t. how ProxyModels
+        # are handled.
+
+        existing_set = self._tracking_set
+        if existing_set is None:
+            existing_set = {m: m for m in self._items if not m.__gel_new__}
+
+        updated_items: list[_PT_co] = []
+        for obj in updated:
+            obj_id: uuid.UUID = obj.id  # type: ignore [attr-defined]
+
+            try:
+                existing = existing_set[obj]
+            except KeyError:
+                if is_computed and obj_id in existing_objects:
+                    new = existing_objects[obj_id]
+                else:
+                    new = new_objects[obj_id]
+                # `obj` will have updated __linkprops__ but the wrapped
+                # model will be coming from new_objects
+                obj.__gel_replace_wrapped_model__(new)
+                updated_items.append(obj)
+            else:
+                # updated will have newly refetched __linkprops__, so
+                # copy them
+                existing.__gel_replace_linkprops__(obj.__linkprops__)
+                updated_items.append(existing)
+
+        return updated_items
+
+    def __gel_reconcile__(  # pyright: ignore [reportIncompatibleMethodOverride]
+        self,
+        updated: LinkWithPropsSet[_PT_co, _BMT_co],  # type: ignore [override]
+        existing_objects: dict[uuid.UUID, AbstractGelModel],
+        new_objects: dict[uuid.UUID, AbstractGelModel],
+    ) -> Self:
+        new_items = self._reconcile(
+            updated, existing_objects, new_objects, is_computed=True
+        )
+        return type(self)(
+            new_items,
+            __mode__=self._mode,
+            __wrap_list__=True,
+            __overwrite_data__=False,
+        )
+
+    def __reduce__(self) -> tuple[Any, ...]:
+        cls = type(self)
+        return (
+            cls._reconstruct_from_pickle,
+            (
+                cls.__parametric_origin__,
+                cls.type,
+                cls.proxytype,
+                self._items,
+                self._tracking_index.values()
+                if self._tracking_index is not None
+                else None,
+                self._tracking_set,
+                self._index_snapshot,
+                self._mode,
+                self.__gel_overwrite_data__,
+            ),
+        )
+
+    @staticmethod
+    def _reconstruct_from_pickle(  # noqa: PLR0917
+        origin: type[ComputedLinkWithPropsSet[_PT_co, _BMT_co]],  # type: ignore [valid-type]
+        tp: type[_PT_co],  # type: ignore [valid-type]
+        proxytp: type[_BMT_co],  # type: ignore [valid-type]
+        items: list[_PT_co],
+        tracking_index: list[_PT_co] | None,
+        tracking_set: dict[_PT_co, _PT_co] | None,
+        index_snapshot: list[_PT_co] | None,
+        mode: Mode,
+        gel_overwrite_data: bool,  # noqa: FBT001
+    ) -> ComputedLinkWithPropsSet[_PT_co, _BMT_co]:
+        cls = cast(
+            "type[ComputedLinkWithPropsSet[_PT_co, _BMT_co]]",
+            origin[proxytp, tp],  # type: ignore [index]
+        )
+        lst = cls.__new__(cls)
+
+        lst._items = items
+
+        if tracking_index is None:
+            lst._tracking_index = None
+        else:
+            lst._tracking_index = {
+                cls._pyid(item): item for item in tracking_index
+            }
+
+        lst._tracking_set = tracking_set
+
+        if index_snapshot is None:
+            lst._index_snapshot = None
+        else:
+            lst._index_snapshot = {
+                cls._pyid(item): item for item in index_snapshot
+            }
+
+        lst._mode = mode
+        lst.__gel_overwrite_data__ = gel_overwrite_data
+
+        return lst
 
 
 class AbstractMutableLinkSet(
@@ -251,6 +558,21 @@ class AbstractMutableLinkSet(
     if not TYPE_CHECKING:
         # AbstractMutableLinkSet subclasses are mutable
         __hash__ = None
+
+    def __gel_reconcile__(  # pyright: ignore [reportIncompatibleMethodOverride]
+        self,
+        updated: AbstractLinkSet[_MT_co],
+        existing_objects: dict[uuid.UUID, AbstractGelModel],
+        new_objects: dict[uuid.UUID, AbstractGelModel],
+    ) -> Self:
+        self._items = self._reconcile(
+            updated, existing_objects, new_objects, is_computed=False
+        )
+        # Reset tracking: it will likely be not needed. Typically there
+        # should be just one `sync()` call with no modifications of anything
+        # after it.
+        self._tracking_index = self._tracking_set = self._index_snapshot = None
+        return self
 
     def _ensure_value_indexable(self, value: Any) -> _MT_co | None:
         # ProxyModels are designed to be transparent and are ignored
@@ -510,8 +832,8 @@ class AbstractMutableLinkSet(
 
 
 class LinkSet(
-    parametric.SingleParametricType[_MT_co],
     AbstractMutableLinkSet[_MT_co],
+    ComputedLinkSet[_MT_co],
 ):
     __slots__ = ()
 
@@ -546,78 +868,6 @@ class LinkSet(
 
         return t.__gel_validate__(value)
 
-    @staticmethod
-    def _pyid(item: _MT_co) -> int:  # type: ignore [misc]
-        return id(item)
-
-    def __gel_reconcile__(  # pyright: ignore [reportIncompatibleMethodOverride]
-        self,
-        updated: LinkSet[_MT_co],  # type: ignore [override]
-        new_objects: dict[uuid.UUID, _MT_co],
-    ) -> None:
-        # This method is called by sync() when it refetches the link.
-        #
-        # - `updated` is a collection of GelModels that only have the `id`
-        #   field set, but no other data. It is the latest state of the link:
-        #
-        #   - right after we run EdgeQL `update` command we refetch the link
-        #     with a 'select' command
-        #   - that select command would be filtering the link by all model
-        #     IDs that were in the link prior to calling sync() PLUS ALL
-        #     IDs of all objects that the sync() call inserted.
-        #
-        # - `new_objects` is a collection of all newly inserted GelModels
-        #   by sync().
-        #
-        # When we look through `.id` attributes of objects in the `updated`
-        # collection we can have two situations:
-        #
-        # - this `id` is in `self._tracking_set` -- we had this object before
-        #   sync() call; it was not a new object.
-        # - this `id` is not in `self._tracking_set` -- it was one of the
-        #   objects that was new.
-        #
-        # Mind that we can have *fewer* `updated` objects than `self._items`
-        # because there are situations when objects that were submitted to
-        # sync() would not be refetched:
-        #
-        # - an existing object could be concurrently removed while
-        #   between the time it was fetched and then synced.
-        # - an object could be intercepted by a trigger while it was being
-        #   synced.
-        #
-        # So we know that `updated` is the new `_items` of this collection,
-        # with just one caveat: if an item in `updated` has an `.id` that we
-        # already have -- we keep that original object (it will be updated
-        # separately with freshly refetched data), and if it's a *new* `.id`
-        # we get the new object from `new_objects`.
-
-        existing_set = self._tracking_set
-        if existing_set is None:
-            # `self._init_tracking()` wasn't called on this model prior to
-            # sync() -- there were no modifications. But we need a quick
-            # way of checking if an updated object was one of the existing
-            # objects in this link before to keep it, so let's build an
-            # index of them.
-            existing_set = {m: m for m in self._items if not m.__gel_new__}
-
-        updated_items = []
-        for obj in updated:
-            try:
-                # This works because `GelModel` hashes and compares by `.id`
-                existing = existing_set[obj]
-            except KeyError:  # noqa: PERF203
-                updated_items.append(new_objects[obj.id])  # type: ignore [attr-defined]
-            else:
-                updated_items.append(existing)
-
-        self._items = updated_items
-
-        # Let's reset tracking -- it will likely be not needed. Typically there
-        # should be just one `sync()` call with no modifications of anything
-        # after it.
-        self._tracking_index = self._tracking_set = self._index_snapshot = None
-
     def __gel_extend__(self, values: Iterable[_MT_co]) -> None:
         if values is self:
             # This is a "unique list" with a set-like behavior, so
@@ -629,74 +879,12 @@ class LinkSet(
         for v in values:
             self.add(v)
 
-    def __reduce__(self) -> tuple[Any, ...]:
-        cls = type(self)
-        return (
-            cls._reconstruct_from_pickle,
-            (
-                cls.__parametric_origin__,
-                cls.type,
-                self._items,
-                self._tracking_set,
-                self._tracking_index,
-                self._index_snapshot,
-                self._mode,
-                self.__gel_overwrite_data__,
-            ),
-        )
-
-    @staticmethod
-    def _reconstruct_from_pickle(  # noqa: PLR0917
-        origin: type[LinkSet[_MT_co]],
-        tp: type[_MT_co],  # pyright: ignore [reportGeneralTypeIssues]
-        items: list[_MT_co],
-        tracking_set: dict[_MT_co, _MT_co] | None,
-        tracking_index: dict[int, _MT_co] | None,
-        index_snapshot: dict[int, _MT_co] | None,
-        mode: Mode,
-        gel_overwrite_data: bool,  # noqa: FBT001
-    ) -> LinkSet[_MT_co]:
-        cls = cast(
-            "type[LinkSet[_MT_co]]",
-            origin[tp],  # type: ignore [index]
-        )
-        lst = cls.__new__(cls)
-
-        lst._items = items
-        lst._tracking_set = tracking_set
-        lst._tracking_index = tracking_index
-        lst._index_snapshot = index_snapshot
-
-        lst._mode = mode
-        lst.__gel_overwrite_data__ = gel_overwrite_data
-
-        return lst
-
-
-_BMT_co = TypeVar("_BMT_co", bound=AbstractGelModel, covariant=True)
-"""Base model type"""
-
-_PT_co = TypeVar(
-    "_PT_co",
-    bound=AbstractGelProxyModel[AbstractGelModel, AbstractGelLinkModel],
-    covariant=True,
-)
-"""Proxy model"""
-
 
 class LinkWithPropsSet(
-    parametric.ParametricType,
     AbstractMutableLinkSet[_PT_co],
-    Generic[_PT_co, _BMT_co],
+    ComputedLinkWithPropsSet[_PT_co, _BMT_co],
 ):
     __slots__ = ()
-
-    proxytype: ClassVar[type[_PT_co]]  # type: ignore [misc]
-    type: ClassVar[type[_BMT_co]]  # type: ignore [assignment, misc]
-
-    @staticmethod
-    def _pyid(item: _PT_co) -> int:  # type: ignore [misc]
-        return id(item.without_linkprops())
 
     def _find_proxy(self, item: _PT_co | _BMT_co) -> _PT_co | None:
         assert self._tracking_index is not None
@@ -809,103 +997,6 @@ class LinkWithPropsSet(
         self._items.remove(existing)
 
         return existing
-
-    def __gel_basetype_iter__(self) -> Iterator[_BMT_co]:  # type: ignore [override]
-        for item in self._items:
-            yield item._p__obj__  # type: ignore [misc]
-
-    def __reduce__(self) -> tuple[Any, ...]:
-        cls = type(self)
-        return (
-            cls._reconstruct_from_pickle,
-            (
-                cls.__parametric_origin__,
-                cls.type,
-                cls.proxytype,
-                self._items,
-                self._tracking_index.values()
-                if self._tracking_index is not None
-                else None,
-                self._tracking_set,
-                self._index_snapshot,
-                self._mode,
-                self.__gel_overwrite_data__,
-            ),
-        )
-
-    def __gel_reconcile__(  # pyright: ignore [reportIncompatibleMethodOverride]
-        self,
-        updated: LinkWithPropsSet[_PT_co, _BMT_co],  # type: ignore [override]
-        new_objects: dict[uuid.UUID, _BMT_co],  # type: ignore [override]
-    ) -> None:
-        # See comments in `LinkSet.__gel_reconcile__()` for most implementation
-        # details.
-        #
-        # This implementaion has a couple differences w.r.t. how ProxyModels
-        # are handled.
-
-        existing_set = self._tracking_set
-        if existing_set is None:
-            existing_set = {m: m for m in self._items if not m.__gel_new__}
-
-        updated_items = []
-        for obj in updated:
-            try:
-                existing = existing_set[obj]
-            except KeyError:  # noqa: PERF203
-                # `obj` will have updated __linkprops__ but the wrapped
-                # model will be coming from new_objects
-                obj.__gel_replace_wrapped_model__(new_objects[obj.id])  # type: ignore [attr-defined]
-                updated_items.append(obj)
-            else:
-                # updated will have newly refetched __linkprops__, so
-                # copy them
-                existing.__gel_replace_linkprops__(obj.__linkprops__)
-                updated_items.append(existing)
-
-        self._items = updated_items
-        self._tracking_index = self._tracking_set = self._index_snapshot = None
-
-    @staticmethod
-    def _reconstruct_from_pickle(  # noqa: PLR0917
-        origin: type[LinkWithPropsSet[_PT_co, _BMT_co]],  # type: ignore [valid-type]
-        tp: type[_PT_co],  # type: ignore [valid-type]
-        proxytp: type[_BMT_co],  # type: ignore [valid-type]
-        items: list[_PT_co],
-        tracking_index: list[_PT_co] | None,
-        tracking_set: dict[_PT_co, _PT_co] | None,
-        index_snapshot: list[_PT_co] | None,
-        mode: Mode,
-        gel_overwrite_data: bool,  # noqa: FBT001
-    ) -> LinkWithPropsSet[_PT_co, _BMT_co]:
-        cls = cast(
-            "type[LinkWithPropsSet[_PT_co, _BMT_co]]",
-            origin[proxytp, tp],  # type: ignore [index]
-        )
-        lst = cls.__new__(cls)
-
-        lst._items = items
-
-        if tracking_index is None:
-            lst._tracking_index = None
-        else:
-            lst._tracking_index = {
-                cls._pyid(item): item for item in tracking_index
-            }
-
-        lst._tracking_set = tracking_set
-
-        if index_snapshot is None:
-            lst._index_snapshot = None
-        else:
-            lst._index_snapshot = {
-                cls._pyid(item): item for item in index_snapshot
-            }
-
-        lst._mode = mode
-        lst.__gel_overwrite_data__ = gel_overwrite_data
-
-        return lst
 
     if TYPE_CHECKING:
 
