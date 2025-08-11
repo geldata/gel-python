@@ -42,31 +42,13 @@ class AbstractLinkSet(  # noqa: PLW1641 (__hash__ is implemented)
     AbstractCollection[_MT_co],
     Collection[_MT_co],
 ):
-    """A mutable, ordered set-like list that enforces element-type covariance
-    at runtime and maintains distinctness of elements in insertion order using
-
-    There are some differences between LinkSet and normal Python set:
-
-    - LinkSet is ordered
-    - LinkSet does not have the `pop()` method and other non-sensical
-      methods for persisted database objects
-    - LinkSet can be compared to a list (see the __eq__ comments)
-    - LinkSet supports `+=` and `-=` operators to mimic EdgeQL a list and set.
-    """
+    """A read-only, ordered set-like list"""
 
     __slots__ = (
         "_index_snapshot",
         "_tracking_index",
         "_tracking_set",
     )
-
-    _allowed_write_only_ops: ClassVar[list[str]] = [
-        ".add()",
-        ".discard()",
-        ".update()",
-        "+=",
-        "-=",
-    ]
 
     # Set of (hashable) items to maintain distinctness.
     _tracking_set: dict[_MT_co, _MT_co] | None
@@ -81,11 +63,194 @@ class AbstractLinkSet(  # noqa: PLW1641 (__hash__ is implemented)
         self._index_snapshot = None
         super().__init__(*args, **kwargs)
 
+    def __gel_reconcile__(
+        self,
+        updated: AbstractLinkSet[_MT_co],
+        new_objects: dict[uuid.UUID, _MT_co],
+    ) -> None:
+        raise NotImplementedError
+
+    @requires_read("use `in` operator on")
+    def __contains__(self, item: object) -> bool:
+        if isinstance(item, AbstractGelProxyModel):
+            item = item.without_linkprops()
+        if not isinstance(item, type(self).type):
+            return False
+        return self._is_tracked(item)
+
+    def _track_item(self, item: _MT_co) -> None:  # type: ignore [misc]
+        assert self._tracking_set is not None
+        if not item.__gel_new__:
+            self._tracking_set[item] = item
+
+        assert self._tracking_index is not None
+        self._tracking_index[self._pyid(item)] = item
+
+    def _is_tracked(self, item: _MT_co) -> bool:  # type: ignore [misc]
+        self._init_tracking()
+
+        assert self._tracking_index is not None
+        if self._pyid(item) in self._tracking_index:
+            # Fast path
+            return True
+
+        # The item is not in the index, but it might have an equal
+        # one in the tracking set.
+        assert self._tracking_set is not None
+        if not item.__gel_new__:
+            return item in self._tracking_set
+
+        return False
+
+    def _init_tracking(self) -> None:
+        if self._tracking_set is None:
+            # Why is `set(self._items)` OK? `self._items` can be
+            # in one of two states:
+            #
+            #  - have 0 elements -- new collection
+            #  - have non-zero elements -- existing collection
+            #    loaded from database (we trust its contents)
+            #    *before any mutations*.
+            #
+            # So it's either no elements or all elements are hashable
+            # (have IDs).
+            self._tracking_set = dict(
+                zip(self._items, self._items, strict=True)
+            )
+
+            assert self._tracking_index is None
+            self._tracking_index = {self._pyid(o): o for o in self._items}
+        else:
+            assert self._tracking_index is not None
+
     @staticmethod
     def _pyid(item: _MT_co) -> int:  # type: ignore [misc]
         # For ListSet it's `id(item)`, but for LinkWithPropsSet
         # it's `id(item.without_linkprops())`.
         raise NotImplementedError
+
+    def __eq__(self, other: object) -> bool:
+        if isinstance(other, set):
+            if self._mode is Mode.Write:
+                return False
+
+            self_len = len(self._items)
+            other_len = len(other)
+
+            if self_len != other_len:
+                return False
+            if self_len == other_len == 0:
+                return True
+
+            if (
+                self._tracking_set is not None
+                and self._tracking_index is not None
+                and len(self._tracking_set) != len(self._tracking_index)
+            ):
+                # There are unhashable items in our collection
+                # (added after the link was fetched or this is a new link),
+                # so we're not equal to any valid Python set.
+                return False
+
+            if self._tracking_set is None:
+                # Initializing tracking is a bit expensive, but if there
+                # are multiple comparison of this list with different sets
+                # it's worth it to do it once and then have cheaper checks.
+                self._init_tracking()
+                assert self._tracking_set is not None
+
+            return self._tracking_set.keys() == other
+
+        elif isinstance(other, list):
+            # In an ideal world we'd only allow comparisions with sets.
+            # But in our world we already allow initialization from a list
+            # and an assigment to a list (we can't require users to use
+            # sets because unsaved objects are unhashable).
+            # It's weird if comparison doesn't work with lists, but also
+            # you can't even put unsaved objects in a set (again, they
+            # are unhashable).
+            if self._mode is Mode.Write:
+                return False
+            return self._items == other
+
+        elif isinstance(other, AbstractLinkSet) and not isinstance(
+            other, AbstractMutableLinkSet
+        ):
+            # A comparison with a computed link.
+
+            if self._mode is Mode.Write or other._mode is Mode.Write:
+                return False
+
+            self_len = len(self._items)
+            other_len = len(other._items)
+
+            if self_len != other_len:
+                return False
+            if self_len == other_len == 0:
+                return True
+
+            if self._tracking_set is None:
+                self._init_tracking()
+            assert self._tracking_set is not None
+
+            if (
+                len(self._tracking_set) != self_len
+                or len(self._tracking_set) != other_len
+            ):
+                # There are new items in the link. `other` is a computed
+                # link, so it can't have any new items, we know that
+                # we can't be equal.
+                return False
+
+            if other._tracking_set is None:
+                other._init_tracking()
+                # Computeds can't have new items
+                assert other._tracking_set is not None
+                assert other._tracking_index is not None
+                assert (
+                    len(other._tracking_set) == len(other._tracking_index) > 0
+                )
+
+            return self._tracking_set == other._tracking_set
+
+        else:
+            return NotImplemented
+
+    def __repr__(self) -> str:
+        if self._mode is Mode.Write:
+            return f"<WRITE-ONLY{self._items!r}>"
+        else:
+            return repr(self._items)
+
+
+class AbstractMutableLinkSet(
+    AbstractLinkSet[_MT_co],
+):
+    """A mutable, ordered set-like list that enforces element-type covariance
+    at runtime and maintains distinctness of elements in insertion order using
+
+    There are some differences between LinkSet and normal Python set:
+
+    - LinkSet is ordered
+    - LinkSet does not have the `pop()` method and other non-sensical
+      methods for persisted database objects
+    - LinkSet can be compared to a list (see the __eq__ comments)
+    - LinkSet supports `+=` and `-=` operators to mimic EdgeQL a list and set.
+    """
+
+    __slots__ = ()
+
+    _allowed_write_only_ops: ClassVar[list[str]] = [
+        ".add()",
+        ".discard()",
+        ".update()",
+        "+=",
+        "-=",
+    ]
+
+    if not TYPE_CHECKING:
+        # AbstractMutableLinkSet subclasses are mutable
+        __hash__ = None
 
     def _ensure_value_indexable(self, value: Any) -> _MT_co | None:
         # ProxyModels are designed to be transparent and are ignored
@@ -113,34 +278,6 @@ class AbstractLinkSet(  # noqa: PLW1641 (__hash__ is implemented)
         self._index_snapshot = None
         self._tracking_set = None
         self._tracking_index = None
-
-    def _init_tracking(self) -> None:
-        if self._tracking_set is None:
-            # Why is `set(self._items)` OK? `self._items` can be
-            # in one of two states:
-            #
-            #  - have 0 elements -- new collection
-            #  - have non-zero elements -- existing collection
-            #    loaded from database (we trust its contents)
-            #    *before any mutations*.
-            #
-            # So it's either no elements or all elements are hashable
-            # (have IDs).
-            self._tracking_set = dict(
-                zip(self._items, self._items, strict=True)
-            )
-
-            assert self._tracking_index is None
-            self._tracking_index = {self._pyid(o): o for o in self._items}
-        else:
-            assert self._tracking_index is not None
-
-    def __gel_reconcile__(
-        self,
-        updated: AbstractLinkSet[_MT_co],
-        new_objects: dict[uuid.UUID, _MT_co],
-    ) -> None:
-        raise NotImplementedError
 
     def __gel_get_added__(self) -> list[_MT_co]:
         match bool(self._index_snapshot), bool(self._tracking_index):
@@ -248,14 +385,6 @@ class AbstractLinkSet(  # noqa: PLW1641 (__hash__ is implemented)
                 f"`{len(self._items)=}`"
             )
 
-    def _track_item(self, item: _MT_co) -> None:  # type: ignore [misc]
-        assert self._tracking_set is not None
-        if not item.__gel_new__:
-            self._tracking_set[item] = item
-
-        assert self._tracking_index is not None
-        self._tracking_index[self._pyid(item)] = item
-
     def _untrack_item(self, item: _MT_co) -> None:  # type: ignore [misc]
         assert self._tracking_set is not None
         if not item.__gel_new__:
@@ -263,22 +392,6 @@ class AbstractLinkSet(  # noqa: PLW1641 (__hash__ is implemented)
 
         assert self._tracking_index is not None
         self._tracking_index.pop(self._pyid(item), None)
-
-    def _is_tracked(self, item: _MT_co) -> bool:  # type: ignore [misc]
-        self._init_tracking()
-
-        assert self._tracking_index is not None
-        if self._pyid(item) in self._tracking_index:
-            # Fast path
-            return True
-
-        # The item is not in the index, but it might have an equal
-        # one in the tracking set.
-        assert self._tracking_set is not None
-        if not item.__gel_new__:
-            return item in self._tracking_set
-
-        return False
 
     def clear(self) -> None:
         """Remove all items but keep element-type enforcement."""
@@ -288,14 +401,6 @@ class AbstractLinkSet(  # noqa: PLW1641 (__hash__ is implemented)
         self._tracking_set.clear()
         assert self._tracking_index is not None
         self._tracking_index.clear()
-
-    @requires_read("use `in` operator on")
-    def __contains__(self, item: object) -> bool:
-        if isinstance(item, AbstractGelProxyModel):
-            item = item.without_linkprops()
-        if not isinstance(item, type(self).type):
-            return False
-        return self._is_tracked(item)
 
     def __gel_add__(self, value: _MT_co) -> None:  # type: ignore [misc]
         raise NotImplementedError
@@ -337,61 +442,48 @@ class AbstractLinkSet(  # noqa: PLW1641 (__hash__ is implemented)
         return self
 
     def __eq__(self, other: object) -> bool:
-        if isinstance(other, AbstractLinkSet):
-            if self._mode is Mode.Write:
+        if isinstance(other, AbstractMutableLinkSet):
+            if self._mode is Mode.Write or other._mode is Mode.Write:
                 # __eq__ is pretty fundamental in Python and we don't
                 # want it to crash in all random places where it can
                 # be called from. So we just return False.
                 return False
 
-            if len(self._items) != len(other._items):
-                return False
+            self_len = len(self._items)
+            other_len = len(other._items)
 
-            if self._tracking_index and other._tracking_index:
-                # Both collections are tracked so we can compare
-                # the indexes -- that's faster
-                return self._tracking_index == other._tracking_index
+            if self_len != other_len:
+                return False
+            if self_len == other_len == 0:
+                return True
 
             if self._tracking_index is None:
                 self._init_tracking()
             if other._tracking_index is None:
                 other._init_tracking()
-            return self._tracking_index == other._tracking_index
 
-        elif isinstance(other, set):
-            if self._mode is Mode.Write:
+            assert self._tracking_index is not None
+            assert other._tracking_index is not None
+
+            if self._tracking_set != other._tracking_set:
+                # If objects that have `.id` are different then we
+                # can bail early
                 return False
 
-            if (
-                self._tracking_set is not None
-                and self._tracking_index is not None
-                and len(self._tracking_set) != len(self._tracking_index)
-            ):
-                # There are unhashable items in our collection
-                # (added after the link was fetched or this is a new link),
-                # so we're not equal to any valid Python set.
-                return False
+            # Compare the IDs of the new items (they don't have `.id` yet
+            # and are compared by reference)
 
-            if self._tracking_set is not None:
-                return self._tracking_set.keys() == other
+            self_new_items_ids = {
+                i for i, m in self._tracking_index.items() if m.__gel_new__
+            }
+            other_new_items_ids = {
+                i for i, m in other._tracking_index.items() if m.__gel_new__
+            }
 
-            return set(self._items) == other
-
-        elif isinstance(other, list):
-            # In an ideal world we'd only allow comparisions with sets.
-            # But in our world we already allow initialization from a list
-            # and an assigment to a list (we can't require users to use
-            # sets because unsaved objects are unhashable).
-            # It's weird if comparison doesn't work with lists, but also
-            # you can't even put unsaved objects in a set (again, they
-            # are unhashable).
-            if self._mode is Mode.Write:
-                return False
-
-            return self._items == other
+            return self_new_items_ids == other_new_items_ids
 
         else:
-            return NotImplemented
+            return super().__eq__(other)
 
     @staticmethod
     def __gel_validate__(
@@ -416,16 +508,10 @@ class AbstractLinkSet(  # noqa: PLW1641 (__hash__ is implemented)
                 f"could not convert {type(value)} to {tp.__name__}"
             )
 
-    def __repr__(self) -> str:
-        if self._mode is Mode.Write:
-            return f"<WRITE-ONLY{self._items!r}>"
-        else:
-            return repr(self._items)
-
 
 class LinkSet(
     parametric.SingleParametricType[_MT_co],
-    AbstractLinkSet[_MT_co],
+    AbstractMutableLinkSet[_MT_co],
 ):
     __slots__ = ()
 
@@ -600,7 +686,7 @@ _PT_co = TypeVar(
 
 class LinkWithPropsSet(
     parametric.ParametricType,
-    AbstractLinkSet[_PT_co],
+    AbstractMutableLinkSet[_PT_co],
     Generic[_PT_co, _BMT_co],
 ):
     __slots__ = ()

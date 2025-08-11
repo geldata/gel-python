@@ -97,7 +97,7 @@ class AbstractCollection(Iterable[_T_co], Generic[_T_co]):
     _allowed_write_only_ops: ClassVar[list[str]]
 
     if not TYPE_CHECKING:
-        # All collections are mutable.
+        # Collections are mutable unless a subclass defines __hash__
         __hash__ = None
 
     def __init__(

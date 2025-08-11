@@ -43,6 +43,7 @@ from ._descriptors import (
 
 from ._link_set import (
     AbstractLinkSet,
+    AbstractMutableLinkSet,
     LinkSet,
     LinkWithPropsSet,
 )
@@ -111,6 +112,7 @@ __all__ = (
     "AbstractGelProxyModel",
     "AbstractGelSourceModel",
     "AbstractLinkSet",
+    "AbstractMutableLinkSet",
     "AnyEnum",
     "AnyEnumMeta",
     "AnyLinkDescriptor",

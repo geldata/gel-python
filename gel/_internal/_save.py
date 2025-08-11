@@ -36,7 +36,7 @@ from gel._internal._tracked_list import (
 )
 from gel._internal._qbmodel._abstract import (
     DEFAULT_VALUE,
-    AbstractLinkSet,
+    AbstractMutableLinkSet,
     LinkSet,
     LinkWithPropsSet,
     AbstractGelSourceModel,
@@ -343,8 +343,8 @@ def is_link_set(val: object) -> TypeGuard[LinkSet[GelModel]]:
 
 def is_link_abstract_dlist(
     val: object,
-) -> TypeGuard[AbstractLinkSet[GelModel]]:
-    return isinstance(val, AbstractLinkSet) and issubclass(
+) -> TypeGuard[AbstractMutableLinkSet[GelModel]]:
+    return isinstance(val, AbstractMutableLinkSet) and issubclass(
         type(val).type, GelModel
     )
 
