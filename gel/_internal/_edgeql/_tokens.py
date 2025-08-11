@@ -101,11 +101,15 @@ class Token(StrEnum):
     GROUP = "GROUP"
     IF = "IF"
     ILIKE = "ILIKE"
+    NOT_ILIKE = "NOT ILIKE"
     IN = "IN"
+    NOT_IN = "NOT IN"
     INSERT = "INSERT"
     INTROSPECT = "INTROSPECT"
     IS = "IS"
+    IS_NOT = "IS NOT"
     LIKE = "LIKE"
+    NOT_LIKE = "NOT LIKE"
     LIMIT = "LIMIT"
     MODULE = "MODULE"
     NOT = "NOT"
@@ -297,8 +301,11 @@ PRECEDENCE: dict[Token | tuple[Token, int] | Operation, Precedence] = {
     Token.AND: Precedence(4, Assoc.LEFT),
     Token.NOT: Precedence(5, Assoc.RIGHT),
     Token.LIKE: Precedence(6, Assoc.NONASSOC),
+    Token.NOT_LIKE: Precedence(6, Assoc.NONASSOC),
     Token.ILIKE: Precedence(6, Assoc.NONASSOC),
+    Token.NOT_ILIKE: Precedence(6, Assoc.NONASSOC),
     Token.IN: Precedence(7, Assoc.NONASSOC),
+    Token.NOT_IN: Precedence(7, Assoc.NONASSOC),
     Token.IDENT: Precedence(8, Assoc.NONASSOC),
     Token.DISTINCTFROM: Precedence(9, Assoc.NONASSOC),
     Token.EQUALS: Precedence(9, Assoc.NONASSOC),
@@ -309,6 +316,7 @@ PRECEDENCE: dict[Token | tuple[Token, int] | Operation, Precedence] = {
     Token.NOTEQ: Precedence(9, Assoc.NONASSOC),
     Token.RANGBRACKET: Precedence(9, Assoc.NONASSOC),
     Token.IS: Precedence(10, Assoc.NONASSOC),
+    Token.IS_NOT: Precedence(10, Assoc.NONASSOC),
     Token.PLUS: Precedence(11, Assoc.LEFT),
     Token.MINUS: Precedence(11, Assoc.LEFT),
     Token.DOUBLEPLUS: Precedence(11, Assoc.LEFT),

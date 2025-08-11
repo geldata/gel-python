@@ -26,14 +26,14 @@ cdef class ObjectCodec(BaseNamedRecordCodec):
         tuple flags
         tuple source_types
 
-        dict cached_tid_map
+        dict cached_tname_map
         tuple cached_return_type_subcodecs
         tuple cached_return_type_dlists
         object cached_return_type_proxy
         object cached_return_type
         object cached_field_origins
         object cached_orig_return_type
-        Py_ssize_t cached_tid_index
+        Py_ssize_t cached_tname_index
 
     cdef encode_args(self, WriteBuffer buf, dict obj)
 

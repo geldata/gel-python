@@ -309,14 +309,13 @@ class TestQueryBuilder(tb.ModelTestCase):
         self.assertEqual(res[1].author.name, "Alice")
         self.assertEqual(res[1].body, "I'm Alice")
 
-    @tb.xfail
     def test_qb_filter_08(self):
-        from models import default
+        from models import default, std
 
         # Test filter with nested property expression
         res = self.client.query(
             default.Post.select("**").filter(
-                lambda p: "red" not in p.author.groups.name
+                lambda p: std.not_in("red", p.author.groups.name)
             )
         )
         self.assertEqual(len(res), 1)
@@ -567,13 +566,14 @@ class TestQueryBuilderModify(tb.ModelTestCase):
         self.assertEqual(res.name, "Cooper")
         self.assertEqual(res.nickname, "singer")
 
-    @tb.xfail
     def test_qb_update_02(self):
-        from models import default
+        from models import default, std
 
         self.client.query(
             default.UserGroup.filter(name="blue").update(
-                users=default.User.filter(lambda u: u.name in {"Zoe", "Dana"})
+                users=default.User.filter(
+                    lambda u: std.in_(u.name, {"Zoe", "Dana"})
+                )
             )
         )
 
@@ -606,7 +606,9 @@ class TestQueryBuilderModify(tb.ModelTestCase):
 
         self.client.query(
             default.UserGroup.filter(name="blue").update(
-                users=default.User.filter(lambda u: u.name in {"Zoe", "Dana"})
+                users=default.User.filter(
+                    lambda u: std.in_(u.name, {"Zoe", "Dana"})
+                )
             )
         )
 

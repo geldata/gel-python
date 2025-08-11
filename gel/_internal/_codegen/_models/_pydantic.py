@@ -949,7 +949,6 @@ class BaseGeneratedModule:
         base_types: Iterable[str] = (),
         base_metadata_class: str = "GelSchemaMetadata",
     ) -> None:
-        uuid = self.import_name("uuid", "UUID")
         schemapath = self.import_name(BASE_IMPL, "SchemaPath")
         base_types = list(base_types)
         if not base_types:
@@ -967,7 +966,6 @@ class BaseGeneratedModule:
                 base_types,
             ),
         ):
-            self.write(f"id = {uuid}(int={sobj.uuid.int})")
             self.write(f"name = {sobj.schemapath.as_code(schemapath)}")
 
     def write_object_type_reflection(
@@ -1006,7 +1004,6 @@ class BaseGeneratedModule:
             "__gel_reflection__",
             _map_name(lambda s: f"{s}.__gel_reflection__", class_bases),
         ):
-            self.write(f"id = {uuid_}(int={objtype.uuid.int})")
             self.write(f"name = {objtype.schemapath.as_code(sp)}")
             # Need a cheap at runtime way to check if the type is abstract
             # in GelModel.__new__
@@ -1042,14 +1039,12 @@ class BaseGeneratedModule:
         bases: list[str],
     ) -> None:
         sp = self.import_name(BASE_IMPL, "SchemaPath")
-        uuid_ = self.import_name("uuid", "UUID")
 
         class_bases = bases or [self.import_name(BASE_IMPL, "GelLinkModel")]
         with self._class_def(
             "__gel_reflection__",
             _map_name(lambda s: f"{s}.__gel_reflection__", class_bases),
         ):
-            self.write(f"id = {uuid_}(int={link.uuid.int})")
             self.write(f"name = {sp}({link.name!r})")
             self._write_pointers_reflection(link.pointers, bases)
 
@@ -1130,6 +1125,7 @@ class BaseGeneratedModule:
             "computed": str(ptr.is_computed),
             "readonly": str(ptr.is_readonly),
             "has_default": str(ptr.has_default),
+            "mutable": str(target_type.mutable(self._types)),
         }
 
         if ptr.pointers is not None:
@@ -3180,6 +3176,9 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         }
         num_overlapping_py_types = len(overlapping_py_types)
 
+        def known_py_type_overlap(t: PyTypeName) -> bool:
+            return t in overlapping_py_types
+
         def specialization_sort_key(t: reflection.Type) -> int:
             return overlapping_py_types.get(
                 base_scalars[t.name],
@@ -3188,79 +3187,86 @@ class GeneratedSchemaModule(BaseGeneratedModule):
 
         for overload in overloads:
             generics = overload.generics(self._types)
-            if (gen_return := generics.get("__return__")) is not None:
-                overload_specializations = []
-                gen_type_map: dict[reflection.Type, list[reflection.Type]] = {}
-                in_params: defaultdict[
-                    reflection.Type,
-                    list[tuple[CallableParamKey, AbstractSet[Indirection]]],
-                ] = defaultdict(list)
-                for param_key, param_generics in generics.items():
+            if not generics:
+                continue
+
+            overload_specializations = []
+            gen_type_map: dict[reflection.Type, list[reflection.Type]] = {}
+            gen_params: defaultdict[
+                reflection.Type,
+                list[tuple[CallableParamKey, AbstractSet[Indirection]]],
+            ] = defaultdict(list)
+            in_params: defaultdict[
+                reflection.Type,
+                list[tuple[CallableParamKey, AbstractSet[Indirection]]],
+            ] = defaultdict(list)
+
+            for param_key, param_generics in generics.items():
+                for type_, paths in param_generics.items():
+                    gen_params[type_].append((param_key, paths))
                     if param_key != "__return__":
-                        for type_, paths in param_generics.items():
-                            in_params[type_].append((param_key, paths))
+                        in_params[type_].append((param_key, paths))
 
-                for gen_t in gen_return:
-                    if gen_t not in in_params:
-                        continue
+            if style == "method":
+                gen_ret = generics.get("__return__", {})
+                if not gen_ret or set(in_params).isdisjoint(set(gen_ret)):
+                    continue
 
-                    if isinstance(gen_t, reflection.ScalarType):
-                        descendants = gen_t.descendants(self._types)
-                        gen_type_map[gen_t] = sorted(
-                            (
-                                descendant
-                                for descendant in descendants
-                                if descendant.name in base_scalars
-                            ),
-                            key=specialization_sort_key,
+            for gen_t in gen_params:
+                if isinstance(gen_t, reflection.ScalarType):
+                    descendants = gen_t.descendants(self._types)
+                    gen_type_map[gen_t] = sorted(
+                        (
+                            descendant
+                            for descendant in descendants
+                            if descendant.name in base_scalars
+                        ),
+                        key=specialization_sort_key,
+                    )
+                elif gen_t.name == "anytype":
+                    gen_type_map[gen_t] = sorted(
+                        (
+                            self._types_by_name[tn]
+                            for tn in base_scalars
+                            if tn in self._types_by_name
+                        ),
+                        key=specialization_sort_key,
+                    )
+
+            for gen_t, specializations in gen_type_map.items():
+                if not specializations:
+                    continue
+
+                for specialization in specializations:
+                    param_specializations = {
+                        param_key: dict.fromkeys(
+                            paths,
+                            (gen_t, specialization),
                         )
-                    elif gen_t.name == "anytype":
-                        gen_type_map[gen_t] = sorted(
-                            (
-                                self._types_by_name[tn]
-                                for tn in base_scalars
-                                if tn in self._types_by_name
-                            ),
-                            key=specialization_sort_key,
-                        )
+                        for param_key, paths in gen_params[gen_t]
+                    }
 
-                for gen_t, specializations in gen_type_map.items():
-                    if not specializations:
-                        continue
+                    specialized = overload.specialize(
+                        param_specializations, schema=self._types
+                    )
+                    spec_param_types: reflection.CallableParamTypeMap = {
+                        param.key: [param.get_type(self._types)]
+                        for param in param_getter(specialized)
+                    }
 
-                    for specialization in specializations:
-                        param_specializations = {
-                            param_key: dict.fromkeys(
-                                paths,
-                                (gen_t, specialization),
-                            )
-                            for param_key, paths in (
-                                ("__return__", gen_return[gen_t]),
-                                *in_params[gen_t],
-                            )
-                        }
+                    if not self._would_cause_overlap(
+                        overload,
+                        spec_param_types,
+                        overload_signatures,
+                    ):
+                        overload_specializations.append(specialized)
+                        overload_signatures[specialized] = spec_param_types
 
-                        specialized = overload.specialize(
-                            param_specializations, schema=self._types
-                        )
-                        spec_param_types: reflection.CallableParamTypeMap = {
-                            param.key: [param.get_type(self._types)]
-                            for param in param_getter(specialized)
-                        }
+                        for param in param_getter(specialized):
+                            param_overload_map[param.key].add(specialized)
 
-                        if not self._would_cause_overlap(
-                            overload,
-                            spec_param_types,
-                            overload_signatures,
-                        ):
-                            overload_specializations.append(specialized)
-                            overload_signatures[specialized] = spec_param_types
-
-                            for param in param_getter(specialized):
-                                param_overload_map[param.key].add(specialized)
-
-                overloads_specializations[overload] = overload_specializations
-                num_specializations += len(overload_specializations)
+            overloads_specializations[overload] = overload_specializations
+            num_specializations += len(overload_specializations)
 
         if num_specializations > 0:
             nominal_overloads_total += num_specializations
@@ -3268,10 +3274,12 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             # Splice generic specializations into the overloads list
             expanded_overloads: list[_Callable_T] = []
             for overload in overloads:
-                if overload_specs := overloads_specializations[overload]:
+                if overload_specs := overloads_specializations.get(overload):
                     expanded_overloads.extend(overload_specs)
                 expanded_overloads.append(overload)
             overloads = expanded_overloads
+
+        overload_order = {overload: i for i, overload in enumerate(overloads)}
 
         # Track which types are explicitly used to avoid creating overlaps
         # when adding implicit casts
@@ -3309,7 +3317,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                         )
 
             for icast_type, ranking in cast_rankings.items():
-                ranking.sort(key=lambda v: (v[0], generality_key(v[1])))
+                ranking.sort(key=lambda v: (v[0], overload_order[v[1]]))
 
                 for _, param_overload in ranking:
                     overload_param_types = overload_signatures[param_overload]
@@ -3387,27 +3395,19 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                     overload_param_py_types = overload_signatures[overload]
                     param_py_types = overload_param_py_types[param_key]
                     param_py_types.append(py_type)
-                    # Check if adding this Python type would cause overlap
-                    overload_param_py_types_only = {
-                        k: [
-                            pt
-                            for pt in v
-                            if not isinstance(pt, reflection.Type)
-                            or k != param_key
-                        ]
-                        for k, v in overload_param_py_types.items()
-                    }
+                    # Check if adding this Python type would cause overlaps
                     if self._would_cause_overlap(
                         overload,
-                        overload_param_py_types_only,
+                        overload_param_py_types,
                         potentially_overlapping_py_overloads,
+                        consider_py_inheritance=False,
                     ):
                         param_py_types.pop()
                     else:
-                        if py_type in overlapping_py_types and (
+                        if known_py_type_overlap(py_type) and (
                             overlapping_with := self._would_cause_overlap(
                                 overload,
-                                overload_param_py_types_only,
+                                overload_param_py_types,
                                 potentially_overlapping_py_overloads,
                                 consider_py_inheritance=True,
                             )
@@ -3422,22 +3422,30 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                         if overload not in scalar_map:
                             scalar_map[overload] = st
 
-        # Generate the final overload implementations with expanded types
+        # Compute final parameter signatures, potentially folding generic
+        # specializations back into a single overload with a union.
+        final_overload_signatures: dict[
+            _Callable_T,
+            reflection.CallableParamTypeMap,
+        ] = {}
+        overload_py_cast_maps: dict[
+            _Callable_T,
+            dict[
+                reflection.CallableParamKey,
+                dict[PyTypeName, reflection.Type],
+            ],
+        ] = {}
         for overload in overloads:
             params = overload_signatures[overload]
-            param_cast_map: dict[
-                reflection.CallableParamKey, dict[str, reflection.Type]
-            ] = {}
-            param_type_unions: dict[
-                reflection.CallableParamKey, list[reflection.Type]
-            ] = {}
+            param_cast_map = overload_py_cast_maps[overload] = {}
+            param_type_unions = final_overload_signatures[overload] = {}
             if excluded_param_types is not None:
                 overload_excluded_pt = excluded_param_types.get(overload)
             else:
                 overload_excluded_pt = None
             for param_idx, param_types in params.items():
-                param_type_union: list[reflection.Type] = []
-                py_coerce_map: dict[str, reflection.Type] = {}
+                param_type_union = param_type_unions[param_idx] = []
+                py_coerce_map = param_cast_map[param_idx] = {}
                 if overload_excluded_pt is not None:
                     excluded = overload_excluded_pt.get(param_idx)
                 else:
@@ -3450,22 +3458,20 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                     else:
                         # Handle Python type coercions
                         st = param_py_scalar_map[param_idx][t][overload]
-                        py_type = t
 
-                        # Import the Python type symbol
-                        if proto := _qbmodel.maybe_get_protocol_for_py_type(
-                            py_type
-                        ):
-                            ptype_sym = self.import_name(BASE_IMPL, proto)
+                        # This is a protocolized Python type
+                        ptype: PyTypeName
+                        if proto := _qbmodel.maybe_get_protocol_for_py_type(t):
+                            ptype = (BASE_IMPL, proto)
                         else:
-                            ptype_sym = self.import_name(*py_type)
+                            ptype = t
 
                         # Map Python type to canonical Gel scalar type
-                        py_coerce_map[ptype_sym] = st
+                        py_coerce_map[ptype] = st
+                        param_type_union.append(ptype)
 
-                param_cast_map[param_idx] = py_coerce_map
-                param_type_unions[param_idx] = param_type_union
-
+        # Generate the final overload implementations with expanded types
+        for overload, overload_sig in final_overload_signatures.items():
             this_type_ignore: Sequence[str]
             if overload_type_ignores := overloads_type_ignores.get(overload):
                 this_type_ignore = sorted(
@@ -3478,8 +3484,8 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             self._write_function_overload(
                 overload,
                 num_overloads_total=nominal_overloads_total,
-                param_types=param_type_unions,
-                cast_map=param_cast_map,
+                param_types=overload_sig,
+                cast_map=overload_py_cast_maps[overload],
                 style=style,
                 type_ignore=this_type_ignore,
                 param_getter=param_getter,
@@ -3570,7 +3576,6 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             aspect=ModuleAspect.MAIN,
         )
         assert objecttype_import is not None
-        uuid = self.import_name("uuid", "UUID")
         with self._class_def(base_shape_class, base_shape_bases):
             if not objtype.abstract:
                 with self.type_checking():
@@ -3731,7 +3736,6 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                     self.write(f'raise {attribute_error}("id") from None')
 
         class_r_kwargs = {
-            "__gel_type_id__": f"{uuid}(int={objtype.uuid.int})",
             "__gel_shape__": '"RequiredId"',
         }
         with self._class_def(
@@ -4135,27 +4139,6 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         self,
         objtype: reflection.ObjectType,
     ) -> None:
-        if objtype.name == "std::BaseObject":
-            gmm = self.import_name(BASE_IMPL, "GelModelMeta")
-            for ptr in objtype.pointers:
-                if ptr.name == "__type__":
-                    ptr_type = self.get_ptr_type(
-                        objtype,
-                        ptr,
-                        aspect=ModuleAspect.MAIN,
-                        cardinality=reflection.Cardinality.One,
-                    )
-                    with self._property_def(ptr.name, [], ptr_type):
-                        self.write(
-                            "tid = self.__class__.__gel_reflection__.id"
-                        )
-                        self.write(f"actualcls = {gmm}.get_class_by_id(tid)")
-                        self.write(
-                            "return actualcls.__gel_reflection__.object"
-                            "  # type: ignore [attr-defined, no-any-return]"
-                        )
-                self.write()
-
         with self.type_checking():
             render_id_variant = False
 
@@ -4662,6 +4645,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         other_overloads: dict[_Callable_T, reflection.CallableParamTypeMap],
         *,
         consider_py_inheritance: bool = False,
+        consider_optionality: bool = True,
     ) -> _Callable_T | None:
         """Check if adding a type to a parameter union in a callable form
         would cause an overload overlap and if so, return the first other
@@ -4669,12 +4653,31 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         """
         schema = self._types
         for other_overload, other_param_types in other_overloads.items():
-            if overload != other_overload and overload.overlaps(
+            if overload == other_overload:
+                continue
+
+            if other_overload.assignable_from(
+                overload,
+                param_types=other_param_types,
+                other_param_types=overload_param_types,
+                ignore_return=True,
+                schema=schema,
+            ) or overload.assignable_from(
+                other_overload,
+                param_types=overload_param_types,
+                other_param_types=other_param_types,
+                ignore_return=True,
+                schema=schema,
+            ):
+                return other_overload
+
+            if overload.overlaps(
                 other_overload,
                 param_types=other_param_types,
                 other_param_types=overload_param_types,
                 schema=schema,
                 consider_py_inheritance=consider_py_inheritance,
+                consider_optionality=consider_optionality,
             ):
                 return other_overload
 
@@ -4682,11 +4685,13 @@ class GeneratedSchemaModule(BaseGeneratedModule):
 
     def _partition_function_params(
         self,
+        *,
         params: list[str],
         omittable_params: set[str],
         nullable_params: Mapping[str, str],
         params_casts: Mapping[str, str],
-    ) -> tuple[list[str], list[str]]:
+        param_vars: Mapping[str, str],
+    ) -> tuple[dict[str, str], dict[str, str]]:
         """Partition function parameters into mandatory and omittable groups
         with transformations.
 
@@ -4701,59 +4706,65 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                              with their canonical type.
             params_casts: Mapping from parameter names to type strings for
                           parameters requiring casts
+            param_vars: Mapping of parameter names to actual variable names.
 
         Returns:
-            Tuple of (mandatory_params, omittable_params) where each list
-            contains the processed parameter expressions ready for code
-            generation. Nullable parameters are wrapped with
-            empty_set_if_none() calls, and parameters requiring casts are
-            wrapped with typing.cast() calls.
+            Tuple of (mandatory_params, omittable_params) where each item
+            is a dict mapping parameter variable names to Python expressions
+            where nullable parameters are wrapped with empty_set_if_none()
+            calls, and parameters requiring casts are wrapped with
+            typing.cast() calls.
         """
-        mandatory = [a for a in params if a not in omittable_params]
-        omittable = [a for a in params if a in omittable_params]
+        mandatory = {
+            a: param_vars[a] for a in params if a not in omittable_params
+        }
+        omittable = {a: param_vars[a] for a in params if a in omittable_params}
 
         if nullable_params:
             empty_set = self.import_name(BASE_IMPL, "empty_set_if_none")
-            mandatory = [
-                (
-                    f"{empty_set}({a}, {st})"
-                    if (st := nullable_params.get(a)) is not None
-                    else a
+            mandatory = {
+                param: (
+                    f"{empty_set}({var}, {st})"
+                    if (st := nullable_params.get(param)) is not None
+                    else var
                 )
-                for a in mandatory
-            ]
+                for param, var in mandatory.items()
+            }
 
-            omittable = [
-                (
-                    f"{empty_set}({a}, {st})"
-                    if (st := nullable_params.get(a)) is not None
-                    else a
+            omittable = {
+                param: (
+                    f"{empty_set}({var}, {st})"
+                    if (st := nullable_params.get(param)) is not None
+                    else var
                 )
-                for a in omittable
-            ]
+                for param, var in omittable.items()
+            }
 
         if params_casts:
             cast_ = self.import_name("typing", "cast")
 
-            mandatory = [
-                (
-                    f"{cast_}({t!r}, {a})"
-                    if (t := params_casts.get(a)) is not None
-                    else a
+            mandatory = {
+                param: (
+                    f"{cast_}({t!r}, {var})"
+                    if (t := params_casts.get(param)) is not None
+                    else var
                 )
-                for a in mandatory
-            ]
+                for param, var in mandatory.items()
+            }
 
-            omittable = [
-                (
-                    f"{cast_}({t!r}, {a})"
-                    if (t := params_casts.get(a)) is not None
-                    else a
+            omittable = {
+                param: (
+                    f"{cast_}({t!r}, {var})"
+                    if (t := params_casts.get(param)) is not None
+                    else var
                 )
-                for a in omittable
-            ]
+                for param, var in omittable.items()
+            }
 
-        return mandatory, omittable
+        return (
+            {param_vars[param]: var for param, var in mandatory.items()},
+            {param_vars[param]: var for param, var in omittable.items()},
+        )
 
     def _write_function_positional_args_collection(
         self,
@@ -4761,6 +4772,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         omittable_params: set[str],
         nullable_params: Mapping[str, str],
         *,
+        param_vars: Mapping[str, str],
         variadic_name: str | None,
         var: str,
         params_casts: Mapping[str, str],
@@ -4784,7 +4796,11 @@ class GeneratedSchemaModule(BaseGeneratedModule):
 
         args_def = f"{var}: {list_}[{expr_compat}]"
         mandatory, omittable = self._partition_function_params(
-            params, omittable_params, nullable_params, params_casts
+            params=params,
+            omittable_params=omittable_params,
+            nullable_params=nullable_params,
+            params_casts=params_casts,
+            param_vars=param_vars,
         )
         if omittable or variadic_name:
             unsp_t = self.import_name(BASE_IMPL, "UnspecifiedType")
@@ -4794,7 +4810,9 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                 # Filter out unspecified
                 self.write("__v__")
                 self.write(
-                    self.format_list("for __v__ in ({list})", omittable)
+                    self.format_list(
+                        "for __v__ in ({list})", omittable.values()
+                    )
                 )
                 self.write(f"if not {isinst}(__v__, {unsp_t})")
 
@@ -4802,7 +4820,9 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             with self.indented():
                 # Include all mandatory parameters first
                 if mandatory:
-                    self.write(self.format_list("*({list}),", mandatory))
+                    self.write(
+                        self.format_list("*({list}),", mandatory.values())
+                    )
                 if omittable:
                     self.write("*(")
                     with self.indented():
@@ -4817,7 +4837,9 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         else:
             # Simple case: all parameters are mandatory
             self.write(
-                self.format_list(f"{args_def} = [{{list}}]", mandatory),
+                self.format_list(
+                    f"{args_def} = [{{list}}]", mandatory.values()
+                ),
             )
 
     def _write_function_keyword_args_collection(
@@ -4826,6 +4848,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         omittable_params: set[str],
         nullable_params: Mapping[str, str],
         *,
+        param_vars: Mapping[str, str],
         var: str,
         params_casts: Mapping[str, str],
     ) -> None:
@@ -4850,7 +4873,11 @@ class GeneratedSchemaModule(BaseGeneratedModule):
 
         args_def = f"{var}: {dict_}[{str_}, {expr_compat}]"
         mandatory, omittable = self._partition_function_params(
-            params, omittable_params, nullable_params, params_casts
+            params=params,
+            omittable_params=omittable_params,
+            nullable_params=nullable_params,
+            params_casts=params_casts,
+            param_vars=param_vars,
         )
         if omittable:
             unsp_t = self.import_name(BASE_IMPL, "UnspecifiedType")
@@ -4862,7 +4889,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                 self.write(
                     self.format_list(
                         "for __k__, __v__ in {{{list}}}.items()",
-                        [f'"{n}": {n}' for n in omittable],
+                        [f'"{n}": {e}' for n, e in omittable.items()],
                     )
                 )
                 self.write(f"if not {isinst}(__v__, {unsp_t})")
@@ -4874,7 +4901,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                     self.write(
                         self.format_list(
                             "**{{{list}}},",
-                            [f'"{n}": {n}' for n in mandatory],
+                            [f'"{n}": {e}' for n, e in mandatory.items()],
                         ),
                     )
                     self.write("**{")
@@ -4889,7 +4916,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             self.write(
                 self.format_list(
                     f"{args_def} = {{{{{{list}}}}}}",
-                    [f'"{n}": {n}' for n in mandatory],
+                    [f'"{n}": {e}' for n, e in mandatory.items()],
                 ),
             )
 
@@ -4914,13 +4941,15 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         function: _Callable_T,
         *,
         num_overloads_total: int,
-        param_types: Mapping[
+        param_types: reflection.CallableParamTypeMap | None = None,
+        canonical_param_types: Mapping[
             reflection.CallableParamKey,
-            Sequence[reflection.Type],
+            reflection.Type,
         ]
         | None = None,
         cast_map: Mapping[
-            reflection.CallableParamKey, dict[str, reflection.Type]
+            reflection.CallableParamKey,
+            dict[PyTypeName, reflection.Type],
         ]
         | None = None,
         style: Literal["constructor", "method", "function"] = "function",
@@ -4960,12 +4989,27 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                 attribute)
             node_ctor: QB node constructor (default is _write_func_node_ctor).
         """
-        params: list[str] = []
+        param_vars: dict[str, str] = {}
+        param_decls: list[str] = []
         kwargs: list[str] = []
         pos_names: list[str] = []
         kw_names: list[str] = []
         variadic: str | None = None
         param_non_type_types: dict[CallableParamKey, list[str]] = {}
+        param_non_type_non_coll_types: dict[CallableParamKey, list[str]] = {}
+        required_generic_params: set[str] = set()
+        optional_generic_params: set[str] = set()
+        omittable_params: set[str] = set()
+        param_workaround_casts: dict[str, str] = {}
+        if canonical_param_types is None:
+            canonical_param_types = {}
+        else:
+            canonical_param_types = {**canonical_param_types}
+        nullable_params: list[reflection.CallableParam] = []
+        generic_params: defaultdict[
+            reflection.Type,
+            set[tuple[reflection.CallableParam, Indirection]],
+        ] = defaultdict(set)
 
         generic_param_map = function.generics(self._types)
         if (
@@ -4978,6 +5022,9 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             self_t = first_t
         else:
             self_t = None
+
+        if cast_map is None:
+            cast_map = {}
 
         # Create TypeVars for generic params
         typevars: dict[reflection.Type, str] = {}
@@ -4992,16 +5039,10 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                 bound=bound,
             )
 
-        required_generic_params: set[str] = set()
-        optional_generic_params: set[str] = set()
-        omittable_params: set[str] = set()
-        param_workaround_casts: dict[str, str] = {}
-        nullable_param_types: dict[str, reflection.Type] = {}
-        generic_params: defaultdict[
-            reflection.Type,
-            set[tuple[reflection.CallableParam, Indirection]],
-        ] = defaultdict(set)
         for param in param_getter(function):
+            pident = ident(param.name)
+            param_vars[param.name] = pident
+
             # Track which parameters contribute to generic type resolution
             if (generics := generic_param_map.get(param.key)) is not None:
                 for gt, paths in generics.items():
@@ -5026,61 +5067,86 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                 param_type = None
             if param_type is None:
                 param_type = [param.get_type(self._types)]
-
+            if param.key not in canonical_param_types:
+                canonical_param_types[param.key] = param.get_type(self._types)
             if param.typemod is TypeModifier.Optional:
-                nullable_param_types[param.name] = param_type[0]
+                nullable_params.append(param)
 
             # Tuple types need special handling due to a possible mypy bug.
-            if any(reflection.is_tuple_type(t) for t in param_type):
+            if any(
+                isinstance(
+                    t, (reflection.TupleType, reflection.NamedTupleType)
+                )
+                for t in param_type
+            ):
                 expr_compat = self.import_name(BASE_IMPL, "ExprCompatible")
                 param_workaround_casts[param.name] = expr_compat
 
             # Build the union type for parameter.
             union: list[str] = []
             non_type_union: list[str] = []
+            non_type_non_coll_union: list[str] = []
             for item in param_type:
-                # The type class (i.e another qb expression)
-                pt_str = self.get_type_type(
-                    item,
-                    import_time=ImportTime.typecheck_runtime,
-                    typevars=typevars,
-                )
-                union.append(pt_str)
-                # For primitives, also accept the values
-                if reflection.is_primitive_type(item):
-                    pt_str = self.get_type(
+                if isinstance(item, reflection.Type):
+                    # The type class (i.e another qb expression)
+                    pt_str = self.get_type_type(
                         item,
                         import_time=ImportTime.typecheck_runtime,
                         typevars=typevars,
                     )
                     union.append(pt_str)
-                    if self_t is not None and style == "method":
+                    # For primitives, also accept the values
+                    if reflection.is_primitive_type(item):
                         pt_str = self.get_type(
                             item,
                             import_time=ImportTime.typecheck_runtime,
-                            typevars=typevars | {self_t: "self"},
+                            typevars=typevars,
                         )
-                        non_type_union.append(pt_str)
+                        union.append(pt_str)
+                        if self_t is not None and style == "method":
+                            gen_pt_str = self.get_type(
+                                item,
+                                import_time=ImportTime.typecheck_runtime,
+                                typevars=typevars | {self_t: "self"},
+                            )
+                        else:
+                            gen_pt_str = pt_str
+                        non_type_union.append(gen_pt_str)
+                        non_type_non_coll_union.append(gen_pt_str)
 
-            if cast_map is not None and (
-                (param_casts := cast_map.get(param.key)) is not None
-            ):
-                union.extend(param_casts)
-                non_type_union.extend(param_casts)
+                        if param.typemod is TypeModifier.SetOf:
+                            coll = self.import_name(
+                                "collections.abc", "Collection"
+                            )
+                            union.append(f"{coll}[{pt_str}]")
+                            non_type_union.append(coll)
+                else:
+                    py_type = self.import_name(*item)
+                    union.append(py_type)
+                    non_type_union.append(py_type)
+                    non_type_non_coll_union.append(py_type)
+                    if param.typemod is TypeModifier.SetOf:
+                        coll = self.import_name(
+                            "collections.abc", "Collection"
+                        )
+                        non_type_union.append(coll)
+                        union.append(f"{coll}[{py_type}]")
 
             param_non_type_types[param.key] = sorted(non_type_union)
+            param_non_type_non_coll_types[param.key] = sorted(
+                non_type_non_coll_union
+            )
 
             pt = self._render_callable_sig_type(
                 " | ".join(sorted(union)),
                 param.typemod,
                 param.default,
             )
-            pident = ident(param.name)
+            param_decl = f"{pident}: {pt}"
 
-            param_decl = f"{param.name}: {pt}"
             if param.kind == reflection.CallableParamKind.Positional:
-                params.append(param_decl)
-                pos_names.append(pident)
+                param_decls.append(param_decl)
+                pos_names.append(param.name)
             elif param.kind == reflection.CallableParamKind.Variadic:
                 # Gel functions should have at most one variadic parameter
                 if variadic is not None:
@@ -5091,7 +5157,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                 variadic = param_decl
             elif param.kind == reflection.CallableParamKind.NamedOnly:
                 kwargs.append(param_decl)
-                kw_names.append(pident)
+                kw_names.append(param.name)
             else:
                 raise AssertionError(
                     f"unexpected parameter kind in {function.name}: "
@@ -5099,10 +5165,10 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                 )
 
         if variadic is not None:
-            params.append(f"*{variadic}")
+            param_decls.append(f"*{variadic}")
         elif kwargs:
-            params.append("*")
-        params.extend(kwargs)
+            param_decls.append("*")
+        param_decls.extend(kwargs)
 
         ret_type = function.get_return_type(self._types)
         rtype = self.render_callable_return_type(
@@ -5123,7 +5189,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         # Constructor functions use __new__ and need explicit cls parameter
         if style == "constructor":
             fname = "__new__"
-            params.insert(0, "cls")
+            param_decls.insert(0, "cls")
         elif style == "method":
             if self_t is not None:
                 type_ = self.import_name("builtins", "type")
@@ -5132,11 +5198,12 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                 type_ignore = sorted({*type_ignore, "misc"})
             else:
                 self_param = "self"
-            params.insert(0, self_param)
+            param_decls.insert(0, self_param)
 
+        self.write(f"# {function}")
         with fdef(
             fname,
-            params,
+            param_decls,
             rtype,
             overload=num_overloads_total > 1,
             type_ignore=type_ignore,
@@ -5147,7 +5214,6 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             aexpr = self.import_name(BASE_IMPL, "AnnotatedExpr")
             unsp = self.import_name(BASE_IMPL, "Unspecified")
             expr_compat = self.import_name(BASE_IMPL, "ExprCompatible")
-            list_ = self.import_name("builtins", "list")
 
             if style == "method" and fname in {"__eq__", "__ne__"}:
                 basealias = self.import_name(BASE_IMPL, "BaseAlias")
@@ -5172,43 +5238,147 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                         f"  # type: ignore [return-value]"
                     )
 
-            if cast_map is None:
-                cast_map = {}
+            def write_cast_match(
+                var: str,
+                casts: dict[str, str],
+                *,
+                type_var: str | None = None,
+            ) -> None:
+                self.write(f"match {var}:")
+                with self.indented():
+                    for py_type, cast_t in casts.items():
+                        self.write(f"case {py_type}():")
+                        with self.indented():
+                            self.write(f"{var} = {cast_t}({var})")
+                            if type_var is not None:
+                                with self.if_(f"{type_var} is None"):
+                                    self.write(
+                                        f"{type_var} = "
+                                        f"{cast_t}.__gel_reflection__.name"
+                                    )
+                    if type_var is not None:
+                        anytype = self.get_type(self._types_by_name["anytype"])
+                        self.write(f"case {anytype}():")
+                        with self.indented():
+                            with self.if_(f"{type_var} is None"):
+                                self.write(
+                                    f"{type_var} = "
+                                    f"{var}.__gel_reflection__.name"
+                                )
 
             # Build a `match` block for Python-to-Gel coercion of values.
-            for param in function.params:
+            for param in param_getter(function):
+                pident = param_vars[param.name]
                 if param_cast := cast_map.get(param.key):
-                    pident = ident(param.name)
                     casts = {
-                        py_type: self.get_type(
+                        self.import_name(*py_type): self.get_type(
                             st, import_time=ImportTime.typecheck_runtime
                         )
                         for py_type, st in param_cast.items()
                     }
                     if param.is_variadic:
+                        list_ = self.import_name("builtins", "list")
                         new_list = "__variadic__"
                         self.write(f"{new_list}: {list_}[{expr_compat}] = []")
                         it = f"{dunder(param.name)}el__"
                         self.write(f"for {it} in {pident}:")
                         with self.indented():
-                            self.write(f"match {it}:")
-                            with self.indented():
-                                for py_type, cast_t in casts.items():
-                                    self.write(f"case {py_type}():")
-                                    with self.indented():
-                                        self.write(f"{it} = {cast_t}({it})")
+                            write_cast_match(it, casts)
                             self.write(f"{new_list}.append({it})")
+                    elif param.typemod is TypeModifier.SetOf:
+                        list_ = self.import_name("builtins", "list")
+                        isinstance_ = self.import_name(
+                            "builtins", "isinstance"
+                        )
+                        type_ = self.import_name("builtins", "type")
+                        basealias = self.import_name(BASE_IMPL, "BaseAlias")
+                        type_var = f"{dunder(pident)}t__"
+                        schema_path = self.import_name(BASE_IMPL, "SchemaPath")
+                        new_pident = f"{dunder(pident)}expr__"
+                        param_vars[param.name] = new_pident
+                        self.write(f"{new_pident}: {expr_compat}")
+                        non_coll_types = param_non_type_non_coll_types[
+                            param.key
+                        ]
+                        with self.if_(
+                            f"{isinstance_}({pident}, ({type_}, {basealias}))"
+                        ):
+                            self.write(f"{new_pident} = {pident}")
+                        if non_coll_types:
+                            with self.elif_(
+                                f"{isinstance_}({pident}, "
+                                f"({', '.join(non_coll_types)},))"
+                            ):
+                                write_cast_match(pident, casts)
+                                self.write(f"{new_pident} = {pident}")
+                        with self.else_():
+                            self.write(
+                                f"{type_var}: {schema_path} | None = None"
+                            )
+                            new_list = f"{dunder(param.name)}list__"
+                            self.write(
+                                f"{new_list}: {list_}[{expr_compat}] = []"
+                            )
+                            it = f"{dunder(param.name)}el__"
+                            self.write(f"for {it} in {pident}:")
+                            with self.indented():
+                                write_cast_match(it, casts, type_var=type_var)
+                                self.write(f"{new_list}.append({it})")
+
+                            set_lit = self.import_name(BASE_IMPL, "SetLiteral")
+                            self.write(f"assert {type_var} is not None")
+                            self.write(
+                                f"{new_pident} = {set_lit}("
+                                f"items=(*{new_list},), type_={type_var})"
+                            )
                     else:
-                        self.write(f"match {pident}:")
-                        with self.indented():
-                            for py_type, cast_t in casts.items():
-                                self.write(f"case {py_type}():")
-                                with self.indented():
-                                    self.write(
-                                        f"{pident} = {cast_t}({pident})"
-                                    )
+                        write_cast_match(pident, casts)
+
                 elif param.is_variadic:
-                    self.write(f"__variadic__ = {ident(param.name)}")
+                    self.write(f"__variadic__ = {pident}")
+
+                elif param.typemod is TypeModifier.SetOf:
+                    if param_non_type_types.get(param.key):
+                        isinstance_ = self.import_name(
+                            "builtins", "isinstance"
+                        )
+                        type_ = self.import_name("builtins", "type")
+                        basealias = self.import_name(BASE_IMPL, "BaseAlias")
+                        new_pident = f"{dunder(pident)}expr__"
+                        param_vars[param.name] = new_pident
+                        self.write(f"{new_pident}: {expr_compat}")
+                        with self.if_(
+                            f"{isinstance_}({pident}, ({type_}, {basealias}))"
+                        ):
+                            if workaround_cast := param_workaround_casts.pop(
+                                param.name, None
+                            ):
+                                cast_ = self.import_name("typing", "cast")
+                                pexpr = (
+                                    f"{cast_}({workaround_cast!r}, {pident})"
+                                )
+                            else:
+                                pexpr = pident
+                            self.write(f"{new_pident} = {pexpr}")
+                        coll = self.import_name(
+                            "collections.abc", "Collection"
+                        )
+                        with self.elif_(
+                            f"not {isinstance_}({pident}, {coll})"
+                        ):
+                            self.write(f"{new_pident} = {pident}")
+                        with self.else_():
+                            set_lit = self.import_name(BASE_IMPL, "SetLiteral")
+                            canon_type = self.get_type(
+                                canonical_param_types[param.key],
+                                import_time=ImportTime.typecheck_runtime,
+                                typevars=typevars,
+                            )
+                            self.write(
+                                f"{new_pident} = {set_lit}("
+                                f"items=(*{pident},), "
+                                f"type_={canon_type}.__gel_reflection__.name)"
+                            )
 
             rt_generics = generic_param_map.get("__return__")
             if rt_generics is None and not optional_generic_params:
@@ -5217,13 +5387,13 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                     ret_type,
                     import_time=ImportTime.typecheck_runtime,
                 )
-                nullable_params = {
-                    n: self.get_type(
-                        t,
+                nullable_param_types = {
+                    param.name: self.get_type(
+                        canonical_param_types[param.key],
                         import_time=ImportTime.typecheck_runtime,
                         typevars=typevars,
                     )
-                    for n, t in nullable_param_types.items()
+                    for param in nullable_params
                 }
             else:
                 # Need runtime generic type inference
@@ -5275,14 +5445,13 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                     # Try to infer generic type from required params first
                     for param, path in sources:
                         if param.name in required_generic_params:
-                            pn = ident(param.name)
-                            resolve(pn, path)
+                            resolve(param_vars[param.name], path)
                             break
                     else:
                         # Fall back to optional params with null/unspecified
                         # checks
                         for i, (param, path) in enumerate(sources):
-                            pn = ident(param.name)
+                            pn = param_vars[param.name]
                             conds = []
                             if (
                                 param.typemod
@@ -5329,13 +5498,13 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                     typevars=rtypevars,
                     import_time=ImportTime.typecheck_runtime,
                 )
-                nullable_params = {
-                    n: self.get_type(
-                        t,
+                nullable_param_types = {
+                    param.name: self.get_type(
+                        canonical_param_types[param.key],
                         import_time=ImportTime.typecheck_runtime,
                         typevars=rtypevars,
                     )
-                    for n, t in nullable_param_types.items()
+                    for param in nullable_params
                 }
 
             # Generate positional argument collection code (__args__ tuple)
@@ -5343,7 +5512,8 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                 self._write_function_positional_args_collection(
                     pos_names,
                     omittable_params,
-                    nullable_params,
+                    nullable_param_types,
+                    param_vars=param_vars,
                     variadic_name=variadic,
                     params_casts=param_workaround_casts,
                     var="__args__",
@@ -5354,7 +5524,8 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                 self._write_function_keyword_args_collection(
                     kw_names,
                     omittable_params,
-                    nullable_params,
+                    nullable_param_types,
+                    param_vars=param_vars,
                     params_casts=param_workaround_casts,
                     var="__kwargs__",
                 )
@@ -5629,7 +5800,9 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                     result = f"{nreq}[{result}]"
             case "arg" | "unspec_arg" | "arg_no_default":
                 if cardinality.is_multi():
-                    iterable = self.import_name("collections.abc", "Iterable")
+                    iterable = self.import_name(
+                        "collections.abc", "Collection"
+                    )
                     type_ = f"{iterable}[{ptr_type}]"
                     default = "[]"
                 elif cardinality.is_optional():

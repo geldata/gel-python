@@ -652,10 +652,11 @@ class Client(
     __slots__ = ()
     _impl_class = _PoolImpl
 
-    def save(
+    def _save_impl(
         self,
-        *objs: GelModel,
-        refetch: bool = True,
+        *,
+        refetch: bool,
+        objs: tuple[GelModel, ...],
     ) -> None:
         opts = self._get_debug_options()
 
@@ -676,7 +677,35 @@ class Client(
                     for ids, batch in zip(batch_ids, batches, strict=True):
                         batch.feed_db_data(ids)
 
+                if refetch:
+                    ref_queries = executor.get_refetch_queries()
+                    for ref in ref_queries:
+                        tx.send_query(ref.query, **ref.args)
+
+                    refetch_data = tx.wait()
+                    for ref_data, ref in zip(
+                        refetch_data, ref_queries, strict=True
+                    ):
+                        ref.feed_db_data(ref_data)
+
                 executor.commit()
+
+    def save(
+        self,
+        *objs: GelModel,
+    ) -> None:
+        """Persist objects without refetching updated data back.
+
+        This is a subset of `sync()`, optimized to avoid refetching.
+        """
+        self._save_impl(refetch=False, objs=objs)
+
+    def sync(
+        self,
+        *objs: GelModel,
+    ) -> None:
+        """Persist objects and refetch updated data back into them."""
+        self._save_impl(refetch=True, objs=objs)
 
     def __debug_save__(self, *objs: GelModel) -> SaveDebug:
         ns = time.monotonic_ns()

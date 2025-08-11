@@ -28,7 +28,6 @@ from gel._internal._xmethod import hybridmethod
 if TYPE_CHECKING:
     import abc
     import types
-    import uuid
     from collections.abc import Iterator
 
 
@@ -140,7 +139,7 @@ class AbstractGelSourceModel(_qb.GelSourceMetadata):
 
 class AbstractGelModelMeta(GelTypeMeta):
     __gel_class_registry__: ClassVar[
-        weakref.WeakValueDictionary[uuid.UUID, type[Any]]
+        weakref.WeakValueDictionary[str, type[Any]]
     ] = weakref.WeakValueDictionary()
 
     # Splat qb protocol
@@ -155,7 +154,6 @@ class AbstractGelModelMeta(GelTypeMeta):
         bases: tuple[type[Any], ...],
         namespace: dict[str, Any],
         *,
-        __gel_type_id__: uuid.UUID | None = None,
         __gel_shape__: str | None = None,
         **kwargs: Any,
     ) -> AbstractGelModelMeta:
@@ -163,25 +161,20 @@ class AbstractGelModelMeta(GelTypeMeta):
             "type[AbstractGelModel]",
             super().__new__(mcls, name, bases, namespace, **kwargs),
         )
-        if __gel_type_id__ is not None:
-            mcls.__gel_class_registry__[__gel_type_id__] = cls
+        reflection = cls.__gel_reflection__
+        if (tname := getattr(reflection, "name", None)) is not None:
+            mcls.__gel_class_registry__[tname] = cls
         cls.__gel_shape__ = __gel_shape__
         return cls
 
     @classmethod
-    def get_class_by_id(cls, tid: uuid.UUID) -> type[AbstractGelModel]:
+    def get_class_by_name(cls, tname: str) -> type[AbstractGelModel]:
         try:
-            return cls.__gel_class_registry__[tid]
+            return cls.__gel_class_registry__[tname]
         except KeyError:
             raise LookupError(
-                f"cannot find GelModel for object type id {tid}"
+                f"cannot find GelModel for object type {tname}"
             ) from None
-
-    @classmethod
-    def register_class(
-        cls, tid: uuid.UUID, type_: type[AbstractGelModel]
-    ) -> None:
-        cls.__gel_class_registry__[tid] = cls
 
 
 class AbstractGelModel(
