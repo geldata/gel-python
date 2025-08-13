@@ -31,10 +31,9 @@ from gel import _testbase as tb
 
 @tb.typecheck
 class TestLinkSetModels(tb.ModelTestCase):
-
     SCHEMA = os.path.join(os.path.dirname(__file__), "dbsetup", "link_set.gel")
 
-    SETUP = '''
+    SETUP = """
         INSERT House { name := 'Griffindor' };
         INSERT House { name := 'Hufflepuff' };
         INSERT House { name := 'Ravenclaw' };
@@ -108,90 +107,94 @@ class TestLinkSetModels(tb.ModelTestCase):
                 )
             ))
         };
-    '''
+    """
 
     def _format_type_name(self, name: str) -> str:
-        return (
-            name
-            .translate(str.maketrans('', '', string.whitespace))
-            .replace(',', ', ')
-        )
+        return name.translate(
+            str.maketrans("", "", string.whitespace)
+        ).replace(",", ", ")
 
     def test_link_set_model_types_01(self):
-        from models import default
+        from models.link_set import default
 
         self.assertEqual(
             reveal_type(default.House.members),
-            "type[models.default.Person]",
+            "type[models.link_set.default.Person]",
         )
         self.assertEqual(
             reveal_type(default.Person.house),
-            "type[models.__shapes__.default.Person.__links__.house]",
+            "type[models.link_set.__shapes__.default.Person.__links__.house]",
         )
         self.assertEqual(
             reveal_type(default.Person.friends),
-            "type[models.__shapes__.default.Person.__links__.friends]",
+            "type[models.link_set.__shapes__.default.Person.__links__.friends]",
         )
         self.assertEqual(
             reveal_type(default.Person.pet),
-            "type[models.default.Pet]",
+            "type[models.link_set.default.Pet]",
         )
         self.assertEqual(
             reveal_type(default.Person.classes),
-            "type[models.default.Class]",
+            "type[models.link_set.default.Class]",
         )
         self.assertEqual(
             reveal_type(default.Pet.owner),
-            "type[models.default.Person]",
+            "type[models.link_set.default.Person]",
         )
 
     def test_link_set_model_query_single_link_01(self):
-        from models import default
+        from models.link_set import default
 
         harry = self.client.query_required_single(
             default.Person.select(
                 pet=True,
-            ).filter(name='Harry Potter').limit(1)
+            )
+            .filter(name="Harry Potter")
+            .limit(1)
         )
         hedwig = self.client.query_required_single(
-            default.Pet.filter(name='Hedwig').limit(1)
+            default.Pet.filter(name="Hedwig").limit(1)
         )
 
         self.assertEqual(harry.pet, hedwig)
         self.assertEqual(
             reveal_type(harry.pet),
-            "models.default.Pet | None",
+            "models.link_set.default.Pet | None",
         )
 
     def test_link_set_model_query_single_link_02(self):
-        from models import default
+        from models.link_set import default
 
         harry = self.client.query_required_single(
             default.Person.select(
                 pet=lambda p: p.pet.select(name=True),
-            ).filter(name='Harry Potter').limit(1)
+            )
+            .filter(name="Harry Potter")
+            .limit(1)
         )
         hedwig = self.client.query_required_single(
-            default.Pet.filter(name='Hedwig').limit(1)
+            default.Pet.filter(name="Hedwig").limit(1)
         )
 
         self.assertEqual(harry.pet, hedwig)
         self.assertEqual(
             reveal_type(harry.pet),
-            "models.default.Pet | None",
+            "models.link_set.default.Pet | None",
         )
 
     @tb.xfail  # link not set
     def test_link_set_model_query_single_link_03(self):
-        from models import default
+        from models.link_set import default
 
         harry = self.client.query_required_single(
             default.Person.select(
                 "*",
-            ).filter(name='Harry Potter').limit(1)
+            )
+            .filter(name="Harry Potter")
+            .limit(1)
         )
         hedwig = self.client.query_required_single(
-            default.Pet.filter(name='Hedwig').limit(1)
+            default.Pet.filter(name="Hedwig").limit(1)
         )
 
         self.assertEqual(harry.pet, hedwig)
@@ -199,24 +202,26 @@ class TestLinkSetModels(tb.ModelTestCase):
             reveal_type(harry.pet),
             (
                 "gel._internal._qbmodel._abstract._link_set.LinkSet["
-                "models.default.Class"
+                "models.link_set.default.Class"
                 "]"
             ),
         )
 
     def test_link_set_model_query_multi_link_01(self):
-        from models import default
+        from models.link_set import default
 
         harry = self.client.query_required_single(
             default.Person.select(
                 classes=True,
-            ).filter(name='Harry Potter').limit(1)
+            )
+            .filter(name="Harry Potter")
+            .limit(1)
         )
         charms = self.client.query_required_single(
-            default.Class.filter(name='Charms').limit(1)
+            default.Class.filter(name="Charms").limit(1)
         )
         potions = self.client.query_required_single(
-            default.Class.filter(name='Potions').limit(1)
+            default.Class.filter(name="Potions").limit(1)
         )
 
         self.assertEqual(harry.classes, {charms, potions})
@@ -224,24 +229,26 @@ class TestLinkSetModels(tb.ModelTestCase):
             reveal_type(harry.classes),
             (
                 "gel._internal._qbmodel._abstract._link_set.LinkSet["
-                "models.default.Class"
+                "models.link_set.default.Class"
                 "]"
             ),
         )
 
     def test_link_set_model_query_multi_link_02(self):
-        from models import default
+        from models.link_set import default
 
         harry = self.client.query_required_single(
             default.Person.select(
                 classes=lambda p: p.classes.select(name=True),
-            ).filter(name='Harry Potter').limit(1)
+            )
+            .filter(name="Harry Potter")
+            .limit(1)
         )
         charms = self.client.query_required_single(
-            default.Class.filter(name='Charms').limit(1)
+            default.Class.filter(name="Charms").limit(1)
         )
         potions = self.client.query_required_single(
-            default.Class.filter(name='Potions').limit(1)
+            default.Class.filter(name="Potions").limit(1)
         )
 
         self.assertEqual(harry.classes, {charms, potions})
@@ -249,150 +256,160 @@ class TestLinkSetModels(tb.ModelTestCase):
             reveal_type(harry.classes),
             (
                 "gel._internal._qbmodel._abstract._link_set.LinkSet["
-                "models.default.Class"
+                "models.link_set.default.Class"
                 "]"
             ),
         )
 
     @tb.xfail  # nothing fetched
     def test_link_set_model_query_multi_link_03(self):
-        from models import default
+        from models.link_set import default
 
         harry = self.client.query_required_single(
             default.Person.select(
                 "*",
-            ).filter(name='Harry Potter').limit(1)
+            )
+            .filter(name="Harry Potter")
+            .limit(1)
         )
         charms = self.client.query_required_single(
-            default.Class.filter(name='Charms').limit(1)
+            default.Class.filter(name="Charms").limit(1)
         )
         potions = self.client.query_required_single(
-            default.Class.filter(name='Potions').limit(1)
+            default.Class.filter(name="Potions").limit(1)
         )
 
         self.assertEqual(harry.classes, {charms, potions})
         self.assertEqual(
             reveal_type(harry.classes),
-            "models.default.Pet | None",
+            "models.link_set.default.Pet | None",
         )
 
     def test_link_set_model_query_single_link_with_props_01(self):
-        from models import default
+        from models.link_set import default
 
         harry = self.client.query_required_single(
             default.Person.select(
                 house=True,
-            ).filter(name='Harry Potter').limit(1)
+            )
+            .filter(name="Harry Potter")
+            .limit(1)
         )
         griffindor = self.client.query_required_single(
-            default.House.filter(name='Griffindor').limit(1)
+            default.House.filter(name="Griffindor").limit(1)
         )
 
         self.assertEqual(harry.house, griffindor)
         self.assertEqual(
             reveal_type(harry.house),
-            "models.__shapes__.default.Person.__links__.house | None",
+            "models.link_set.__shapes__.default.Person.__links__.house | None",
         )
         self.assertEqual(
             (
                 harry.house.__linkprops__.rank
-                if harry.house is not None else
-                ''
+                if harry.house is not None
+                else ""
             ),
-            'seeker',
+            "seeker",
         )
         self.assertEqual(
             reveal_type(
                 harry.house.__linkprops__.rank
-                if harry.house is not None else
-                None
+                if harry.house is not None
+                else None
             ),
             "builtins.str | None",
         )
 
     def test_link_set_model_query_single_link_with_props_02(self):
-        from models import default
+        from models.link_set import default
 
         harry = self.client.query_required_single(
             default.Person.select(
                 house=lambda p: p.house.select(name=True),
-            ).filter(name='Harry Potter').limit(1)
+            )
+            .filter(name="Harry Potter")
+            .limit(1)
         )
         griffindor = self.client.query_required_single(
-            default.House.filter(name='Griffindor').limit(1)
+            default.House.filter(name="Griffindor").limit(1)
         )
 
         self.assertEqual(harry.house, griffindor)
         self.assertEqual(
             reveal_type(harry.house),
-            "models.__shapes__.default.Person.__links__.house | None",
+            "models.link_set.__shapes__.default.Person.__links__.house | None",
         )
         self.assertEqual(
             (
                 harry.house.__linkprops__.rank
-                if harry.house is not None else
-                ''
+                if harry.house is not None
+                else ""
             ),
-            'seeker',
+            "seeker",
         )
         self.assertEqual(
             reveal_type(
                 harry.house.__linkprops__.rank
-                if harry.house is not None else
-                None
+                if harry.house is not None
+                else None
             ),
             "builtins.str | None",
         )
 
     @tb.xfail  # link not set
     def test_link_set_model_query_single_link_with_props_03(self):
-        from models import default
+        from models.link_set import default
 
         harry = self.client.query_required_single(
             default.Person.select(
                 "*",
-            ).filter(name='Harry Potter').limit(1)
+            )
+            .filter(name="Harry Potter")
+            .limit(1)
         )
         griffindor = self.client.query_required_single(
-            default.House.filter(name='Griffindor').limit(1)
+            default.House.filter(name="Griffindor").limit(1)
         )
 
         self.assertEqual(harry.house, griffindor)
         self.assertEqual(
             reveal_type(harry.house),
-            "models.__shapes__.default.Person.__links__.house | None",
+            "models.link_set.__shapes__.default.Person.__links__.house | None",
         )
         self.assertEqual(
             (
                 harry.house.__linkprops__.rank
-                if harry.house is not None else
-                ''
+                if harry.house is not None
+                else ""
             ),
-            'seeker',
+            "seeker",
         )
         self.assertEqual(
             reveal_type(
                 harry.house.__linkprops__.rank
-                if harry.house is not None else
-                None
+                if harry.house is not None
+                else None
             ),
             "builtins.str | None",
         )
 
     @tb.xfail  # expected ForwardRef to be a path alias
     def test_link_set_model_query_multi_link_with_props_01(self):
-        from models import default
+        from models.link_set import default
 
         harry = self.client.query_required_single(
             default.Person.select(
                 friends=True,
-            ).filter(name='Harry Potter').limit(1)
+            )
+            .filter(name="Harry Potter")
+            .limit(1)
         )
         hermione = self.client.query_required_single(
-            default.Person.filter(name='Hermione Granger').limit(1)
+            default.Person.filter(name="Hermione Granger").limit(1)
         )
         ron = self.client.query_required_single(
-            default.Person.filter(name='Ron Weasley').limit(1)
+            default.Person.filter(name="Ron Weasley").limit(1)
         )
 
         self.assertEqual(harry.friends, {hermione, ron})
@@ -400,14 +417,14 @@ class TestLinkSetModels(tb.ModelTestCase):
             reveal_type(harry.friends),
             (
                 "gel._internal._qbmodel._abstract._link_set.LinkWithPropsSet["
-                "models.__shapes__.default.Person.__links__.friends, "
-                "models.default.Person"
+                "models.link_set.__shapes__.default.Person.__links__.friends, "
+                "models.link_set.default.Person"
                 "]"
             ),
         )
         self.assertEqual(
             {f: f.__linkprops__.opinion for f in harry.friends},
-            {hermione: 'smart', ron: 'reliable'}
+            {hermione: "smart", ron: "reliable"},
         )
         self.assertEqual(
             reveal_type(list(harry.friends)[0].__linkprops__.opinion),
@@ -415,18 +432,20 @@ class TestLinkSetModels(tb.ModelTestCase):
         )
 
     def test_link_set_model_query_multi_link_with_props_02(self):
-        from models import default
+        from models.link_set import default
 
         harry = self.client.query_required_single(
             default.Person.select(
                 friends=lambda p: p.friends.select(name=True),
-            ).filter(name='Harry Potter').limit(1)
+            )
+            .filter(name="Harry Potter")
+            .limit(1)
         )
         hermione = self.client.query_required_single(
-            default.Person.filter(name='Hermione Granger').limit(1)
+            default.Person.filter(name="Hermione Granger").limit(1)
         )
         ron = self.client.query_required_single(
-            default.Person.filter(name='Ron Weasley').limit(1)
+            default.Person.filter(name="Ron Weasley").limit(1)
         )
 
         self.assertEqual(harry.friends, {hermione, ron})
@@ -434,14 +453,14 @@ class TestLinkSetModels(tb.ModelTestCase):
             reveal_type(harry.friends),
             (
                 "gel._internal._qbmodel._abstract._link_set.LinkWithPropsSet["
-                "models.__shapes__.default.Person.__links__.friends, "
-                "models.default.Person"
+                "models.link_set.__shapes__.default.Person.__links__.friends, "
+                "models.link_set.default.Person"
                 "]"
             ),
         )
         self.assertEqual(
             {f: f.__linkprops__.opinion for f in harry.friends},
-            {hermione: 'smart', ron: 'reliable'}
+            {hermione: "smart", ron: "reliable"},
         )
         self.assertEqual(
             reveal_type(list(harry.friends)[0].__linkprops__.opinion),
@@ -450,18 +469,20 @@ class TestLinkSetModels(tb.ModelTestCase):
 
     @tb.xfail  # nothing fetched
     def test_link_set_model_query_multi_link_with_props_03(self):
-        from models import default
+        from models.link_set import default
 
         harry = self.client.query_required_single(
             default.Person.select(
                 "*",
-            ).filter(name='Harry Potter').limit(1)
+            )
+            .filter(name="Harry Potter")
+            .limit(1)
         )
         hermione = self.client.query_required_single(
-            default.Person.filter(name='Hermione Granger').limit(1)
+            default.Person.filter(name="Hermione Granger").limit(1)
         )
         ron = self.client.query_required_single(
-            default.Person.filter(name='Ron Weasley').limit(1)
+            default.Person.filter(name="Ron Weasley").limit(1)
         )
 
         self.assertEqual(harry.friends, {hermione, ron})
@@ -469,14 +490,14 @@ class TestLinkSetModels(tb.ModelTestCase):
             reveal_type(harry.friends),
             (
                 "gel._internal._qbmodel._abstract._link_set.LinkWithPropsSet["
-                "models.__shapes__.default.Person.__links__.friends, "
-                "models.default.Person"
+                "models.link_set.__shapes__.default.Person.__links__.friends, "
+                "models.link_set.default.Person"
                 "]"
             ),
         )
         self.assertEqual(
             {f: f.__linkprops__.opinion for f in harry.friends},
-            {hermione: 'smart', ron: 'reliable'}
+            {hermione: "smart", ron: "reliable"},
         )
         self.assertEqual(
             reveal_type(
@@ -486,77 +507,79 @@ class TestLinkSetModels(tb.ModelTestCase):
         )
 
     def test_link_set_model_query_computed_single_link_01(self):
-        from models import default
+        from models.link_set import default
 
         hedwig = self.client.query_required_single(
-            default.Pet.select(
-                owner=True
-            ).filter(name='Hedwig').limit(1)
+            default.Pet.select(owner=True).filter(name="Hedwig").limit(1)
         )
         harry = self.client.query_required_single(
-            default.Person.filter(name='Harry Potter').limit(1)
+            default.Person.filter(name="Harry Potter").limit(1)
         )
 
         self.assertEqual(hedwig.owner, harry)
         self.assertEqual(
             reveal_type(hedwig.owner),
-            "models.default.Person | None",
+            "models.link_set.default.Person | None",
         )
 
     def test_link_set_model_query_computed_single_link_02(self):
-        from models import default
+        from models.link_set import default
 
         hedwig = self.client.query_required_single(
-            default.Pet.select(
-                owner=lambda p: p.owner.select(name=True)
-            ).filter(name='Hedwig').limit(1)
+            default.Pet.select(owner=lambda p: p.owner.select(name=True))
+            .filter(name="Hedwig")
+            .limit(1)
         )
         harry = self.client.query_required_single(
-            default.Person.filter(name='Harry Potter').limit(1)
+            default.Person.filter(name="Harry Potter").limit(1)
         )
 
         self.assertEqual(hedwig.owner, harry)
         self.assertEqual(
             reveal_type(hedwig.owner),
-            "models.default.Person | None",
+            "models.link_set.default.Person | None",
         )
 
     @tb.xfail  # link not set
     def test_link_set_model_query_computed_single_link_03(self):
-        from models import default
+        from models.link_set import default
 
         hedwig = self.client.query_required_single(
             default.Pet.select(
                 "*",
-            ).filter(name='Hedwig').limit(1)
+            )
+            .filter(name="Hedwig")
+            .limit(1)
         )
         harry = self.client.query_required_single(
-            default.Person.filter(name='Harry Potter').limit(1)
+            default.Person.filter(name="Harry Potter").limit(1)
         )
 
         self.assertEqual(hedwig.owner, harry)
         self.assertEqual(
             reveal_type(hedwig.owner),
-            "models.default.Person | None",
+            "models.link_set.default.Person | None",
         )
 
     @tb.xfail  # expected ForwardRef to be a path alias
     def test_link_set_model_query_computed_multi_link_01(self):
-        from models import default
+        from models.link_set import default
 
         griffindor = self.client.query_required_single(
             default.House.select(
                 members=True,
-            ).filter(name='Griffindor').limit(1)
+            )
+            .filter(name="Griffindor")
+            .limit(1)
         )
         harry = self.client.query_required_single(
-            default.Person.filter(name='Harry Potter').limit(1)
+            default.Person.filter(name="Harry Potter").limit(1)
         )
         hermione = self.client.query_required_single(
-            default.Person.filter(name='Hermione Granger').limit(1)
+            default.Person.filter(name="Hermione Granger").limit(1)
         )
         ron = self.client.query_required_single(
-            default.Person.filter(name='Ron Weasley').limit(1)
+            default.Person.filter(name="Ron Weasley").limit(1)
         )
 
         self.assertEqual(griffindor.members, {harry, hermione, ron})
@@ -564,30 +587,32 @@ class TestLinkSetModels(tb.ModelTestCase):
             reveal_type(griffindor.members),
             (
                 "gel._internal._qbmodel._abstract._link_set.ComputedLinkSet["
-                "models.default.Person"
+                "models.link_set.default.Person"
                 "]"
             ),
         )
 
     def test_link_set_model_query_computed_multi_link_02(self):
-        from models import default
+        from models.link_set import default
 
         griffindor = self.client.query_required_single(
             default.House.select(
                 members=lambda h: h.members.select(name=True),
-            ).filter(name='Griffindor').limit(1)
+            )
+            .filter(name="Griffindor")
+            .limit(1)
         )
         harry = self.client.query_required_single(
-            default.Person.filter(name='Harry Potter').limit(1)
+            default.Person.filter(name="Harry Potter").limit(1)
         )
         hermione = self.client.query_required_single(
-            default.Person.filter(name='Hermione Granger').limit(1)
+            default.Person.filter(name="Hermione Granger").limit(1)
         )
         ron = self.client.query_required_single(
-            default.Person.filter(name='Ron Weasley').limit(1)
+            default.Person.filter(name="Ron Weasley").limit(1)
         )
         neville = self.client.query_required_single(
-            default.Person.filter(name='Neville Longbottom').limit(1)
+            default.Person.filter(name="Neville Longbottom").limit(1)
         )
 
         self.assertEqual(griffindor.members, {harry, hermione, ron, neville})
@@ -595,28 +620,30 @@ class TestLinkSetModels(tb.ModelTestCase):
             reveal_type(griffindor.members),
             (
                 "gel._internal._qbmodel._abstract._link_set.ComputedLinkSet["
-                "models.default.Person"
+                "models.link_set.default.Person"
                 "]"
             ),
         )
 
     @tb.xfail  # link not set
     def test_link_set_model_query_computed_multi_link_03(self):
-        from models import default
+        from models.link_set import default
 
         griffindor = self.client.query_required_single(
             default.House.select(
                 "*",
-            ).filter(name='Griffindor').limit(1)
+            )
+            .filter(name="Griffindor")
+            .limit(1)
         )
         harry = self.client.query_required_single(
-            default.Person.filter(name='Harry Potter').limit(1)
+            default.Person.filter(name="Harry Potter").limit(1)
         )
         hermione = self.client.query_required_single(
-            default.Person.filter(name='Hermione Granger').limit(1)
+            default.Person.filter(name="Hermione Granger").limit(1)
         )
         ron = self.client.query_required_single(
-            default.Person.filter(name='Ron Weasley').limit(1)
+            default.Person.filter(name="Ron Weasley").limit(1)
         )
 
         self.assertEqual(griffindor.members, {harry, hermione, ron})
@@ -624,25 +651,27 @@ class TestLinkSetModels(tb.ModelTestCase):
             reveal_type(griffindor.members),
             (
                 "gel._internal._qbmodel._abstract._link_set.ComputedLinkSet["
-                "models.default.Person"
+                "models.link_set.default.Person"
                 "]"
             ),
         )
 
     def test_link_set_model_modify_multi_link_add_01(self):
         # Add existing item
-        from models import default
+        from models.link_set import default
 
         harry = self.client.query_required_single(
             default.Person.select(
                 classes=lambda p: p.classes.select(name=True),
-            ).filter(name='Harry Potter').limit(1)
+            )
+            .filter(name="Harry Potter")
+            .limit(1)
         )
         charms = self.client.query_required_single(
-            default.Class.filter(name='Charms').limit(1)
+            default.Class.filter(name="Charms").limit(1)
         )
         potions = self.client.query_required_single(
-            default.Class.filter(name='Potions').limit(1)
+            default.Class.filter(name="Potions").limit(1)
         )
 
         harry.classes.add(potions)
@@ -652,28 +681,30 @@ class TestLinkSetModels(tb.ModelTestCase):
             reveal_type(harry.classes),
             (
                 "gel._internal._qbmodel._abstract._link_set.LinkSet["
-                "models.default.Class"
+                "models.link_set.default.Class"
                 "]"
             ),
         )
 
     def test_link_set_model_modify_multi_link_add_02(self):
         # Add new item with id
-        from models import default
+        from models.link_set import default
 
         harry = self.client.query_required_single(
             default.Person.select(
                 classes=lambda p: p.classes.select(name=True),
-            ).filter(name='Harry Potter').limit(1)
+            )
+            .filter(name="Harry Potter")
+            .limit(1)
         )
         charms = self.client.query_required_single(
-            default.Class.filter(name='Charms').limit(1)
+            default.Class.filter(name="Charms").limit(1)
         )
         potions = self.client.query_required_single(
-            default.Class.filter(name='Potions').limit(1)
+            default.Class.filter(name="Potions").limit(1)
         )
         divination = self.client.query_required_single(
-            default.Class.filter(name='Divination').limit(1)
+            default.Class.filter(name="Divination").limit(1)
         )
 
         harry.classes.add(divination)
@@ -683,27 +714,29 @@ class TestLinkSetModels(tb.ModelTestCase):
             reveal_type(harry.classes),
             (
                 "gel._internal._qbmodel._abstract._link_set.LinkSet["
-                "models.default.Class"
+                "models.link_set.default.Class"
                 "]"
             ),
         )
 
     def test_link_set_model_modify_multi_link_add_03(self):
         # Add new item without id
-        from models import default
+        from models.link_set import default
 
         harry = self.client.query_required_single(
             default.Person.select(
                 classes=lambda p: p.classes.select(name=True),
-            ).filter(name='Harry Potter').limit(1)
+            )
+            .filter(name="Harry Potter")
+            .limit(1)
         )
         charms = self.client.query_required_single(
-            default.Class.filter(name='Charms').limit(1)
+            default.Class.filter(name="Charms").limit(1)
         )
         potions = self.client.query_required_single(
-            default.Class.filter(name='Potions').limit(1)
+            default.Class.filter(name="Potions").limit(1)
         )
-        herbology = default.Class(name='Herbology')
+        herbology = default.Class(name="Herbology")
 
         harry.classes.add(herbology)
 
@@ -713,25 +746,27 @@ class TestLinkSetModels(tb.ModelTestCase):
             reveal_type(harry.classes),
             (
                 "gel._internal._qbmodel._abstract._link_set.LinkSet["
-                "models.default.Class"
+                "models.link_set.default.Class"
                 "]"
             ),
         )
 
     def test_link_set_model_modify_multi_link_remove_01(self):
         # Remove existing item
-        from models import default
+        from models.link_set import default
 
         harry = self.client.query_required_single(
             default.Person.select(
                 classes=lambda p: p.classes.select(name=True),
-            ).filter(name='Harry Potter').limit(1)
+            )
+            .filter(name="Harry Potter")
+            .limit(1)
         )
         charms = self.client.query_required_single(
-            default.Class.filter(name='Charms').limit(1)
+            default.Class.filter(name="Charms").limit(1)
         )
         potions = self.client.query_required_single(
-            default.Class.filter(name='Potions').limit(1)
+            default.Class.filter(name="Potions").limit(1)
         )
 
         harry.classes.remove(potions)
@@ -742,28 +777,30 @@ class TestLinkSetModels(tb.ModelTestCase):
             reveal_type(harry.classes),
             (
                 "gel._internal._qbmodel._abstract._link_set.LinkSet["
-                "models.default.Class"
+                "models.link_set.default.Class"
                 "]"
             ),
         )
 
     def test_link_set_model_modify_multi_link_remove_02(self):
         # Remove new item with id
-        from models import default
+        from models.link_set import default
 
         harry = self.client.query_required_single(
             default.Person.select(
                 classes=lambda p: p.classes.select(name=True),
-            ).filter(name='Harry Potter').limit(1)
+            )
+            .filter(name="Harry Potter")
+            .limit(1)
         )
         charms = self.client.query_required_single(
-            default.Class.filter(name='Charms').limit(1)
+            default.Class.filter(name="Charms").limit(1)
         )
         potions = self.client.query_required_single(
-            default.Class.filter(name='Potions').limit(1)
+            default.Class.filter(name="Potions").limit(1)
         )
         divination = self.client.query_required_single(
-            default.Class.filter(name='Divination').limit(1)
+            default.Class.filter(name="Divination").limit(1)
         )
 
         with self.assertRaises(KeyError):
@@ -774,27 +811,29 @@ class TestLinkSetModels(tb.ModelTestCase):
             reveal_type(harry.classes),
             (
                 "gel._internal._qbmodel._abstract._link_set.LinkSet["
-                "models.default.Class"
+                "models.link_set.default.Class"
                 "]"
             ),
         )
 
     def test_link_set_model_modify_multi_link_remove_03(self):
         # Remove new item without id
-        from models import default
+        from models.link_set import default
 
         harry = self.client.query_required_single(
             default.Person.select(
                 classes=lambda p: p.classes.select(name=True),
-            ).filter(name='Harry Potter').limit(1)
+            )
+            .filter(name="Harry Potter")
+            .limit(1)
         )
         charms = self.client.query_required_single(
-            default.Class.filter(name='Charms').limit(1)
+            default.Class.filter(name="Charms").limit(1)
         )
         potions = self.client.query_required_single(
-            default.Class.filter(name='Potions').limit(1)
+            default.Class.filter(name="Potions").limit(1)
         )
-        herbology = default.Class(name='Herbology')
+        herbology = default.Class(name="Herbology")
 
         with self.assertRaises(KeyError):
             harry.classes.remove(herbology)
@@ -804,25 +843,27 @@ class TestLinkSetModels(tb.ModelTestCase):
             reveal_type(harry.classes),
             (
                 "gel._internal._qbmodel._abstract._link_set.LinkSet["
-                "models.default.Class"
+                "models.link_set.default.Class"
                 "]"
             ),
         )
 
     def test_link_set_model_modify_multi_link_discard_01(self):
         # Discard existing item
-        from models import default
+        from models.link_set import default
 
         harry = self.client.query_required_single(
             default.Person.select(
                 classes=lambda p: p.classes.select(name=True),
-            ).filter(name='Harry Potter').limit(1)
+            )
+            .filter(name="Harry Potter")
+            .limit(1)
         )
         charms = self.client.query_required_single(
-            default.Class.filter(name='Charms').limit(1)
+            default.Class.filter(name="Charms").limit(1)
         )
         potions = self.client.query_required_single(
-            default.Class.filter(name='Potions').limit(1)
+            default.Class.filter(name="Potions").limit(1)
         )
 
         harry.classes.discard(potions)
@@ -833,28 +874,30 @@ class TestLinkSetModels(tb.ModelTestCase):
             reveal_type(harry.classes),
             (
                 "gel._internal._qbmodel._abstract._link_set.LinkSet["
-                "models.default.Class"
+                "models.link_set.default.Class"
                 "]"
             ),
         )
 
     def test_link_set_model_modify_multi_link_discard_02(self):
         # Discard new item with id
-        from models import default
+        from models.link_set import default
 
         harry = self.client.query_required_single(
             default.Person.select(
                 classes=lambda p: p.classes.select(name=True),
-            ).filter(name='Harry Potter').limit(1)
+            )
+            .filter(name="Harry Potter")
+            .limit(1)
         )
         charms = self.client.query_required_single(
-            default.Class.filter(name='Charms').limit(1)
+            default.Class.filter(name="Charms").limit(1)
         )
         potions = self.client.query_required_single(
-            default.Class.filter(name='Potions').limit(1)
+            default.Class.filter(name="Potions").limit(1)
         )
         divination = self.client.query_required_single(
-            default.Class.filter(name='Divination').limit(1)
+            default.Class.filter(name="Divination").limit(1)
         )
 
         harry.classes.discard(divination)
@@ -864,27 +907,29 @@ class TestLinkSetModels(tb.ModelTestCase):
             reveal_type(harry.classes),
             (
                 "gel._internal._qbmodel._abstract._link_set.LinkSet["
-                "models.default.Class"
+                "models.link_set.default.Class"
                 "]"
             ),
         )
 
     def test_link_set_model_modify_multi_link_discard_03(self):
         # Discard new item without id
-        from models import default
+        from models.link_set import default
 
         harry = self.client.query_required_single(
             default.Person.select(
                 classes=lambda p: p.classes.select(name=True),
-            ).filter(name='Harry Potter').limit(1)
+            )
+            .filter(name="Harry Potter")
+            .limit(1)
         )
         charms = self.client.query_required_single(
-            default.Class.filter(name='Charms').limit(1)
+            default.Class.filter(name="Charms").limit(1)
         )
         potions = self.client.query_required_single(
-            default.Class.filter(name='Potions').limit(1)
+            default.Class.filter(name="Potions").limit(1)
         )
-        herbology = default.Class(name='Herbology')
+        herbology = default.Class(name="Herbology")
 
         harry.classes.discard(herbology)
 
@@ -893,19 +938,21 @@ class TestLinkSetModels(tb.ModelTestCase):
             reveal_type(harry.classes),
             (
                 "gel._internal._qbmodel._abstract._link_set.LinkSet["
-                "models.default.Class"
+                "models.link_set.default.Class"
                 "]"
             ),
         )
 
     def test_link_set_model_modify_multi_link_clear_01(self):
         # Discard existing item
-        from models import default
+        from models.link_set import default
 
         harry = self.client.query_required_single(
             default.Person.select(
                 classes=lambda p: p.classes.select(name=True),
-            ).filter(name='Harry Potter').limit(1)
+            )
+            .filter(name="Harry Potter")
+            .limit(1)
         )
 
         harry.classes.clear()
@@ -915,25 +962,27 @@ class TestLinkSetModels(tb.ModelTestCase):
             reveal_type(harry.classes),
             (
                 "gel._internal._qbmodel._abstract._link_set.LinkSet["
-                "models.default.Class"
+                "models.link_set.default.Class"
                 "]"
             ),
         )
 
     def test_link_set_model_modify_multi_link_update_01(self):
         # Update existing item
-        from models import default
+        from models.link_set import default
 
         harry = self.client.query_required_single(
             default.Person.select(
                 classes=lambda p: p.classes.select(name=True),
-            ).filter(name='Harry Potter').limit(1)
+            )
+            .filter(name="Harry Potter")
+            .limit(1)
         )
         charms = self.client.query_required_single(
-            default.Class.filter(name='Charms').limit(1)
+            default.Class.filter(name="Charms").limit(1)
         )
         potions = self.client.query_required_single(
-            default.Class.filter(name='Potions').limit(1)
+            default.Class.filter(name="Potions").limit(1)
         )
 
         harry.classes.update([potions])
@@ -943,28 +992,30 @@ class TestLinkSetModels(tb.ModelTestCase):
             reveal_type(harry.classes),
             (
                 "gel._internal._qbmodel._abstract._link_set.LinkSet["
-                "models.default.Class"
+                "models.link_set.default.Class"
                 "]"
             ),
         )
 
     def test_link_set_model_modify_multi_link_update_02(self):
         # Update new item with id
-        from models import default
+        from models.link_set import default
 
         harry = self.client.query_required_single(
             default.Person.select(
                 classes=lambda p: p.classes.select(name=True),
-            ).filter(name='Harry Potter').limit(1)
+            )
+            .filter(name="Harry Potter")
+            .limit(1)
         )
         charms = self.client.query_required_single(
-            default.Class.filter(name='Charms').limit(1)
+            default.Class.filter(name="Charms").limit(1)
         )
         potions = self.client.query_required_single(
-            default.Class.filter(name='Potions').limit(1)
+            default.Class.filter(name="Potions").limit(1)
         )
         divination = self.client.query_required_single(
-            default.Class.filter(name='Divination').limit(1)
+            default.Class.filter(name="Divination").limit(1)
         )
 
         harry.classes.update([divination])
@@ -974,27 +1025,29 @@ class TestLinkSetModels(tb.ModelTestCase):
             reveal_type(harry.classes),
             (
                 "gel._internal._qbmodel._abstract._link_set.LinkSet["
-                "models.default.Class"
+                "models.link_set.default.Class"
                 "]"
             ),
         )
 
     def test_link_set_model_modify_multi_link_update_03(self):
         # Update new item with id
-        from models import default
+        from models.link_set import default
 
         harry = self.client.query_required_single(
             default.Person.select(
                 classes=lambda p: p.classes.select(name=True),
-            ).filter(name='Harry Potter').limit(1)
+            )
+            .filter(name="Harry Potter")
+            .limit(1)
         )
         charms = self.client.query_required_single(
-            default.Class.filter(name='Charms').limit(1)
+            default.Class.filter(name="Charms").limit(1)
         )
         potions = self.client.query_required_single(
-            default.Class.filter(name='Potions').limit(1)
+            default.Class.filter(name="Potions").limit(1)
         )
-        herbology = default.Class(name='Herbology')
+        herbology = default.Class(name="Herbology")
 
         harry.classes.update([herbology])
 
@@ -1004,7 +1057,7 @@ class TestLinkSetModels(tb.ModelTestCase):
             reveal_type(harry.classes),
             (
                 "gel._internal._qbmodel._abstract._link_set.LinkSet["
-                "models.default.Class"
+                "models.link_set.default.Class"
                 "]"
             ),
         )
@@ -1012,18 +1065,20 @@ class TestLinkSetModels(tb.ModelTestCase):
     @tb.xfail  # mypy seems to be checking + instead of +=
     def test_link_set_model_modify_multi_link_op_iadd_01(self):
         # Operator iadd existing item
-        from models import default
+        from models.link_set import default
 
         harry = self.client.query_required_single(
             default.Person.select(
                 classes=lambda p: p.classes.select(name=True),
-            ).filter(name='Harry Potter').limit(1)
+            )
+            .filter(name="Harry Potter")
+            .limit(1)
         )
         charms = self.client.query_required_single(
-            default.Class.filter(name='Charms').limit(1)
+            default.Class.filter(name="Charms").limit(1)
         )
         potions = self.client.query_required_single(
-            default.Class.filter(name='Potions').limit(1)
+            default.Class.filter(name="Potions").limit(1)
         )
 
         harry.classes += [potions]
@@ -1033,7 +1088,7 @@ class TestLinkSetModels(tb.ModelTestCase):
             reveal_type(harry.classes),
             (
                 "gel._internal._qbmodel._abstract._link_set.LinkSet["
-                "models.default.Class"
+                "models.link_set.default.Class"
                 "]"
             ),
         )
@@ -1041,21 +1096,23 @@ class TestLinkSetModels(tb.ModelTestCase):
     @tb.xfail  # mypy seems to be checking + instead of +=
     def test_link_set_model_modify_multi_link_op_iadd_02(self):
         # Operator iadd new item with id
-        from models import default
+        from models.link_set import default
 
         harry = self.client.query_required_single(
             default.Person.select(
                 classes=lambda p: p.classes.select(name=True),
-            ).filter(name='Harry Potter').limit(1)
+            )
+            .filter(name="Harry Potter")
+            .limit(1)
         )
         charms = self.client.query_required_single(
-            default.Class.filter(name='Charms').limit(1)
+            default.Class.filter(name="Charms").limit(1)
         )
         potions = self.client.query_required_single(
-            default.Class.filter(name='Potions').limit(1)
+            default.Class.filter(name="Potions").limit(1)
         )
         divination = self.client.query_required_single(
-            default.Class.filter(name='Divination').limit(1)
+            default.Class.filter(name="Divination").limit(1)
         )
 
         harry.classes += [divination]
@@ -1065,7 +1122,7 @@ class TestLinkSetModels(tb.ModelTestCase):
             reveal_type(harry.classes),
             (
                 "gel._internal._qbmodel._abstract._link_set.LinkSet["
-                "models.default.Class"
+                "models.link_set.default.Class"
                 "]"
             ),
         )
@@ -1073,20 +1130,22 @@ class TestLinkSetModels(tb.ModelTestCase):
     @tb.xfail  # mypy seems to be checking + instead of +=
     def test_link_set_model_modify_multi_link_op_iadd_03(self):
         # Update new item with id
-        from models import default
+        from models.link_set import default
 
         harry = self.client.query_required_single(
             default.Person.select(
                 classes=lambda p: p.classes.select(name=True),
-            ).filter(name='Harry Potter').limit(1)
+            )
+            .filter(name="Harry Potter")
+            .limit(1)
         )
         charms = self.client.query_required_single(
-            default.Class.filter(name='Charms').limit(1)
+            default.Class.filter(name="Charms").limit(1)
         )
         potions = self.client.query_required_single(
-            default.Class.filter(name='Potions').limit(1)
+            default.Class.filter(name="Potions").limit(1)
         )
-        herbology = default.Class(name='Herbology')
+        herbology = default.Class(name="Herbology")
 
         harry.classes += [herbology]
 
@@ -1096,7 +1155,7 @@ class TestLinkSetModels(tb.ModelTestCase):
             reveal_type(harry.classes),
             (
                 "gel._internal._qbmodel._abstract._link_set.LinkSet["
-                "models.default.Class"
+                "models.link_set.default.Class"
                 "]"
             ),
         )
@@ -1104,18 +1163,20 @@ class TestLinkSetModels(tb.ModelTestCase):
     @tb.xfail  # mypy seems to be checking - instead of -=
     def test_link_set_model_modify_multi_link_op_isub_01(self):
         # Operator isub existing item
-        from models import default
+        from models.link_set import default
 
         harry = self.client.query_required_single(
             default.Person.select(
                 classes=lambda p: p.classes.select(name=True),
-            ).filter(name='Harry Potter').limit(1)
+            )
+            .filter(name="Harry Potter")
+            .limit(1)
         )
         charms = self.client.query_required_single(
-            default.Class.filter(name='Charms').limit(1)
+            default.Class.filter(name="Charms").limit(1)
         )
         potions = self.client.query_required_single(
-            default.Class.filter(name='Potions').limit(1)
+            default.Class.filter(name="Potions").limit(1)
         )
 
         harry.classes -= [potions]
@@ -1125,7 +1186,7 @@ class TestLinkSetModels(tb.ModelTestCase):
             reveal_type(harry.classes),
             (
                 "gel._internal._qbmodel._abstract._link_set.LinkSet["
-                "models.default.Class"
+                "models.link_set.default.Class"
                 "]"
             ),
         )
@@ -1133,21 +1194,23 @@ class TestLinkSetModels(tb.ModelTestCase):
     @tb.xfail  # mypy seems to be checking - instead of -=
     def test_link_set_model_modify_multi_link_op_isub_02(self):
         # Operator isub new item with id
-        from models import default
+        from models.link_set import default
 
         harry = self.client.query_required_single(
             default.Person.select(
                 classes=lambda p: p.classes.select(name=True),
-            ).filter(name='Harry Potter').limit(1)
+            )
+            .filter(name="Harry Potter")
+            .limit(1)
         )
         charms = self.client.query_required_single(
-            default.Class.filter(name='Charms').limit(1)
+            default.Class.filter(name="Charms").limit(1)
         )
         potions = self.client.query_required_single(
-            default.Class.filter(name='Potions').limit(1)
+            default.Class.filter(name="Potions").limit(1)
         )
         divination = self.client.query_required_single(
-            default.Class.filter(name='Divination').limit(1)
+            default.Class.filter(name="Divination").limit(1)
         )
 
         harry.classes -= [divination]
@@ -1157,7 +1220,7 @@ class TestLinkSetModels(tb.ModelTestCase):
             reveal_type(harry.classes),
             (
                 "gel._internal._qbmodel._abstract._link_set.LinkSet["
-                "models.default.Class"
+                "models.link_set.default.Class"
                 "]"
             ),
         )
@@ -1165,18 +1228,20 @@ class TestLinkSetModels(tb.ModelTestCase):
     # Tests for friends property (multi link with props) instead of classes
     def test_link_set_model_modify_multi_link_with_props_add_01(self):
         # Add existing item
-        from models import default
+        from models.link_set import default
 
         harry = self.client.query_required_single(
             default.Person.select(
                 friends=lambda p: p.friends.select(name=True),
-            ).filter(name='Harry Potter').limit(1)
+            )
+            .filter(name="Harry Potter")
+            .limit(1)
         )
         hermione = self.client.query_required_single(
-            default.Person.filter(name='Hermione Granger').limit(1)
+            default.Person.filter(name="Hermione Granger").limit(1)
         )
         ron = self.client.query_required_single(
-            default.Person.filter(name='Ron Weasley').limit(1)
+            default.Person.filter(name="Ron Weasley").limit(1)
         )
 
         harry.friends.add(ron)
@@ -1186,33 +1251,35 @@ class TestLinkSetModels(tb.ModelTestCase):
             reveal_type(harry.friends),
             (
                 "gel._internal._qbmodel._abstract._link_set.LinkWithPropsSet["
-                "models.__shapes__.default.Person.__links__.friends, "
-                "models.default.Person"
+                "models.link_set.__shapes__.default.Person.__links__.friends, "
+                "models.link_set.default.Person"
                 "]"
             ),
         )
         self.assertEqual(
             {f: f.__linkprops__.opinion for f in harry.friends},
-            {hermione: 'smart', ron: 'reliable'},
+            {hermione: "smart", ron: "reliable"},
         )
 
     def test_link_set_model_modify_multi_link_with_props_add_02(self):
         # Add new item with id
-        from models import default
+        from models.link_set import default
 
         harry = self.client.query_required_single(
             default.Person.select(
                 friends=lambda p: p.friends.select(name=True),
-            ).filter(name='Harry Potter').limit(1)
+            )
+            .filter(name="Harry Potter")
+            .limit(1)
         )
         hermione = self.client.query_required_single(
-            default.Person.filter(name='Hermione Granger').limit(1)
+            default.Person.filter(name="Hermione Granger").limit(1)
         )
         ron = self.client.query_required_single(
-            default.Person.filter(name='Ron Weasley').limit(1)
+            default.Person.filter(name="Ron Weasley").limit(1)
         )
         neville = self.client.query_required_single(
-            default.Person.filter(name='Neville Longbottom').limit(1)
+            default.Person.filter(name="Neville Longbottom").limit(1)
         )
 
         harry.friends.add(neville)
@@ -1222,8 +1289,8 @@ class TestLinkSetModels(tb.ModelTestCase):
             reveal_type(harry.friends),
             (
                 "gel._internal._qbmodel._abstract._link_set.LinkWithPropsSet["
-                "models.__shapes__.default.Person.__links__.friends, "
-                "models.default.Person"
+                "models.link_set.__shapes__.default.Person.__links__.friends, "
+                "models.link_set.default.Person"
                 "]"
             ),
         )
@@ -1231,30 +1298,32 @@ class TestLinkSetModels(tb.ModelTestCase):
             {
                 f: (
                     f.__linkprops__.opinion
-                    if hasattr(f.__linkprops__, 'opinion') else
-                    None
+                    if hasattr(f.__linkprops__, "opinion")
+                    else None
                 )
                 for f in harry.friends
             },
-            {hermione: 'smart', ron: 'reliable', neville: None},
+            {hermione: "smart", ron: "reliable", neville: None},
         )
 
     def test_link_set_model_modify_multi_link_with_props_add_03(self):
         # Add new item without id
-        from models import default
+        from models.link_set import default
 
         harry = self.client.query_required_single(
             default.Person.select(
                 friends=lambda p: p.friends.select(name=True),
-            ).filter(name='Harry Potter').limit(1)
+            )
+            .filter(name="Harry Potter")
+            .limit(1)
         )
         hermione = self.client.query_required_single(
-            default.Person.filter(name='Hermione Granger').limit(1)
+            default.Person.filter(name="Hermione Granger").limit(1)
         )
         ron = self.client.query_required_single(
-            default.Person.filter(name='Ron Weasley').limit(1)
+            default.Person.filter(name="Ron Weasley").limit(1)
         )
-        luna = default.Person(name='Luna Lovegood')
+        luna = default.Person(name="Luna Lovegood")
 
         harry.friends.add(luna)
 
@@ -1264,8 +1333,8 @@ class TestLinkSetModels(tb.ModelTestCase):
             reveal_type(harry.friends),
             (
                 "gel._internal._qbmodel._abstract._link_set.LinkWithPropsSet["
-                "models.__shapes__.default.Person.__links__.friends, "
-                "models.default.Person"
+                "models.link_set.__shapes__.default.Person.__links__.friends, "
+                "models.link_set.default.Person"
                 "]"
             ),
         )
@@ -1273,32 +1342,34 @@ class TestLinkSetModels(tb.ModelTestCase):
             {
                 f.name: (
                     f.__linkprops__.opinion
-                    if hasattr(f.__linkprops__, 'opinion') else
-                    None
+                    if hasattr(f.__linkprops__, "opinion")
+                    else None
                 )
                 for f in harry.friends
             },
             {
-                'Hermione Granger': 'smart',
-                'Ron Weasley': 'reliable',
-                'Luna Lovegood': None,
+                "Hermione Granger": "smart",
+                "Ron Weasley": "reliable",
+                "Luna Lovegood": None,
             },
         )
 
     def test_link_set_model_modify_multi_link_with_props_remove_01(self):
         # Remove existing item
-        from models import default
+        from models.link_set import default
 
         harry = self.client.query_required_single(
             default.Person.select(
                 friends=lambda p: p.friends.select(name=True),
-            ).filter(name='Harry Potter').limit(1)
+            )
+            .filter(name="Harry Potter")
+            .limit(1)
         )
         hermione = self.client.query_required_single(
-            default.Person.filter(name='Hermione Granger').limit(1)
+            default.Person.filter(name="Hermione Granger").limit(1)
         )
         ron = self.client.query_required_single(
-            default.Person.filter(name='Ron Weasley').limit(1)
+            default.Person.filter(name="Ron Weasley").limit(1)
         )
 
         harry.friends.remove(ron)
@@ -1309,33 +1380,35 @@ class TestLinkSetModels(tb.ModelTestCase):
             reveal_type(harry.friends),
             (
                 "gel._internal._qbmodel._abstract._link_set.LinkWithPropsSet["
-                "models.__shapes__.default.Person.__links__.friends, "
-                "models.default.Person"
+                "models.link_set.__shapes__.default.Person.__links__.friends, "
+                "models.link_set.default.Person"
                 "]"
             ),
         )
         self.assertEqual(
             {f: f.__linkprops__.opinion for f in harry.friends},
-            {hermione: 'smart'},
+            {hermione: "smart"},
         )
 
     def test_link_set_model_modify_multi_link_with_props_remove_02(self):
         # Remove new item with id
-        from models import default
+        from models.link_set import default
 
         harry = self.client.query_required_single(
             default.Person.select(
                 friends=lambda p: p.friends.select(name=True),
-            ).filter(name='Harry Potter').limit(1)
+            )
+            .filter(name="Harry Potter")
+            .limit(1)
         )
         hermione = self.client.query_required_single(
-            default.Person.filter(name='Hermione Granger').limit(1)
+            default.Person.filter(name="Hermione Granger").limit(1)
         )
         ron = self.client.query_required_single(
-            default.Person.filter(name='Ron Weasley').limit(1)
+            default.Person.filter(name="Ron Weasley").limit(1)
         )
         neville = self.client.query_required_single(
-            default.Person.filter(name='Neville Longbottom').limit(1)
+            default.Person.filter(name="Neville Longbottom").limit(1)
         )
 
         with self.assertRaises(KeyError):
@@ -1346,32 +1419,34 @@ class TestLinkSetModels(tb.ModelTestCase):
             reveal_type(harry.friends),
             (
                 "gel._internal._qbmodel._abstract._link_set.LinkWithPropsSet["
-                "models.__shapes__.default.Person.__links__.friends, "
-                "models.default.Person"
+                "models.link_set.__shapes__.default.Person.__links__.friends, "
+                "models.link_set.default.Person"
                 "]"
             ),
         )
         self.assertEqual(
             {f: f.__linkprops__.opinion for f in harry.friends},
-            {hermione: 'smart', ron: 'reliable'},
+            {hermione: "smart", ron: "reliable"},
         )
 
     def test_link_set_model_modify_multi_link_with_props_remove_03(self):
         # Remove new item without id
-        from models import default
+        from models.link_set import default
 
         harry = self.client.query_required_single(
             default.Person.select(
                 friends=lambda p: p.friends.select(name=True),
-            ).filter(name='Harry Potter').limit(1)
+            )
+            .filter(name="Harry Potter")
+            .limit(1)
         )
         hermione = self.client.query_required_single(
-            default.Person.filter(name='Hermione Granger').limit(1)
+            default.Person.filter(name="Hermione Granger").limit(1)
         )
         ron = self.client.query_required_single(
-            default.Person.filter(name='Ron Weasley').limit(1)
+            default.Person.filter(name="Ron Weasley").limit(1)
         )
-        luna = default.Person(name='Luna Lovegood')
+        luna = default.Person(name="Luna Lovegood")
 
         with self.assertRaises(KeyError):
             harry.friends.remove(luna)
@@ -1381,30 +1456,32 @@ class TestLinkSetModels(tb.ModelTestCase):
             reveal_type(harry.friends),
             (
                 "gel._internal._qbmodel._abstract._link_set.LinkWithPropsSet["
-                "models.__shapes__.default.Person.__links__.friends, "
-                "models.default.Person"
+                "models.link_set.__shapes__.default.Person.__links__.friends, "
+                "models.link_set.default.Person"
                 "]"
             ),
         )
         self.assertEqual(
             {f: f.__linkprops__.opinion for f in harry.friends},
-            {hermione: 'smart', ron: 'reliable'},
+            {hermione: "smart", ron: "reliable"},
         )
 
     def test_link_set_model_modify_multi_link_with_props_discard_01(self):
         # Discard existing item
-        from models import default
+        from models.link_set import default
 
         harry = self.client.query_required_single(
             default.Person.select(
                 friends=lambda p: p.friends.select(name=True),
-            ).filter(name='Harry Potter').limit(1)
+            )
+            .filter(name="Harry Potter")
+            .limit(1)
         )
         hermione = self.client.query_required_single(
-            default.Person.filter(name='Hermione Granger').limit(1)
+            default.Person.filter(name="Hermione Granger").limit(1)
         )
         ron = self.client.query_required_single(
-            default.Person.filter(name='Ron Weasley').limit(1)
+            default.Person.filter(name="Ron Weasley").limit(1)
         )
 
         harry.friends.discard(ron)
@@ -1415,33 +1492,35 @@ class TestLinkSetModels(tb.ModelTestCase):
             reveal_type(harry.friends),
             (
                 "gel._internal._qbmodel._abstract._link_set.LinkWithPropsSet["
-                "models.__shapes__.default.Person.__links__.friends, "
-                "models.default.Person"
+                "models.link_set.__shapes__.default.Person.__links__.friends, "
+                "models.link_set.default.Person"
                 "]"
             ),
         )
         self.assertEqual(
             {f: f.__linkprops__.opinion for f in harry.friends},
-            {hermione: 'smart'},
+            {hermione: "smart"},
         )
 
     def test_link_set_model_modify_multi_link_with_props_discard_02(self):
         # Discard new item with id
-        from models import default
+        from models.link_set import default
 
         harry = self.client.query_required_single(
             default.Person.select(
                 friends=lambda p: p.friends.select(name=True),
-            ).filter(name='Harry Potter').limit(1)
+            )
+            .filter(name="Harry Potter")
+            .limit(1)
         )
         hermione = self.client.query_required_single(
-            default.Person.filter(name='Hermione Granger').limit(1)
+            default.Person.filter(name="Hermione Granger").limit(1)
         )
         ron = self.client.query_required_single(
-            default.Person.filter(name='Ron Weasley').limit(1)
+            default.Person.filter(name="Ron Weasley").limit(1)
         )
         neville = self.client.query_required_single(
-            default.Person.filter(name='Neville Longbottom').limit(1)
+            default.Person.filter(name="Neville Longbottom").limit(1)
         )
 
         harry.friends.discard(neville)
@@ -1451,32 +1530,34 @@ class TestLinkSetModels(tb.ModelTestCase):
             reveal_type(harry.friends),
             (
                 "gel._internal._qbmodel._abstract._link_set.LinkWithPropsSet["
-                "models.__shapes__.default.Person.__links__.friends, "
-                "models.default.Person"
+                "models.link_set.__shapes__.default.Person.__links__.friends, "
+                "models.link_set.default.Person"
                 "]"
             ),
         )
         self.assertEqual(
             {f: f.__linkprops__.opinion for f in harry.friends},
-            {hermione: 'smart', ron: 'reliable'},
+            {hermione: "smart", ron: "reliable"},
         )
 
     def test_link_set_model_modify_multi_link_with_props_discard_03(self):
         # Discard new item without id
-        from models import default
+        from models.link_set import default
 
         harry = self.client.query_required_single(
             default.Person.select(
                 friends=lambda p: p.friends.select(name=True),
-            ).filter(name='Harry Potter').limit(1)
+            )
+            .filter(name="Harry Potter")
+            .limit(1)
         )
         hermione = self.client.query_required_single(
-            default.Person.filter(name='Hermione Granger').limit(1)
+            default.Person.filter(name="Hermione Granger").limit(1)
         )
         ron = self.client.query_required_single(
-            default.Person.filter(name='Ron Weasley').limit(1)
+            default.Person.filter(name="Ron Weasley").limit(1)
         )
-        luna = default.Person(name='Luna Lovegood')
+        luna = default.Person(name="Luna Lovegood")
 
         harry.friends.discard(luna)
 
@@ -1485,24 +1566,26 @@ class TestLinkSetModels(tb.ModelTestCase):
             reveal_type(harry.friends),
             (
                 "gel._internal._qbmodel._abstract._link_set.LinkWithPropsSet["
-                "models.__shapes__.default.Person.__links__.friends, "
-                "models.default.Person"
+                "models.link_set.__shapes__.default.Person.__links__.friends, "
+                "models.link_set.default.Person"
                 "]"
             ),
         )
         self.assertEqual(
             {f: f.__linkprops__.opinion for f in harry.friends},
-            {hermione: 'smart', ron: 'reliable'},
+            {hermione: "smart", ron: "reliable"},
         )
 
     def test_link_set_model_modify_multi_link_with_props_clear_01(self):
         # Clear existing items
-        from models import default
+        from models.link_set import default
 
         harry = self.client.query_required_single(
             default.Person.select(
                 friends=lambda p: p.friends.select(name=True),
-            ).filter(name='Harry Potter').limit(1)
+            )
+            .filter(name="Harry Potter")
+            .limit(1)
         )
 
         harry.friends.clear()
@@ -1512,8 +1595,8 @@ class TestLinkSetModels(tb.ModelTestCase):
             reveal_type(harry.friends),
             (
                 "gel._internal._qbmodel._abstract._link_set.LinkWithPropsSet["
-                "models.__shapes__.default.Person.__links__.friends, "
-                "models.default.Person"
+                "models.link_set.__shapes__.default.Person.__links__.friends, "
+                "models.link_set.default.Person"
                 "]"
             ),
         )
@@ -1524,18 +1607,20 @@ class TestLinkSetModels(tb.ModelTestCase):
 
     def test_link_set_model_modify_multi_link_with_props_update_01(self):
         # Update existing item
-        from models import default
+        from models.link_set import default
 
         harry = self.client.query_required_single(
             default.Person.select(
                 friends=lambda p: p.friends.select(name=True),
-            ).filter(name='Harry Potter').limit(1)
+            )
+            .filter(name="Harry Potter")
+            .limit(1)
         )
         hermione = self.client.query_required_single(
-            default.Person.filter(name='Hermione Granger').limit(1)
+            default.Person.filter(name="Hermione Granger").limit(1)
         )
         ron = self.client.query_required_single(
-            default.Person.filter(name='Ron Weasley').limit(1)
+            default.Person.filter(name="Ron Weasley").limit(1)
         )
 
         harry.friends.update([ron])
@@ -1545,33 +1630,35 @@ class TestLinkSetModels(tb.ModelTestCase):
             reveal_type(harry.friends),
             (
                 "gel._internal._qbmodel._abstract._link_set.LinkWithPropsSet["
-                "models.__shapes__.default.Person.__links__.friends, "
-                "models.default.Person"
+                "models.link_set.__shapes__.default.Person.__links__.friends, "
+                "models.link_set.default.Person"
                 "]"
             ),
         )
         self.assertEqual(
             {f: f.__linkprops__.opinion for f in harry.friends},
-            {hermione: 'smart', ron: 'reliable'},
+            {hermione: "smart", ron: "reliable"},
         )
 
     def test_link_set_model_modify_multi_link_with_props_update_02(self):
         # Update new item with id
-        from models import default
+        from models.link_set import default
 
         harry = self.client.query_required_single(
             default.Person.select(
                 friends=lambda p: p.friends.select(name=True),
-            ).filter(name='Harry Potter').limit(1)
+            )
+            .filter(name="Harry Potter")
+            .limit(1)
         )
         hermione = self.client.query_required_single(
-            default.Person.filter(name='Hermione Granger').limit(1)
+            default.Person.filter(name="Hermione Granger").limit(1)
         )
         ron = self.client.query_required_single(
-            default.Person.filter(name='Ron Weasley').limit(1)
+            default.Person.filter(name="Ron Weasley").limit(1)
         )
         neville = self.client.query_required_single(
-            default.Person.filter(name='Neville Longbottom').limit(1)
+            default.Person.filter(name="Neville Longbottom").limit(1)
         )
 
         harry.friends.update([neville])
@@ -1581,8 +1668,8 @@ class TestLinkSetModels(tb.ModelTestCase):
             reveal_type(harry.friends),
             (
                 "gel._internal._qbmodel._abstract._link_set.LinkWithPropsSet["
-                "models.__shapes__.default.Person.__links__.friends, "
-                "models.default.Person"
+                "models.link_set.__shapes__.default.Person.__links__.friends, "
+                "models.link_set.default.Person"
                 "]"
             ),
         )
@@ -1590,30 +1677,32 @@ class TestLinkSetModels(tb.ModelTestCase):
             {
                 f: (
                     f.__linkprops__.opinion
-                    if hasattr(f.__linkprops__, 'opinion') else
-                    None
+                    if hasattr(f.__linkprops__, "opinion")
+                    else None
                 )
                 for f in harry.friends
             },
-            {hermione: 'smart', ron: 'reliable', neville: None},
+            {hermione: "smart", ron: "reliable", neville: None},
         )
 
     def test_link_set_model_modify_multi_link_with_props_update_03(self):
         # Update new item without id
-        from models import default
+        from models.link_set import default
 
         harry = self.client.query_required_single(
             default.Person.select(
                 friends=lambda p: p.friends.select(name=True),
-            ).filter(name='Harry Potter').limit(1)
+            )
+            .filter(name="Harry Potter")
+            .limit(1)
         )
         hermione = self.client.query_required_single(
-            default.Person.filter(name='Hermione Granger').limit(1)
+            default.Person.filter(name="Hermione Granger").limit(1)
         )
         ron = self.client.query_required_single(
-            default.Person.filter(name='Ron Weasley').limit(1)
+            default.Person.filter(name="Ron Weasley").limit(1)
         )
-        luna = default.Person(name='Luna Lovegood')
+        luna = default.Person(name="Luna Lovegood")
 
         harry.friends.update([luna])
 
@@ -1623,8 +1712,8 @@ class TestLinkSetModels(tb.ModelTestCase):
             reveal_type(harry.friends),
             (
                 "gel._internal._qbmodel._abstract._link_set.LinkWithPropsSet["
-                "models.__shapes__.default.Person.__links__.friends, "
-                "models.default.Person"
+                "models.link_set.__shapes__.default.Person.__links__.friends, "
+                "models.link_set.default.Person"
                 "]"
             ),
         )
@@ -1632,32 +1721,34 @@ class TestLinkSetModels(tb.ModelTestCase):
             {
                 f.name: (
                     f.__linkprops__.opinion
-                    if hasattr(f.__linkprops__, 'opinion') else
-                    None
+                    if hasattr(f.__linkprops__, "opinion")
+                    else None
                 )
                 for f in harry.friends
             },
             {
-                'Hermione Granger': 'smart',
-                'Ron Weasley': 'reliable',
-                'Luna Lovegood': None,
+                "Hermione Granger": "smart",
+                "Ron Weasley": "reliable",
+                "Luna Lovegood": None,
             },
         )
 
     def test_link_set_model_modify_multi_link_with_props_op_iadd_01(self):
         # Operator iadd existing item
-        from models import default
+        from models.link_set import default
 
         harry = self.client.query_required_single(
             default.Person.select(
                 friends=lambda p: p.friends.select(name=True),
-            ).filter(name='Harry Potter').limit(1)
+            )
+            .filter(name="Harry Potter")
+            .limit(1)
         )
         hermione = self.client.query_required_single(
-            default.Person.filter(name='Hermione Granger').limit(1)
+            default.Person.filter(name="Hermione Granger").limit(1)
         )
         ron = self.client.query_required_single(
-            default.Person.filter(name='Ron Weasley').limit(1)
+            default.Person.filter(name="Ron Weasley").limit(1)
         )
 
         harry.friends += [ron]
@@ -1667,33 +1758,35 @@ class TestLinkSetModels(tb.ModelTestCase):
             reveal_type(harry.friends),
             (
                 "gel._internal._qbmodel._abstract._link_set.LinkWithPropsSet["
-                "models.__shapes__.default.Person.__links__.friends, "
-                "models.default.Person"
+                "models.link_set.__shapes__.default.Person.__links__.friends, "
+                "models.link_set.default.Person"
                 "]"
             ),
         )
         self.assertEqual(
             {f: f.__linkprops__.opinion for f in harry.friends},
-            {hermione: 'smart', ron: 'reliable'},
+            {hermione: "smart", ron: "reliable"},
         )
 
     def test_link_set_model_modify_multi_link_with_props_op_iadd_02(self):
         # Operator iadd new item with id
-        from models import default
+        from models.link_set import default
 
         harry = self.client.query_required_single(
             default.Person.select(
                 friends=lambda p: p.friends.select(name=True),
-            ).filter(name='Harry Potter').limit(1)
+            )
+            .filter(name="Harry Potter")
+            .limit(1)
         )
         hermione = self.client.query_required_single(
-            default.Person.filter(name='Hermione Granger').limit(1)
+            default.Person.filter(name="Hermione Granger").limit(1)
         )
         ron = self.client.query_required_single(
-            default.Person.filter(name='Ron Weasley').limit(1)
+            default.Person.filter(name="Ron Weasley").limit(1)
         )
         neville = self.client.query_required_single(
-            default.Person.filter(name='Neville Longbottom').limit(1)
+            default.Person.filter(name="Neville Longbottom").limit(1)
         )
 
         harry.friends += [neville]
@@ -1703,8 +1796,8 @@ class TestLinkSetModels(tb.ModelTestCase):
             reveal_type(harry.friends),
             (
                 "gel._internal._qbmodel._abstract._link_set.LinkWithPropsSet["
-                "models.__shapes__.default.Person.__links__.friends, "
-                "models.default.Person"
+                "models.link_set.__shapes__.default.Person.__links__.friends, "
+                "models.link_set.default.Person"
                 "]"
             ),
         )
@@ -1712,30 +1805,32 @@ class TestLinkSetModels(tb.ModelTestCase):
             {
                 f: (
                     f.__linkprops__.opinion
-                    if hasattr(f.__linkprops__, 'opinion') else
-                    None
+                    if hasattr(f.__linkprops__, "opinion")
+                    else None
                 )
                 for f in harry.friends
             },
-            {hermione: 'smart', ron: 'reliable', neville: None},
+            {hermione: "smart", ron: "reliable", neville: None},
         )
 
     def test_link_set_model_modify_multi_link_with_props_op_iadd_03(self):
         # Operator iadd new item without id
-        from models import default
+        from models.link_set import default
 
         harry = self.client.query_required_single(
             default.Person.select(
                 friends=lambda p: p.friends.select(name=True),
-            ).filter(name='Harry Potter').limit(1)
+            )
+            .filter(name="Harry Potter")
+            .limit(1)
         )
         hermione = self.client.query_required_single(
-            default.Person.filter(name='Hermione Granger').limit(1)
+            default.Person.filter(name="Hermione Granger").limit(1)
         )
         ron = self.client.query_required_single(
-            default.Person.filter(name='Ron Weasley').limit(1)
+            default.Person.filter(name="Ron Weasley").limit(1)
         )
-        luna = default.Person(name='Luna Lovegood')
+        luna = default.Person(name="Luna Lovegood")
 
         harry.friends += [luna]
 
@@ -1745,8 +1840,8 @@ class TestLinkSetModels(tb.ModelTestCase):
             reveal_type(harry.friends),
             (
                 "gel._internal._qbmodel._abstract._link_set.LinkWithPropsSet["
-                "models.__shapes__.default.Person.__links__.friends, "
-                "models.default.Person"
+                "models.link_set.__shapes__.default.Person.__links__.friends, "
+                "models.link_set.default.Person"
                 "]"
             ),
         )
@@ -1754,33 +1849,35 @@ class TestLinkSetModels(tb.ModelTestCase):
             {
                 f.name: (
                     f.__linkprops__.opinion
-                    if hasattr(f.__linkprops__, 'opinion') else
-                    None
+                    if hasattr(f.__linkprops__, "opinion")
+                    else None
                 )
                 for f in harry.friends
             },
             {
-                'Hermione Granger': 'smart',
-                'Ron Weasley': 'reliable',
-                'Luna Lovegood': None,
+                "Hermione Granger": "smart",
+                "Ron Weasley": "reliable",
+                "Luna Lovegood": None,
             },
         )
 
     @tb.xfail  # mypy seems to be checking - instead of -=
     def test_link_set_model_modify_multi_link_with_props_op_isub_01(self):
         # Operator isub existing item
-        from models import default
+        from models.link_set import default
 
         harry = self.client.query_required_single(
             default.Person.select(
                 friends=lambda p: p.friends.select(name=True),
-            ).filter(name='Harry Potter').limit(1)
+            )
+            .filter(name="Harry Potter")
+            .limit(1)
         )
         hermione = self.client.query_required_single(
-            default.Person.filter(name='Hermione Granger').limit(1)
+            default.Person.filter(name="Hermione Granger").limit(1)
         )
         ron = self.client.query_required_single(
-            default.Person.filter(name='Ron Weasley').limit(1)
+            default.Person.filter(name="Ron Weasley").limit(1)
         )
 
         harry.friends -= [ron]
@@ -1790,34 +1887,36 @@ class TestLinkSetModels(tb.ModelTestCase):
             reveal_type(harry.friends),
             (
                 "gel._internal._qbmodel._abstract._link_set.LinkWithPropsSet["
-                "models.__shapes__.default.Person.__links__.friends, "
-                "models.default.Person"
+                "models.link_set.__shapes__.default.Person.__links__.friends, "
+                "models.link_set.default.Person"
                 "]"
             ),
         )
         self.assertEqual(
             {f: f.__linkprops__.opinion for f in harry.friends},
-            {hermione: 'smart'},
+            {hermione: "smart"},
         )
 
     @tb.xfail  # mypy seems to be checking - instead of -=
     def test_link_set_model_modify_multi_link_with_props_op_isub_02(self):
         # Operator isub new item with id
-        from models import default
+        from models.link_set import default
 
         harry = self.client.query_required_single(
             default.Person.select(
                 friends=lambda p: p.friends.select(name=True),
-            ).filter(name='Harry Potter').limit(1)
+            )
+            .filter(name="Harry Potter")
+            .limit(1)
         )
         hermione = self.client.query_required_single(
-            default.Person.filter(name='Hermione Granger').limit(1)
+            default.Person.filter(name="Hermione Granger").limit(1)
         )
         ron = self.client.query_required_single(
-            default.Person.filter(name='Ron Weasley').limit(1)
+            default.Person.filter(name="Ron Weasley").limit(1)
         )
         neville = self.client.query_required_single(
-            default.Person.filter(name='Neville Longbottom').limit(1)
+            default.Person.filter(name="Neville Longbottom").limit(1)
         )
 
         harry.friends -= [neville]
@@ -1827,28 +1926,28 @@ class TestLinkSetModels(tb.ModelTestCase):
             reveal_type(harry.friends),
             (
                 "gel._internal._qbmodel._abstract._link_set.LinkWithPropsSet["
-                "models.__shapes__.default.Person.__links__.friends, "
-                "models.default.Person"
+                "models.link_set.__shapes__.default.Person.__links__.friends, "
+                "models.link_set.default.Person"
                 "]"
             ),
         )
         self.assertEqual(
             {f: f.__linkprops__.opinion for f in harry.friends},
-            {hermione: 'smart', ron: 'reliable'},
+            {hermione: "smart", ron: "reliable"},
         )
 
     def test_link_set_model_fresh_multi_link_add_01(self):
         # Add existing item
-        from models import default
+        from models.link_set import default
 
         charms = self.client.query_required_single(
-            default.Class.filter(name='Charms').limit(1)
+            default.Class.filter(name="Charms").limit(1)
         )
         potions = self.client.query_required_single(
-            default.Class.filter(name='Potions').limit(1)
+            default.Class.filter(name="Potions").limit(1)
         )
 
-        harry = default.Person(name='Harry Potter', classes=[charms, potions])
+        harry = default.Person(name="Harry Potter", classes=[charms, potions])
 
         harry.classes.add(potions)
 
@@ -1857,26 +1956,26 @@ class TestLinkSetModels(tb.ModelTestCase):
             reveal_type(harry.classes),
             (
                 "gel._internal._qbmodel._abstract._link_set.LinkSet["
-                "models.default.Class"
+                "models.link_set.default.Class"
                 "]"
             ),
         )
 
     def test_link_set_model_fresh_multi_link_add_02(self):
         # Add new item with id
-        from models import default
+        from models.link_set import default
 
         charms = self.client.query_required_single(
-            default.Class.filter(name='Charms').limit(1)
+            default.Class.filter(name="Charms").limit(1)
         )
         potions = self.client.query_required_single(
-            default.Class.filter(name='Potions').limit(1)
+            default.Class.filter(name="Potions").limit(1)
         )
         divination = self.client.query_required_single(
-            default.Class.filter(name='Divination').limit(1)
+            default.Class.filter(name="Divination").limit(1)
         )
 
-        harry = default.Person(name='Harry Potter', classes=[charms, potions])
+        harry = default.Person(name="Harry Potter", classes=[charms, potions])
 
         harry.classes.add(divination)
 
@@ -1885,24 +1984,24 @@ class TestLinkSetModels(tb.ModelTestCase):
             reveal_type(harry.classes),
             (
                 "gel._internal._qbmodel._abstract._link_set.LinkSet["
-                "models.default.Class"
+                "models.link_set.default.Class"
                 "]"
             ),
         )
 
     def test_link_set_model_fresh_multi_link_add_03(self):
         # Add new item without id
-        from models import default
+        from models.link_set import default
 
         charms = self.client.query_required_single(
-            default.Class.filter(name='Charms').limit(1)
+            default.Class.filter(name="Charms").limit(1)
         )
         potions = self.client.query_required_single(
-            default.Class.filter(name='Potions').limit(1)
+            default.Class.filter(name="Potions").limit(1)
         )
-        herbology = default.Class(name='Herbology')
+        herbology = default.Class(name="Herbology")
 
-        harry = default.Person(name='Harry Potter', classes=[charms, potions])
+        harry = default.Person(name="Harry Potter", classes=[charms, potions])
 
         harry.classes.add(herbology)
 
@@ -1912,23 +2011,23 @@ class TestLinkSetModels(tb.ModelTestCase):
             reveal_type(harry.classes),
             (
                 "gel._internal._qbmodel._abstract._link_set.LinkSet["
-                "models.default.Class"
+                "models.link_set.default.Class"
                 "]"
             ),
         )
 
     def test_link_set_model_fresh_multi_link_remove_01(self):
         # Remove existing item
-        from models import default
+        from models.link_set import default
 
         charms = self.client.query_required_single(
-            default.Class.filter(name='Charms').limit(1)
+            default.Class.filter(name="Charms").limit(1)
         )
         potions = self.client.query_required_single(
-            default.Class.filter(name='Potions').limit(1)
+            default.Class.filter(name="Potions").limit(1)
         )
 
-        harry = default.Person(name='Harry Potter', classes=[charms, potions])
+        harry = default.Person(name="Harry Potter", classes=[charms, potions])
 
         harry.classes.remove(potions)
 
@@ -1938,26 +2037,26 @@ class TestLinkSetModels(tb.ModelTestCase):
             reveal_type(harry.classes),
             (
                 "gel._internal._qbmodel._abstract._link_set.LinkSet["
-                "models.default.Class"
+                "models.link_set.default.Class"
                 "]"
             ),
         )
 
     def test_link_set_model_fresh_multi_link_remove_02(self):
         # Remove new item with id
-        from models import default
+        from models.link_set import default
 
         charms = self.client.query_required_single(
-            default.Class.filter(name='Charms').limit(1)
+            default.Class.filter(name="Charms").limit(1)
         )
         potions = self.client.query_required_single(
-            default.Class.filter(name='Potions').limit(1)
+            default.Class.filter(name="Potions").limit(1)
         )
         divination = self.client.query_required_single(
-            default.Class.filter(name='Divination').limit(1)
+            default.Class.filter(name="Divination").limit(1)
         )
 
-        harry = default.Person(name='Harry Potter', classes=[charms, potions])
+        harry = default.Person(name="Harry Potter", classes=[charms, potions])
 
         with self.assertRaises(KeyError):
             harry.classes.remove(divination)
@@ -1967,24 +2066,24 @@ class TestLinkSetModels(tb.ModelTestCase):
             reveal_type(harry.classes),
             (
                 "gel._internal._qbmodel._abstract._link_set.LinkSet["
-                "models.default.Class"
+                "models.link_set.default.Class"
                 "]"
             ),
         )
 
     def test_link_set_model_fresh_multi_link_remove_03(self):
         # Remove new item without id
-        from models import default
+        from models.link_set import default
 
         charms = self.client.query_required_single(
-            default.Class.filter(name='Charms').limit(1)
+            default.Class.filter(name="Charms").limit(1)
         )
         potions = self.client.query_required_single(
-            default.Class.filter(name='Potions').limit(1)
+            default.Class.filter(name="Potions").limit(1)
         )
-        herbology = default.Class(name='Herbology')
+        herbology = default.Class(name="Herbology")
 
-        harry = default.Person(name='Harry Potter', classes=[charms, potions])
+        harry = default.Person(name="Harry Potter", classes=[charms, potions])
 
         with self.assertRaises(KeyError):
             harry.classes.remove(herbology)
@@ -1994,23 +2093,23 @@ class TestLinkSetModels(tb.ModelTestCase):
             reveal_type(harry.classes),
             (
                 "gel._internal._qbmodel._abstract._link_set.LinkSet["
-                "models.default.Class"
+                "models.link_set.default.Class"
                 "]"
             ),
         )
 
     def test_link_set_model_fresh_multi_link_discard_01(self):
         # Discard existing item
-        from models import default
+        from models.link_set import default
 
         charms = self.client.query_required_single(
-            default.Class.filter(name='Charms').limit(1)
+            default.Class.filter(name="Charms").limit(1)
         )
         potions = self.client.query_required_single(
-            default.Class.filter(name='Potions').limit(1)
+            default.Class.filter(name="Potions").limit(1)
         )
 
-        harry = default.Person(name='Harry Potter', classes=[charms, potions])
+        harry = default.Person(name="Harry Potter", classes=[charms, potions])
 
         harry.classes.discard(potions)
 
@@ -2020,26 +2119,26 @@ class TestLinkSetModels(tb.ModelTestCase):
             reveal_type(harry.classes),
             (
                 "gel._internal._qbmodel._abstract._link_set.LinkSet["
-                "models.default.Class"
+                "models.link_set.default.Class"
                 "]"
             ),
         )
 
     def test_link_set_model_fresh_multi_link_discard_02(self):
         # Discard new item with id
-        from models import default
+        from models.link_set import default
 
         charms = self.client.query_required_single(
-            default.Class.filter(name='Charms').limit(1)
+            default.Class.filter(name="Charms").limit(1)
         )
         potions = self.client.query_required_single(
-            default.Class.filter(name='Potions').limit(1)
+            default.Class.filter(name="Potions").limit(1)
         )
         divination = self.client.query_required_single(
-            default.Class.filter(name='Divination').limit(1)
+            default.Class.filter(name="Divination").limit(1)
         )
 
-        harry = default.Person(name='Harry Potter', classes=[charms, potions])
+        harry = default.Person(name="Harry Potter", classes=[charms, potions])
 
         harry.classes.discard(divination)
 
@@ -2048,24 +2147,24 @@ class TestLinkSetModels(tb.ModelTestCase):
             reveal_type(harry.classes),
             (
                 "gel._internal._qbmodel._abstract._link_set.LinkSet["
-                "models.default.Class"
+                "models.link_set.default.Class"
                 "]"
             ),
         )
 
     def test_link_set_model_fresh_multi_link_discard_03(self):
         # Discard new item without id
-        from models import default
+        from models.link_set import default
 
         charms = self.client.query_required_single(
-            default.Class.filter(name='Charms').limit(1)
+            default.Class.filter(name="Charms").limit(1)
         )
         potions = self.client.query_required_single(
-            default.Class.filter(name='Potions').limit(1)
+            default.Class.filter(name="Potions").limit(1)
         )
-        herbology = default.Class(name='Herbology')
+        herbology = default.Class(name="Herbology")
 
-        harry = default.Person(name='Harry Potter', classes=[charms, potions])
+        harry = default.Person(name="Harry Potter", classes=[charms, potions])
 
         harry.classes.discard(herbology)
 
@@ -2074,23 +2173,23 @@ class TestLinkSetModels(tb.ModelTestCase):
             reveal_type(harry.classes),
             (
                 "gel._internal._qbmodel._abstract._link_set.LinkSet["
-                "models.default.Class"
+                "models.link_set.default.Class"
                 "]"
             ),
         )
 
     def test_link_set_model_fresh_multi_link_clear_01(self):
         # Clear existing items
-        from models import default
+        from models.link_set import default
 
         charms = self.client.query_required_single(
-            default.Class.filter(name='Charms').limit(1)
+            default.Class.filter(name="Charms").limit(1)
         )
         potions = self.client.query_required_single(
-            default.Class.filter(name='Potions').limit(1)
+            default.Class.filter(name="Potions").limit(1)
         )
 
-        harry = default.Person(name='Harry Potter', classes=[charms, potions])
+        harry = default.Person(name="Harry Potter", classes=[charms, potions])
 
         harry.classes.clear()
 
@@ -2099,23 +2198,23 @@ class TestLinkSetModels(tb.ModelTestCase):
             reveal_type(harry.classes),
             (
                 "gel._internal._qbmodel._abstract._link_set.LinkSet["
-                "models.default.Class"
+                "models.link_set.default.Class"
                 "]"
             ),
         )
 
     def test_link_set_model_fresh_multi_link_update_01(self):
         # Update existing item
-        from models import default
+        from models.link_set import default
 
         charms = self.client.query_required_single(
-            default.Class.filter(name='Charms').limit(1)
+            default.Class.filter(name="Charms").limit(1)
         )
         potions = self.client.query_required_single(
-            default.Class.filter(name='Potions').limit(1)
+            default.Class.filter(name="Potions").limit(1)
         )
 
-        harry = default.Person(name='Harry Potter', classes=[charms, potions])
+        harry = default.Person(name="Harry Potter", classes=[charms, potions])
 
         harry.classes.update([potions])
 
@@ -2124,26 +2223,26 @@ class TestLinkSetModels(tb.ModelTestCase):
             reveal_type(harry.classes),
             (
                 "gel._internal._qbmodel._abstract._link_set.LinkSet["
-                "models.default.Class"
+                "models.link_set.default.Class"
                 "]"
             ),
         )
 
     def test_link_set_model_fresh_multi_link_update_02(self):
         # Update new item with id
-        from models import default
+        from models.link_set import default
 
         charms = self.client.query_required_single(
-            default.Class.filter(name='Charms').limit(1)
+            default.Class.filter(name="Charms").limit(1)
         )
         potions = self.client.query_required_single(
-            default.Class.filter(name='Potions').limit(1)
+            default.Class.filter(name="Potions").limit(1)
         )
         divination = self.client.query_required_single(
-            default.Class.filter(name='Divination').limit(1)
+            default.Class.filter(name="Divination").limit(1)
         )
 
-        harry = default.Person(name='Harry Potter', classes=[charms, potions])
+        harry = default.Person(name="Harry Potter", classes=[charms, potions])
 
         harry.classes.update([divination])
 
@@ -2152,24 +2251,24 @@ class TestLinkSetModels(tb.ModelTestCase):
             reveal_type(harry.classes),
             (
                 "gel._internal._qbmodel._abstract._link_set.LinkSet["
-                "models.default.Class"
+                "models.link_set.default.Class"
                 "]"
             ),
         )
 
     def test_link_set_model_fresh_multi_link_update_03(self):
         # Update new item without id
-        from models import default
+        from models.link_set import default
 
         charms = self.client.query_required_single(
-            default.Class.filter(name='Charms').limit(1)
+            default.Class.filter(name="Charms").limit(1)
         )
         potions = self.client.query_required_single(
-            default.Class.filter(name='Potions').limit(1)
+            default.Class.filter(name="Potions").limit(1)
         )
-        herbology = default.Class(name='Herbology')
+        herbology = default.Class(name="Herbology")
 
-        harry = default.Person(name='Harry Potter', classes=[charms, potions])
+        harry = default.Person(name="Harry Potter", classes=[charms, potions])
 
         harry.classes.update([herbology])
 
@@ -2179,7 +2278,7 @@ class TestLinkSetModels(tb.ModelTestCase):
             reveal_type(harry.classes),
             (
                 "gel._internal._qbmodel._abstract._link_set.LinkSet["
-                "models.default.Class"
+                "models.link_set.default.Class"
                 "]"
             ),
         )
@@ -2187,16 +2286,16 @@ class TestLinkSetModels(tb.ModelTestCase):
     @tb.xfail  # mypy seems to be checking + instead of +=
     def test_link_set_model_fresh_multi_link_op_iadd_01(self):
         # Operator iadd existing item
-        from models import default
+        from models.link_set import default
 
         charms = self.client.query_required_single(
-            default.Class.filter(name='Charms').limit(1)
+            default.Class.filter(name="Charms").limit(1)
         )
         potions = self.client.query_required_single(
-            default.Class.filter(name='Potions').limit(1)
+            default.Class.filter(name="Potions").limit(1)
         )
 
-        harry = default.Person(name='Harry Potter', classes=[charms, potions])
+        harry = default.Person(name="Harry Potter", classes=[charms, potions])
 
         harry.classes += [potions]
 
@@ -2205,7 +2304,7 @@ class TestLinkSetModels(tb.ModelTestCase):
             reveal_type(harry.classes),
             (
                 "gel._internal._qbmodel._abstract._link_set.LinkSet["
-                "models.default.Class"
+                "models.link_set.default.Class"
                 "]"
             ),
         )
@@ -2213,19 +2312,19 @@ class TestLinkSetModels(tb.ModelTestCase):
     @tb.xfail  # mypy seems to be checking + instead of +=
     def test_link_set_model_fresh_multi_link_op_iadd_02(self):
         # Operator iadd new item with id
-        from models import default
+        from models.link_set import default
 
         charms = self.client.query_required_single(
-            default.Class.filter(name='Charms').limit(1)
+            default.Class.filter(name="Charms").limit(1)
         )
         potions = self.client.query_required_single(
-            default.Class.filter(name='Potions').limit(1)
+            default.Class.filter(name="Potions").limit(1)
         )
         divination = self.client.query_required_single(
-            default.Class.filter(name='Divination').limit(1)
+            default.Class.filter(name="Divination").limit(1)
         )
 
-        harry = default.Person(name='Harry Potter', classes=[charms, potions])
+        harry = default.Person(name="Harry Potter", classes=[charms, potions])
 
         harry.classes += [divination]
 
@@ -2234,7 +2333,7 @@ class TestLinkSetModels(tb.ModelTestCase):
             reveal_type(harry.classes),
             (
                 "gel._internal._qbmodel._abstract._link_set.LinkSet["
-                "models.default.Class"
+                "models.link_set.default.Class"
                 "]"
             ),
         )
@@ -2242,17 +2341,17 @@ class TestLinkSetModels(tb.ModelTestCase):
     @tb.xfail  # mypy seems to be checking + instead of +=
     def test_link_set_model_fresh_multi_link_op_iadd_03(self):
         # Operator iadd new item without id
-        from models import default
+        from models.link_set import default
 
         charms = self.client.query_required_single(
-            default.Class.filter(name='Charms').limit(1)
+            default.Class.filter(name="Charms").limit(1)
         )
         potions = self.client.query_required_single(
-            default.Class.filter(name='Potions').limit(1)
+            default.Class.filter(name="Potions").limit(1)
         )
-        herbology = default.Class(name='Herbology')
+        herbology = default.Class(name="Herbology")
 
-        harry = default.Person(name='Harry Potter', classes=[charms, potions])
+        harry = default.Person(name="Harry Potter", classes=[charms, potions])
 
         harry.classes += [herbology]
 
@@ -2262,7 +2361,7 @@ class TestLinkSetModels(tb.ModelTestCase):
             reveal_type(harry.classes),
             (
                 "gel._internal._qbmodel._abstract._link_set.LinkSet["
-                "models.default.Class"
+                "models.link_set.default.Class"
                 "]"
             ),
         )
@@ -2270,16 +2369,16 @@ class TestLinkSetModels(tb.ModelTestCase):
     @tb.xfail  # mypy seems to be checking - instead of -=
     def test_link_set_model_fresh_multi_link_op_isub_01(self):
         # Operator isub existing item
-        from models import default
+        from models.link_set import default
 
         charms = self.client.query_required_single(
-            default.Class.filter(name='Charms').limit(1)
+            default.Class.filter(name="Charms").limit(1)
         )
         potions = self.client.query_required_single(
-            default.Class.filter(name='Potions').limit(1)
+            default.Class.filter(name="Potions").limit(1)
         )
 
-        harry = default.Person(name='Harry Potter', classes=[charms, potions])
+        harry = default.Person(name="Harry Potter", classes=[charms, potions])
 
         harry.classes -= [potions]
 
@@ -2288,7 +2387,7 @@ class TestLinkSetModels(tb.ModelTestCase):
             reveal_type(harry.classes),
             (
                 "gel._internal._qbmodel._abstract._link_set.LinkSet["
-                "models.default.Class"
+                "models.link_set.default.Class"
                 "]"
             ),
         )
@@ -2296,19 +2395,19 @@ class TestLinkSetModels(tb.ModelTestCase):
     @tb.xfail  # mypy seems to be checking - instead of -=
     def test_link_set_model_fresh_multi_link_op_isub_02(self):
         # Operator isub new item with id
-        from models import default
+        from models.link_set import default
 
         charms = self.client.query_required_single(
-            default.Class.filter(name='Charms').limit(1)
+            default.Class.filter(name="Charms").limit(1)
         )
         potions = self.client.query_required_single(
-            default.Class.filter(name='Potions').limit(1)
+            default.Class.filter(name="Potions").limit(1)
         )
         divination = self.client.query_required_single(
-            default.Class.filter(name='Divination').limit(1)
+            default.Class.filter(name="Divination").limit(1)
         )
 
-        harry = default.Person(name='Harry Potter', classes=[charms, potions])
+        harry = default.Person(name="Harry Potter", classes=[charms, potions])
 
         harry.classes -= [divination]
 
@@ -2317,27 +2416,27 @@ class TestLinkSetModels(tb.ModelTestCase):
             reveal_type(harry.classes),
             (
                 "gel._internal._qbmodel._abstract._link_set.LinkSet["
-                "models.default.Class"
+                "models.link_set.default.Class"
                 "]"
             ),
         )
 
     def test_link_set_model_fresh_multi_link_with_props_add_01(self):
         # Add existing item
-        from models import default
+        from models.link_set import default
 
         hermione = self.client.query_required_single(
-            default.Person.filter(name='Hermione Granger').limit(1)
+            default.Person.filter(name="Hermione Granger").limit(1)
         )
         ron = self.client.query_required_single(
-            default.Person.filter(name='Ron Weasley').limit(1)
+            default.Person.filter(name="Ron Weasley").limit(1)
         )
 
         harry = default.Person(
-            name='Harry Potter',
+            name="Harry Potter",
             friends=[
-                default.Person.friends.link(hermione, opinion='smart'),
-                default.Person.friends.link(ron, opinion='reliable'),
+                default.Person.friends.link(hermione, opinion="smart"),
+                default.Person.friends.link(ron, opinion="reliable"),
             ],
         )
 
@@ -2348,35 +2447,35 @@ class TestLinkSetModels(tb.ModelTestCase):
             reveal_type(harry.friends),
             (
                 "gel._internal._qbmodel._abstract._link_set.LinkWithPropsSet["
-                "models.__shapes__.default.Person.__links__.friends, "
-                "models.default.Person"
+                "models.link_set.__shapes__.default.Person.__links__.friends, "
+                "models.link_set.default.Person"
                 "]"
             ),
         )
         self.assertEqual(
             {f: f.__linkprops__.opinion for f in harry.friends},
-            {hermione: 'smart', ron: 'reliable'},
+            {hermione: "smart", ron: "reliable"},
         )
 
     def test_link_set_model_fresh_multi_link_with_props_add_02(self):
         # Add new item with id
-        from models import default
+        from models.link_set import default
 
         hermione = self.client.query_required_single(
-            default.Person.filter(name='Hermione Granger').limit(1)
+            default.Person.filter(name="Hermione Granger").limit(1)
         )
         ron = self.client.query_required_single(
-            default.Person.filter(name='Ron Weasley').limit(1)
+            default.Person.filter(name="Ron Weasley").limit(1)
         )
         neville = self.client.query_required_single(
-            default.Person.filter(name='Neville Longbottom').limit(1)
+            default.Person.filter(name="Neville Longbottom").limit(1)
         )
 
         harry = default.Person(
-            name='Harry Potter',
+            name="Harry Potter",
             friends=[
-                default.Person.friends.link(hermione, opinion='smart'),
-                default.Person.friends.link(ron, opinion='reliable'),
+                default.Person.friends.link(hermione, opinion="smart"),
+                default.Person.friends.link(ron, opinion="reliable"),
             ],
         )
 
@@ -2387,8 +2486,8 @@ class TestLinkSetModels(tb.ModelTestCase):
             reveal_type(harry.friends),
             (
                 "gel._internal._qbmodel._abstract._link_set.LinkWithPropsSet["
-                "models.__shapes__.default.Person.__links__.friends, "
-                "models.default.Person"
+                "models.link_set.__shapes__.default.Person.__links__.friends, "
+                "models.link_set.default.Person"
                 "]"
             ),
         )
@@ -2396,31 +2495,31 @@ class TestLinkSetModels(tb.ModelTestCase):
             {
                 f: (
                     f.__linkprops__.opinion
-                    if hasattr(f.__linkprops__, 'opinion') else
-                    None
+                    if hasattr(f.__linkprops__, "opinion")
+                    else None
                 )
                 for f in harry.friends
             },
-            {hermione: 'smart', ron: 'reliable', neville: None},
+            {hermione: "smart", ron: "reliable", neville: None},
         )
 
     def test_link_set_model_fresh_multi_link_with_props_add_03(self):
         # Add new item without id
-        from models import default
+        from models.link_set import default
 
         hermione = self.client.query_required_single(
-            default.Person.filter(name='Hermione Granger').limit(1)
+            default.Person.filter(name="Hermione Granger").limit(1)
         )
         ron = self.client.query_required_single(
-            default.Person.filter(name='Ron Weasley').limit(1)
+            default.Person.filter(name="Ron Weasley").limit(1)
         )
-        luna = default.Person(name='Luna Lovegood')
+        luna = default.Person(name="Luna Lovegood")
 
         harry = default.Person(
-            name='Harry Potter',
+            name="Harry Potter",
             friends=[
-                default.Person.friends.link(hermione, opinion='smart'),
-                default.Person.friends.link(ron, opinion='reliable'),
+                default.Person.friends.link(hermione, opinion="smart"),
+                default.Person.friends.link(ron, opinion="reliable"),
             ],
         )
 
@@ -2432,8 +2531,8 @@ class TestLinkSetModels(tb.ModelTestCase):
             reveal_type(harry.friends),
             (
                 "gel._internal._qbmodel._abstract._link_set.LinkWithPropsSet["
-                "models.__shapes__.default.Person.__links__.friends, "
-                "models.default.Person"
+                "models.link_set.__shapes__.default.Person.__links__.friends, "
+                "models.link_set.default.Person"
                 "]"
             ),
         )
@@ -2441,34 +2540,34 @@ class TestLinkSetModels(tb.ModelTestCase):
             {
                 f.name: (
                     f.__linkprops__.opinion
-                    if hasattr(f.__linkprops__, 'opinion') else
-                    None
+                    if hasattr(f.__linkprops__, "opinion")
+                    else None
                 )
                 for f in harry.friends
             },
             {
-                'Hermione Granger': 'smart',
-                'Ron Weasley': 'reliable',
-                'Luna Lovegood': None,
+                "Hermione Granger": "smart",
+                "Ron Weasley": "reliable",
+                "Luna Lovegood": None,
             },
         )
 
     def test_link_set_model_fresh_multi_link_with_props_remove_01(self):
         # Remove existing item
-        from models import default
+        from models.link_set import default
 
         hermione = self.client.query_required_single(
-            default.Person.filter(name='Hermione Granger').limit(1)
+            default.Person.filter(name="Hermione Granger").limit(1)
         )
         ron = self.client.query_required_single(
-            default.Person.filter(name='Ron Weasley').limit(1)
+            default.Person.filter(name="Ron Weasley").limit(1)
         )
 
         harry = default.Person(
-            name='Harry Potter',
+            name="Harry Potter",
             friends=[
-                default.Person.friends.link(hermione, opinion='smart'),
-                default.Person.friends.link(ron, opinion='reliable'),
+                default.Person.friends.link(hermione, opinion="smart"),
+                default.Person.friends.link(ron, opinion="reliable"),
             ],
         )
 
@@ -2480,35 +2579,35 @@ class TestLinkSetModels(tb.ModelTestCase):
             reveal_type(harry.friends),
             (
                 "gel._internal._qbmodel._abstract._link_set.LinkWithPropsSet["
-                "models.__shapes__.default.Person.__links__.friends, "
-                "models.default.Person"
+                "models.link_set.__shapes__.default.Person.__links__.friends, "
+                "models.link_set.default.Person"
                 "]"
             ),
         )
         self.assertEqual(
             {f: f.__linkprops__.opinion for f in harry.friends},
-            {hermione: 'smart'},
+            {hermione: "smart"},
         )
 
     def test_link_set_model_fresh_multi_link_with_props_remove_02(self):
         # Remove new item with id
-        from models import default
+        from models.link_set import default
 
         hermione = self.client.query_required_single(
-            default.Person.filter(name='Hermione Granger').limit(1)
+            default.Person.filter(name="Hermione Granger").limit(1)
         )
         ron = self.client.query_required_single(
-            default.Person.filter(name='Ron Weasley').limit(1)
+            default.Person.filter(name="Ron Weasley").limit(1)
         )
         neville = self.client.query_required_single(
-            default.Person.filter(name='Neville Longbottom').limit(1)
+            default.Person.filter(name="Neville Longbottom").limit(1)
         )
 
         harry = default.Person(
-            name='Harry Potter',
+            name="Harry Potter",
             friends=[
-                default.Person.friends.link(hermione, opinion='smart'),
-                default.Person.friends.link(ron, opinion='reliable'),
+                default.Person.friends.link(hermione, opinion="smart"),
+                default.Person.friends.link(ron, opinion="reliable"),
             ],
         )
 
@@ -2520,33 +2619,33 @@ class TestLinkSetModels(tb.ModelTestCase):
             reveal_type(harry.friends),
             (
                 "gel._internal._qbmodel._abstract._link_set.LinkWithPropsSet["
-                "models.__shapes__.default.Person.__links__.friends, "
-                "models.default.Person"
+                "models.link_set.__shapes__.default.Person.__links__.friends, "
+                "models.link_set.default.Person"
                 "]"
             ),
         )
         self.assertEqual(
             {f: f.__linkprops__.opinion for f in harry.friends},
-            {hermione: 'smart', ron: 'reliable'},
+            {hermione: "smart", ron: "reliable"},
         )
 
     def test_link_set_model_fresh_multi_link_with_props_remove_03(self):
         # Remove new item without id
-        from models import default
+        from models.link_set import default
 
         hermione = self.client.query_required_single(
-            default.Person.filter(name='Hermione Granger').limit(1)
+            default.Person.filter(name="Hermione Granger").limit(1)
         )
         ron = self.client.query_required_single(
-            default.Person.filter(name='Ron Weasley').limit(1)
+            default.Person.filter(name="Ron Weasley").limit(1)
         )
-        luna = default.Person(name='Luna Lovegood')
+        luna = default.Person(name="Luna Lovegood")
 
         harry = default.Person(
-            name='Harry Potter',
+            name="Harry Potter",
             friends=[
-                default.Person.friends.link(hermione, opinion='smart'),
-                default.Person.friends.link(ron, opinion='reliable'),
+                default.Person.friends.link(hermione, opinion="smart"),
+                default.Person.friends.link(ron, opinion="reliable"),
             ],
         )
 
@@ -2558,32 +2657,32 @@ class TestLinkSetModels(tb.ModelTestCase):
             reveal_type(harry.friends),
             (
                 "gel._internal._qbmodel._abstract._link_set.LinkWithPropsSet["
-                "models.__shapes__.default.Person.__links__.friends, "
-                "models.default.Person"
+                "models.link_set.__shapes__.default.Person.__links__.friends, "
+                "models.link_set.default.Person"
                 "]"
             ),
         )
         self.assertEqual(
             {f: f.__linkprops__.opinion for f in harry.friends},
-            {hermione: 'smart', ron: 'reliable'},
+            {hermione: "smart", ron: "reliable"},
         )
 
     def test_link_set_model_fresh_multi_link_with_props_discard_01(self):
         # Discard existing item
-        from models import default
+        from models.link_set import default
 
         hermione = self.client.query_required_single(
-            default.Person.filter(name='Hermione Granger').limit(1)
+            default.Person.filter(name="Hermione Granger").limit(1)
         )
         ron = self.client.query_required_single(
-            default.Person.filter(name='Ron Weasley').limit(1)
+            default.Person.filter(name="Ron Weasley").limit(1)
         )
 
         harry = default.Person(
-            name='Harry Potter',
+            name="Harry Potter",
             friends=[
-                default.Person.friends.link(hermione, opinion='smart'),
-                default.Person.friends.link(ron, opinion='reliable'),
+                default.Person.friends.link(hermione, opinion="smart"),
+                default.Person.friends.link(ron, opinion="reliable"),
             ],
         )
 
@@ -2595,35 +2694,35 @@ class TestLinkSetModels(tb.ModelTestCase):
             reveal_type(harry.friends),
             (
                 "gel._internal._qbmodel._abstract._link_set.LinkWithPropsSet["
-                "models.__shapes__.default.Person.__links__.friends, "
-                "models.default.Person"
+                "models.link_set.__shapes__.default.Person.__links__.friends, "
+                "models.link_set.default.Person"
                 "]"
             ),
         )
         self.assertEqual(
             {f: f.__linkprops__.opinion for f in harry.friends},
-            {hermione: 'smart'},
+            {hermione: "smart"},
         )
 
     def test_link_set_model_fresh_multi_link_with_props_discard_02(self):
         # Discard new item with id
-        from models import default
+        from models.link_set import default
 
         hermione = self.client.query_required_single(
-            default.Person.filter(name='Hermione Granger').limit(1)
+            default.Person.filter(name="Hermione Granger").limit(1)
         )
         ron = self.client.query_required_single(
-            default.Person.filter(name='Ron Weasley').limit(1)
+            default.Person.filter(name="Ron Weasley").limit(1)
         )
         neville = self.client.query_required_single(
-            default.Person.filter(name='Neville Longbottom').limit(1)
+            default.Person.filter(name="Neville Longbottom").limit(1)
         )
 
         harry = default.Person(
-            name='Harry Potter',
+            name="Harry Potter",
             friends=[
-                default.Person.friends.link(hermione, opinion='smart'),
-                default.Person.friends.link(ron, opinion='reliable'),
+                default.Person.friends.link(hermione, opinion="smart"),
+                default.Person.friends.link(ron, opinion="reliable"),
             ],
         )
 
@@ -2634,33 +2733,33 @@ class TestLinkSetModels(tb.ModelTestCase):
             reveal_type(harry.friends),
             (
                 "gel._internal._qbmodel._abstract._link_set.LinkWithPropsSet["
-                "models.__shapes__.default.Person.__links__.friends, "
-                "models.default.Person"
+                "models.link_set.__shapes__.default.Person.__links__.friends, "
+                "models.link_set.default.Person"
                 "]"
             ),
         )
         self.assertEqual(
             {f: f.__linkprops__.opinion for f in harry.friends},
-            {hermione: 'smart', ron: 'reliable'},
+            {hermione: "smart", ron: "reliable"},
         )
 
     def test_link_set_model_fresh_multi_link_with_props_discard_03(self):
         # Discard new item without id
-        from models import default
+        from models.link_set import default
 
         hermione = self.client.query_required_single(
-            default.Person.filter(name='Hermione Granger').limit(1)
+            default.Person.filter(name="Hermione Granger").limit(1)
         )
         ron = self.client.query_required_single(
-            default.Person.filter(name='Ron Weasley').limit(1)
+            default.Person.filter(name="Ron Weasley").limit(1)
         )
-        luna = default.Person(name='Luna Lovegood')
+        luna = default.Person(name="Luna Lovegood")
 
         harry = default.Person(
-            name='Harry Potter',
+            name="Harry Potter",
             friends=[
-                default.Person.friends.link(hermione, opinion='smart'),
-                default.Person.friends.link(ron, opinion='reliable'),
+                default.Person.friends.link(hermione, opinion="smart"),
+                default.Person.friends.link(ron, opinion="reliable"),
             ],
         )
 
@@ -2671,32 +2770,32 @@ class TestLinkSetModels(tb.ModelTestCase):
             reveal_type(harry.friends),
             (
                 "gel._internal._qbmodel._abstract._link_set.LinkWithPropsSet["
-                "models.__shapes__.default.Person.__links__.friends, "
-                "models.default.Person"
+                "models.link_set.__shapes__.default.Person.__links__.friends, "
+                "models.link_set.default.Person"
                 "]"
             ),
         )
         self.assertEqual(
             {f: f.__linkprops__.opinion for f in harry.friends},
-            {hermione: 'smart', ron: 'reliable'},
+            {hermione: "smart", ron: "reliable"},
         )
 
     def test_link_set_model_fresh_multi_link_with_props_clear_01(self):
         # Clear existing items
-        from models import default
+        from models.link_set import default
 
         hermione = self.client.query_required_single(
-            default.Person.filter(name='Hermione Granger').limit(1)
+            default.Person.filter(name="Hermione Granger").limit(1)
         )
         ron = self.client.query_required_single(
-            default.Person.filter(name='Ron Weasley').limit(1)
+            default.Person.filter(name="Ron Weasley").limit(1)
         )
 
         harry = default.Person(
-            name='Harry Potter',
+            name="Harry Potter",
             friends=[
-                default.Person.friends.link(hermione, opinion='smart'),
-                default.Person.friends.link(ron, opinion='reliable'),
+                default.Person.friends.link(hermione, opinion="smart"),
+                default.Person.friends.link(ron, opinion="reliable"),
             ],
         )
 
@@ -2707,8 +2806,8 @@ class TestLinkSetModels(tb.ModelTestCase):
             reveal_type(harry.friends),
             (
                 "gel._internal._qbmodel._abstract._link_set.LinkWithPropsSet["
-                "models.__shapes__.default.Person.__links__.friends, "
-                "models.default.Person"
+                "models.link_set.__shapes__.default.Person.__links__.friends, "
+                "models.link_set.default.Person"
                 "]"
             ),
         )
@@ -2719,20 +2818,20 @@ class TestLinkSetModels(tb.ModelTestCase):
 
     def test_link_set_model_fresh_multi_link_with_props_update_01(self):
         # Update existing item
-        from models import default
+        from models.link_set import default
 
         hermione = self.client.query_required_single(
-            default.Person.filter(name='Hermione Granger').limit(1)
+            default.Person.filter(name="Hermione Granger").limit(1)
         )
         ron = self.client.query_required_single(
-            default.Person.filter(name='Ron Weasley').limit(1)
+            default.Person.filter(name="Ron Weasley").limit(1)
         )
 
         harry = default.Person(
-            name='Harry Potter',
+            name="Harry Potter",
             friends=[
-                default.Person.friends.link(hermione, opinion='smart'),
-                default.Person.friends.link(ron, opinion='reliable'),
+                default.Person.friends.link(hermione, opinion="smart"),
+                default.Person.friends.link(ron, opinion="reliable"),
             ],
         )
 
@@ -2743,35 +2842,35 @@ class TestLinkSetModels(tb.ModelTestCase):
             reveal_type(harry.friends),
             (
                 "gel._internal._qbmodel._abstract._link_set.LinkWithPropsSet["
-                "models.__shapes__.default.Person.__links__.friends, "
-                "models.default.Person"
+                "models.link_set.__shapes__.default.Person.__links__.friends, "
+                "models.link_set.default.Person"
                 "]"
             ),
         )
         self.assertEqual(
             {f: f.__linkprops__.opinion for f in harry.friends},
-            {hermione: 'smart', ron: 'reliable'},
+            {hermione: "smart", ron: "reliable"},
         )
 
     def test_link_set_model_fresh_multi_link_with_props_update_02(self):
         # Update new item with id
-        from models import default
+        from models.link_set import default
 
         hermione = self.client.query_required_single(
-            default.Person.filter(name='Hermione Granger').limit(1)
+            default.Person.filter(name="Hermione Granger").limit(1)
         )
         ron = self.client.query_required_single(
-            default.Person.filter(name='Ron Weasley').limit(1)
+            default.Person.filter(name="Ron Weasley").limit(1)
         )
         neville = self.client.query_required_single(
-            default.Person.filter(name='Neville Longbottom').limit(1)
+            default.Person.filter(name="Neville Longbottom").limit(1)
         )
 
         harry = default.Person(
-            name='Harry Potter',
+            name="Harry Potter",
             friends=[
-                default.Person.friends.link(hermione, opinion='smart'),
-                default.Person.friends.link(ron, opinion='reliable'),
+                default.Person.friends.link(hermione, opinion="smart"),
+                default.Person.friends.link(ron, opinion="reliable"),
             ],
         )
 
@@ -2782,8 +2881,8 @@ class TestLinkSetModels(tb.ModelTestCase):
             reveal_type(harry.friends),
             (
                 "gel._internal._qbmodel._abstract._link_set.LinkWithPropsSet["
-                "models.__shapes__.default.Person.__links__.friends, "
-                "models.default.Person"
+                "models.link_set.__shapes__.default.Person.__links__.friends, "
+                "models.link_set.default.Person"
                 "]"
             ),
         )
@@ -2791,31 +2890,31 @@ class TestLinkSetModels(tb.ModelTestCase):
             {
                 f: (
                     f.__linkprops__.opinion
-                    if hasattr(f.__linkprops__, 'opinion') else
-                    None
+                    if hasattr(f.__linkprops__, "opinion")
+                    else None
                 )
                 for f in harry.friends
             },
-            {hermione: 'smart', ron: 'reliable', neville: None},
+            {hermione: "smart", ron: "reliable", neville: None},
         )
 
     def test_link_set_model_fresh_multi_link_with_props_update_03(self):
         # Update new item without id
-        from models import default
+        from models.link_set import default
 
         hermione = self.client.query_required_single(
-            default.Person.filter(name='Hermione Granger').limit(1)
+            default.Person.filter(name="Hermione Granger").limit(1)
         )
         ron = self.client.query_required_single(
-            default.Person.filter(name='Ron Weasley').limit(1)
+            default.Person.filter(name="Ron Weasley").limit(1)
         )
-        luna = default.Person(name='Luna Lovegood')
+        luna = default.Person(name="Luna Lovegood")
 
         harry = default.Person(
-            name='Harry Potter',
+            name="Harry Potter",
             friends=[
-                default.Person.friends.link(hermione, opinion='smart'),
-                default.Person.friends.link(ron, opinion='reliable'),
+                default.Person.friends.link(hermione, opinion="smart"),
+                default.Person.friends.link(ron, opinion="reliable"),
             ],
         )
 
@@ -2827,8 +2926,8 @@ class TestLinkSetModels(tb.ModelTestCase):
             reveal_type(harry.friends),
             (
                 "gel._internal._qbmodel._abstract._link_set.LinkWithPropsSet["
-                "models.__shapes__.default.Person.__links__.friends, "
-                "models.default.Person"
+                "models.link_set.__shapes__.default.Person.__links__.friends, "
+                "models.link_set.default.Person"
                 "]"
             ),
         )
@@ -2836,34 +2935,36 @@ class TestLinkSetModels(tb.ModelTestCase):
             {
                 f.name: (
                     f.__linkprops__.opinion
-                    if hasattr(f.__linkprops__, 'opinion') else
-                    None
+                    if hasattr(f.__linkprops__, "opinion")
+                    else None
                 )
                 for f in harry.friends
             },
             {
-                'Hermione Granger': 'smart',
-                'Ron Weasley': 'reliable',
-                'Luna Lovegood': None,
+                "Hermione Granger": "smart",
+                "Ron Weasley": "reliable",
+                "Luna Lovegood": None,
             },
         )
 
     def test_link_set_model_fresh_multi_link_with_props_op_iadd_01(self):
         # Operator iadd existing item
-        from models import default
+        from models.link_set import default
+
+        print(default.Person)
 
         hermione = self.client.query_required_single(
-            default.Person.filter(name='Hermione Granger').limit(1)
+            default.Person.filter(name="Hermione Granger").limit(1)
         )
         ron = self.client.query_required_single(
-            default.Person.filter(name='Ron Weasley').limit(1)
+            default.Person.filter(name="Ron Weasley").limit(1)
         )
 
         harry = default.Person(
-            name='Harry Potter',
+            name="Harry Potter",
             friends=[
-                default.Person.friends.link(hermione, opinion='smart'),
-                default.Person.friends.link(ron, opinion='reliable'),
+                default.Person.friends.link(hermione, opinion="smart"),
+                default.Person.friends.link(ron, opinion="reliable"),
             ],
         )
 
@@ -2874,35 +2975,35 @@ class TestLinkSetModels(tb.ModelTestCase):
             reveal_type(harry.friends),
             (
                 "gel._internal._qbmodel._abstract._link_set.LinkWithPropsSet["
-                "models.__shapes__.default.Person.__links__.friends, "
-                "models.default.Person"
+                "models.link_set.__shapes__.default.Person.__links__.friends, "
+                "models.link_set.default.Person"
                 "]"
             ),
         )
         self.assertEqual(
             {f: f.__linkprops__.opinion for f in harry.friends},
-            {hermione: 'smart', ron: 'reliable'},
+            {hermione: "smart", ron: "reliable"},
         )
 
     def test_link_set_model_fresh_multi_link_with_props_op_iadd_02(self):
         # Operator iadd new item with id
-        from models import default
+        from models.link_set import default
 
         hermione = self.client.query_required_single(
-            default.Person.filter(name='Hermione Granger').limit(1)
+            default.Person.filter(name="Hermione Granger").limit(1)
         )
         ron = self.client.query_required_single(
-            default.Person.filter(name='Ron Weasley').limit(1)
+            default.Person.filter(name="Ron Weasley").limit(1)
         )
         neville = self.client.query_required_single(
-            default.Person.filter(name='Neville Longbottom').limit(1)
+            default.Person.filter(name="Neville Longbottom").limit(1)
         )
 
         harry = default.Person(
-            name='Harry Potter',
+            name="Harry Potter",
             friends=[
-                default.Person.friends.link(hermione, opinion='smart'),
-                default.Person.friends.link(ron, opinion='reliable'),
+                default.Person.friends.link(hermione, opinion="smart"),
+                default.Person.friends.link(ron, opinion="reliable"),
             ],
         )
 
@@ -2913,8 +3014,8 @@ class TestLinkSetModels(tb.ModelTestCase):
             reveal_type(harry.friends),
             (
                 "gel._internal._qbmodel._abstract._link_set.LinkWithPropsSet["
-                "models.__shapes__.default.Person.__links__.friends, "
-                "models.default.Person"
+                "models.link_set.__shapes__.default.Person.__links__.friends, "
+                "models.link_set.default.Person"
                 "]"
             ),
         )
@@ -2922,31 +3023,31 @@ class TestLinkSetModels(tb.ModelTestCase):
             {
                 f: (
                     f.__linkprops__.opinion
-                    if hasattr(f.__linkprops__, 'opinion') else
-                    None
+                    if hasattr(f.__linkprops__, "opinion")
+                    else None
                 )
                 for f in harry.friends
             },
-            {hermione: 'smart', ron: 'reliable', neville: None},
+            {hermione: "smart", ron: "reliable", neville: None},
         )
 
     def test_link_set_model_fresh_multi_link_with_props_op_iadd_03(self):
         # Operator iadd new item without id
-        from models import default
+        from models.link_set import default
 
         hermione = self.client.query_required_single(
-            default.Person.filter(name='Hermione Granger').limit(1)
+            default.Person.filter(name="Hermione Granger").limit(1)
         )
         ron = self.client.query_required_single(
-            default.Person.filter(name='Ron Weasley').limit(1)
+            default.Person.filter(name="Ron Weasley").limit(1)
         )
-        luna = default.Person(name='Luna Lovegood')
+        luna = default.Person(name="Luna Lovegood")
 
         harry = default.Person(
-            name='Harry Potter',
+            name="Harry Potter",
             friends=[
-                default.Person.friends.link(hermione, opinion='smart'),
-                default.Person.friends.link(ron, opinion='reliable'),
+                default.Person.friends.link(hermione, opinion="smart"),
+                default.Person.friends.link(ron, opinion="reliable"),
             ],
         )
 
@@ -2958,8 +3059,8 @@ class TestLinkSetModels(tb.ModelTestCase):
             reveal_type(harry.friends),
             (
                 "gel._internal._qbmodel._abstract._link_set.LinkWithPropsSet["
-                "models.__shapes__.default.Person.__links__.friends, "
-                "models.default.Person"
+                "models.link_set.__shapes__.default.Person.__links__.friends, "
+                "models.link_set.default.Person"
                 "]"
             ),
         )
@@ -2967,35 +3068,35 @@ class TestLinkSetModels(tb.ModelTestCase):
             {
                 f.name: (
                     f.__linkprops__.opinion
-                    if hasattr(f.__linkprops__, 'opinion') else
-                    None
+                    if hasattr(f.__linkprops__, "opinion")
+                    else None
                 )
                 for f in harry.friends
             },
             {
-                'Hermione Granger': 'smart',
-                'Ron Weasley': 'reliable',
-                'Luna Lovegood': None,
+                "Hermione Granger": "smart",
+                "Ron Weasley": "reliable",
+                "Luna Lovegood": None,
             },
         )
 
     @tb.xfail  # mypy seems to be checking - instead of -=
     def test_link_set_model_fresh_multi_link_with_props_op_isub_01(self):
         # Operator isub existing item
-        from models import default
+        from models.link_set import default
 
         hermione = self.client.query_required_single(
-            default.Person.filter(name='Hermione Granger').limit(1)
+            default.Person.filter(name="Hermione Granger").limit(1)
         )
         ron = self.client.query_required_single(
-            default.Person.filter(name='Ron Weasley').limit(1)
+            default.Person.filter(name="Ron Weasley").limit(1)
         )
 
         harry = default.Person(
-            name='Harry Potter',
+            name="Harry Potter",
             friends=[
-                default.Person.friends.link(hermione, opinion='smart'),
-                default.Person.friends.link(ron, opinion='reliable'),
+                default.Person.friends.link(hermione, opinion="smart"),
+                default.Person.friends.link(ron, opinion="reliable"),
             ],
         )
 
@@ -3006,36 +3107,36 @@ class TestLinkSetModels(tb.ModelTestCase):
             reveal_type(harry.friends),
             (
                 "gel._internal._qbmodel._abstract._link_set.LinkWithPropsSet["
-                "models.__shapes__.default.Person.__links__.friends, "
-                "models.default.Person"
+                "models.link_set.__shapes__.default.Person.__links__.friends, "
+                "models.link_set.default.Person"
                 "]"
             ),
         )
         self.assertEqual(
             {f: f.__linkprops__.opinion for f in harry.friends},
-            {hermione: 'smart'},
+            {hermione: "smart"},
         )
 
     @tb.xfail  # mypy seems to be checking - instead of -=
     def test_link_set_model_fresh_multi_link_with_props_op_isub_02(self):
         # Operator isub new item with id
-        from models import default
+        from models.link_set import default
 
         hermione = self.client.query_required_single(
-            default.Person.filter(name='Hermione Granger').limit(1)
+            default.Person.filter(name="Hermione Granger").limit(1)
         )
         ron = self.client.query_required_single(
-            default.Person.filter(name='Ron Weasley').limit(1)
+            default.Person.filter(name="Ron Weasley").limit(1)
         )
         neville = self.client.query_required_single(
-            default.Person.filter(name='Neville Longbottom').limit(1)
+            default.Person.filter(name="Neville Longbottom").limit(1)
         )
 
         harry = default.Person(
-            name='Harry Potter',
+            name="Harry Potter",
             friends=[
-                default.Person.friends.link(hermione, opinion='smart'),
-                default.Person.friends.link(ron, opinion='reliable'),
+                default.Person.friends.link(hermione, opinion="smart"),
+                default.Person.friends.link(ron, opinion="reliable"),
             ],
         )
 
@@ -3046,12 +3147,12 @@ class TestLinkSetModels(tb.ModelTestCase):
             reveal_type(harry.friends),
             (
                 "gel._internal._qbmodel._abstract._link_set.LinkWithPropsSet["
-                "models.__shapes__.default.Person.__links__.friends, "
-                "models.default.Person"
+                "models.link_set.__shapes__.default.Person.__links__.friends, "
+                "models.link_set.default.Person"
                 "]"
             ),
         )
         self.assertEqual(
             {f: f.__linkprops__.opinion for f in harry.friends},
-            {hermione: 'smart', ron: 'reliable'},
+            {hermione: "smart", ron: "reliable"},
         )
