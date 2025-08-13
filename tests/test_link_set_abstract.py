@@ -8,8 +8,6 @@ from gel._internal._qbmodel._abstract._link_set import (
 )
 from gel._internal._qbmodel._abstract import AbstractGelModel
 
-from gel import _testbase as tb
-
 
 _T_test = TypeVar("_T_test", bound="AbstractGelModel", covariant=True)
 
@@ -1323,27 +1321,31 @@ class TestAbstractMutableLinkSet(unittest.TestCase):
             self._check_list(lst, [box_b], all_items)
 
     # Tracking behavior
-    def test_abstract_mutable_link_set_track_changes_01(self):
-        # Track changes after constructor
-        box_a = BoxedInt(1)
-        box_b = BoxedInt(2)
-        box_c = BoxedInt(3)
-
+    def test_abstract_mutable_link_set_track_changes_constructor_01(self):
+        # Empty
         for mode, wrap in _get_single_permutations():
             lst = DummyAbstractMutableLinkSet(
                 [],
                 __mode__=mode,
                 __wrap_list__=wrap,
             )
+
             self.assertEqual(list(lst.__gel_get_added__()), [])
             self.assertEqual(list(lst.__gel_get_removed__()), [])
 
-            # With items
+    def test_abstract_mutable_link_set_track_changes_constructor_02(self):
+        # With items
+        box_a = BoxedInt(1)
+        box_b = BoxedInt(2)
+        box_c = BoxedInt(3)
+
+        for mode, wrap in _get_single_permutations():
             lst = DummyAbstractMutableLinkSet(
                 [box_a, box_b, box_c],
                 __mode__=mode,
                 __wrap_list__=wrap,
             )
+
             if wrap:
                 self.assertEqual(list(lst.__gel_get_added__()), [])
                 self.assertEqual(list(lst.__gel_get_removed__()), [])
@@ -1354,9 +1356,8 @@ class TestAbstractMutableLinkSet(unittest.TestCase):
                 )
                 self.assertEqual(list(lst.__gel_get_removed__()), [])
 
-    @tb.xfail
-    def test_abstract_mutable_link_set_track_changes_02(self):
-        # Track changes after add
+    def test_abstract_mutable_link_set_track_changes_add_01(self):
+        # New item
         box_a = BoxedInt(1)
         box_b = BoxedInt(2)
         box_c = BoxedInt(3)
@@ -1367,88 +1368,148 @@ class TestAbstractMutableLinkSet(unittest.TestCase):
                 __mode__=mode,
                 __wrap_list__=wrap,
             )
-            lst.add(box_c)
-            self.assertEqual(list(lst.__gel_get_added__()), [])
-            self.assertEqual(list(lst.__gel_get_removed__()), [box_c])
 
-    @tb.xfail
-    def test_abstract_mutable_link_set_track_changes_03a(self):
-        # Track changes after remove
+            lst.add(box_c)
+
+            if wrap:
+                self.assertEqual(list(lst.__gel_get_added__()), [box_c])
+                self.assertEqual(list(lst.__gel_get_removed__()), [])
+            else:
+                self.assertEqual(
+                    list(lst.__gel_get_added__()),
+                    [box_a, box_b, box_c],
+                )
+                self.assertEqual(list(lst.__gel_get_removed__()), [])
+
+    def test_abstract_mutable_link_set_track_changes_add_02(self):
+        # Duplicate item
         box_a = BoxedInt(1)
         box_b = BoxedInt(2)
         box_c = BoxedInt(3)
 
         for mode, wrap in _get_single_permutations():
-            # successful remove
             lst = DummyAbstractMutableLinkSet(
                 [box_a, box_b, box_c],
                 __mode__=mode,
                 __wrap_list__=wrap,
             )
-            lst.remove(box_b)
-            self.assertEqual(list(lst.__gel_get_added__()), [])
-            self.assertEqual(list(lst.__gel_get_removed__()), [box_b])
 
-    @tb.xfail
-    def test_abstract_mutable_link_set_track_changes_03b(self):
-        # Track changes after remove
+            lst.add(box_c)
+
+            if wrap:
+                self.assertEqual(list(lst.__gel_get_added__()), [])
+                self.assertEqual(list(lst.__gel_get_removed__()), [])
+            else:
+                self.assertEqual(
+                    list(lst.__gel_get_added__()),
+                    [box_a, box_b, box_c],
+                )
+                self.assertEqual(list(lst.__gel_get_removed__()), [])
+
+    def test_abstract_mutable_link_set_track_changes_remove_01(self):
+        # Successful remove
+        box_a = BoxedInt(1)
+        box_b = BoxedInt(2)
+        box_c = BoxedInt(3)
+
+        for mode, wrap in _get_single_permutations():
+            lst = DummyAbstractMutableLinkSet(
+                [box_a, box_b, box_c],
+                __mode__=mode,
+                __wrap_list__=wrap,
+            )
+
+            lst.remove(box_b)
+
+            if wrap:
+                self.assertEqual(list(lst.__gel_get_added__()), [])
+                self.assertEqual(list(lst.__gel_get_removed__()), [box_b])
+            else:
+                self.assertEqual(
+                    list(lst.__gel_get_added__()),
+                    [box_a, box_c],
+                )
+                self.assertEqual(list(lst.__gel_get_removed__()), [])
+
+    def test_abstract_mutable_link_set_track_changes_remove_02(self):
+        # Failed remove
         box_a = BoxedInt(1)
         box_b = BoxedInt(2)
         box_c = BoxedInt(3)
         box_d = BoxedInt(3)
 
         for mode, wrap in _get_single_permutations():
-            # failed remove
             lst = DummyAbstractMutableLinkSet(
                 [box_a, box_b, box_c],
                 __mode__=mode,
                 __wrap_list__=wrap,
             )
+
             with self.assertRaises(KeyError):
                 lst.remove(box_d)
-            self.assertEqual(list(lst.__gel_get_added__()), [])
-            self.assertEqual(list(lst.__gel_get_removed__()), [])
 
-    @tb.xfail
-    def test_abstract_mutable_link_set_track_changes_04a(self):
-        # Track changes after discard
+            if wrap:
+                self.assertEqual(list(lst.__gel_get_added__()), [])
+                self.assertEqual(list(lst.__gel_get_removed__()), [])
+            else:
+                self.assertEqual(
+                    list(lst.__gel_get_added__()),
+                    [box_a, box_b, box_c],
+                )
+                self.assertEqual(list(lst.__gel_get_removed__()), [])
+
+    def test_abstract_mutable_link_set_track_changes_discard_01(self):
+        # Successful discard
         box_a = BoxedInt(1)
         box_b = BoxedInt(2)
         box_c = BoxedInt(3)
 
         for mode, wrap in _get_single_permutations():
-            # successful discard
             lst = DummyAbstractMutableLinkSet(
                 [box_a, box_b, box_c],
                 __mode__=mode,
                 __wrap_list__=wrap,
             )
-            lst.discard(box_b)
-            self.assertEqual(list(lst.__gel_get_added__()), [])
-            self.assertEqual(list(lst.__gel_get_removed__()), [box_b])
 
-    @tb.xfail
-    def test_abstract_mutable_link_set_track_changes_04b(self):
-        # Track changes after remove
+            lst.discard(box_b)
+
+            if wrap:
+                self.assertEqual(list(lst.__gel_get_added__()), [])
+                self.assertEqual(list(lst.__gel_get_removed__()), [box_b])
+            else:
+                self.assertEqual(
+                    list(lst.__gel_get_added__()),
+                    [box_a, box_c],
+                )
+                self.assertEqual(list(lst.__gel_get_removed__()), [])
+
+    def test_abstract_mutable_link_set_track_changes_discard_02(self):
+        # Failed discard
         box_a = BoxedInt(1)
         box_b = BoxedInt(2)
         box_c = BoxedInt(3)
         box_d = BoxedInt(3)
 
         for mode, wrap in _get_single_permutations():
-            # failed discard
             lst = DummyAbstractMutableLinkSet(
                 [box_a, box_b, box_c],
                 __mode__=mode,
                 __wrap_list__=wrap,
             )
+
             lst.discard(box_d)
-            self.assertEqual(list(lst.__gel_get_added__()), [])
-            self.assertEqual(list(lst.__gel_get_removed__()), [])
 
-    @tb.xfail
-    def test_abstract_mutable_link_set_track_changes_05(self):
-        # Track changes after clear
+            if wrap:
+                self.assertEqual(list(lst.__gel_get_added__()), [])
+                self.assertEqual(list(lst.__gel_get_removed__()), [])
+            else:
+                self.assertEqual(
+                    list(lst.__gel_get_added__()),
+                    [box_a, box_b, box_c],
+                )
+                self.assertEqual(list(lst.__gel_get_removed__()), [])
+
+    def test_abstract_mutable_link_set_track_changes_clear_01(self):
         box_a = BoxedInt(1)
         box_b = BoxedInt(2)
         box_c = BoxedInt(3)
@@ -1459,122 +1520,170 @@ class TestAbstractMutableLinkSet(unittest.TestCase):
                 __mode__=mode,
                 __wrap_list__=wrap,
             )
+
             lst.clear()
-            self.assertEqual(list(lst.__gel_get_added__()), [])
-            self.assertEqual(
-                list(lst.__gel_get_removed__()),
-                [box_a, box_b, box_c],
-            )
 
-    @tb.xfail
-    def test_abstract_mutable_link_set_track_changes_06a(self):
-        # Track changes after update
+            if wrap:
+                self.assertEqual(list(lst.__gel_get_added__()), [])
+                self.assertEqual(
+                    list(lst.__gel_get_removed__()),
+                    [box_a, box_b, box_c],
+                )
+            else:
+                self.assertEqual(list(lst.__gel_get_added__()), [])
+                self.assertEqual(list(lst.__gel_get_removed__()), [])
+
+    def test_abstract_mutable_link_set_track_changes_update_01(self):
+        # No changes
         box_a = BoxedInt(1)
         box_b = BoxedInt(2)
 
         for mode, wrap in _get_single_permutations():
-            # No changes
             lst = DummyAbstractMutableLinkSet(
                 [box_a, box_b],
                 __mode__=mode,
                 __wrap_list__=wrap,
             )
+
             lst.update([box_a, box_b])
-            self.assertEqual(list(lst.__gel_get_added__()), [])
-            self.assertEqual(list(lst.__gel_get_removed__()), [])
 
-    @tb.xfail
+            if wrap:
+                self.assertEqual(list(lst.__gel_get_added__()), [])
+                self.assertEqual(list(lst.__gel_get_removed__()), [])
+            else:
+                self.assertEqual(
+                    list(lst.__gel_get_added__()),
+                    [box_a, box_b],
+                )
+                self.assertEqual(list(lst.__gel_get_removed__()), [])
+
     def test_abstract_mutable_link_set_track_changes_06b(self):
-        # Track changes after update
+        # Items added
         box_a = BoxedInt(1)
         box_b = BoxedInt(2)
         box_c = BoxedInt(3)
         box_d = BoxedInt(4)
 
         for mode, wrap in _get_single_permutations():
-            # Items added
             lst = DummyAbstractMutableLinkSet(
                 [box_a, box_b],
                 __mode__=mode,
                 __wrap_list__=wrap,
             )
+
             lst.update([box_b, box_c, box_d])
-            self.assertEqual(list(lst.__gel_get_added__()), [])
-            self.assertEqual(list(lst.__gel_get_removed__()), [box_c, box_d])
 
-    @tb.xfail
+            if wrap:
+                self.assertEqual(list(lst.__gel_get_added__()), [box_c, box_d])
+                self.assertEqual(list(lst.__gel_get_removed__()), [])
+            else:
+                self.assertEqual(
+                    list(lst.__gel_get_added__()),
+                    [box_a, box_b, box_c, box_d],
+                )
+                self.assertEqual(list(lst.__gel_get_removed__()), [])
+
     def test_abstract_mutable_link_set_track_changes_07a(self):
-        # Track changes after operator iadd
+        # No changes
         box_a = BoxedInt(1)
         box_b = BoxedInt(2)
 
         for mode, wrap in _get_single_permutations():
-            # No changes
             lst = DummyAbstractMutableLinkSet(
                 [box_a, box_b],
                 __mode__=mode,
                 __wrap_list__=wrap,
             )
+
             lst += [box_a, box_b]
-            self.assertEqual(list(lst.__gel_get_added__()), [])
-            self.assertEqual(list(lst.__gel_get_removed__()), [])
 
-    @tb.xfail
+            if wrap:
+                self.assertEqual(list(lst.__gel_get_added__()), [])
+                self.assertEqual(list(lst.__gel_get_removed__()), [])
+            else:
+                self.assertEqual(
+                    list(lst.__gel_get_added__()),
+                    [box_a, box_b],
+                )
+                self.assertEqual(list(lst.__gel_get_removed__()), [])
+
     def test_abstract_mutable_link_set_track_changes_07b(self):
-        # Track changes after operator iadd
+        # Items added
         box_a = BoxedInt(1)
         box_b = BoxedInt(2)
         box_c = BoxedInt(3)
         box_d = BoxedInt(4)
 
         for mode, wrap in _get_single_permutations():
-            # Items added
             lst = DummyAbstractMutableLinkSet(
                 [box_a, box_b],
                 __mode__=mode,
                 __wrap_list__=wrap,
             )
+
             lst += [box_b, box_c, box_d]
-            self.assertEqual(list(lst.__gel_get_added__()), [])
-            self.assertEqual(list(lst.__gel_get_removed__()), [box_c, box_d])
 
-    @tb.xfail
+            if wrap:
+                self.assertEqual(list(lst.__gel_get_added__()), [box_c, box_d])
+                self.assertEqual(list(lst.__gel_get_removed__()), [])
+            else:
+                self.assertEqual(
+                    list(lst.__gel_get_added__()),
+                    [box_a, box_b, box_c, box_d],
+                )
+                self.assertEqual(list(lst.__gel_get_removed__()), [])
+
     def test_abstract_mutable_link_set_track_changes_08a(self):
-        # Track changes after operator isub
+        # No changes
         box_a = BoxedInt(1)
         box_b = BoxedInt(2)
         box_c = BoxedInt(3)
         box_d = BoxedInt(4)
 
         for mode, wrap in _get_single_permutations():
-            # No changes
             lst = DummyAbstractMutableLinkSet(
                 [box_a, box_b, box_c],
                 __mode__=mode,
                 __wrap_list__=wrap,
             )
+
             lst -= [box_d]
-            self.assertEqual(list(lst.__gel_get_added__()), [])
-            self.assertEqual(list(lst.__gel_get_removed__()), [])
 
-    @tb.xfail
+            if wrap:
+                self.assertEqual(list(lst.__gel_get_added__()), [])
+                self.assertEqual(list(lst.__gel_get_removed__()), [])
+            else:
+                self.assertEqual(
+                    list(lst.__gel_get_added__()),
+                    [box_a, box_b, box_c],
+                )
+                self.assertEqual(list(lst.__gel_get_removed__()), [])
+
     def test_abstract_mutable_link_set_track_changes_08b(self):
-        # Track changes after operator isub
+        # Items removed
         box_a = BoxedInt(1)
         box_b = BoxedInt(2)
         box_c = BoxedInt(3)
         box_d = BoxedInt(4)
 
         for mode, wrap in _get_single_permutations():
-            # Items removed
             lst = DummyAbstractMutableLinkSet(
                 [box_a, box_b, box_c],
                 __mode__=mode,
                 __wrap_list__=wrap,
             )
+
             lst -= [box_b, box_c, box_d]
-            self.assertEqual(list(lst.__gel_get_added__()), [])
-            self.assertEqual(list(lst.__gel_get_removed__()), [box_b, box_c])
+
+            if wrap:
+                self.assertEqual(list(lst.__gel_get_added__()), [])
+                self.assertEqual(
+                    list(lst.__gel_get_removed__()),
+                    [box_b, box_c],
+                )
+            else:
+                self.assertEqual(list(lst.__gel_get_added__()), [box_a])
+                self.assertEqual(list(lst.__gel_get_removed__()), [])
 
     def test_abstract_mutable_link_set_commit_01(self):
         # New items are only added to the _tracking_set after commiting

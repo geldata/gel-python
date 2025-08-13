@@ -754,6 +754,10 @@ class BaseModelTestCase(DatabaseTestCase):
             td_kwargs["delete"] = not cls.orm_debug
 
         cls.tmp_model_dir = tempfile.TemporaryDirectory(**td_kwargs)
+
+        assert isinstance(cls.SCHEMA, str)
+        short_name = pathlib.Path(cls.SCHEMA).stem
+
         if cls.orm_debug:
             print(cls.tmp_model_dir.name)
 
@@ -766,7 +770,15 @@ class BaseModelTestCase(DatabaseTestCase):
         try:
             gen_client.ensure_connected()
             cls.gen = PydanticModelsGenerator(
-                argparse.Namespace(no_cache=True, quiet=True, output=None),
+                argparse.Namespace(
+                    no_cache=True,
+                    quiet=True,
+                    output=(
+                        pathlib.Path(cls.tmp_model_dir.name)
+                        / "models"
+                        / short_name
+                    ).absolute(),
+                ),
                 project_dir=pathlib.Path(cls.tmp_model_dir.name),
                 client=gen_client,
                 interactive=False,
