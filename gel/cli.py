@@ -56,7 +56,7 @@ def _die(msg: str) -> NoReturn:
     sys.exit(1)
 
 
-def _warn(msg: str) -> NoReturn:
+def _warn(msg: str) -> None:
     print(f"warning: {msg}", file=sys.stderr)
 
 
@@ -215,10 +215,10 @@ def _get_mountpoint(path: pathlib.Path) -> pathlib.Path:
             if os.path.ismount(str(p)):
                 return p
 
-        return p
+        return path.parents[-1]
 
 
-def _install_cli(os_name: str, arch: str, path: pathlib.Path) -> str:
+def _install_cli(os_name: str, arch: str, path: pathlib.Path) -> None:
     triple = f"{arch}"
     ext = ""
     if os_name == "Windows":
@@ -259,7 +259,7 @@ def _install_cli(os_name: str, arch: str, path: pathlib.Path) -> str:
         )
 
 
-def main() -> NoReturn:
+def get_cli() -> str:
     dev_cli = shutil.which("gel-dev")
     if dev_cli:
         path = pathlib.Path(dev_cli)
@@ -270,7 +270,11 @@ def main() -> NoReturn:
         if not path.exists():
             _install_cli(os, arch, path)
 
-    _run_cli(path)
+    return str(path)
+
+
+def main() -> NoReturn:
+    _run_cli(get_cli())
 
 
 if __name__ == "__main__":

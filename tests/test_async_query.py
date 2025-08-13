@@ -29,7 +29,7 @@ import asyncio
 import gel
 
 from gel import abstract
-from gel import _testbase as tb
+from gel._internal import _testbase as tb
 from gel.options import RetryOptions
 from gel.protocol import protocol
 
@@ -1079,6 +1079,16 @@ class TestAsyncQuery(tb.AsyncQueryTestCase):
             await client.aclose()
 
     async def test_async_log_message(self):
+        has_internal_restart = await self.client.query_single("""
+            select exists(
+                select
+                    (select schema::ObjectType filter .name = 'cfg::Config')
+                    .pointers filter .name = '__internal_restart'
+            );
+        """)
+        if not has_internal_restart:
+            self.skipTest("No cfg::__internal_restart config")
+
         msgs = []
 
         def on_log(con, msg):

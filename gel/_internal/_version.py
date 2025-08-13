@@ -24,12 +24,22 @@ class DirectURLOrigin:
     commit_id: str | None = None
 
 
-def get_direct_url_origin(dist_name: str) -> DirectURLOrigin | None:
+def get_direct_url_origin(
+    dist_name: str,
+    path: list[str] | None = None,
+) -> DirectURLOrigin | None:
     """Return PEP 660 Direct URL Origin metadata for package if present"""
-    try:
-        dist = importlib.metadata.distribution(dist_name)
-    except importlib.metadata.PackageNotFoundError:
-        return None
+    if path is not None:
+        dists = importlib.metadata.distributions(name=dist_name, path=path)
+        try:
+            dist = next(iter(dists))
+        except StopIteration:
+            return None
+    else:
+        try:
+            dist = importlib.metadata.distribution(dist_name)
+        except importlib.metadata.PackageNotFoundError:
+            return None
     try:
         data = dist.read_text("direct_url.json")
     except OSError:
