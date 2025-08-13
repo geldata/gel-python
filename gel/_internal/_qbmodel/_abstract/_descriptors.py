@@ -41,7 +41,10 @@ from ._base import (
 
 if TYPE_CHECKING:
     import types
-    from collections.abc import Sequence, Set as AbstractSet
+    import uuid
+
+    from collections.abc import Sequence, Set as AbstractSet, Iterable
+
     from ._link_set import (
         AbstractLinkSet,
         ComputedLinkSet,
@@ -738,6 +741,63 @@ def copy_or_ref_lprops(lp: _LM_co) -> _LM_co:  # type: ignore [misc]
     else:
         lp.__gel_copied_by_ref__ = True
         return lp
+
+
+def reconcile_link(
+    *,
+    existing: _MT_co | None,
+    refetched: _MT_co,  # type: ignore [misc]
+    existing_objects: dict[uuid.UUID, _MT_co | Iterable[_MT_co]],
+    new_objects: dict[uuid.UUID, _MT_co],
+) -> _MT_co:
+    if existing is not None:
+        return existing
+
+    obj_id: uuid.UUID = ll_getattr(refetched, "id")
+
+    if (link_to := existing_objects.get(obj_id)) is not None:
+        if isinstance(link_to, AbstractGelModel):
+            return link_to
+        else:
+            return next(iter(link_to))
+
+    return new_objects[obj_id]
+
+
+def reconcile_proxy_link(
+    *,
+    existing: AbstractGelProxyModel[_MT_co, _LM_co] | None,
+    refetched: AbstractGelProxyModel[_MT_co, _LM_co],
+    existing_objects: dict[uuid.UUID, _MT_co | Iterable[_MT_co]],
+    new_objects: dict[uuid.UUID, _MT_co],
+) -> AbstractGelProxyModel[_MT_co, _LM_co]:
+    if existing is not None:
+        # `refetched` will have newly refetched __linkprops__,
+        # so copy them
+        existing.__gel_replace_linkprops__(
+            copy_or_ref_lprops(refetched.__linkprops__)
+        )
+        return existing
+
+    obj_id: uuid.UUID = ll_getattr(refetched.without_linkprops(), "id")
+
+    if (_link_to := existing_objects.get(obj_id)) is not None:
+        if isinstance(_link_to, AbstractGelModel):
+            link_to = _link_to
+        else:
+            link_to = next(iter(_link_to))
+    else:
+        link_to = new_objects[obj_id]
+
+    # Make sure we create a new proxy model that
+    # would wrap either an object that already exists
+    # or a new one just inserted by sync(); copy linkprops
+    # efficiently.
+    return refetched.__gel_proxy_construct__(
+        link_to,  # pyright: ignore [reportArgumentType]
+        copy_or_ref_lprops(refetched.__linkprops__),
+        linked=True,
+    )
 
 
 def proxy_link(

@@ -40,6 +40,8 @@ from ._descriptors import (
     get_proxy_linkprops,
     is_proxy_linked,
     copy_or_ref_lprops,
+    reconcile_link,
+    reconcile_proxy_link,
 )
 
 from ._link_set import (
@@ -184,4 +186,6 @@ __all__ = (
     "is_generic_type",
     "is_proxy_linked",
     "maybe_get_protocol_for_py_type",
+    "reconcile_link",
+    "reconcile_proxy_link",
 )

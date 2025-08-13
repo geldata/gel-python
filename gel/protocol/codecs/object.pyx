@@ -389,8 +389,7 @@ cdef class ObjectCodec(BaseNamedRecordCodec):
                 dlists.append(None)
                 self.cached_tname_index = i
                 origins.append(return_type)
-            elif name in {"__tid__", "id", "__py_id"}:
-                # __py_id is used by `save()`
+            elif name in {"__tid__", "id"}:
                 subs.append(None)
                 dlists.append(None)
                 origins.append(return_type)

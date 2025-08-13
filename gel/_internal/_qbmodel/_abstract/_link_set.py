@@ -14,6 +14,7 @@ from collections.abc import Iterable, Collection
 
 from gel._internal import _typing_parametric as parametric
 from gel._internal._qbmodel._abstract._base import AbstractGelLinkModel
+from gel._internal._qbmodel import _abstract
 from gel._internal._tracked_list import (
     AbstractCollection,
     DefaultList,
@@ -74,10 +75,32 @@ class AbstractLinkSet(  # noqa: PLW1641 (__hash__ is implemented)
         self._index_snapshot = None
         super().__init__(*args, **kwargs)
 
+    def __copy__(self) -> Self:
+        obj = type(self).__new__(type(self))
+
+        obj.__gel_overwrite_data__ = self.__gel_overwrite_data__
+        obj._mode = self._mode
+        obj._items = list(self._items)
+        obj._index_snapshot = (
+            dict(self._index_snapshot) if self._index_snapshot else None
+        )
+        obj._tracking_set = (
+            dict(self._tracking_set) if self._tracking_set else None
+        )
+        obj._tracking_index = (
+            dict(self._tracking_index) if self._tracking_index else None
+        )
+        return obj
+
+    def __deepcopy__(self, memo: dict[int, Any]) -> Self:
+        return self.__copy__()
+
     def __gel_reconcile__(
         self,
         updated: AbstractLinkSet[_MT_co],
-        existing_objects: dict[uuid.UUID, AbstractGelModel],
+        existing_objects: dict[
+            uuid.UUID, AbstractGelModel | Iterable[AbstractGelModel]
+        ],
         new_objects: dict[uuid.UUID, AbstractGelModel],
     ) -> Self:
         raise NotImplementedError
@@ -117,10 +140,10 @@ class AbstractLinkSet(  # noqa: PLW1641 (__hash__ is implemented)
     def _reconcile(
         self,
         updated: AbstractLinkSet[_MT_co],
-        existing_objects: dict[uuid.UUID, AbstractGelModel],
+        existing_objects: dict[
+            uuid.UUID, AbstractGelModel | Iterable[AbstractGelModel]
+        ],
         new_objects: dict[uuid.UUID, AbstractGelModel],
-        *,
-        is_computed: bool,
     ) -> list[_MT_co]:
         raise NotImplementedError
 
@@ -250,6 +273,12 @@ class AbstractLinkSet(  # noqa: PLW1641 (__hash__ is implemented)
         else:
             return repr(self._items)
 
+    def __gel_replace_with_empty__(self) -> None:
+        self._items.clear()
+        self._index_snapshot = None
+        self._tracking_set = None
+        self._tracking_index = None
+
 
 class ComputedLinkSet(
     parametric.SingleParametricType[_MT_co],
@@ -266,10 +295,10 @@ class ComputedLinkSet(
     def _reconcile(
         self,
         updated: AbstractLinkSet[_MT_co],
-        existing_objects: dict[uuid.UUID, AbstractGelModel],
+        existing_objects: dict[
+            uuid.UUID, AbstractGelModel | Iterable[AbstractGelModel]
+        ],
         new_objects: dict[uuid.UUID, AbstractGelModel],
-        *,
-        is_computed: bool,
     ) -> list[_MT_co]:
         # This method is called by sync() when it refetches the link.
         #
@@ -319,30 +348,29 @@ class ComputedLinkSet(
 
         updated_items: list[_MT_co] = []
         for obj in updated:
-            obj_id: uuid.UUID = obj.id  # type: ignore [attr-defined]
+            # This works because `GelModel` hashes and compares by `.id`
+            existing: _MT_co | None = existing_set.get(obj)
 
-            try:
-                # This works because `GelModel` hashes and compares by `.id`
-                existing = existing_set[obj]
-            except KeyError:
-                if is_computed and obj_id in existing_objects:
-                    updated_items.append(existing_objects[obj_id])  # type: ignore [arg-type]
-                else:
-                    updated_items.append(new_objects[obj_id])  # type: ignore [arg-type]
-            else:
-                updated_items.append(existing)
+            updated_items.append(
+                _abstract.reconcile_link(  # type: ignore [misc]
+                    existing=existing,
+                    refetched=obj,
+                    existing_objects=existing_objects,
+                    new_objects=new_objects,
+                )
+            )
 
         return updated_items
 
     def __gel_reconcile__(  # pyright: ignore [reportIncompatibleMethodOverride]
         self,
         updated: AbstractLinkSet[_MT_co],
-        existing_objects: dict[uuid.UUID, AbstractGelModel],
+        existing_objects: dict[
+            uuid.UUID, AbstractGelModel | Iterable[AbstractGelModel]
+        ],
         new_objects: dict[uuid.UUID, AbstractGelModel],
     ) -> Self:
-        new_items = self._reconcile(
-            updated, existing_objects, new_objects, is_computed=True
-        )
+        new_items = self._reconcile(updated, existing_objects, new_objects)
         return type(self)(
             new_items,
             __mode__=self._mode,
@@ -415,10 +443,10 @@ class ComputedLinkWithPropsSet(
     def _reconcile(  # pyright: ignore [reportIncompatibleMethodOverride]
         self,
         updated: LinkWithPropsSet[_PT_co, _BMT_co],  # type: ignore [override]
-        existing_objects: dict[uuid.UUID, AbstractGelModel],
+        existing_objects: dict[
+            uuid.UUID, AbstractGelModel | Iterable[AbstractGelModel]
+        ],
         new_objects: dict[uuid.UUID, AbstractGelModel],
-        *,
-        is_computed: bool,
     ) -> list[_PT_co]:
         # See comments in `LinkSet._reconcile()` for most implementation
         # details.
@@ -432,36 +460,29 @@ class ComputedLinkWithPropsSet(
 
         updated_items: list[_PT_co] = []
         for obj in updated:
-            obj_id: uuid.UUID = obj.id  # type: ignore [attr-defined]
+            # This works because `GelModel` hashes and compares by `.id`
+            existing = existing_set.get(obj)
 
-            try:
-                existing = existing_set[obj]
-            except KeyError:
-                if is_computed and obj_id in existing_objects:
-                    new = existing_objects[obj_id]
-                else:
-                    new = new_objects[obj_id]
-                # `obj` will have updated __linkprops__ but the wrapped
-                # model will be coming from new_objects
-                obj.__gel_replace_wrapped_model__(new)
-                updated_items.append(obj)
-            else:
-                # updated will have newly refetched __linkprops__, so
-                # copy them
-                existing.__gel_replace_linkprops__(obj.__linkprops__)
-                updated_items.append(existing)
+            updated_items.append(
+                _abstract.reconcile_proxy_link(
+                    existing=existing,
+                    refetched=obj,
+                    existing_objects=existing_objects,
+                    new_objects=new_objects,
+                )  # type: ignore [arg-type]
+            )
 
         return updated_items
 
     def __gel_reconcile__(  # pyright: ignore [reportIncompatibleMethodOverride]
         self,
         updated: LinkWithPropsSet[_PT_co, _BMT_co],  # type: ignore [override]
-        existing_objects: dict[uuid.UUID, AbstractGelModel],
+        existing_objects: dict[
+            uuid.UUID, AbstractGelModel | Iterable[AbstractGelModel]
+        ],
         new_objects: dict[uuid.UUID, AbstractGelModel],
     ) -> Self:
-        new_items = self._reconcile(
-            updated, existing_objects, new_objects, is_computed=True
-        )
+        new_items = self._reconcile(updated, existing_objects, new_objects)
         return type(self)(
             new_items,
             __mode__=self._mode,
@@ -562,12 +583,12 @@ class AbstractMutableLinkSet(
     def __gel_reconcile__(  # pyright: ignore [reportIncompatibleMethodOverride]
         self,
         updated: AbstractLinkSet[_MT_co],
-        existing_objects: dict[uuid.UUID, AbstractGelModel],
+        existing_objects: dict[
+            uuid.UUID, AbstractGelModel | Iterable[AbstractGelModel]
+        ],
         new_objects: dict[uuid.UUID, AbstractGelModel],
     ) -> Self:
-        self._items = self._reconcile(
-            updated, existing_objects, new_objects, is_computed=False
-        )
+        self._items = self._reconcile(updated, existing_objects, new_objects)
         # Reset tracking: it will likely be not needed. Typically there
         # should be just one `sync()` call with no modifications of anything
         # after it.
@@ -594,12 +615,6 @@ class AbstractMutableLinkSet(
         if self._index_snapshot is None:
             assert self._tracking_index is not None
             self._index_snapshot = dict(self._tracking_index)
-
-    def __gel_replace_with_empty__(self) -> None:
-        self._items.clear()
-        self._index_snapshot = None
-        self._tracking_set = None
-        self._tracking_index = None
 
     def __gel_get_added__(self) -> list[_MT_co]:
         match bool(self._index_snapshot), bool(self._tracking_index):
