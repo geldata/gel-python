@@ -1,11 +1,12 @@
 from __future__ import annotations
-
 from typing import TYPE_CHECKING
 
 
 import contextlib
 import functools
+import pathlib
 import subprocess
+import sys
 import tempfile
 import textwrap
 import threading
@@ -13,7 +14,6 @@ import threading
 
 if TYPE_CHECKING:
     import io
-    import pathlib
     import types
     from collections.abc import Callable, Iterator
     from contextlib import AbstractContextManager
@@ -102,33 +102,47 @@ class SubprocessLogger:
 
 
 @contextlib.contextmanager
-def _gel_toml(app_path: pathlib.Path) -> Iterator[str]:
-    output = app_path / "models"
-    content = textwrap.dedent(f"""\
-        [hooks-extend]
-        schema.update.after="gel-generate-py models --output={output}"
+def _gel_toml(app_path: pathlib.Path) -> Iterator[tuple[str, str]]:
+    with tempfile.TemporaryDirectory() as tmpdir:
+        output = app_path / "models"
+        path = pathlib.Path(tmpdir)
+        reloader = str(path / "reload_fastapi.py")
+        reload_code = f"""\
+            with open("{reloader}", "w+t") as f: print(file=f)
+        """.strip().replace('"', '\\"')
+        content = textwrap.dedent(f"""\
+            [hooks-extend]
+            schema.update.after="gel-generate-py models --output={output}"
+            config.update.after="{sys.executable} -c '{reload_code}'"
         """)
 
-    with tempfile.NamedTemporaryFile("w+t", encoding="utf8") as f:
-        print(content, file=f, flush=True)
-        yield f.name
+        with (path / "gel.extend.toml").open("w+t", encoding="utf8") as f:
+            print(content, file=f, flush=True)
+            yield f.name, tmpdir
 
 
 @contextlib.contextmanager
 def fastapi_cli_lifespan(
     cli: rich_toolkit.RichToolkit,
     app_path: pathlib.Path,
-) -> Iterator[None]:
-    with _gel_toml(app_path) as gel_toml:
-        cmd = ["gel", "watch", "--migrate", "--extend-gel-toml", gel_toml]
+) -> Iterator[str]:
+    with _gel_toml(app_path) as (gel_toml, watch_file):
+        cmd = [
+            "gel",
+            "watch",
+            "--migrate",
+            "--sync",
+            "--extend-gel-toml",
+            gel_toml,
+        ]
         with SubprocessLogger(cmd, cwd=app_path, cli=cli):
-            yield
+            yield watch_file
 
 
 def fastapi_cli_lifespan_hook(
     app_name: str,
     app_path: pathlib.Path,
     cli: rich_toolkit.RichToolkit,
-) -> AbstractContextManager[None]:
+) -> AbstractContextManager[str]:
     cli.print(f"Watching Gel project in [blue]{app_path}[/blue]", tag="gel")
     return fastapi_cli_lifespan(cli, app_path)
