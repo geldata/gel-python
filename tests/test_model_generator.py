@@ -3616,6 +3616,45 @@ class TestModelGenerator(tb.ModelTestCase):
 
         check({"owner": {"name": "Alice", "@count": 424242, "@bonus": False}})
 
+    def test_modelgen_save_46(self):
+        # Test that sync() updates all objects with the same .id to have
+        # the same data in them.
+
+        from models import default
+
+        elsa1 = self.client.get(
+            default.User.select(name=True).filter(lambda u: u.name == "Elsa"),
+        )
+
+        elsa2 = self.client.get(
+            default.User.select("*", groups=True).filter(
+                lambda u: u.name == "Elsa"
+            ),
+        )
+
+        self.assertNotIn("groups", elsa1.__dict__)
+
+        red = self.client.get(
+            default.UserGroup.select(
+                "*",
+                users=lambda ug: ug.users.select("*"),
+            ).filter(lambda u: u.name == "red"),
+        )
+
+        red.users.add(elsa1)
+        # Note that `elsa1.groups` still doesn't exist, it's a Gel computed
+
+        self.client.sync(elsa2, red)
+
+        # Now we test that *both* `elsa1` and `elsa2` have their
+        # *groups* computeds updated and pointing to `red`
+
+        self.assertEqual(elsa1.name_len, elsa2.name_len)
+        self.assertEqual(elsa1.name_len, 4)
+
+        self.assertEqual(elsa1.groups, elsa2.groups)
+        self.assertEqual(elsa1.groups, {red})
+
     def test_modelgen_save_reload_props_01(self):
         from models import default
 

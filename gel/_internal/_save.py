@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import collections
+import copy
 import dataclasses
 import pathlib
 import warnings
@@ -20,8 +21,16 @@ from typing import (
 from typing_extensions import TypeAliasType, dataclass_transform, Self
 
 from gel._internal._qbmodel._abstract import (
+    DEFAULT_VALUE,
+    AbstractLinkSet,
+    AbstractMutableLinkSet,
+    LinkSet,
+    LinkWithPropsSet,
+    AbstractGelSourceModel,
     GelPrimitiveType,
     get_proxy_linkprops,
+    reconcile_link,
+    reconcile_proxy_link,
 )
 from gel._internal._qbmodel._pydantic._models import (
     GelModel,
@@ -33,14 +42,6 @@ from gel._internal._tracked_list import (
     AbstractTrackedList,
     TrackedList,
     DowncastingTrackedList,
-)
-from gel._internal._qbmodel._abstract import (
-    DEFAULT_VALUE,
-    AbstractLinkSet,
-    AbstractMutableLinkSet,
-    LinkSet,
-    LinkWithPropsSet,
-    AbstractGelSourceModel,
 )
 from gel._internal._edgeql import PointerKind, quote_ident
 
@@ -84,6 +85,11 @@ SYNC_BASE_STACKLEVEL = 6
 T = TypeVar("T")
 T_co = TypeVar("T_co", covariant=True)
 V = TypeVar("V")
+
+
+def _identity_func(x: T) -> T:
+    return x
+
 
 _unset = object()
 _missing_arg = object()
@@ -253,17 +259,10 @@ class SavePlan(NamedTuple):
     # Only non-empty when refetch is True.
     refetch_batch: RefetchBatch
 
-    # When we refetch, we need to update individual objects
-    # with relevant data *for them*, and we can have multiple Python
-    # objects with different fields and computeds under the same Gel ID.
-    # So we use Python `id(obj): obj` mapping make an individual
-    # refetch select for each unique Python object.
-    graph_ids_to_model: IDTracker[GelModel, None]
-
     # When we refetch computed links we also need to know which
     # objects were in the sync() graph that theoretically can end
     # up in the computed link. So we track then in this dict.
-    existing_objects: dict[uuid.UUID, GelModel]
+    existing_objects: dict[uuid.UUID, GelModel | IDTracker[GelModel, None]]
 
 
 class IDTracker(Generic[T, V]):
@@ -362,6 +361,12 @@ def is_link_wprops_set(
     val: object,
 ) -> TypeGuard[LinkWithPropsSet[ProxyModel[GelModel], GelModel]]:
     return isinstance(val, LinkWithPropsSet)
+
+
+def is_proxy(
+    val: object,
+) -> TypeGuard[ProxyModel[GelModel]]:
+    return isinstance(val, ProxyModel)
 
 
 def unwrap_proxy(val: GelModel) -> GelModel:
@@ -590,7 +595,11 @@ def model_attr(
         return dct.get(name, default)
 
 
-def push_refetch(obj: GelModel, refetch_ops: RefetchBatch) -> None:
+def push_refetch(
+    obj: GelModel,
+    existing_objects: dict[uuid.UUID, GelModel | IDTracker[GelModel, None]],
+    refetch_ops: RefetchBatch,
+) -> None:
     tp_obj: type[GelModel] = type(obj)
     tp_pointers = tp_obj.__gel_reflection__.pointers
     ref_shape = refetch_ops[tp_obj]
@@ -607,6 +616,21 @@ def push_refetch(obj: GelModel, refetch_ops: RefetchBatch) -> None:
         else:
             ref_shape.fields[field_name] = ptr_info
 
+    try:
+        elst = existing_objects[obj.id]
+    except KeyError:
+        existing_objects[obj.id] = obj
+    else:
+        if isinstance(elst, IDTracker):
+            elst.track(obj)
+        else:
+            # We'll have to track multiple GelModel instances with the same
+            # `.id` and thus equal to each other. We still don't want to have
+            # duplicates, so in (hopefully) rare cases when we have multiple
+            # objects with the same `.id`, we'll have to tell them apart by
+            # their Python address.
+            existing_objects[obj.id] = IDTracker([elst, obj])
+
 
 def make_plan(
     objs: Iterable[GelModel],
@@ -621,7 +645,9 @@ def make_plan(
     removed_objects: list[Iterable[GelModel]] = []
 
     iter_graph_tracker: IDTracker[GelModel, None] = IDTracker()
-    existing_objects: dict[uuid.UUID, GelModel] = {}
+    existing_objects: dict[
+        uuid.UUID, GelModel | IDTracker[GelModel, None]
+    ] = {}
 
     for obj in iter_graph(objs, iter_graph_tracker):
         tp_obj: type[GelModel] = type(obj)
@@ -636,8 +662,7 @@ def make_plan(
         sched: FieldChangeLists = collections.defaultdict(list)
 
         if refetch and not obj.__gel_new__:
-            push_refetch(obj, refetch_ops)
-            existing_objects[obj.id] = obj
+            push_refetch(obj, existing_objects, refetch_ops)
 
         for prop in pointers:
             # Skip computeds, we can't update them.
@@ -992,8 +1017,11 @@ def make_plan(
         for removed in removed_objects:
             for m in removed:
                 if m not in iter_graph_tracker:
+                    # `iter_graph_tracker` was used in the big loop above;
+                    # now we're using it to make sure we don't submit
+                    # removed objects to refetch more than once.
                     iter_graph_tracker.track(m)
-                    push_refetch(m, refetch_ops)
+                    push_refetch(m, existing_objects, refetch_ops)
 
     # Plan batch inserts of new objects -- we have to insert objects
     # in batches respecting their required cross-dependencies.
@@ -1036,7 +1064,6 @@ def make_plan(
         insert_batches,
         update_ops,
         refetch_ops,
-        iter_graph_tracker,
         existing_objects,
     )
 
@@ -1052,7 +1079,6 @@ def make_save_executor_constructor(
         create_batches,
         updates,
         refetch_batch,
-        graph_ids_to_model,
         existing_objects,
     ) = make_plan(
         objs,
@@ -1064,7 +1090,6 @@ def make_save_executor_constructor(
         create_batches=create_batches,
         updates=updates,
         refetch_batch=refetch_batch,
-        graph_ids_to_model=graph_ids_to_model,
         existing_objects=existing_objects,
         refetch=refetch,
         save_postcheck=save_postcheck,
@@ -1117,7 +1142,7 @@ class QueryBatch:
                     obj_data, self.changes, strict=True
                 ):
                     for field in obj_upd.__dict__:
-                        if field in _STOP_FIELDS:
+                        if field == "id":
                             continue
                         change.model.__dict__[field] = obj_upd.__dict__[field]
                         change.model.__pydantic_fields_set__.add(field)
@@ -1141,33 +1166,87 @@ class QueryRefetch:
     def feed_db_data(self, obj_data: Iterable[Any]) -> None:
         for obj in obj_data:
             obj_dict = obj.__dict__
-            py_id: int = obj_dict["__py_id"]
             gel_id: uuid.UUID = obj.id
-            model = self.executor.graph_ids_to_model.get_tracked_by_hash(py_id)
-            assert model.id == gel_id
-            model_dict = model.__dict__
-            model_pydantic_fields_set = model.__pydantic_fields_set__
-            for field in model.__pydantic_fields_set__:
+
+            model_or_models = self.executor.existing_objects[gel_id]
+            models: Iterable[GelModel]
+            if isinstance(model_or_models, IDTracker):
+                # In some situations we might have multiple objects with
+                # the same `.id` - in this case we want to deeep copy mutable
+                # `multi prop` and arrays in `single props`.
+                models = model_or_models
+                deepcopy = copy.deepcopy
+            else:
+                models = (model_or_models,)
+                # But when we have a single object for the given UUID
+                # (the most common case) we don't need to copy anything
+                # and can just use the collection returned by the codec.
+                # `obj` is essentially a throwaway object that will be
+                # GCed after sync().
+                deepcopy = _identity_func  # type: ignore [assignment]
+
+            for field, new_value in obj_dict.items():
+                if field in _STOP_FIELDS:
+                    continue
+
                 shape_field = self.shape.fields[field]
-                if (
-                    shape_field.kind.is_link()
-                    # XXX handle single too
-                    and shape_field.cardinality.is_multi()
-                ):
-                    link = model_dict[field]
-                    new_link = obj_dict[field]
+                is_multi = shape_field.cardinality.is_multi()
+                is_link = shape_field.kind.is_link()
 
-                    assert is_link_abstract_dlist(link)
-                    assert type(new_link) is type(link)
-                    model_dict[field] = link.__gel_reconcile__(
-                        new_link,
-                        self.executor.existing_objects,  # type: ignore [arg-type]
-                        self.executor.new_objects,  # type: ignore [arg-type]
-                    )
-                else:
-                    model_dict[field] = obj_dict[field]
+                for model in models:
+                    assert model.id == gel_id
+                    model_dict = model.__dict__
 
-                model_pydantic_fields_set.add(field)
+                    model.__pydantic_fields_set__.add(field)
+
+                    if is_link and is_multi:
+                        link = model_dict.get(field)
+                        if link is None:
+                            # This instance never had this link, but
+                            # now it will.
+                            # TODO: this needs to be optimized.
+                            link = copy.copy(new_value)
+                            model_dict[field] = link
+                            link.__gel_replace_with_empty__()
+
+                        assert is_link_abstract_dlist(link)
+                        assert type(new_value) is type(link)
+                        model_dict[field] = link.__gel_reconcile__(
+                            # no need to copy `new_value`,
+                            # it will only be iterated over
+                            new_value,
+                            self.executor.existing_objects,  # type: ignore [arg-type]
+                            self.executor.new_objects,  # type: ignore [arg-type]
+                        )
+
+                    elif is_link:
+                        if shape_field.properties:
+                            model_dict[field] = reconcile_proxy_link(
+                                existing=model_dict.get(field),
+                                refetched=new_value,  # pyright: ignore [reportArgumentType]
+                                existing_objects=self.executor.existing_objects,  # type: ignore [arg-type]
+                                new_objects=self.executor.new_objects,
+                            )
+                        else:
+                            model_dict[field] = reconcile_link(
+                                existing=model_dict.get(field),
+                                refetched=new_value,
+                                existing_objects=self.executor.existing_objects,  # type: ignore [arg-type]
+                                new_objects=self.executor.new_objects,
+                            )
+
+                    elif not is_link:
+                        # could be a multi prop, could be a single prop
+                        # with an array value
+                        if shape_field.mutable:
+                            model_dict[field] = deepcopy(new_value)
+                        else:
+                            model_dict[field] = new_value
+
+            # Let's be extra cautious and help GC a bit here. `obj` can
+            # have recursive references to other objects via links and
+            # computed backlinks.
+            obj.__dict__.clear()
 
 
 @_struct
@@ -1185,8 +1264,7 @@ class SaveExecutor:
     create_batches: list[ChangeBatch]
     updates: ChangeBatch
     refetch_batch: RefetchBatch
-    graph_ids_to_model: IDTracker[GelModel, None]
-    existing_objects: dict[uuid.UUID, GelModel]
+    existing_objects: dict[uuid.UUID, GelModel | IDTracker[GelModel, None]]
     refetch: bool
     save_postcheck: bool
     warn_on_large_sync_set: bool
@@ -1218,7 +1296,6 @@ class SaveExecutor:
             self.create_batches = None  # type: ignore [assignment]
             self.updates = None  # type: ignore [assignment]
             self.refetch_batch = None  # type: ignore [assignment]
-            self.graph_ids_to_model = None  # type: ignore [assignment]
             self.new_object_ids = None  # type: ignore [assignment]
             self.new_objects = None  # type: ignore [assignment]
 
@@ -1237,13 +1314,7 @@ class SaveExecutor:
         total_refetch_obj_count = 0
 
         for tp, shape in self.refetch_batch.items():
-            spec_arg: list[
-                tuple[uuid.UUID, int, list[tuple[bool, list[uuid.UUID]]]]
-            ] = []
-
-            select_shape: list[str] = [
-                "__py_id := __obj_data.1",
-            ]
+            select_shape: list[str] = []
 
             link_arg_order: list[str] = []
 
@@ -1282,7 +1353,7 @@ class SaveExecutor:
                     select_shape.append(f"""
                         {quote_ident(ptr.name)} := {maybe_assert}(
                             with
-                                __link := __obj_data.2[{link_num}]
+                                __link := __obj_data.1[{link_num}]
                             select .{quote_ident(ptr.name)} {props}
                             filter __link.0 and (
                                 .id in array_unpack(__link.1)
@@ -1295,57 +1366,63 @@ class SaveExecutor:
                 else:
                     select_shape.append(quote_ident(ptr.name))
 
+            obj_links_all: dict[uuid.UUID, dict[str, list[uuid.UUID]]] = (
+                collections.defaultdict(dict)
+            )
             for obj in shape.models:
-                obj_links: list[tuple[bool, list[uuid.UUID]]] = []
+                link_ids = obj_links_all[obj.id]
                 for lname in link_arg_order:
-                    if lname in obj.__pydantic_fields_set__:
-                        ptr = shape.fields[lname]
-                        if ptr.cardinality.is_multi():
-                            m_link: AbstractCollection[GelModel] = model_attr(
-                                obj, lname
-                            )
-                            if ptr.computed:
-                                # m_link will be a tuple.
-                                m_iter = iter(m_link)
-                            else:
-                                # m_link will be an AbstractCollection.
-                                m_iter = m_link.unsafe_iter()
+                    if lname not in obj.__pydantic_fields_set__:
+                        # `model_attr` below this 'if' will always succeed
+                        continue
 
-                            if ptr.properties:
-                                obj_links.append(
-                                    (
-                                        True,
-                                        [
-                                            self._get_id(unwrap_proxy(sub))
-                                            for sub in m_iter
-                                        ],
-                                    )
-                                )
-                            else:
-                                obj_links.append(
-                                    (
-                                        True,
-                                        [self._get_id(sub) for sub in m_iter],
-                                    )
-                                )
+                    obj_link_ids = link_ids.get(lname)
+                    if obj_link_ids is None:
+                        link_ids[lname] = obj_link_ids = []
+
+                    ptr = shape.fields[lname]
+                    if ptr.cardinality.is_multi():
+                        m_link: AbstractCollection[GelModel] = model_attr(
+                            obj, lname
+                        )
+                        if ptr.computed:
+                            # m_link will be a tuple.
+                            m_iter = iter(m_link)
                         else:
-                            s_link: GelModel = model_attr(obj, lname)
-                            if ptr.properties:
-                                obj_links.append(
-                                    (
-                                        True,
-                                        [self._get_id(unwrap_proxy(s_link))],
-                                    )
-                                )
-                            else:
-                                obj_links.append(
-                                    (True, [self._get_id(s_link)])
-                                )
-                    else:
-                        obj_links.append((False, []))
+                            # m_link will be an AbstractCollection.
+                            m_iter = m_link.unsafe_iter()
 
-                assert not obj.__gel_new__ and obj.id
-                spec_arg.append((obj.id, id(obj), obj_links))
+                        if ptr.properties:
+                            obj_link_ids.extend(
+                                self._get_id(unwrap_proxy(sub))
+                                for sub in m_iter
+                            )
+                        else:
+                            obj_link_ids.extend(
+                                self._get_id(unwrap_proxy(sub))
+                                for sub in m_iter
+                            )
+                    else:
+                        s_link: GelModel = model_attr(obj, lname)
+                        if ptr.properties:
+                            obj_link_ids.append(
+                                self._get_id(unwrap_proxy(s_link))
+                            )
+                        else:
+                            obj_link_ids.append(self._get_id(s_link))
+
+            spec_arg = [
+                (
+                    obj_id,
+                    [
+                        (False, [])
+                        if (li := link_ids.get(lname)) is None
+                        else (True, li)
+                        for lname in link_arg_order
+                    ],
+                )
+                for obj_id, link_ids in obj_links_all.items()
+            ]
 
             tp_ql_name = tp.__gel_reflection__.name.as_quoted_schema_name()
 
@@ -1354,7 +1431,6 @@ class SaveExecutor:
                     __new := std::array_unpack(<array<std::uuid>>$new),
                     __spec := <array<tuple<
                         std::uuid,
-                        std::int64,
                         array<tuple<std::bool,array<std::uuid>>>
                     >>>$spec,
                     __existing := std::array_unpack(
@@ -1609,7 +1685,7 @@ class SaveExecutor:
 
         # Final check: make sure that the save plan is empty
         # in case we've missed something in `_check_recursive()`.
-        create_batches, updates, _, _, _ = make_plan(
+        create_batches, updates, _, _ = make_plan(
             self.objs,
             refetch=self.refetch,
             warn_on_large_sync_set=False,

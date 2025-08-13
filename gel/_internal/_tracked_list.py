@@ -30,6 +30,7 @@ from collections.abc import (
     Sequence,
 )
 
+import copy
 import functools
 
 from gel._internal import _typing_inspect
@@ -253,6 +254,23 @@ class AbstractTrackedList(
         self._added_items = None
         self._removed_items = None
         super().__init__(*args, **kwargs)
+
+    def __copy__(self, *, deep: bool = False) -> Self:
+        obj = type(self).__new__(type(self))
+
+        obj.__gel_overwrite_data__ = self.__gel_overwrite_data__
+        obj._mode = self._mode
+        obj._items = copy.deepcopy(self._items) if deep else list(self._items)
+        obj._added_items = (
+            list(self._added_items) if self._added_items else None
+        )
+        obj._removed_items = (
+            list(self._removed_items) if self._removed_items else None
+        )
+        return obj
+
+    def __deepcopy__(self, memo: dict[int, Any]) -> Self:
+        return self.__copy__(deep=True)
 
     def __gel_extend__(self, it: Iterable[_T_co]) -> None:
         self.extend(it)
