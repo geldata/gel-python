@@ -1836,3 +1836,1222 @@ class TestLinkSetModels(tb.ModelTestCase):
             {f: f.__linkprops__.opinion for f in harry.friends},
             {hermione: 'smart', ron: 'reliable'},
         )
+
+    def test_link_set_model_fresh_multi_link_add_01(self):
+        # Add existing item
+        from models import default
+
+        charms = self.client.query_required_single(
+            default.Class.filter(name='Charms').limit(1)
+        )
+        potions = self.client.query_required_single(
+            default.Class.filter(name='Potions').limit(1)
+        )
+
+        harry = default.Person(name='Harry Potter', classes=[charms, potions])
+
+        harry.classes.add(potions)
+
+        self.assertEqual(harry.classes, {charms, potions})
+        self.assertEqual(
+            reveal_type(harry.classes),
+            (
+                "gel._internal._qbmodel._abstract._link_set.LinkSet["
+                "models.default.Class"
+                "]"
+            ),
+        )
+
+    def test_link_set_model_fresh_multi_link_add_02(self):
+        # Add new item with id
+        from models import default
+
+        charms = self.client.query_required_single(
+            default.Class.filter(name='Charms').limit(1)
+        )
+        potions = self.client.query_required_single(
+            default.Class.filter(name='Potions').limit(1)
+        )
+        divination = self.client.query_required_single(
+            default.Class.filter(name='Divination').limit(1)
+        )
+
+        harry = default.Person(name='Harry Potter', classes=[charms, potions])
+
+        harry.classes.add(divination)
+
+        self.assertEqual(harry.classes, {charms, potions, divination})
+        self.assertEqual(
+            reveal_type(harry.classes),
+            (
+                "gel._internal._qbmodel._abstract._link_set.LinkSet["
+                "models.default.Class"
+                "]"
+            ),
+        )
+
+    def test_link_set_model_fresh_multi_link_add_03(self):
+        # Add new item without id
+        from models import default
+
+        charms = self.client.query_required_single(
+            default.Class.filter(name='Charms').limit(1)
+        )
+        potions = self.client.query_required_single(
+            default.Class.filter(name='Potions').limit(1)
+        )
+        herbology = default.Class(name='Herbology')
+
+        harry = default.Person(name='Harry Potter', classes=[charms, potions])
+
+        harry.classes.add(herbology)
+
+        # Compare to list, since there are unhashable items
+        self.assertEqual(harry.classes, [charms, potions, herbology])
+        self.assertEqual(
+            reveal_type(harry.classes),
+            (
+                "gel._internal._qbmodel._abstract._link_set.LinkSet["
+                "models.default.Class"
+                "]"
+            ),
+        )
+
+    def test_link_set_model_fresh_multi_link_remove_01(self):
+        # Remove existing item
+        from models import default
+
+        charms = self.client.query_required_single(
+            default.Class.filter(name='Charms').limit(1)
+        )
+        potions = self.client.query_required_single(
+            default.Class.filter(name='Potions').limit(1)
+        )
+
+        harry = default.Person(name='Harry Potter', classes=[charms, potions])
+
+        harry.classes.remove(potions)
+
+        # Compare to list, tracking indexes and sets not synchronized
+        self.assertEqual(harry.classes, [charms])
+        self.assertEqual(
+            reveal_type(harry.classes),
+            (
+                "gel._internal._qbmodel._abstract._link_set.LinkSet["
+                "models.default.Class"
+                "]"
+            ),
+        )
+
+    def test_link_set_model_fresh_multi_link_remove_02(self):
+        # Remove new item with id
+        from models import default
+
+        charms = self.client.query_required_single(
+            default.Class.filter(name='Charms').limit(1)
+        )
+        potions = self.client.query_required_single(
+            default.Class.filter(name='Potions').limit(1)
+        )
+        divination = self.client.query_required_single(
+            default.Class.filter(name='Divination').limit(1)
+        )
+
+        harry = default.Person(name='Harry Potter', classes=[charms, potions])
+
+        with self.assertRaises(KeyError):
+            harry.classes.remove(divination)
+
+        self.assertEqual(harry.classes, {charms, potions})
+        self.assertEqual(
+            reveal_type(harry.classes),
+            (
+                "gel._internal._qbmodel._abstract._link_set.LinkSet["
+                "models.default.Class"
+                "]"
+            ),
+        )
+
+    def test_link_set_model_fresh_multi_link_remove_03(self):
+        # Remove new item without id
+        from models import default
+
+        charms = self.client.query_required_single(
+            default.Class.filter(name='Charms').limit(1)
+        )
+        potions = self.client.query_required_single(
+            default.Class.filter(name='Potions').limit(1)
+        )
+        herbology = default.Class(name='Herbology')
+
+        harry = default.Person(name='Harry Potter', classes=[charms, potions])
+
+        with self.assertRaises(KeyError):
+            harry.classes.remove(herbology)
+
+        self.assertEqual(harry.classes, {charms, potions})
+        self.assertEqual(
+            reveal_type(harry.classes),
+            (
+                "gel._internal._qbmodel._abstract._link_set.LinkSet["
+                "models.default.Class"
+                "]"
+            ),
+        )
+
+    def test_link_set_model_fresh_multi_link_discard_01(self):
+        # Discard existing item
+        from models import default
+
+        charms = self.client.query_required_single(
+            default.Class.filter(name='Charms').limit(1)
+        )
+        potions = self.client.query_required_single(
+            default.Class.filter(name='Potions').limit(1)
+        )
+
+        harry = default.Person(name='Harry Potter', classes=[charms, potions])
+
+        harry.classes.discard(potions)
+
+        # Compare to list, tracking indexes and sets not synchronized
+        self.assertEqual(harry.classes, [charms])
+        self.assertEqual(
+            reveal_type(harry.classes),
+            (
+                "gel._internal._qbmodel._abstract._link_set.LinkSet["
+                "models.default.Class"
+                "]"
+            ),
+        )
+
+    def test_link_set_model_fresh_multi_link_discard_02(self):
+        # Discard new item with id
+        from models import default
+
+        charms = self.client.query_required_single(
+            default.Class.filter(name='Charms').limit(1)
+        )
+        potions = self.client.query_required_single(
+            default.Class.filter(name='Potions').limit(1)
+        )
+        divination = self.client.query_required_single(
+            default.Class.filter(name='Divination').limit(1)
+        )
+
+        harry = default.Person(name='Harry Potter', classes=[charms, potions])
+
+        harry.classes.discard(divination)
+
+        self.assertEqual(harry.classes, {charms, potions})
+        self.assertEqual(
+            reveal_type(harry.classes),
+            (
+                "gel._internal._qbmodel._abstract._link_set.LinkSet["
+                "models.default.Class"
+                "]"
+            ),
+        )
+
+    def test_link_set_model_fresh_multi_link_discard_03(self):
+        # Discard new item without id
+        from models import default
+
+        charms = self.client.query_required_single(
+            default.Class.filter(name='Charms').limit(1)
+        )
+        potions = self.client.query_required_single(
+            default.Class.filter(name='Potions').limit(1)
+        )
+        herbology = default.Class(name='Herbology')
+
+        harry = default.Person(name='Harry Potter', classes=[charms, potions])
+
+        harry.classes.discard(herbology)
+
+        self.assertEqual(harry.classes, {charms, potions})
+        self.assertEqual(
+            reveal_type(harry.classes),
+            (
+                "gel._internal._qbmodel._abstract._link_set.LinkSet["
+                "models.default.Class"
+                "]"
+            ),
+        )
+
+    def test_link_set_model_fresh_multi_link_clear_01(self):
+        # Clear existing items
+        from models import default
+
+        charms = self.client.query_required_single(
+            default.Class.filter(name='Charms').limit(1)
+        )
+        potions = self.client.query_required_single(
+            default.Class.filter(name='Potions').limit(1)
+        )
+
+        harry = default.Person(name='Harry Potter', classes=[charms, potions])
+
+        harry.classes.clear()
+
+        self.assertEqual(harry.classes, set())
+        self.assertEqual(
+            reveal_type(harry.classes),
+            (
+                "gel._internal._qbmodel._abstract._link_set.LinkSet["
+                "models.default.Class"
+                "]"
+            ),
+        )
+
+    def test_link_set_model_fresh_multi_link_update_01(self):
+        # Update existing item
+        from models import default
+
+        charms = self.client.query_required_single(
+            default.Class.filter(name='Charms').limit(1)
+        )
+        potions = self.client.query_required_single(
+            default.Class.filter(name='Potions').limit(1)
+        )
+
+        harry = default.Person(name='Harry Potter', classes=[charms, potions])
+
+        harry.classes.update([potions])
+
+        self.assertEqual(harry.classes, {charms, potions})
+        self.assertEqual(
+            reveal_type(harry.classes),
+            (
+                "gel._internal._qbmodel._abstract._link_set.LinkSet["
+                "models.default.Class"
+                "]"
+            ),
+        )
+
+    def test_link_set_model_fresh_multi_link_update_02(self):
+        # Update new item with id
+        from models import default
+
+        charms = self.client.query_required_single(
+            default.Class.filter(name='Charms').limit(1)
+        )
+        potions = self.client.query_required_single(
+            default.Class.filter(name='Potions').limit(1)
+        )
+        divination = self.client.query_required_single(
+            default.Class.filter(name='Divination').limit(1)
+        )
+
+        harry = default.Person(name='Harry Potter', classes=[charms, potions])
+
+        harry.classes.update([divination])
+
+        self.assertEqual(harry.classes, {charms, potions, divination})
+        self.assertEqual(
+            reveal_type(harry.classes),
+            (
+                "gel._internal._qbmodel._abstract._link_set.LinkSet["
+                "models.default.Class"
+                "]"
+            ),
+        )
+
+    def test_link_set_model_fresh_multi_link_update_03(self):
+        # Update new item without id
+        from models import default
+
+        charms = self.client.query_required_single(
+            default.Class.filter(name='Charms').limit(1)
+        )
+        potions = self.client.query_required_single(
+            default.Class.filter(name='Potions').limit(1)
+        )
+        herbology = default.Class(name='Herbology')
+
+        harry = default.Person(name='Harry Potter', classes=[charms, potions])
+
+        harry.classes.update([herbology])
+
+        # Compare to list, since there are unhashable items
+        self.assertEqual(harry.classes, [charms, potions, herbology])
+        self.assertEqual(
+            reveal_type(harry.classes),
+            (
+                "gel._internal._qbmodel._abstract._link_set.LinkSet["
+                "models.default.Class"
+                "]"
+            ),
+        )
+
+    @tb.xfail  # mypy seems to be checking + instead of +=
+    def test_link_set_model_fresh_multi_link_op_iadd_01(self):
+        # Operator iadd existing item
+        from models import default
+
+        charms = self.client.query_required_single(
+            default.Class.filter(name='Charms').limit(1)
+        )
+        potions = self.client.query_required_single(
+            default.Class.filter(name='Potions').limit(1)
+        )
+
+        harry = default.Person(name='Harry Potter', classes=[charms, potions])
+
+        harry.classes += [potions]
+
+        self.assertEqual(harry.classes, {charms, potions})
+        self.assertEqual(
+            reveal_type(harry.classes),
+            (
+                "gel._internal._qbmodel._abstract._link_set.LinkSet["
+                "models.default.Class"
+                "]"
+            ),
+        )
+
+    @tb.xfail  # mypy seems to be checking + instead of +=
+    def test_link_set_model_fresh_multi_link_op_iadd_02(self):
+        # Operator iadd new item with id
+        from models import default
+
+        charms = self.client.query_required_single(
+            default.Class.filter(name='Charms').limit(1)
+        )
+        potions = self.client.query_required_single(
+            default.Class.filter(name='Potions').limit(1)
+        )
+        divination = self.client.query_required_single(
+            default.Class.filter(name='Divination').limit(1)
+        )
+
+        harry = default.Person(name='Harry Potter', classes=[charms, potions])
+
+        harry.classes += [divination]
+
+        self.assertEqual(harry.classes, {charms, potions, divination})
+        self.assertEqual(
+            reveal_type(harry.classes),
+            (
+                "gel._internal._qbmodel._abstract._link_set.LinkSet["
+                "models.default.Class"
+                "]"
+            ),
+        )
+
+    @tb.xfail  # mypy seems to be checking + instead of +=
+    def test_link_set_model_fresh_multi_link_op_iadd_03(self):
+        # Operator iadd new item without id
+        from models import default
+
+        charms = self.client.query_required_single(
+            default.Class.filter(name='Charms').limit(1)
+        )
+        potions = self.client.query_required_single(
+            default.Class.filter(name='Potions').limit(1)
+        )
+        herbology = default.Class(name='Herbology')
+
+        harry = default.Person(name='Harry Potter', classes=[charms, potions])
+
+        harry.classes += [herbology]
+
+        # Compare to list, since there are unhashable items
+        self.assertEqual(harry.classes, [charms, potions, herbology])
+        self.assertEqual(
+            reveal_type(harry.classes),
+            (
+                "gel._internal._qbmodel._abstract._link_set.LinkSet["
+                "models.default.Class"
+                "]"
+            ),
+        )
+
+    @tb.xfail  # mypy seems to be checking - instead of -=
+    def test_link_set_model_fresh_multi_link_op_isub_01(self):
+        # Operator isub existing item
+        from models import default
+
+        charms = self.client.query_required_single(
+            default.Class.filter(name='Charms').limit(1)
+        )
+        potions = self.client.query_required_single(
+            default.Class.filter(name='Potions').limit(1)
+        )
+
+        harry = default.Person(name='Harry Potter', classes=[charms, potions])
+
+        harry.classes -= [potions]
+
+        self.assertEqual(harry.classes, {charms})
+        self.assertEqual(
+            reveal_type(harry.classes),
+            (
+                "gel._internal._qbmodel._abstract._link_set.LinkSet["
+                "models.default.Class"
+                "]"
+            ),
+        )
+
+    @tb.xfail  # mypy seems to be checking - instead of -=
+    def test_link_set_model_fresh_multi_link_op_isub_02(self):
+        # Operator isub new item with id
+        from models import default
+
+        charms = self.client.query_required_single(
+            default.Class.filter(name='Charms').limit(1)
+        )
+        potions = self.client.query_required_single(
+            default.Class.filter(name='Potions').limit(1)
+        )
+        divination = self.client.query_required_single(
+            default.Class.filter(name='Divination').limit(1)
+        )
+
+        harry = default.Person(name='Harry Potter', classes=[charms, potions])
+
+        harry.classes -= [divination]
+
+        self.assertEqual(harry.classes, {charms, potions})
+        self.assertEqual(
+            reveal_type(harry.classes),
+            (
+                "gel._internal._qbmodel._abstract._link_set.LinkSet["
+                "models.default.Class"
+                "]"
+            ),
+        )
+
+    def test_link_set_model_fresh_multi_link_with_props_add_01(self):
+        # Add existing item
+        from models import default
+
+        hermione = self.client.query_required_single(
+            default.Person.filter(name='Hermione Granger').limit(1)
+        )
+        ron = self.client.query_required_single(
+            default.Person.filter(name='Ron Weasley').limit(1)
+        )
+
+        harry = default.Person(
+            name='Harry Potter',
+            friends=[
+                default.Person.friends.link(hermione, opinion='smart'),
+                default.Person.friends.link(ron, opinion='reliable'),
+            ],
+        )
+
+        harry.friends.add(ron)
+
+        self.assertEqual(harry.friends, {hermione, ron})
+        self.assertEqual(
+            reveal_type(harry.friends),
+            (
+                "gel._internal._qbmodel._abstract._link_set.LinkWithPropsSet["
+                "models.__shapes__.default.Person.__links__.friends, "
+                "models.default.Person"
+                "]"
+            ),
+        )
+        self.assertEqual(
+            {f: f.__linkprops__.opinion for f in harry.friends},
+            {hermione: 'smart', ron: 'reliable'},
+        )
+
+    def test_link_set_model_fresh_multi_link_with_props_add_02(self):
+        # Add new item with id
+        from models import default
+
+        hermione = self.client.query_required_single(
+            default.Person.filter(name='Hermione Granger').limit(1)
+        )
+        ron = self.client.query_required_single(
+            default.Person.filter(name='Ron Weasley').limit(1)
+        )
+        neville = self.client.query_required_single(
+            default.Person.filter(name='Neville Longbottom').limit(1)
+        )
+
+        harry = default.Person(
+            name='Harry Potter',
+            friends=[
+                default.Person.friends.link(hermione, opinion='smart'),
+                default.Person.friends.link(ron, opinion='reliable'),
+            ],
+        )
+
+        harry.friends.add(neville)
+
+        self.assertEqual(harry.friends, {hermione, ron, neville})
+        self.assertEqual(
+            reveal_type(harry.friends),
+            (
+                "gel._internal._qbmodel._abstract._link_set.LinkWithPropsSet["
+                "models.__shapes__.default.Person.__links__.friends, "
+                "models.default.Person"
+                "]"
+            ),
+        )
+        self.assertEqual(
+            {
+                f: (
+                    f.__linkprops__.opinion
+                    if hasattr(f.__linkprops__, 'opinion') else
+                    None
+                )
+                for f in harry.friends
+            },
+            {hermione: 'smart', ron: 'reliable', neville: None},
+        )
+
+    def test_link_set_model_fresh_multi_link_with_props_add_03(self):
+        # Add new item without id
+        from models import default
+
+        hermione = self.client.query_required_single(
+            default.Person.filter(name='Hermione Granger').limit(1)
+        )
+        ron = self.client.query_required_single(
+            default.Person.filter(name='Ron Weasley').limit(1)
+        )
+        luna = default.Person(name='Luna Lovegood')
+
+        harry = default.Person(
+            name='Harry Potter',
+            friends=[
+                default.Person.friends.link(hermione, opinion='smart'),
+                default.Person.friends.link(ron, opinion='reliable'),
+            ],
+        )
+
+        harry.friends.add(luna)
+
+        # Compare to list, since there are unhashable items
+        self.assertEqual(harry.friends, [hermione, ron, luna])
+        self.assertEqual(
+            reveal_type(harry.friends),
+            (
+                "gel._internal._qbmodel._abstract._link_set.LinkWithPropsSet["
+                "models.__shapes__.default.Person.__links__.friends, "
+                "models.default.Person"
+                "]"
+            ),
+        )
+        self.assertEqual(
+            {
+                f.name: (
+                    f.__linkprops__.opinion
+                    if hasattr(f.__linkprops__, 'opinion') else
+                    None
+                )
+                for f in harry.friends
+            },
+            {
+                'Hermione Granger': 'smart',
+                'Ron Weasley': 'reliable',
+                'Luna Lovegood': None,
+            },
+        )
+
+    def test_link_set_model_fresh_multi_link_with_props_remove_01(self):
+        # Remove existing item
+        from models import default
+
+        hermione = self.client.query_required_single(
+            default.Person.filter(name='Hermione Granger').limit(1)
+        )
+        ron = self.client.query_required_single(
+            default.Person.filter(name='Ron Weasley').limit(1)
+        )
+
+        harry = default.Person(
+            name='Harry Potter',
+            friends=[
+                default.Person.friends.link(hermione, opinion='smart'),
+                default.Person.friends.link(ron, opinion='reliable'),
+            ],
+        )
+
+        harry.friends.remove(ron)
+
+        # Compare to list, tracking indexes and sets not synchronized
+        self.assertEqual(harry.friends, [hermione])
+        self.assertEqual(
+            reveal_type(harry.friends),
+            (
+                "gel._internal._qbmodel._abstract._link_set.LinkWithPropsSet["
+                "models.__shapes__.default.Person.__links__.friends, "
+                "models.default.Person"
+                "]"
+            ),
+        )
+        self.assertEqual(
+            {f: f.__linkprops__.opinion for f in harry.friends},
+            {hermione: 'smart'},
+        )
+
+    def test_link_set_model_fresh_multi_link_with_props_remove_02(self):
+        # Remove new item with id
+        from models import default
+
+        hermione = self.client.query_required_single(
+            default.Person.filter(name='Hermione Granger').limit(1)
+        )
+        ron = self.client.query_required_single(
+            default.Person.filter(name='Ron Weasley').limit(1)
+        )
+        neville = self.client.query_required_single(
+            default.Person.filter(name='Neville Longbottom').limit(1)
+        )
+
+        harry = default.Person(
+            name='Harry Potter',
+            friends=[
+                default.Person.friends.link(hermione, opinion='smart'),
+                default.Person.friends.link(ron, opinion='reliable'),
+            ],
+        )
+
+        with self.assertRaises(KeyError):
+            harry.friends.remove(neville)
+
+        self.assertEqual(harry.friends, {hermione, ron})
+        self.assertEqual(
+            reveal_type(harry.friends),
+            (
+                "gel._internal._qbmodel._abstract._link_set.LinkWithPropsSet["
+                "models.__shapes__.default.Person.__links__.friends, "
+                "models.default.Person"
+                "]"
+            ),
+        )
+        self.assertEqual(
+            {f: f.__linkprops__.opinion for f in harry.friends},
+            {hermione: 'smart', ron: 'reliable'},
+        )
+
+    def test_link_set_model_fresh_multi_link_with_props_remove_03(self):
+        # Remove new item without id
+        from models import default
+
+        hermione = self.client.query_required_single(
+            default.Person.filter(name='Hermione Granger').limit(1)
+        )
+        ron = self.client.query_required_single(
+            default.Person.filter(name='Ron Weasley').limit(1)
+        )
+        luna = default.Person(name='Luna Lovegood')
+
+        harry = default.Person(
+            name='Harry Potter',
+            friends=[
+                default.Person.friends.link(hermione, opinion='smart'),
+                default.Person.friends.link(ron, opinion='reliable'),
+            ],
+        )
+
+        with self.assertRaises(KeyError):
+            harry.friends.remove(luna)
+
+        self.assertEqual(harry.friends, {hermione, ron})
+        self.assertEqual(
+            reveal_type(harry.friends),
+            (
+                "gel._internal._qbmodel._abstract._link_set.LinkWithPropsSet["
+                "models.__shapes__.default.Person.__links__.friends, "
+                "models.default.Person"
+                "]"
+            ),
+        )
+        self.assertEqual(
+            {f: f.__linkprops__.opinion for f in harry.friends},
+            {hermione: 'smart', ron: 'reliable'},
+        )
+
+    def test_link_set_model_fresh_multi_link_with_props_discard_01(self):
+        # Discard existing item
+        from models import default
+
+        hermione = self.client.query_required_single(
+            default.Person.filter(name='Hermione Granger').limit(1)
+        )
+        ron = self.client.query_required_single(
+            default.Person.filter(name='Ron Weasley').limit(1)
+        )
+
+        harry = default.Person(
+            name='Harry Potter',
+            friends=[
+                default.Person.friends.link(hermione, opinion='smart'),
+                default.Person.friends.link(ron, opinion='reliable'),
+            ],
+        )
+
+        harry.friends.discard(ron)
+
+        # Compare to list, tracking indexes and sets not synchronized
+        self.assertEqual(harry.friends, [hermione])
+        self.assertEqual(
+            reveal_type(harry.friends),
+            (
+                "gel._internal._qbmodel._abstract._link_set.LinkWithPropsSet["
+                "models.__shapes__.default.Person.__links__.friends, "
+                "models.default.Person"
+                "]"
+            ),
+        )
+        self.assertEqual(
+            {f: f.__linkprops__.opinion for f in harry.friends},
+            {hermione: 'smart'},
+        )
+
+    def test_link_set_model_fresh_multi_link_with_props_discard_02(self):
+        # Discard new item with id
+        from models import default
+
+        hermione = self.client.query_required_single(
+            default.Person.filter(name='Hermione Granger').limit(1)
+        )
+        ron = self.client.query_required_single(
+            default.Person.filter(name='Ron Weasley').limit(1)
+        )
+        neville = self.client.query_required_single(
+            default.Person.filter(name='Neville Longbottom').limit(1)
+        )
+
+        harry = default.Person(
+            name='Harry Potter',
+            friends=[
+                default.Person.friends.link(hermione, opinion='smart'),
+                default.Person.friends.link(ron, opinion='reliable'),
+            ],
+        )
+
+        harry.friends.discard(neville)
+
+        self.assertEqual(harry.friends, {hermione, ron})
+        self.assertEqual(
+            reveal_type(harry.friends),
+            (
+                "gel._internal._qbmodel._abstract._link_set.LinkWithPropsSet["
+                "models.__shapes__.default.Person.__links__.friends, "
+                "models.default.Person"
+                "]"
+            ),
+        )
+        self.assertEqual(
+            {f: f.__linkprops__.opinion for f in harry.friends},
+            {hermione: 'smart', ron: 'reliable'},
+        )
+
+    def test_link_set_model_fresh_multi_link_with_props_discard_03(self):
+        # Discard new item without id
+        from models import default
+
+        hermione = self.client.query_required_single(
+            default.Person.filter(name='Hermione Granger').limit(1)
+        )
+        ron = self.client.query_required_single(
+            default.Person.filter(name='Ron Weasley').limit(1)
+        )
+        luna = default.Person(name='Luna Lovegood')
+
+        harry = default.Person(
+            name='Harry Potter',
+            friends=[
+                default.Person.friends.link(hermione, opinion='smart'),
+                default.Person.friends.link(ron, opinion='reliable'),
+            ],
+        )
+
+        harry.friends.discard(luna)
+
+        self.assertEqual(harry.friends, {hermione, ron})
+        self.assertEqual(
+            reveal_type(harry.friends),
+            (
+                "gel._internal._qbmodel._abstract._link_set.LinkWithPropsSet["
+                "models.__shapes__.default.Person.__links__.friends, "
+                "models.default.Person"
+                "]"
+            ),
+        )
+        self.assertEqual(
+            {f: f.__linkprops__.opinion for f in harry.friends},
+            {hermione: 'smart', ron: 'reliable'},
+        )
+
+    def test_link_set_model_fresh_multi_link_with_props_clear_01(self):
+        # Clear existing items
+        from models import default
+
+        hermione = self.client.query_required_single(
+            default.Person.filter(name='Hermione Granger').limit(1)
+        )
+        ron = self.client.query_required_single(
+            default.Person.filter(name='Ron Weasley').limit(1)
+        )
+
+        harry = default.Person(
+            name='Harry Potter',
+            friends=[
+                default.Person.friends.link(hermione, opinion='smart'),
+                default.Person.friends.link(ron, opinion='reliable'),
+            ],
+        )
+
+        harry.friends.clear()
+
+        self.assertEqual(harry.friends, set())
+        self.assertEqual(
+            reveal_type(harry.friends),
+            (
+                "gel._internal._qbmodel._abstract._link_set.LinkWithPropsSet["
+                "models.__shapes__.default.Person.__links__.friends, "
+                "models.default.Person"
+                "]"
+            ),
+        )
+        self.assertEqual(
+            {f: f.__linkprops__.opinion for f in harry.friends},
+            {},
+        )
+
+    def test_link_set_model_fresh_multi_link_with_props_update_01(self):
+        # Update existing item
+        from models import default
+
+        hermione = self.client.query_required_single(
+            default.Person.filter(name='Hermione Granger').limit(1)
+        )
+        ron = self.client.query_required_single(
+            default.Person.filter(name='Ron Weasley').limit(1)
+        )
+
+        harry = default.Person(
+            name='Harry Potter',
+            friends=[
+                default.Person.friends.link(hermione, opinion='smart'),
+                default.Person.friends.link(ron, opinion='reliable'),
+            ],
+        )
+
+        harry.friends.update([ron])
+
+        self.assertEqual(harry.friends, {hermione, ron})
+        self.assertEqual(
+            reveal_type(harry.friends),
+            (
+                "gel._internal._qbmodel._abstract._link_set.LinkWithPropsSet["
+                "models.__shapes__.default.Person.__links__.friends, "
+                "models.default.Person"
+                "]"
+            ),
+        )
+        self.assertEqual(
+            {f: f.__linkprops__.opinion for f in harry.friends},
+            {hermione: 'smart', ron: 'reliable'},
+        )
+
+    def test_link_set_model_fresh_multi_link_with_props_update_02(self):
+        # Update new item with id
+        from models import default
+
+        hermione = self.client.query_required_single(
+            default.Person.filter(name='Hermione Granger').limit(1)
+        )
+        ron = self.client.query_required_single(
+            default.Person.filter(name='Ron Weasley').limit(1)
+        )
+        neville = self.client.query_required_single(
+            default.Person.filter(name='Neville Longbottom').limit(1)
+        )
+
+        harry = default.Person(
+            name='Harry Potter',
+            friends=[
+                default.Person.friends.link(hermione, opinion='smart'),
+                default.Person.friends.link(ron, opinion='reliable'),
+            ],
+        )
+
+        harry.friends.update([neville])
+
+        self.assertEqual(harry.friends, {hermione, ron, neville})
+        self.assertEqual(
+            reveal_type(harry.friends),
+            (
+                "gel._internal._qbmodel._abstract._link_set.LinkWithPropsSet["
+                "models.__shapes__.default.Person.__links__.friends, "
+                "models.default.Person"
+                "]"
+            ),
+        )
+        self.assertEqual(
+            {
+                f: (
+                    f.__linkprops__.opinion
+                    if hasattr(f.__linkprops__, 'opinion') else
+                    None
+                )
+                for f in harry.friends
+            },
+            {hermione: 'smart', ron: 'reliable', neville: None},
+        )
+
+    def test_link_set_model_fresh_multi_link_with_props_update_03(self):
+        # Update new item without id
+        from models import default
+
+        hermione = self.client.query_required_single(
+            default.Person.filter(name='Hermione Granger').limit(1)
+        )
+        ron = self.client.query_required_single(
+            default.Person.filter(name='Ron Weasley').limit(1)
+        )
+        luna = default.Person(name='Luna Lovegood')
+
+        harry = default.Person(
+            name='Harry Potter',
+            friends=[
+                default.Person.friends.link(hermione, opinion='smart'),
+                default.Person.friends.link(ron, opinion='reliable'),
+            ],
+        )
+
+        harry.friends.update([luna])
+
+        # Compare to list, since there are unhashable items
+        self.assertEqual(harry.friends, [hermione, ron, luna])
+        self.assertEqual(
+            reveal_type(harry.friends),
+            (
+                "gel._internal._qbmodel._abstract._link_set.LinkWithPropsSet["
+                "models.__shapes__.default.Person.__links__.friends, "
+                "models.default.Person"
+                "]"
+            ),
+        )
+        self.assertEqual(
+            {
+                f.name: (
+                    f.__linkprops__.opinion
+                    if hasattr(f.__linkprops__, 'opinion') else
+                    None
+                )
+                for f in harry.friends
+            },
+            {
+                'Hermione Granger': 'smart',
+                'Ron Weasley': 'reliable',
+                'Luna Lovegood': None,
+            },
+        )
+
+    def test_link_set_model_fresh_multi_link_with_props_op_iadd_01(self):
+        # Operator iadd existing item
+        from models import default
+
+        hermione = self.client.query_required_single(
+            default.Person.filter(name='Hermione Granger').limit(1)
+        )
+        ron = self.client.query_required_single(
+            default.Person.filter(name='Ron Weasley').limit(1)
+        )
+
+        harry = default.Person(
+            name='Harry Potter',
+            friends=[
+                default.Person.friends.link(hermione, opinion='smart'),
+                default.Person.friends.link(ron, opinion='reliable'),
+            ],
+        )
+
+        harry.friends += [ron]
+
+        self.assertEqual(harry.friends, {hermione, ron})
+        self.assertEqual(
+            reveal_type(harry.friends),
+            (
+                "gel._internal._qbmodel._abstract._link_set.LinkWithPropsSet["
+                "models.__shapes__.default.Person.__links__.friends, "
+                "models.default.Person"
+                "]"
+            ),
+        )
+        self.assertEqual(
+            {f: f.__linkprops__.opinion for f in harry.friends},
+            {hermione: 'smart', ron: 'reliable'},
+        )
+
+    def test_link_set_model_fresh_multi_link_with_props_op_iadd_02(self):
+        # Operator iadd new item with id
+        from models import default
+
+        hermione = self.client.query_required_single(
+            default.Person.filter(name='Hermione Granger').limit(1)
+        )
+        ron = self.client.query_required_single(
+            default.Person.filter(name='Ron Weasley').limit(1)
+        )
+        neville = self.client.query_required_single(
+            default.Person.filter(name='Neville Longbottom').limit(1)
+        )
+
+        harry = default.Person(
+            name='Harry Potter',
+            friends=[
+                default.Person.friends.link(hermione, opinion='smart'),
+                default.Person.friends.link(ron, opinion='reliable'),
+            ],
+        )
+
+        harry.friends += [neville]
+
+        self.assertEqual(harry.friends, {hermione, ron, neville})
+        self.assertEqual(
+            reveal_type(harry.friends),
+            (
+                "gel._internal._qbmodel._abstract._link_set.LinkWithPropsSet["
+                "models.__shapes__.default.Person.__links__.friends, "
+                "models.default.Person"
+                "]"
+            ),
+        )
+        self.assertEqual(
+            {
+                f: (
+                    f.__linkprops__.opinion
+                    if hasattr(f.__linkprops__, 'opinion') else
+                    None
+                )
+                for f in harry.friends
+            },
+            {hermione: 'smart', ron: 'reliable', neville: None},
+        )
+
+    def test_link_set_model_fresh_multi_link_with_props_op_iadd_03(self):
+        # Operator iadd new item without id
+        from models import default
+
+        hermione = self.client.query_required_single(
+            default.Person.filter(name='Hermione Granger').limit(1)
+        )
+        ron = self.client.query_required_single(
+            default.Person.filter(name='Ron Weasley').limit(1)
+        )
+        luna = default.Person(name='Luna Lovegood')
+
+        harry = default.Person(
+            name='Harry Potter',
+            friends=[
+                default.Person.friends.link(hermione, opinion='smart'),
+                default.Person.friends.link(ron, opinion='reliable'),
+            ],
+        )
+
+        harry.friends += [luna]
+
+        # Compare to list, since there are unhashable items
+        self.assertEqual(harry.friends, [hermione, ron, luna])
+        self.assertEqual(
+            reveal_type(harry.friends),
+            (
+                "gel._internal._qbmodel._abstract._link_set.LinkWithPropsSet["
+                "models.__shapes__.default.Person.__links__.friends, "
+                "models.default.Person"
+                "]"
+            ),
+        )
+        self.assertEqual(
+            {
+                f.name: (
+                    f.__linkprops__.opinion
+                    if hasattr(f.__linkprops__, 'opinion') else
+                    None
+                )
+                for f in harry.friends
+            },
+            {
+                'Hermione Granger': 'smart',
+                'Ron Weasley': 'reliable',
+                'Luna Lovegood': None,
+            },
+        )
+
+    @tb.xfail  # mypy seems to be checking - instead of -=
+    def test_link_set_model_fresh_multi_link_with_props_op_isub_01(self):
+        # Operator isub existing item
+        from models import default
+
+        hermione = self.client.query_required_single(
+            default.Person.filter(name='Hermione Granger').limit(1)
+        )
+        ron = self.client.query_required_single(
+            default.Person.filter(name='Ron Weasley').limit(1)
+        )
+
+        harry = default.Person(
+            name='Harry Potter',
+            friends=[
+                default.Person.friends.link(hermione, opinion='smart'),
+                default.Person.friends.link(ron, opinion='reliable'),
+            ],
+        )
+
+        harry.friends -= [ron]
+
+        self.assertEqual(harry.friends, {hermione})
+        self.assertEqual(
+            reveal_type(harry.friends),
+            (
+                "gel._internal._qbmodel._abstract._link_set.LinkWithPropsSet["
+                "models.__shapes__.default.Person.__links__.friends, "
+                "models.default.Person"
+                "]"
+            ),
+        )
+        self.assertEqual(
+            {f: f.__linkprops__.opinion for f in harry.friends},
+            {hermione: 'smart'},
+        )
+
+    @tb.xfail  # mypy seems to be checking - instead of -=
+    def test_link_set_model_fresh_multi_link_with_props_op_isub_02(self):
+        # Operator isub new item with id
+        from models import default
+
+        hermione = self.client.query_required_single(
+            default.Person.filter(name='Hermione Granger').limit(1)
+        )
+        ron = self.client.query_required_single(
+            default.Person.filter(name='Ron Weasley').limit(1)
+        )
+        neville = self.client.query_required_single(
+            default.Person.filter(name='Neville Longbottom').limit(1)
+        )
+
+        harry = default.Person(
+            name='Harry Potter',
+            friends=[
+                default.Person.friends.link(hermione, opinion='smart'),
+                default.Person.friends.link(ron, opinion='reliable'),
+            ],
+        )
+
+        harry.friends -= [neville]
+
+        self.assertEqual(harry.friends, {hermione, ron})
+        self.assertEqual(
+            reveal_type(harry.friends),
+            (
+                "gel._internal._qbmodel._abstract._link_set.LinkWithPropsSet["
+                "models.__shapes__.default.Person.__links__.friends, "
+                "models.default.Person"
+                "]"
+            ),
+        )
+        self.assertEqual(
+            {f: f.__linkprops__.opinion for f in harry.friends},
+            {hermione: 'smart', ron: 'reliable'},
+        )
