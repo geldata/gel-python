@@ -3622,7 +3622,7 @@ class TestModelGenerator(tb.ModelTestCase):
         # Test that sync() updates all objects with the same .id to have
         # the same data in them.
 
-        from models import default
+        from models.orm import default
 
         elsa1 = self.client.get(
             default.User.select(name=True).filter(lambda u: u.name == "Elsa"),

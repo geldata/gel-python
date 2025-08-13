@@ -41,7 +41,7 @@ class TestAsyncModelGenerator(tb.AsyncModelTestCase):
         )
 
         self.assertIn(
-            "ComputedLinkSet[models.default.UserGroup]",
+            "ComputedLinkSet[models.orm.default.UserGroup]",
             reveal_type(alice.groups),
         )
 
