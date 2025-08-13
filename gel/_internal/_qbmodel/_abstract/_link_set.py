@@ -21,51 +21,45 @@ from gel._internal._tracked_list import (
     requires_read,
 )
 
-from ._base import AbstractGelSourceModel, AbstractGelModel
+from ._base import AbstractGelModel
 from ._descriptors import AbstractGelProxyModel, proxy_link
 
 if TYPE_CHECKING:
+    import uuid
     from pathlib import Path
     from collections.abc import Iterator
-    from ._base import AbstractGelSourceModel
+    from typing_extensions import Self
 
 
 ll_getattr = object.__getattribute__
 
 
-_MT_co = TypeVar("_MT_co", bound="AbstractGelSourceModel", covariant=True)
+_MT_co = TypeVar("_MT_co", bound="AbstractGelModel", covariant=True)
+
 _ADL_co = TypeVar("_ADL_co", bound=AbstractCollection[Any], covariant=True)
+
+_BMT_co = TypeVar("_BMT_co", bound=AbstractGelModel, covariant=True)
+"""Base model type"""
+
+_PT_co = TypeVar(
+    "_PT_co",
+    bound=AbstractGelProxyModel[AbstractGelModel, AbstractGelLinkModel],
+    covariant=True,
+)
+"""Proxy model"""
 
 
 class AbstractLinkSet(  # noqa: PLW1641 (__hash__ is implemented)
     AbstractCollection[_MT_co],
     Collection[_MT_co],
 ):
-    """A mutable, ordered set-like list that enforces element-type covariance
-    at runtime and maintains distinctness of elements in insertion order using
-
-    There are some differences between LinkSet and normal Python set:
-
-    - LinkSet is ordered
-    - LinkSet does not have the `pop()` method and other non-sensical
-      methods for persisted database objects
-    - LinkSet can be compared to a list (see the __eq__ comments)
-    - LinkSet supports `+=` and `-=` operators to mimic EdgeQL a list and set.
-    """
+    """A read-only, ordered set-like list"""
 
     __slots__ = (
         "_index_snapshot",
         "_tracking_index",
         "_tracking_set",
     )
-
-    _allowed_write_only_ops: ClassVar[list[str]] = [
-        ".add()",
-        ".discard()",
-        ".update()",
-        "+=",
-        "-=",
-    ]
 
     # Set of (hashable) items to maintain distinctness.
     _tracking_set: dict[_MT_co, _MT_co] | None
@@ -80,11 +74,505 @@ class AbstractLinkSet(  # noqa: PLW1641 (__hash__ is implemented)
         self._index_snapshot = None
         super().__init__(*args, **kwargs)
 
+    def __gel_reconcile__(
+        self,
+        updated: AbstractLinkSet[_MT_co],
+        existing_objects: dict[uuid.UUID, AbstractGelModel],
+        new_objects: dict[uuid.UUID, AbstractGelModel],
+    ) -> Self:
+        raise NotImplementedError
+
+    @requires_read("use `in` operator on")
+    def __contains__(self, item: object) -> bool:
+        if isinstance(item, AbstractGelProxyModel):
+            item = item.without_linkprops()
+        if not isinstance(item, type(self).type):
+            return False
+        return self._is_tracked(item)
+
+    def _track_item(self, item: _MT_co) -> None:  # type: ignore [misc]
+        assert self._tracking_set is not None
+        if not item.__gel_new__:
+            self._tracking_set[item] = item
+
+        assert self._tracking_index is not None
+        self._tracking_index[self._pyid(item)] = item
+
+    def _is_tracked(self, item: _MT_co) -> bool:  # type: ignore [misc]
+        self._init_tracking()
+
+        assert self._tracking_index is not None
+        if self._pyid(item) in self._tracking_index:
+            # Fast path
+            return True
+
+        # The item is not in the index, but it might have an equal
+        # one in the tracking set.
+        assert self._tracking_set is not None
+        if not item.__gel_new__:
+            return item in self._tracking_set
+
+        return False
+
+    def _reconcile(
+        self,
+        updated: AbstractLinkSet[_MT_co],
+        existing_objects: dict[uuid.UUID, AbstractGelModel],
+        new_objects: dict[uuid.UUID, AbstractGelModel],
+        *,
+        is_computed: bool,
+    ) -> list[_MT_co]:
+        raise NotImplementedError
+
+    def _init_tracking(self) -> None:
+        if self._tracking_set is None:
+            # Why is `set(self._items)` OK? `self._items` can be
+            # in one of two states:
+            #
+            #  - have 0 elements -- new collection
+            #  - have non-zero elements -- existing collection
+            #    loaded from database (we trust its contents)
+            #    *before any mutations*.
+            #
+            # So it's either no elements or all elements are hashable
+            # (have IDs).
+            self._tracking_set = dict(
+                zip(self._items, self._items, strict=True)
+            )
+
+            assert self._tracking_index is None
+            self._tracking_index = {self._pyid(o): o for o in self._items}
+        else:
+            assert self._tracking_index is not None
+
     @staticmethod
     def _pyid(item: _MT_co) -> int:  # type: ignore [misc]
         # For ListSet it's `id(item)`, but for LinkWithPropsSet
         # it's `id(item.without_linkprops())`.
         raise NotImplementedError
+
+    def __eq__(self, other: object) -> bool:
+        if isinstance(other, set):
+            if self._mode is Mode.Write:
+                return False
+
+            self_len = len(self._items)
+            other_len = len(other)
+
+            if self_len != other_len:
+                return False
+            if self_len == other_len == 0:
+                return True
+
+            if (
+                self._tracking_set is not None
+                and self._tracking_index is not None
+                and len(self._tracking_set) != len(self._tracking_index)
+            ):
+                # There are unhashable items in our collection
+                # (added after the link was fetched or this is a new link),
+                # so we're not equal to any valid Python set.
+                return False
+
+            if self._tracking_set is None:
+                # Initializing tracking is a bit expensive, but if there
+                # are multiple comparison of this list with different sets
+                # it's worth it to do it once and then have cheaper checks.
+                self._init_tracking()
+                assert self._tracking_set is not None
+
+            return self._tracking_set.keys() == other
+
+        elif isinstance(other, list):
+            # In an ideal world we'd only allow comparisions with sets.
+            # But in our world we already allow initialization from a list
+            # and an assigment to a list (we can't require users to use
+            # sets because unsaved objects are unhashable).
+            # It's weird if comparison doesn't work with lists, but also
+            # you can't even put unsaved objects in a set (again, they
+            # are unhashable).
+            if self._mode is Mode.Write:
+                return False
+            return self._items == other
+
+        elif isinstance(other, AbstractLinkSet) and not isinstance(
+            other, AbstractMutableLinkSet
+        ):
+            # A comparison with a computed link.
+
+            if self._mode is Mode.Write:
+                return False
+
+            self_len = len(self._items)
+            other_len = len(other._items)
+
+            if self_len != other_len:
+                return False
+            if self_len == other_len == 0:
+                return True
+
+            if self._tracking_set is None:
+                self._init_tracking()
+            assert self._tracking_set is not None
+
+            if (
+                len(self._tracking_set) != self_len
+                or len(self._tracking_set) != other_len
+            ):
+                # There are new items in the link. `other` is a computed
+                # link, so it can't have any new items, we know that
+                # we can't be equal.
+                return False
+
+            if other._tracking_set is None:
+                other._init_tracking()
+                # Computeds can't have new items
+                assert other._tracking_set is not None
+                assert other._tracking_index is not None
+                assert (
+                    len(other._tracking_set) == len(other._tracking_index) > 0
+                )
+
+            return self._tracking_set == other._tracking_set
+
+        else:
+            return NotImplemented
+
+    def __len__(self) -> int:
+        return len(self._items)
+
+    def __iter__(self) -> Iterator[_MT_co]:
+        return iter(self._items)
+
+    def __repr__(self) -> str:
+        if self._mode is Mode.Write:
+            return f"<WRITE-ONLY{self._items!r}>"
+        else:
+            return repr(self._items)
+
+
+class ComputedLinkSet(
+    parametric.SingleParametricType[_MT_co],
+    AbstractLinkSet[_MT_co],
+):
+    """A read-only, ordered set-like list that is computed from a query"""
+
+    __slots__ = ()
+
+    @staticmethod
+    def _pyid(item: _MT_co) -> int:  # type: ignore [misc]
+        return id(item)
+
+    def _reconcile(
+        self,
+        updated: AbstractLinkSet[_MT_co],
+        existing_objects: dict[uuid.UUID, AbstractGelModel],
+        new_objects: dict[uuid.UUID, AbstractGelModel],
+        *,
+        is_computed: bool,
+    ) -> list[_MT_co]:
+        # This method is called by sync() when it refetches the link.
+        #
+        # - `updated` is a collection of GelModels that only have the `id`
+        #   field set, but no other data. It is the latest state of the link:
+        #
+        #   - right after we run EdgeQL `update` command we refetch the link
+        #     with a 'select' command
+        #   - that select command would be filtering the link by all model
+        #     IDs that were in the link prior to calling sync() PLUS ALL
+        #     IDs of all objects that the sync() call inserted.
+        #
+        # - `new_objects` is a collection of all newly inserted GelModels
+        #   by sync().
+        #
+        # When we look through `.id` attributes of objects in the `updated`
+        # collection we can have two situations:
+        #
+        # - this `id` is in `self._tracking_set` -- we had this object before
+        #   sync() call; it was not a new object.
+        # - this `id` is not in `self._tracking_set` -- it was one of the
+        #   objects that was new.
+        #
+        # Mind that we can have *fewer* `updated` objects than `self._items`
+        # because there are situations when objects that were submitted to
+        # sync() would not be refetched:
+        #
+        # - an existing object could be concurrently removed while
+        #   between the time it was fetched and then synced.
+        # - an object could be intercepted by a trigger while it was being
+        #   synced.
+        #
+        # So we know that `updated` is the new `_items` of this collection,
+        # with just one caveat: if an item in `updated` has an `.id` that we
+        # already have -- we keep that original object (it will be updated
+        # separately with freshly refetched data), and if it's a *new* `.id`
+        # we get the new object from `new_objects`.
+
+        existing_set = self._tracking_set
+        if existing_set is None:
+            # `self._init_tracking()` wasn't called on this model prior to
+            # sync() -- there were no modifications. But we need a quick
+            # way of checking if an updated object was one of the existing
+            # objects in this link before to keep it, so let's build an
+            # index of them.
+            existing_set = {m: m for m in self._items if not m.__gel_new__}
+
+        updated_items: list[_MT_co] = []
+        for obj in updated:
+            obj_id: uuid.UUID = obj.id  # type: ignore [attr-defined]
+
+            try:
+                # This works because `GelModel` hashes and compares by `.id`
+                existing = existing_set[obj]
+            except KeyError:
+                if is_computed and obj_id in existing_objects:
+                    updated_items.append(existing_objects[obj_id])  # type: ignore [arg-type]
+                else:
+                    updated_items.append(new_objects[obj_id])  # type: ignore [arg-type]
+            else:
+                updated_items.append(existing)
+
+        return updated_items
+
+    def __gel_reconcile__(  # pyright: ignore [reportIncompatibleMethodOverride]
+        self,
+        updated: AbstractLinkSet[_MT_co],
+        existing_objects: dict[uuid.UUID, AbstractGelModel],
+        new_objects: dict[uuid.UUID, AbstractGelModel],
+    ) -> Self:
+        new_items = self._reconcile(
+            updated, existing_objects, new_objects, is_computed=True
+        )
+        return type(self)(
+            new_items,
+            __mode__=self._mode,
+            __wrap_list__=True,
+            __overwrite_data__=False,
+        )
+
+    def __reduce__(self) -> tuple[Any, ...]:
+        cls = type(self)
+        return (
+            cls._reconstruct_from_pickle,
+            (
+                cls.__parametric_origin__,
+                cls.type,
+                self._items,
+                self._tracking_set,
+                self._tracking_index,
+                self._index_snapshot,
+                self._mode,
+                self.__gel_overwrite_data__,
+            ),
+        )
+
+    @staticmethod
+    def _reconstruct_from_pickle(  # noqa: PLR0917
+        origin: type[ComputedLinkSet[_MT_co]],
+        tp: type[_MT_co],  # pyright: ignore [reportGeneralTypeIssues]
+        items: list[_MT_co],
+        tracking_set: dict[_MT_co, _MT_co] | None,
+        tracking_index: dict[int, _MT_co] | None,
+        index_snapshot: dict[int, _MT_co] | None,
+        mode: Mode,
+        gel_overwrite_data: bool,  # noqa: FBT001
+    ) -> ComputedLinkSet[_MT_co]:
+        cls = cast(
+            "type[ComputedLinkSet[_MT_co]]",
+            origin[tp],  # type: ignore [index]
+        )
+        lst = cls.__new__(cls)
+
+        lst._items = items
+        lst._tracking_set = tracking_set
+        lst._tracking_index = tracking_index
+        lst._index_snapshot = index_snapshot
+
+        lst._mode = mode
+        lst.__gel_overwrite_data__ = gel_overwrite_data
+
+        return lst
+
+
+class ComputedLinkWithPropsSet(
+    parametric.ParametricType,
+    AbstractLinkSet[_PT_co],
+    Generic[_PT_co, _BMT_co],
+):
+    __slots__ = ()
+
+    proxytype: ClassVar[type[_PT_co]]  # type: ignore [misc]
+    type: ClassVar[type[_BMT_co]]  # type: ignore [assignment, misc]
+
+    @staticmethod
+    def _pyid(item: _PT_co) -> int:  # type: ignore [misc]
+        return id(item.without_linkprops())
+
+    def __gel_basetype_iter__(self) -> Iterator[_BMT_co]:  # type: ignore [override]
+        for item in self._items:
+            yield item._p__obj__  # type: ignore [misc]
+
+    def _reconcile(  # pyright: ignore [reportIncompatibleMethodOverride]
+        self,
+        updated: LinkWithPropsSet[_PT_co, _BMT_co],  # type: ignore [override]
+        existing_objects: dict[uuid.UUID, AbstractGelModel],
+        new_objects: dict[uuid.UUID, AbstractGelModel],
+        *,
+        is_computed: bool,
+    ) -> list[_PT_co]:
+        # See comments in `LinkSet._reconcile()` for most implementation
+        # details.
+        #
+        # This implementaion has a couple differences w.r.t. how ProxyModels
+        # are handled.
+
+        existing_set = self._tracking_set
+        if existing_set is None:
+            existing_set = {m: m for m in self._items if not m.__gel_new__}
+
+        updated_items: list[_PT_co] = []
+        for obj in updated:
+            obj_id: uuid.UUID = obj.id  # type: ignore [attr-defined]
+
+            try:
+                existing = existing_set[obj]
+            except KeyError:
+                if is_computed and obj_id in existing_objects:
+                    new = existing_objects[obj_id]
+                else:
+                    new = new_objects[obj_id]
+                # `obj` will have updated __linkprops__ but the wrapped
+                # model will be coming from new_objects
+                obj.__gel_replace_wrapped_model__(new)
+                updated_items.append(obj)
+            else:
+                # updated will have newly refetched __linkprops__, so
+                # copy them
+                existing.__gel_replace_linkprops__(obj.__linkprops__)
+                updated_items.append(existing)
+
+        return updated_items
+
+    def __gel_reconcile__(  # pyright: ignore [reportIncompatibleMethodOverride]
+        self,
+        updated: LinkWithPropsSet[_PT_co, _BMT_co],  # type: ignore [override]
+        existing_objects: dict[uuid.UUID, AbstractGelModel],
+        new_objects: dict[uuid.UUID, AbstractGelModel],
+    ) -> Self:
+        new_items = self._reconcile(
+            updated, existing_objects, new_objects, is_computed=True
+        )
+        return type(self)(
+            new_items,
+            __mode__=self._mode,
+            __wrap_list__=True,
+            __overwrite_data__=False,
+        )
+
+    def __reduce__(self) -> tuple[Any, ...]:
+        cls = type(self)
+        return (
+            cls._reconstruct_from_pickle,
+            (
+                cls.__parametric_origin__,
+                cls.type,
+                cls.proxytype,
+                self._items,
+                self._tracking_index.values()
+                if self._tracking_index is not None
+                else None,
+                self._tracking_set,
+                self._index_snapshot,
+                self._mode,
+                self.__gel_overwrite_data__,
+            ),
+        )
+
+    @staticmethod
+    def _reconstruct_from_pickle(  # noqa: PLR0917
+        origin: type[ComputedLinkWithPropsSet[_PT_co, _BMT_co]],  # type: ignore [valid-type]
+        tp: type[_PT_co],  # type: ignore [valid-type]
+        proxytp: type[_BMT_co],  # type: ignore [valid-type]
+        items: list[_PT_co],
+        tracking_index: list[_PT_co] | None,
+        tracking_set: dict[_PT_co, _PT_co] | None,
+        index_snapshot: list[_PT_co] | None,
+        mode: Mode,
+        gel_overwrite_data: bool,  # noqa: FBT001
+    ) -> ComputedLinkWithPropsSet[_PT_co, _BMT_co]:
+        cls = cast(
+            "type[ComputedLinkWithPropsSet[_PT_co, _BMT_co]]",
+            origin[proxytp, tp],  # type: ignore [index]
+        )
+        lst = cls.__new__(cls)
+
+        lst._items = items
+
+        if tracking_index is None:
+            lst._tracking_index = None
+        else:
+            lst._tracking_index = {
+                cls._pyid(item): item for item in tracking_index
+            }
+
+        lst._tracking_set = tracking_set
+
+        if index_snapshot is None:
+            lst._index_snapshot = None
+        else:
+            lst._index_snapshot = {
+                cls._pyid(item): item for item in index_snapshot
+            }
+
+        lst._mode = mode
+        lst.__gel_overwrite_data__ = gel_overwrite_data
+
+        return lst
+
+
+class AbstractMutableLinkSet(
+    AbstractLinkSet[_MT_co],
+):
+    """A mutable, ordered set-like list that enforces element-type covariance
+    at runtime and maintains distinctness of elements in insertion order using
+
+    There are some differences between LinkSet and normal Python set:
+
+    - LinkSet is ordered
+    - LinkSet does not have the `pop()` method and other non-sensical
+      methods for persisted database objects
+    - LinkSet can be compared to a list (see the __eq__ comments)
+    - LinkSet supports `+=` and `-=` operators to mimic EdgeQL a list and set.
+    """
+
+    __slots__ = ()
+
+    _allowed_write_only_ops: ClassVar[list[str]] = [
+        ".add()",
+        ".discard()",
+        ".update()",
+        "+=",
+        "-=",
+    ]
+
+    if not TYPE_CHECKING:
+        # AbstractMutableLinkSet subclasses are mutable
+        __hash__ = None
+
+    def __gel_reconcile__(  # pyright: ignore [reportIncompatibleMethodOverride]
+        self,
+        updated: AbstractLinkSet[_MT_co],
+        existing_objects: dict[uuid.UUID, AbstractGelModel],
+        new_objects: dict[uuid.UUID, AbstractGelModel],
+    ) -> Self:
+        self._items = self._reconcile(
+            updated, existing_objects, new_objects, is_computed=False
+        )
+        # Reset tracking: it will likely be not needed. Typically there
+        # should be just one `sync()` call with no modifications of anything
+        # after it.
+        self._tracking_index = self._tracking_set = self._index_snapshot = None
+        return self
 
     def _ensure_value_indexable(self, value: Any) -> _MT_co | None:
         # ProxyModels are designed to be transparent and are ignored
@@ -112,27 +600,6 @@ class AbstractLinkSet(  # noqa: PLW1641 (__hash__ is implemented)
         self._index_snapshot = None
         self._tracking_set = None
         self._tracking_index = None
-
-    def _init_tracking(self) -> None:
-        if self._tracking_set is None:
-            # Why is `set(self._items)` OK? `self._items` can be
-            # in one of two states:
-            #
-            #  - have 0 elements -- new collection
-            #  - have non-zero elements -- existing collection
-            #    loaded from database (we trust its contents)
-            #    *before any mutations*.
-            #
-            # So it's either no elements or all elements are hashable
-            # (have IDs).
-            self._tracking_set = dict(
-                zip(self._items, self._items, strict=True)
-            )
-
-            assert self._tracking_index is None
-            self._tracking_index = {self._pyid(o): o for o in self._items}
-        else:
-            assert self._tracking_index is not None
 
     def __gel_get_added__(self) -> list[_MT_co]:
         match bool(self._index_snapshot), bool(self._tracking_index):
@@ -240,14 +707,6 @@ class AbstractLinkSet(  # noqa: PLW1641 (__hash__ is implemented)
                 f"`{len(self._items)=}`"
             )
 
-    def _track_item(self, item: _MT_co) -> None:  # type: ignore [misc]
-        assert self._tracking_set is not None
-        if not item.__gel_new__:
-            self._tracking_set[item] = item
-
-        assert self._tracking_index is not None
-        self._tracking_index[self._pyid(item)] = item
-
     def _untrack_item(self, item: _MT_co) -> None:  # type: ignore [misc]
         assert self._tracking_set is not None
         if not item.__gel_new__:
@@ -255,22 +714,6 @@ class AbstractLinkSet(  # noqa: PLW1641 (__hash__ is implemented)
 
         assert self._tracking_index is not None
         self._tracking_index.pop(self._pyid(item), None)
-
-    def _is_tracked(self, item: _MT_co) -> bool:  # type: ignore [misc]
-        self._init_tracking()
-
-        assert self._tracking_index is not None
-        if self._pyid(item) in self._tracking_index:
-            # Fast path
-            return True
-
-        # The item is not in the index, but it might have an equal
-        # one in the tracking set.
-        assert self._tracking_set is not None
-        if not item.__gel_new__:
-            return item in self._tracking_set
-
-        return False
 
     def clear(self) -> None:
         """Remove all items but keep element-type enforcement."""
@@ -280,14 +723,6 @@ class AbstractLinkSet(  # noqa: PLW1641 (__hash__ is implemented)
         self._tracking_set.clear()
         assert self._tracking_index is not None
         self._tracking_index.clear()
-
-    @requires_read("use `in` operator on")
-    def __contains__(self, item: object) -> bool:
-        if isinstance(item, AbstractGelProxyModel):
-            item = item.without_linkprops()
-        if not isinstance(item, type(self).type):
-            return False
-        return self._is_tracked(item)
 
     def __gel_add__(self, value: _MT_co) -> None:  # type: ignore [misc]
         raise NotImplementedError
@@ -329,61 +764,48 @@ class AbstractLinkSet(  # noqa: PLW1641 (__hash__ is implemented)
         return self
 
     def __eq__(self, other: object) -> bool:
-        if isinstance(other, AbstractLinkSet):
-            if self._mode is Mode.Write:
+        if isinstance(other, AbstractMutableLinkSet):
+            if self._mode is Mode.Write or other._mode is Mode.Write:
                 # __eq__ is pretty fundamental in Python and we don't
                 # want it to crash in all random places where it can
                 # be called from. So we just return False.
                 return False
 
-            if len(self._items) != len(other._items):
-                return False
+            self_len = len(self._items)
+            other_len = len(other._items)
 
-            if self._tracking_index and other._tracking_index:
-                # Both collections are tracked so we can compare
-                # the indexes -- that's faster
-                return self._tracking_index == other._tracking_index
+            if self_len != other_len:
+                return False
+            if self_len == other_len == 0:
+                return True
 
             if self._tracking_index is None:
                 self._init_tracking()
             if other._tracking_index is None:
                 other._init_tracking()
-            return self._tracking_index == other._tracking_index
 
-        elif isinstance(other, set):
-            if self._mode is Mode.Write:
+            assert self._tracking_index is not None
+            assert other._tracking_index is not None
+
+            if self._tracking_set != other._tracking_set:
+                # If objects that have `.id` are different then we
+                # can bail early
                 return False
 
-            if (
-                self._tracking_set is not None
-                and self._tracking_index is not None
-                and len(self._tracking_set) != len(self._tracking_index)
-            ):
-                # There are unhashable items in our collection
-                # (added after the link was fetched or this is a new link),
-                # so we're not equal to any valid Python set.
-                return False
+            # Compare the IDs of the new items (they don't have `.id` yet
+            # and are compared by reference)
 
-            if self._tracking_set is not None:
-                return self._tracking_set.keys() == other
+            self_new_items_ids = {
+                i for i, m in self._tracking_index.items() if m.__gel_new__
+            }
+            other_new_items_ids = {
+                i for i, m in other._tracking_index.items() if m.__gel_new__
+            }
 
-            return set(self._items) == other
-
-        elif isinstance(other, list):
-            # In an ideal world we'd only allow comparisions with sets.
-            # But in our world we already allow initialization from a list
-            # and an assigment to a list (we can't require users to use
-            # sets because unsaved objects are unhashable).
-            # It's weird if comparison doesn't work with lists, but also
-            # you can't even put unsaved objects in a set (again, they
-            # are unhashable).
-            if self._mode is Mode.Write:
-                return False
-
-            return self._items == other
+            return self_new_items_ids == other_new_items_ids
 
         else:
-            return NotImplemented
+            return super().__eq__(other)
 
     @staticmethod
     def __gel_validate__(
@@ -410,8 +832,8 @@ class AbstractLinkSet(  # noqa: PLW1641 (__hash__ is implemented)
 
 
 class LinkSet(
-    parametric.SingleParametricType[_MT_co],
-    AbstractLinkSet[_MT_co],
+    AbstractMutableLinkSet[_MT_co],
+    ComputedLinkSet[_MT_co],
 ):
     __slots__ = ()
 
@@ -446,10 +868,6 @@ class LinkSet(
 
         return t.__gel_validate__(value)
 
-    @staticmethod
-    def _pyid(item: _MT_co) -> int:  # type: ignore [misc]
-        return id(item)
-
     def __gel_extend__(self, values: Iterable[_MT_co]) -> None:
         if values is self:
             # This is a "unique list" with a set-like behavior, so
@@ -461,74 +879,12 @@ class LinkSet(
         for v in values:
             self.add(v)
 
-    def __reduce__(self) -> tuple[Any, ...]:
-        cls = type(self)
-        return (
-            cls._reconstruct_from_pickle,
-            (
-                cls.__parametric_origin__,
-                cls.type,
-                self._items,
-                self._tracking_set,
-                self._tracking_index,
-                self._index_snapshot,
-                self._mode,
-                self.__gel_overwrite_data__,
-            ),
-        )
-
-    @staticmethod
-    def _reconstruct_from_pickle(  # noqa: PLR0917
-        origin: type[LinkSet[_MT_co]],
-        tp: type[_MT_co],  # pyright: ignore [reportGeneralTypeIssues]
-        items: list[_MT_co],
-        tracking_set: dict[_MT_co, _MT_co] | None,
-        tracking_index: dict[int, _MT_co] | None,
-        index_snapshot: dict[int, _MT_co] | None,
-        mode: Mode,
-        gel_overwrite_data: bool,  # noqa: FBT001
-    ) -> LinkSet[_MT_co]:
-        cls = cast(
-            "type[LinkSet[_MT_co]]",
-            origin[tp],  # type: ignore [index]
-        )
-        lst = cls.__new__(cls)
-
-        lst._items = items
-        lst._tracking_set = tracking_set
-        lst._tracking_index = tracking_index
-        lst._index_snapshot = index_snapshot
-
-        lst._mode = mode
-        lst.__gel_overwrite_data__ = gel_overwrite_data
-
-        return lst
-
-
-_BMT_co = TypeVar("_BMT_co", bound=AbstractGelModel, covariant=True)
-"""Base model type"""
-
-_PT_co = TypeVar(
-    "_PT_co",
-    bound=AbstractGelProxyModel[AbstractGelModel, AbstractGelLinkModel],
-    covariant=True,
-)
-"""Proxy model"""
-
 
 class LinkWithPropsSet(
-    parametric.ParametricType,
-    AbstractLinkSet[_PT_co],
-    Generic[_PT_co, _BMT_co],
+    AbstractMutableLinkSet[_PT_co],
+    ComputedLinkWithPropsSet[_PT_co, _BMT_co],
 ):
     __slots__ = ()
-
-    proxytype: ClassVar[type[_PT_co]]  # type: ignore [misc]
-    type: ClassVar[type[_BMT_co]]  # type: ignore [assignment, misc]
-
-    @staticmethod
-    def _pyid(item: _PT_co) -> int:  # type: ignore [misc]
-        return id(item.without_linkprops())
 
     def _find_proxy(self, item: _PT_co | _BMT_co) -> _PT_co | None:
         assert self._tracking_index is not None
@@ -641,70 +997,6 @@ class LinkWithPropsSet(
         self._items.remove(existing)
 
         return existing
-
-    def __gel_basetype_iter__(self) -> Iterator[_BMT_co]:  # type: ignore [override]
-        for item in self._items:
-            yield item._p__obj__  # type: ignore [misc]
-
-    def __reduce__(self) -> tuple[Any, ...]:
-        cls = type(self)
-        return (
-            cls._reconstruct_from_pickle,
-            (
-                cls.__parametric_origin__,
-                cls.type,
-                cls.proxytype,
-                self._items,
-                self._tracking_index.values()
-                if self._tracking_index is not None
-                else None,
-                self._tracking_set,
-                self._index_snapshot,
-                self._mode,
-                self.__gel_overwrite_data__,
-            ),
-        )
-
-    @staticmethod
-    def _reconstruct_from_pickle(  # noqa: PLR0917
-        origin: type[LinkWithPropsSet[_PT_co, _BMT_co]],  # type: ignore [valid-type]
-        tp: type[_PT_co],  # type: ignore [valid-type]
-        proxytp: type[_BMT_co],  # type: ignore [valid-type]
-        items: list[_PT_co],
-        tracking_index: list[_PT_co] | None,
-        tracking_set: dict[_PT_co, _PT_co] | None,
-        index_snapshot: list[_PT_co] | None,
-        mode: Mode,
-        gel_overwrite_data: bool,  # noqa: FBT001
-    ) -> LinkWithPropsSet[_PT_co, _BMT_co]:
-        cls = cast(
-            "type[LinkWithPropsSet[_PT_co, _BMT_co]]",
-            origin[proxytp, tp],  # type: ignore [index]
-        )
-        lst = cls.__new__(cls)
-
-        lst._items = items
-
-        if tracking_index is None:
-            lst._tracking_index = None
-        else:
-            lst._tracking_index = {
-                cls._pyid(item): item for item in tracking_index
-            }
-
-        lst._tracking_set = tracking_set
-
-        if index_snapshot is None:
-            lst._index_snapshot = None
-        else:
-            lst._index_snapshot = {
-                cls._pyid(item): item for item in index_snapshot
-            }
-
-        lst._mode = mode
-        lst.__gel_overwrite_data__ = gel_overwrite_data
-
-        return lst
 
     if TYPE_CHECKING:
 

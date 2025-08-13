@@ -657,6 +657,7 @@ class Client(
         *,
         refetch: bool,
         objs: tuple[GelModel, ...],
+        warn_on_large_sync_set: bool = False,
     ) -> None:
         opts = self._get_debug_options()
 
@@ -664,31 +665,31 @@ class Client(
             objs,
             refetch=refetch,
             save_postcheck=opts.save_postcheck,
+            warn_on_large_sync_set=warn_on_large_sync_set,
         )
 
         for tx in self._batch():
             with tx:
                 executor = make_executor()
 
-                for batches in executor:
-                    for batch in batches:
-                        tx.send_query(batch.query, batch.args)
-                    batch_ids = tx.wait()
-                    for ids, batch in zip(batch_ids, batches, strict=True):
-                        batch.feed_db_data(ids)
+                with executor:
+                    for batches in executor:
+                        for batch in batches:
+                            tx.send_query(batch.query, batch.args)
+                        batch_ids = tx.wait()
+                        for ids, batch in zip(batch_ids, batches, strict=True):
+                            batch.feed_db_data(ids)
 
-                if refetch:
-                    ref_queries = executor.get_refetch_queries()
-                    for ref in ref_queries:
-                        tx.send_query(ref.query, **ref.args)
+                    if refetch:
+                        ref_queries = executor.get_refetch_queries()
+                        for ref in ref_queries:
+                            tx.send_query(ref.query, **ref.args)
 
-                    refetch_data = tx.wait()
-                    for ref_data, ref in zip(
-                        refetch_data, ref_queries, strict=True
-                    ):
-                        ref.feed_db_data(ref_data)
-
-                executor.commit()
+                        refetch_data = tx.wait()
+                        for ref_data, ref in zip(
+                            refetch_data, ref_queries, strict=True
+                        ):
+                            ref.feed_db_data(ref_data)
 
     def save(
         self,
@@ -703,9 +704,14 @@ class Client(
     def sync(
         self,
         *objs: GelModel,
+        warn_on_large_sync: bool = True,
     ) -> None:
         """Persist objects and refetch updated data back into them."""
-        self._save_impl(refetch=True, objs=objs)
+        self._save_impl(
+            refetch=True,
+            objs=objs,
+            warn_on_large_sync_set=warn_on_large_sync,
+        )
 
     def __debug_save__(self, *objs: GelModel) -> SaveDebug:
         ns = time.monotonic_ns()
@@ -723,35 +729,36 @@ class Client(
             with tx:
                 executor = make_executor()
 
-                for batches in executor:
-                    for batch in batches:
-                        qdebug = queries[batch.query]
+                with executor:
+                    for batches in executor:
+                        for batch in batches:
+                            qdebug = queries[batch.query]
 
-                        qdebug.total_execs += 1
-                        qdebug.query = batch.query
-                        qdebug.args_query = batch.args_query
+                            qdebug.total_execs += 1
+                            qdebug.query = batch.query
+                            qdebug.args_query = batch.args_query
 
-                        if not qdebug.analyze:
-                            tx.send_query(f"ANALYZE {batch.query}", batch.args)
-                            qdebug.analyze = tx.wait()[0][0]
-                            tx.send_query(
-                                f"ANALYZE {batch.args_query}", batch.args
+                            if not qdebug.analyze:
+                                tx.send_query(
+                                    f"ANALYZE {batch.query}", batch.args
+                                )
+                                qdebug.analyze = tx.wait()[0][0]
+                                tx.send_query(
+                                    f"ANALYZE {batch.args_query}", batch.args
+                                )
+                                qdebug.args_analyze = tx.wait()[0][0]
+                                qdebug.analyze_args = batch.args
+
+                            ns = time.monotonic_ns()
+                            tx.send_query(batch.query, batch.args)
+                            batch_ids = tx.wait()
+                            qdebug.total_exec_time += time.monotonic_ns() - ns
+
+                            qdebug.max_args_number = max(
+                                qdebug.max_args_number, len(batch.args)
                             )
-                            qdebug.args_analyze = tx.wait()[0][0]
-                            qdebug.analyze_args = batch.args
 
-                        ns = time.monotonic_ns()
-                        tx.send_query(batch.query, batch.args)
-                        batch_ids = tx.wait()
-                        qdebug.total_exec_time += time.monotonic_ns() - ns
-
-                        qdebug.max_args_number = max(
-                            qdebug.max_args_number, len(batch.args)
-                        )
-
-                        batch.feed_db_data(batch_ids[0])
-
-                executor.commit()
+                            batch.feed_db_data(batch_ids[0])
 
         for qdebug in queries.values():
             qdebug.total_exec_time /= 1_000_000.0

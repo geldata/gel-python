@@ -42,7 +42,13 @@ from ._base import (
 if TYPE_CHECKING:
     import types
     from collections.abc import Sequence, Set as AbstractSet
-    from ._link_set import AbstractLinkSet, LinkWithPropsSet
+    from ._link_set import (
+        AbstractLinkSet,
+        ComputedLinkSet,
+        ComputedLinkWithPropsSet,
+        LinkSet,
+        LinkWithPropsSet,
+    )
 
 
 class ModelFieldDescriptor(_qb.AbstractFieldDescriptor):
@@ -447,14 +453,14 @@ class MultiLinkDescriptor(AnyLinkDescriptor[_MT_co, _BMT_co]):
             instance: Any,
             owner: type[Any] | None = None,
             /,
-        ) -> AbstractLinkSet[_MT_co]: ...
+        ) -> LinkSet[_MT_co]: ...
 
         def __get__(
             self,
             instance: Any,
             owner: type[Any] | None = None,
             /,
-        ) -> type[_MT_co] | AbstractLinkSet[_MT_co]: ...
+        ) -> type[_MT_co] | LinkSet[_MT_co]: ...
 
         def __set__(
             self,
@@ -483,13 +489,13 @@ class ComputedMultiLinkDescriptor(
             instance: Any,
             owner: type[Any] | None = None,
             /,
-        ) -> tuple[_MT_co, ...]: ...
+        ) -> ComputedLinkSet[_MT_co]: ...
 
         def __get__(
             self,
             instance: Any,
             owner: type[Any] | None = None,
-        ) -> type[_MT_co] | tuple[_MT_co, ...]: ...
+        ) -> type[_MT_co] | ComputedLinkSet[_MT_co]: ...
 
 
 class OptionalLinkDescriptor(
@@ -616,6 +622,9 @@ class AbstractGelProxyModel(AbstractGelModel, Generic[_MT_co, _LM_co]):
     ) -> None:
         raise NotImplementedError
 
+    def __gel_replace_linkprops__(self, new: _LM_co) -> None:  # type: ignore [misc]
+        raise NotImplementedError
+
 
 _PT_co = TypeVar(
     "_PT_co",
@@ -625,7 +634,33 @@ _PT_co = TypeVar(
 """Proxy model"""
 
 
-class MultiLinkWithPropsDescriptor(MultiLinkDescriptor[_PT_co, _BMT_co]):
+class ComputedMultiLinkWithPropsDescriptor(
+    ComputedPointerDescriptor[_PT_co, _BMT_co],
+    AnyLinkDescriptor[_PT_co, _BMT_co],
+):
+    if TYPE_CHECKING:
+
+        @overload
+        def __get__(
+            self, instance: None, owner: type[Any], /
+        ) -> type[_PT_co]: ...
+
+        @overload
+        def __get__(
+            self,
+            instance: Any,
+            owner: type[Any] | None = None,
+            /,
+        ) -> ComputedLinkWithPropsSet[_PT_co, _BMT_co]: ...
+
+        def __get__(
+            self,
+            instance: Any,
+            owner: type[Any] | None = None,
+        ) -> type[_PT_co] | ComputedLinkWithPropsSet[_PT_co, _BMT_co]: ...
+
+
+class MultiLinkWithPropsDescriptor(AnyLinkDescriptor[_PT_co, _BMT_co]):
     if TYPE_CHECKING:
 
         @overload
@@ -654,7 +689,7 @@ class MultiLinkWithPropsDescriptor(MultiLinkDescriptor[_PT_co, _BMT_co]):
         def __set__(  # pyright: ignore [reportIncompatibleMethodOverride]
             self,
             instance: Any,
-            value: Sequence[_PT_co | _BMT_co]  # type: ignore[override]
+            value: Sequence[_PT_co | _BMT_co]
             | AbstractSet[_PT_co | _BMT_co]
             | AbstractLinkSet[_BMT_co]
             | LinkWithPropsSet[_PT_co, _BMT_co],

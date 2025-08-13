@@ -97,7 +97,7 @@ class AbstractCollection(Iterable[_T_co], Generic[_T_co]):
     _allowed_write_only_ops: ClassVar[list[str]]
 
     if not TYPE_CHECKING:
-        # All collections are mutable.
+        # Collections are mutable unless a subclass defines __hash__
         __hash__ = None
 
     def __init__(
@@ -172,6 +172,8 @@ class AbstractCollection(Iterable[_T_co], Generic[_T_co]):
         self.__gel_overwrite_data__ = False
 
     def __gel_post_commit_check__(self, path: Path) -> None:
+        # This hook is only run in tests, when the client is configured with
+        # `client._with_debug(save_postcheck=True)`.
         if self.__gel_overwrite_data__:
             raise ValueError(
                 f"{path} list did not reset self.__gel_overwrite_data__"
@@ -219,9 +221,6 @@ class AbstractCollection(Iterable[_T_co], Generic[_T_co]):
             )
 
         raise RuntimeError(msg)
-
-    def clear(self) -> None:
-        raise NotImplementedError
 
 
 @functools.total_ordering
@@ -453,7 +452,7 @@ class AbstractTrackedList(
 
     def __repr__(self) -> str:
         if self._mode is Mode.Write:
-            return f"[WRITE-ONLY {self._items!r}]"
+            return f"<WRITE-ONLY{self._items!r}>"
         else:
             return repr(self._items)
 

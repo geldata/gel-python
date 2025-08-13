@@ -189,9 +189,9 @@ class TestModelGenerator(tb.ModelTestCase):
             default.User.select(groups=True).limit(1)
         )
 
-        self.assertEqual(
+        self.assertIn(
+            "ComputedLinkSet[models.default.UserGroup]",
             reveal_type(q.groups),
-            "builtins.tuple[models.default.UserGroup, ...]",
         )
 
     def test_modelgen_02(self):
@@ -352,7 +352,10 @@ class TestModelGenerator(tb.ModelTestCase):
     def test_modelgen_data_unpack_3(self):
         from models import default
 
-        from gel._internal._qbmodel._abstract import LinkWithPropsSet
+        from gel._internal._qbmodel._abstract import (
+            LinkWithPropsSet,
+            ComputedLinkSet,
+        )
 
         q = (
             default.GameSession.select(
@@ -382,7 +385,7 @@ class TestModelGenerator(tb.ModelTestCase):
         # Test that links are unpacked into a LinkSet, not a vanilla list
         self.assertIsInstance(d.players, LinkWithPropsSet)
         first_player = next(iter(d.players))
-        self.assertIsInstance(first_player.groups, tuple)
+        self.assertIsInstance(first_player.groups, ComputedLinkSet)
 
         post = default.Post(author=first_player, body="test")
 
@@ -813,6 +816,9 @@ class TestModelGenerator(tb.ModelTestCase):
 
         sl2 = repickle(sl)
         self.assertEqual(sl.model_dump(), sl2.model_dump())
+
+        self.assertIsInstance(sl2.players, type(sl.players))
+        self.assertIs(sl2.players.type, type(sl.players).type)
 
         sl.num += 1
         _pl = next(iter(sl.players))
@@ -1527,6 +1533,40 @@ class TestModelGenerator(tb.ModelTestCase):
 
         g.users
         self.assertEqual(g.__pydantic_fields_set__, expected | {"users"})
+
+    def test_modelgen_pydantic_apis_19(self):
+        from models import default
+
+        g = default.GameSession(num=1, public=True)
+        self.assertEqual(
+            g.model_dump(context={"gel_allow_unsaved": True}),
+            {"num": 1, "public": True, "players": []},
+        )
+        self.assertEqual(
+            g.model_dump_json(context={"gel_allow_unsaved": True}),
+            '{"num":1,"public":true,"players":[]}',
+        )
+
+    def test_modelgen_pydantic_apis_20(self):
+        # Test that ComputedLinkSet can be pickled / dumped
+
+        from models import default
+        from gel._testbase import repickle
+
+        alice = self.client.get(
+            default.User.select(
+                name=True, groups=lambda s: s.groups.select("*")
+            ).filter(name="Alice")
+        )
+
+        alice2 = repickle(alice)
+        self.assertIsInstance(alice2.groups, type(alice.groups))
+        self.assertIs(alice2.groups.type, type(alice.groups).type)
+
+        self.assertEqual(
+            {g["name"] for g in alice.model_dump()["groups"]},
+            {"red", "green"},
+        )
 
     def test_modelgen_data_unpack_polymorphic(self):
         from models import default
@@ -2942,7 +2982,9 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(g.players._mode, Mode.ReadWrite)
         self.assertPydanticChangedFields(
             g,
-            {"num", "public", "players"},
+            # "time_limit" will be fetched by sync() as `g` is a new object
+            # and for new objects we fetch all properties by splat.
+            {"num", "public", "players", "time_limit"},
             expected_gel={"players"},
         )
 
@@ -4056,6 +4098,53 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(alice.name, "Alice")
         self.assertEqual({u.id for u in red.users}, orig_ids)
         self.assertEqual({u.id for u in blue.users}, {alice.id})
+
+    def test_modelgen_save_reload_links_08(self):
+        from models import default
+
+        g = default.UserGroup(
+            name="Pickle Pirates",
+            users=[default.User(name=f"{i}") for i in range(3)],
+        )
+        self.client.sync(g)
+
+        self.assertEqual({u.name for u in g.users}, {"0", "1", "2"})
+
+        for u in g.users:
+            u.name += "aaa"
+
+        self.client.sync(g)
+
+        self.assertEqual({u.name for u in g.users}, {"0aaa", "1aaa", "2aaa"})
+
+        for u in g.users:
+            u.name += "bbb"
+
+        g.users.remove(u)
+        g.users.add(default.User(name="new"))
+
+        self.client.sync(g)
+
+        self.assertEqual(
+            {u.name for u in g.users}, {"0aaabbb", "1aaabbb", "new"}
+        )
+
+        alice = self.client.get(
+            default.User.select("*", groups=True).filter(name="Alice")
+        )
+        orig_groups = {gr.id for gr in alice.groups}
+        g.users.add(alice)
+        self.client.sync(g)
+        self.assertEqual(
+            {u.name for u in g.users},
+            {
+                "0aaabbb",
+                "1aaabbb",
+                "new",
+                "Alice",
+            },
+        )
+        self.assertEqual({gr.id for gr in alice.groups}, orig_groups | {g.id})
 
     @tb.xfail
     # link props aren't reloaded after save
@@ -6309,6 +6398,30 @@ class TestModelGenerator(tb.ModelTestCase):
         conf = next(iter(res.configure))
         self.assertEqual(conf.name, "Alice")
         self.assertEqual(conf.__linkprops__.create, True)
+
+    def test_modelgen_sync_warning(self):
+        from models import default
+
+        g = default.UserGroup(
+            name="Pickle Pirates",
+            users=[default.User(name="{i}") for i in range(200)],
+        )
+
+        with self.assertWarns(msg_part="`sync()` is creating") as fn:
+            self.client.sync(g)
+            self.assertEqual(fn, __file__)  # just a sanity check
+
+        for u in g.users:
+            u.name += "aaa"
+
+        with self.assertWarns(msg_part="`sync()` is refetching"):
+            self.client.sync(g)
+
+        for u in g.users:
+            u.name += "bbb"
+
+        with self.assertNotWarns():
+            self.client.sync(g, warn_on_large_sync=False)
 
 
 @tb.typecheck

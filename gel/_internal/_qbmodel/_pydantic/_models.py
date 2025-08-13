@@ -1663,9 +1663,14 @@ class ProxyModel(
         self,
         new: _MT_co,  # type: ignore [misc]
     ) -> None:
-        existing = ll_getattr(self, "_p__obj__")
-        assert type(existing) is type(new)
+        assert isinstance(new, self.__proxy_of__)
         ll_setattr(self, "_p__obj__", new)
+
+    def __gel_replace_linkprops__(
+        self,
+        new: GelLinkModel,
+    ) -> None:
+        ll_setattr(self, "__linkprops__", new)
 
     def __eq__(self, other: object) -> bool:
         if self is other:
