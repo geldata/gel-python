@@ -25,7 +25,7 @@
 #
 #    Run `python tools/gen_models.py` to generate the models
 #    module from the `orm.gel` schema and get your IDE to
-#    recognize `from models import default`.
+#    recognize `from models.orm import default`.
 #
 #    Don't forget to re-run if you are messing with codegen
 #    implementation or testing different versions of Gel.
@@ -159,12 +159,12 @@ class TestModelGenerator(tb.ModelTestCase):
 
     @tb.must_fail  # this test ensures that @typecheck is working
     def test_modelgen__smoke_test(self):
-        from models import default
+        from models.orm import default
 
         self.assertEqual(reveal_type(default.User.groups), "this must fail")
 
     def test_modelgen_save_refetch_modes(self):
-        from models import default
+        from models.orm import default
 
         u1 = default.User(name="Al")
         self.client.sync(u1)
@@ -175,14 +175,16 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertFalse(hasattr(u2, "name_len"))
 
     def test_modelgen_01(self):
-        from models import default
+        from models.orm import default
 
         self.assertEqual(
-            reveal_type(default.User.name), "type[models.__shapes__.std.str]"
+            reveal_type(default.User.name),
+            "type[models.orm.__shapes__.std.str]",
         )
 
         self.assertEqual(
-            reveal_type(default.User.groups), "type[models.default.UserGroup]"
+            reveal_type(default.User.groups),
+            "type[models.orm.default.UserGroup]",
         )
 
         q = self.client.query_required_single(
@@ -190,12 +192,12 @@ class TestModelGenerator(tb.ModelTestCase):
         )
 
         self.assertIn(
-            "ComputedLinkSet[models.default.UserGroup]",
+            "ComputedLinkSet[models.orm.default.UserGroup]",
             reveal_type(q.groups),
         )
 
     def test_modelgen_02(self):
-        from models import default
+        from models.orm import default
 
         a = self.client.get(default.User.filter(name="Alice"))
         t = default.Team(
@@ -223,7 +225,7 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertTrue(fm == fm2)
 
     def test_modelgen_03(self):
-        from models import default
+        from models.orm import default
 
         a = self.client.get(default.User.filter(name="Alice"))
         m = default.Team.members.link(a, rank=1)
@@ -234,7 +236,7 @@ class TestModelGenerator(tb.ModelTestCase):
             default.Team.members.link(m, rank=1)
 
     def test_modelgen_04(self):
-        from models import default
+        from models.orm import default
 
         with self.assertRaisesRegex(
             TypeError, r"without id value are unhashable"
@@ -242,7 +244,7 @@ class TestModelGenerator(tb.ModelTestCase):
             set([default.User(name="Xavier")])
 
     def test_modelgen_05(self):
-        from models import default
+        from models.orm import default
 
         with self.assertRaisesRegex(
             TypeError, r"without id value are unhashable"
@@ -251,7 +253,7 @@ class TestModelGenerator(tb.ModelTestCase):
 
     def test_modelgen_data_unpack_1a(self):
         import gel
-        from models import default
+        from models.orm import default
 
         q = gel.expr(
             default.Post,
@@ -268,7 +270,7 @@ class TestModelGenerator(tb.ModelTestCase):
         d = self.client.query_single(q)
 
         assert d is not None
-        self.assertEqual(reveal_type(d), "models.default.Post")
+        self.assertEqual(reveal_type(d), "models.orm.default.Post")
 
         self.assertIsInstance(d, default.Post)
         self.assertEqual(d.body, "Hello")
@@ -280,7 +282,7 @@ class TestModelGenerator(tb.ModelTestCase):
         "dispatch_overload currently broken under Python 3.10",
     )
     def test_modelgen_data_unpack_1b(self):
-        from models import default, std
+        from models.orm import default, std
 
         q = (
             default.Post.select(
@@ -296,7 +298,7 @@ class TestModelGenerator(tb.ModelTestCase):
         )
         d = self.client.get(q)
 
-        self.assertEqual(reveal_type(d), "models.default.Post")
+        self.assertEqual(reveal_type(d), "models.orm.default.Post")
 
         self.assertEqual(reveal_type(d.id), "uuid.UUID")
 
@@ -307,7 +309,7 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(d.author.name, "Alice")
 
     def test_modelgen_data_unpack_1c(self):
-        from models import default, std
+        from models.orm import default, std
 
         class MyUser(default.User):
             posts: std.int64
@@ -343,14 +345,14 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(d.posts, 2)
 
     def test_modelgen_data_unpack_2(self):
-        from models import default
+        from models.orm import default
 
         q = default.Post.select().filter(body="Hello")
         d = self.client.query(q)[0]
         self.assertIsInstance(d, default.Post)
 
     def test_modelgen_data_unpack_3(self):
-        from models import default
+        from models.orm import default
 
         from gel._internal._qbmodel._abstract import (
             LinkWithPropsSet,
@@ -403,7 +405,7 @@ class TestModelGenerator(tb.ModelTestCase):
             post.xxx = 123
 
     def test_modelgen_data_unpack_4(self):
-        from models import default
+        from models.orm import default
 
         q = default.Post.select(
             author=True,
@@ -415,7 +417,7 @@ class TestModelGenerator(tb.ModelTestCase):
             d.body
 
     def test_modelgen_pdlist_parametrized(self):
-        from models import default
+        from models.orm import default
         from gel._internal._qbmodel._abstract import (
             LinkWithPropsSet,
         )
@@ -431,7 +433,7 @@ class TestModelGenerator(tb.ModelTestCase):
         from gel._internal._qbmodel._abstract import (
             AbstractLinkSet,
         )
-        import models as m
+        import models.orm as m
 
         ug = self.client.query_required_single(m.UserGroup.limit(1))
 
@@ -459,7 +461,7 @@ class TestModelGenerator(tb.ModelTestCase):
         # regression test for https://github.com/geldata/gel-python/issues/722
 
         import pydantic
-        from models import default
+        from models.orm import default
 
         class UserUpdate(pydantic.BaseModel):
             name: str | None = None
@@ -528,7 +530,7 @@ class TestModelGenerator(tb.ModelTestCase):
 
     def test_modelgen_pydantic_apis_02(self):
         import json
-        from models import default
+        from models.orm import default
 
         user_loaded = self.client.get(
             default.User.select(name=True).filter(name="Alice").limit(1)
@@ -627,7 +629,7 @@ class TestModelGenerator(tb.ModelTestCase):
         # via a single link.
 
         import json
-        from models import default
+        from models.orm import default
         from gel._testbase import pop_ids, pop_ids_json
 
         sl = self.client.query_required_single(
@@ -738,7 +740,7 @@ class TestModelGenerator(tb.ModelTestCase):
         # via a multi link.
 
         import json
-        from models import default
+        from models.orm import default
         from gel._testbase import pop_ids, pop_ids_json
 
         sl = self.client.query_required_single(
@@ -800,7 +802,7 @@ class TestModelGenerator(tb.ModelTestCase):
     def test_modelgen_pydantic_apis_05(self):
         # Test pickling a nested model that has a multi link with link props.
 
-        from models import default
+        from models.orm import default
         from gel._testbase import repickle
 
         sl = self.client.query_required_single(
@@ -855,7 +857,7 @@ class TestModelGenerator(tb.ModelTestCase):
     def test_modelgen_pydantic_apis_06(self):
         # Test pickling a nested model that has a single link with link props.
 
-        from models import default
+        from models.orm import default
         from gel._testbase import repickle
 
         sl = self.client.query_required_single(
@@ -910,7 +912,7 @@ class TestModelGenerator(tb.ModelTestCase):
     def test_modelgen_pydantic_apis_07(self):
         # Test pickling a nested model that has a multi link.
 
-        from models import default
+        from models.orm import default
         from gel._testbase import repickle
 
         sl = self.client.query_required_single(
@@ -972,7 +974,7 @@ class TestModelGenerator(tb.ModelTestCase):
     def test_modelgen_pydantic_apis_08(self):
         # Test pickling a model that has a multi prop.
 
-        from models import default
+        from models.orm import default
         from gel._testbase import repickle
 
         sl = self.client.query_required_single(
@@ -1008,7 +1010,7 @@ class TestModelGenerator(tb.ModelTestCase):
         # test nested serialization -- that it doesn't crash on
         # unfetched computeds and does not leak UNSET_UUID.
 
-        from models import default
+        from models.orm import default
 
         ug = self.client.query_required_single(
             default.UserGroup.select(
@@ -1043,7 +1045,7 @@ class TestModelGenerator(tb.ModelTestCase):
         # test *single required* link serialization
 
         import pydantic
-        from models import default
+        from models.orm import default
 
         p = self.client.get(
             default.Post.select(
@@ -1070,7 +1072,7 @@ class TestModelGenerator(tb.ModelTestCase):
         # Test model_dump() and model_dump_json() on models;
         # test *single required* link serialization in all combinations
 
-        from models import default
+        from models.orm import default
 
         u = default.User(name="aaa")
         t = default.TestSingleLinks(
@@ -1259,7 +1261,7 @@ class TestModelGenerator(tb.ModelTestCase):
 
     def test_modelgen_pydantic_apis_12(self):
         import uuid
-        from models import default
+        from models.orm import default
 
         expected = uuid.uuid4()
         ids = [
@@ -1283,7 +1285,7 @@ class TestModelGenerator(tb.ModelTestCase):
     def test_modelgen_pydantic_apis_13(self):
         # https://github.com/geldata/gel-python/issues/785
 
-        from models import default
+        from models.orm import default
         # insert an object with an optional link to self set to self
 
         p = default.LinearPath(label="singleton")
@@ -1300,7 +1302,7 @@ class TestModelGenerator(tb.ModelTestCase):
         # and that one list with proxies can't leak wrong proxies
         # into anoher list
 
-        from models import default
+        from models.orm import default
 
         # case 1: append a proxy
 
@@ -1374,7 +1376,7 @@ class TestModelGenerator(tb.ModelTestCase):
 
         import json
         import pydantic
-        from models import default
+        from models.orm import default
         from gel._testbase import pop_ids, pop_ids_json
 
         class MyGroup(pydantic.BaseModel):
@@ -1423,7 +1425,7 @@ class TestModelGenerator(tb.ModelTestCase):
             return model.select("*")
 
     def test_modelgen_pydantic_apis_17(self):
-        from models import default
+        from models.orm import default
 
         client = self.client
 
@@ -1494,7 +1496,7 @@ class TestModelGenerator(tb.ModelTestCase):
         )
 
     def test_modelgen_pydantic_apis_18(self):
-        from models import default
+        from models.orm import default
 
         # test that __pydantic_fields_set__ is correct and is
         # only updated when the field is set by the user, not by
@@ -1535,7 +1537,7 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(g.__pydantic_fields_set__, expected | {"users"})
 
     def test_modelgen_pydantic_apis_19(self):
-        from models import default
+        from models.orm import default
 
         g = default.GameSession(num=1, public=True)
         self.assertEqual(
@@ -1550,7 +1552,7 @@ class TestModelGenerator(tb.ModelTestCase):
     def test_modelgen_pydantic_apis_20(self):
         # Test that ComputedLinkSet can be pickled / dumped
 
-        from models import default
+        from models.orm import default
         from gel._testbase import repickle
 
         alice = self.client.get(
@@ -1569,7 +1571,7 @@ class TestModelGenerator(tb.ModelTestCase):
         )
 
     def test_modelgen_data_unpack_polymorphic(self):
-        from models import default
+        from models.orm import default
 
         q = default.Named.select(
             "*",
@@ -1581,7 +1583,7 @@ class TestModelGenerator(tb.ModelTestCase):
                 self.assertIsNotNone(item.mascot)
 
     def test_modelgen_assert_single(self):
-        from models import default
+        from models.orm import default
 
         from gel import errors
 
@@ -1599,19 +1601,19 @@ class TestModelGenerator(tb.ModelTestCase):
             self.client.query(q)
 
     def test_modelgen_submodules_and_reexports(self):
-        import models
+        import models.orm as models
 
         models.default.Post
         models.std.str
 
         self.assertEqual(
             reveal_type(models.sub.TypeInSub.post),
-            "type[models.default.Post]",
+            "type[models.orm.default.Post]",
         )
 
     def test_modelgen_typed_query_expr(self):
         import gel
-        import models
+        import models.orm as models
 
         client: gel.Executor = self.client
 
@@ -1627,7 +1629,7 @@ class TestModelGenerator(tb.ModelTestCase):
         p = client.query(typed)
         self.assertEqual(
             reveal_type(p),
-            "builtins.list[models.default.Post]",
+            "builtins.list[models.orm.default.Post]",
         )
 
         assert len(p) == 1
@@ -1638,7 +1640,7 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(p[0].id, p_expected.id)
 
     def test_modelgen_query_methods_on_instances(self):
-        import models
+        import models.orm as models
 
         q = models.default.Post.limit(1).__gel_assert_single__()
         d = self.client.query(q)[0]
@@ -1661,7 +1663,7 @@ class TestModelGenerator(tb.ModelTestCase):
     def test_modelgen_data_model_validation_1(self):
         from typing import cast
 
-        from models import default, std
+        from models.orm import default, std
 
         from gel._internal._qbmodel._abstract import LinkWithPropsSet
 
@@ -1765,7 +1767,7 @@ class TestModelGenerator(tb.ModelTestCase):
             u.name_len = cast(std.int64, 123)  # type: ignore[assignment]
 
     def test_modelgen_data_model_validation_2(self):
-        from models import default
+        from models.orm import default
 
         T = default.TestSingleLinks
 
@@ -1812,12 +1814,12 @@ class TestModelGenerator(tb.ModelTestCase):
         with self.assertRaisesRegex(
             ValueError,
             r"(?s)is expected to satisfy Python type system.*"
-            r"models.default.TestSingleLinks.opt_wprop_friend.link\(\)",
+            r"models.orm.default.TestSingleLinks.opt_wprop_friend.link\(\)",
         ):
             t.opt_wprop_friend = u1  # type: ignore [assignment]
 
     def test_modelgen_save_01(self):
-        from models import default
+        from models.orm import default
 
         pq = (
             default.Post.select(
@@ -1886,7 +1888,7 @@ class TestModelGenerator(tb.ModelTestCase):
     def test_modelgen_save_02(self):
         import uuid
 
-        from models import default
+        from models.orm import default
         # insert an object with a required multi: no link props, one object
         # added to the link
 
@@ -1916,7 +1918,7 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(m.nickname, "Hannibal")
 
     def test_modelgen_save_03(self):
-        from models import default
+        from models.orm import default
         # insert an object with a required multi: no link props, more than one
         # object added to the link
 
@@ -1966,7 +1968,7 @@ class TestModelGenerator(tb.ModelTestCase):
             self.assertEqual(m.nickname, nickname)
 
     def test_modelgen_save_04(self):
-        from models import default
+        from models.orm import default
         # insert an object with a required multi: with link props, one object
         # added to the link
 
@@ -2016,7 +2018,7 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(m.__linkprops__.rank, 2)
 
     def test_modelgen_save_05(self):
-        from models import default
+        from models.orm import default
         # insert an object with a required multi: with link props, more than
         # one object added to the link; have one link prop for the first
         # object within the link, and another for the second object within the
@@ -2088,7 +2090,7 @@ class TestModelGenerator(tb.ModelTestCase):
             self.assertEqual(m["@rank"], rank)
 
     def test_modelgen_save_06(self):
-        from models import default
+        from models.orm import default
         # Update object adding multiple existing objects to an exiting link
         # (no link props)
 
@@ -2112,7 +2114,7 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(set(res), {"Alice", "Cameron", "Zoe"})
 
     def test_modelgen_save_07(self):
-        from models import default
+        from models.orm import default
         # Update object adding multiple existing objects to an exiting link
         # (no link props)
 
@@ -2136,7 +2138,7 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(set(res), {"Alice", "Billie", "Cameron", "Zoe"})
 
     def test_modelgen_save_08(self):
-        from models import default
+        from models.orm import default
         # Update object adding multiple existing objects to an exiting link
         # with link props (try variance of props within the same multi link
         # for the same object)
@@ -2224,7 +2226,7 @@ class TestModelGenerator(tb.ModelTestCase):
         )
 
     def test_modelgen_save_09(self):
-        from models import default
+        from models.orm import default
         # Update object removing multiple existing objects from an existing
         # multi link
 
@@ -2251,7 +2253,7 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(set(res), {"Alice", "Dana"})
 
     def test_modelgen_save_10(self):
-        from models import default
+        from models.orm import default
         # Update object removing multiple existing objects from an existing
         # multi link
 
@@ -2307,7 +2309,7 @@ class TestModelGenerator(tb.ModelTestCase):
         )
 
     def test_modelgen_save_11(self):
-        from models import default
+        from models.orm import default
         # Update object adding an existing objecs to an exiting single
         # required link (no link props)
 
@@ -2331,7 +2333,7 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(res[0].author.name, "Zoe")
 
     def test_modelgen_save_12(self):
-        from models import default
+        from models.orm import default
 
         # Update object adding an existing object to an exiting single
         # required link (with link props)
@@ -2374,7 +2376,7 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(img.author.__linkprops__.year, 2024)
 
     def test_modelgen_save_13(self):
-        from models import default
+        from models.orm import default
         # Update object adding an existing object to an exiting single
         # optional link (no link props)
 
@@ -2398,7 +2400,7 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(res.owner.name, "Zoe")
 
     def test_modelgen_save_14(self):
-        from models import default
+        from models.orm import default
         # Update object adding an existing object to an exiting single
         # optional link (with link props)
 
@@ -2464,7 +2466,7 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(loot.owner.__linkprops__.bonus, False)
 
     def test_modelgen_save_15(self):
-        from models import default
+        from models.orm import default
         # insert an object with a required single: no link props, one object
         # added to the link
 
@@ -2485,7 +2487,7 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(res.author.name, "Zoe")
 
     def test_modelgen_save_16(self):
-        from models import default
+        from models.orm import default
         # insert an object with a required single: with link props
 
         a = self.client.get(default.User.filter(name="Alice"))
@@ -2511,7 +2513,7 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(img.author.__linkprops__.year, 2000)
 
     def test_modelgen_save_17(self):
-        from models import default
+        from models.orm import default
         # insert an object with an optional single: no link props, one object
         # added to the link
 
@@ -2531,7 +2533,7 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(res.owner.name, "Zoe")
 
     def test_modelgen_save_18(self):
-        from models import default
+        from models.orm import default
         # insert an object with an optional single: with link props
 
         a = self.client.get(default.User.filter(name="Alice"))
@@ -2558,7 +2560,7 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(loot.owner.__linkprops__.bonus, False)
 
     def test_modelgen_save_19(self):
-        from models import default
+        from models.orm import default
         # insert an object with an optional link to self set to self
 
         p = default.LinearPath(label="singleton")
@@ -2575,7 +2577,7 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(res[0].id, res[0].next.id)
 
     def test_modelgen_save_20(self):
-        from models import default
+        from models.orm import default
         # make a self loop in 2 steps
 
         p = default.LinearPath(label="singleton")
@@ -2594,7 +2596,7 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(res[0].id, res[0].next.id)
 
     def test_modelgen_save_21(self):
-        from models import default
+        from models.orm import default
         # insert an object with an optional link to self set to self
 
         p = default.LinearPath(
@@ -2625,7 +2627,7 @@ class TestModelGenerator(tb.ModelTestCase):
         # Test empty object insertion; regression test for
         # https://github.com/geldata/gel-python/issues/720
 
-        from models import default
+        from models.orm import default
 
         from gel._internal._unsetid import UNSET_UUID
 
@@ -2646,7 +2648,7 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertIs(z.pointer, x)
 
     def test_modelgen_save_23(self):
-        from models import default
+        from models.orm import default
 
         p = default.Post(body="save 23", author=default.User(name="Sally"))
 
@@ -2664,7 +2666,7 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(p.author.id, p2.author.id)
 
     def test_modelgen_save_24(self):
-        from models import default
+        from models.orm import default
 
         z = self.client.get(default.User.filter(name="Zoe"))
         p = self.client.get(
@@ -2687,7 +2689,7 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(p2.author.name, "Zoe")
 
     def test_modelgen_save_25(self):
-        from models import default
+        from models.orm import default
 
         g = self.client.get(
             default.UserGroup.select(
@@ -2710,7 +2712,7 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(g2.mascot, "iguana")
 
     def test_modelgen_save_26(self):
-        from models import default
+        from models.orm import default
 
         l0 = default.ImpossibleLink0(val="A", il1=default.BaseLink(val="X"))
         l1 = default.ImpossibleLink1(val="2nd", il0=l0)
@@ -2731,7 +2733,7 @@ class TestModelGenerator(tb.ModelTestCase):
             self.client.sync(l0, l1)
 
     def test_modelgen_save_27(self):
-        from models import default
+        from models.orm import default
 
         a = self.client.get(default.User.filter(name="Alice"))
         b = self.client.get(default.User.filter(name="Billie"))
@@ -2791,7 +2793,7 @@ class TestModelGenerator(tb.ModelTestCase):
         )
 
     def test_modelgen_save_28(self):
-        from models import default
+        from models.orm import default
 
         a = self.client.get(default.User.filter(name="Alice"))
         p = default.Raid(
@@ -2833,7 +2835,7 @@ class TestModelGenerator(tb.ModelTestCase):
         )
 
     def test_modelgen_save_29(self):
-        from models import default
+        from models.orm import default
 
         a = self.client.get(default.User.filter(name="Alice"))
         p = default.Raid(
@@ -2859,7 +2861,7 @@ class TestModelGenerator(tb.ModelTestCase):
 
     def test_modelgen_save_30(self):
         from gel import errors
-        from models import default
+        from models.orm import default
 
         a = self.client.get(default.User.filter(name="Alice"))
         p = default.Raid(
@@ -2894,7 +2896,7 @@ class TestModelGenerator(tb.ModelTestCase):
         # Test that using model_copy with a sparse model updates
         # the target model
 
-        from models import default
+        from models.orm import default
         from pydantic import BaseModel
 
         class SparseUser(BaseModel):
@@ -2914,8 +2916,8 @@ class TestModelGenerator(tb.ModelTestCase):
     def test_modelgen_save_32(self):
         # Test updating an existing model
 
-        import models.std as std
-        from models import default
+        import models.orm.std as std
+        from models.orm import default
 
         u = self.client.get(default.User.filter(name="Alice").limit(1))
 
@@ -2938,7 +2940,7 @@ class TestModelGenerator(tb.ModelTestCase):
         #   new data, default values)
 
         from gel._internal._tracked_list import Mode
-        from models import default
+        from models.orm import default
 
         u = default.User(name="Wat")
         self.assertPydanticChangedFields(u, {"name"})
@@ -3101,7 +3103,7 @@ class TestModelGenerator(tb.ModelTestCase):
         # new User and GameSession objects with players assignment
         # Select data, modify it, check consistency
         from gel._internal._tracked_list import Mode
-        from models import default
+        from models.orm import default
 
         # Create new users
         u1 = default.User(name="TestUser1")
@@ -3159,7 +3161,7 @@ class TestModelGenerator(tb.ModelTestCase):
         # GameSession with players assignment then clear
         # Select data, modify it, check consistency
         from gel._internal._tracked_list import Mode
-        from models import default
+        from models.orm import default
 
         # Get existing user
         u = self.client.get(default.User.filter(name="Elsa"))
@@ -3201,7 +3203,7 @@ class TestModelGenerator(tb.ModelTestCase):
         # instance, pass id to it (but not players). Test overriding
         # `.players` link with a new collection
         from gel._internal._tracked_list import Mode
-        from models import default
+        from models.orm import default
 
         # Get existing GameSession with players
         existing_session = self.client.get(
@@ -3260,7 +3262,7 @@ class TestModelGenerator(tb.ModelTestCase):
         # Make a new GameSession instance,
         # pass id to it. Test appending to players.
         from gel._internal._tracked_list import Mode
-        from models import default
+        from models.orm import default
 
         # Get existing GameSession with players
         existing_session = self.client.get(
@@ -3312,7 +3314,7 @@ class TestModelGenerator(tb.ModelTestCase):
         # instance, pass id and players list to it. Test that save()
         # overrides the data.
         from gel._internal._tracked_list import Mode
-        from models import default
+        from models.orm import default
 
         # Get existing GameSession with players
         existing_session = self.client.get(
@@ -3354,7 +3356,7 @@ class TestModelGenerator(tb.ModelTestCase):
 
     def test_modelgen_save_39(self):
         # Test defaults
-        from models import default
+        from models.orm import default
 
         new_session_with_default_limit = default.GameSession(
             num=9000,
@@ -3372,7 +3374,7 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(session.time_limit, None)
 
     def test_modelgen_save_40(self):
-        from models import default
+        from models.orm import default
         from pydantic import BaseModel
 
         class MyGroup(BaseModel):
@@ -3418,7 +3420,7 @@ class TestModelGenerator(tb.ModelTestCase):
     def test_modelgen_save_41(self):
         """Create and save a model with random UUID"""
         import uuid
-        from models import default
+        from models.orm import default
         from gel import errors
 
         with self.assertRaisesRegex(
@@ -3431,7 +3433,7 @@ class TestModelGenerator(tb.ModelTestCase):
             self.client.sync(obj)
 
     def test_modelgen_save_42(self):
-        from models import default
+        from models.orm import default
 
         # regression test -- model_construct() had a bug where it set
         # __gel_new__ on a class, not on the instance it created.
@@ -3440,7 +3442,7 @@ class TestModelGenerator(tb.ModelTestCase):
 
     def test_modelgen_save_43(self):
         """Test refetch"""
-        from models import default
+        from models.orm import default
 
         u1 = default.User(name="Al")
         self.client.sync(u1)
@@ -3464,7 +3466,7 @@ class TestModelGenerator(tb.ModelTestCase):
 
         import json
         from typing import Any
-        from models import default
+        from models.orm import default
 
         def check(expected: Any) -> None:
             res = self.client.query_required_single_json("""
@@ -3557,7 +3559,7 @@ class TestModelGenerator(tb.ModelTestCase):
 
         import json
         from typing import Any
-        from models import default
+        from models.orm import default
 
         def check(expected: Any) -> None:
             res = self.client.query_required_single_json("""
@@ -3656,7 +3658,7 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(elsa1.groups, {red})
 
     def test_modelgen_save_reload_props_01(self):
-        from models import default
+        from models.orm import default
 
         # Test that we can omit props with default values and then the values
         # are populated after save.
@@ -3673,7 +3675,7 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(fresh.public, gs.public)
 
     def test_modelgen_save_reload_props_02(self):
-        from models import default
+        from models.orm import default
 
         # Test that rewrite rules are executed and values are populated
         # after save.
@@ -3710,7 +3712,7 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(fresh.toggle, tpr.toggle)
 
     def test_modelgen_save_reload_props_03(self):
-        from models import default
+        from models.orm import default
 
         # Test toggle rewrite behavior: flipping, disabling, and re-enabling
 
@@ -3767,7 +3769,7 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(fresh.toggle, tpr.toggle)
 
     def test_modelgen_save_reload_links_01(self):
-        from models import default
+        from models.orm import default
 
         # Test that default link values are populated correctly
         alice = self.client.get(default.User.filter(name="Alice"))
@@ -3787,7 +3789,7 @@ class TestModelGenerator(tb.ModelTestCase):
     @tb.xfail
     # See XXX comments
     def test_modelgen_save_reload_links_02(self):
-        from models import default
+        from models.orm import default
 
         # Test that rewrite link rules are executed correctly
         # The rewrite selects first User >= the object's name alphabetically
@@ -3832,7 +3834,7 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(tlr2.user.name, "Cameron")
 
     def test_modelgen_save_reload_links_03(self):
-        from models import default
+        from models.orm import default
 
         # Test that link trigger rules are executed correctly
         # This trigger updates the linked user's nickname to match the
@@ -3864,7 +3866,7 @@ class TestModelGenerator(tb.ModelTestCase):
     # error from saving tsl2
     # more than one row returned by a subquery used as an expression
     def test_modelgen_save_reload_links_04(self):
-        from models import default
+        from models.orm import default
 
         # Test that what happens to computed links after saving a new object
         # TestSingleLinks has computed versions of all its links
@@ -3991,7 +3993,7 @@ class TestModelGenerator(tb.ModelTestCase):
             assert tsl2.comp_opt_wprop_friend is not None  # access field
 
     def test_modelgen_save_reload_links_05(self):
-        from models import default
+        from models.orm import default
 
         # Test that backlinks become unset after save operations
         # User.groups is a computed backlink to UserGroup.users
@@ -4032,7 +4034,7 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(alice.name, "Alice")
 
     def test_modelgen_save_reload_links_06(self):
-        from models import default
+        from models.orm import default
 
         # Test backlink invalidation when removing a user from existing group
         # Fetch an existing group with users and their backlinks
@@ -4080,7 +4082,7 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual({u.id for u in red.users}, orig_ids - {alice.id})
 
     def test_modelgen_save_reload_links_07(self):
-        from models import default
+        from models.orm import default
 
         # Test backlink invalidation when adding a user to a different group
         # Fetch red and blue groups with nested user data and their groups
@@ -4139,7 +4141,7 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual({u.id for u in blue.users}, {alice.id})
 
     def test_modelgen_save_reload_links_08(self):
-        from models import default
+        from models.orm import default
 
         g = default.UserGroup(
             name="Pickle Pirates",
@@ -4188,7 +4190,7 @@ class TestModelGenerator(tb.ModelTestCase):
     @tb.xfail
     # link props aren't reloaded after save
     def test_modelgen_save_reload_linkprops_01(self):
-        from models import default
+        from models.orm import default
 
         # Test that link property defaults are populated correctly after save
         # StepPath.next has a link property "steps" with default value 1
@@ -4223,7 +4225,7 @@ class TestModelGenerator(tb.ModelTestCase):
         )
 
     def test_modelgen_save_computed_multiprops_01(self):
-        from models import default
+        from models.orm import default
 
         alice = self.client.get(default.User.filter(name="Alice"))
         billie = self.client.get(default.User.filter(name="Billie"))
@@ -4238,7 +4240,7 @@ class TestModelGenerator(tb.ModelTestCase):
         self.client.sync(team)
 
     def test_modelgen_save_computed_multiprops_02(self):
-        from models import default
+        from models.orm import default
 
         # Create ExtraTeam using EdgeQL to avoid ORM save issues
         t = self.client.query_required_single("""
@@ -4272,7 +4274,7 @@ class TestModelGenerator(tb.ModelTestCase):
             team.member_names += ("Cameron",)  # type: ignore
 
     def test_modelgen_save_computed_multiprops_03(self):
-        from models import default
+        from models.orm import default
 
         # Create ExtraTeam using EdgeQL to avoid ORM save issues
         t = self.client.query_required_single("""
@@ -4302,7 +4304,7 @@ class TestModelGenerator(tb.ModelTestCase):
         # Test that reading operations on write-only dlists raise
         # RuntimeError
         from gel._internal._tracked_list import Mode
-        from models import default
+        from models.orm import default
 
         # Create a GameSession with a known ID but without fetching players
         # This puts the players dlist in write-only mode
@@ -4373,7 +4375,7 @@ class TestModelGenerator(tb.ModelTestCase):
     def test_modelgen_scalars_01(self):
         import json
         import datetime as dt
-        from models import default
+        from models.orm import default
 
         # Get the object with non-trivial scalars
         s = self.client.get(default.AssortedScalars.filter(name="hello world"))
@@ -4416,7 +4418,7 @@ class TestModelGenerator(tb.ModelTestCase):
     def test_modelgen_scalars_02(self):
         import json
         import datetime as dt
-        from models import default
+        from models.orm import default
 
         # Create a new AssortedScalars object with all fields same as the
         # existing one, except the name. This makes it easy to verify the
@@ -4458,7 +4460,7 @@ class TestModelGenerator(tb.ModelTestCase):
 
     def test_modelgen_scalars_03(self):
         import json
-        from models import default
+        from models.orm import default
 
         # Test deeply nested mixed collections.
         s = default.AssortedScalars(name="scalars test 2")
@@ -4482,7 +4484,7 @@ class TestModelGenerator(tb.ModelTestCase):
         )
 
     def test_modelgen_enum_01(self):
-        from models import default
+        from models.orm import default
 
         res = self.client.query(default.EnumTest.order_by(color=True))
 
@@ -4497,7 +4499,7 @@ class TestModelGenerator(tb.ModelTestCase):
         )
 
     def test_modelgen_enum_02(self):
-        from models import default
+        from models.orm import default
 
         e = default.EnumTest(name="color test 1", color="Orange")
         self.client.sync(e)
@@ -4518,7 +4520,7 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(e2.color, default.Color.Violet)
 
     def test_modelgen_save_collections_01(self):
-        from models import default
+        from models.orm import default
         # insert an object with an optional single: with link props
 
         ks = default.KitchenSink(
@@ -4552,7 +4554,7 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(sorted(ks3.p_multi_str), ["222", "zzz", "zzz"])
 
     def test_modelgen_save_collections_02(self):
-        from models import default
+        from models.orm import default
 
         ks = default.KitchenSink(
             str="coll_test_2",
@@ -4620,7 +4622,7 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(ks5.array, ["bye bye"])
 
     def test_modelgen_save_collections_03(self):
-        from models import default
+        from models.orm import default
 
         ks = self.client.get(default.KitchenSink.filter(str="hello world"))
         self.assertEqual(ks.array, ["foo"])
@@ -4640,7 +4642,7 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(ks3.array, ["bar"])
 
     def test_modelgen_save_collections_04(self):
-        from models import default
+        from models.orm import default
 
         ks = self.client.get(default.KitchenSink.filter(str="hello world"))
         self.assertEqual(sorted(ks.p_multi_arr), [["bar"], ["foo"]])
@@ -4653,7 +4655,7 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(sorted(ks2.p_multi_arr), [["bar"]])
 
     def test_modelgen_save_collections_05(self):
-        from models import default
+        from models.orm import default
 
         ks = self.client.get(default.KitchenSink.filter(str="hello world"))
         self.assertEqual(ks.p_opt_arr, None)
@@ -4666,7 +4668,7 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(ks2.p_opt_arr, ["silly", "goose"])
 
     def test_modelgen_save_collections_06(self):
-        from models import default
+        from models.orm import default
 
         ks = self.client.get(
             default.KitchenSink.select(
@@ -4681,7 +4683,7 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(ks2.p_opt_str, "silly goose")
 
     def test_modelgen_save_collections_07(self):
-        from models import default
+        from models.orm import default
 
         ks = self.client.get(default.KitchenSink.filter(str="hello world"))
         self.assertEqual(ks.array, ["foo"])
@@ -4697,7 +4699,7 @@ class TestModelGenerator(tb.ModelTestCase):
     def test_modelgen_save_range_01(self):
         import datetime as dt
         from gel import Range
-        from models import default
+        from models.orm import default
 
         r = self.client.get(default.RangeTest.filter(name="test range"))
         self.assertEqual(r.name, "test range")
@@ -4739,7 +4741,7 @@ class TestModelGenerator(tb.ModelTestCase):
     def test_modelgen_save_range_02(self):
         import datetime as dt
         from gel import Range
-        from models import default
+        from models.orm import default
 
         r = default.RangeTest(
             name="new range",
@@ -4767,7 +4769,7 @@ class TestModelGenerator(tb.ModelTestCase):
     def test_modelgen_save_multirange_01(self):
         import datetime as dt
         from gel import MultiRange, Range
-        from models import default
+        from models.orm import default
 
         r = self.client.get(
             default.MultiRangeTest.filter(name="test multirange")
@@ -4827,7 +4829,7 @@ class TestModelGenerator(tb.ModelTestCase):
     def test_modelgen_save_multirange_02(self):
         import datetime as dt
         from gel import MultiRange, Range
-        from models import default
+        from models.orm import default
 
         r = default.MultiRangeTest(
             name="new multirange",
@@ -4857,7 +4859,7 @@ class TestModelGenerator(tb.ModelTestCase):
         )
 
     def test_modelgen_linkprops_01(self):
-        from models import default
+        from models.orm import default
 
         # Create a new GameSession and add a player
         u = self.client.get(default.User.filter(name="Zoe"))
@@ -4883,7 +4885,7 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(p.__linkprops__.is_tall_enough, True)
 
     def test_modelgen_linkprops_02(self):
-        from models import default
+        from models.orm import default
 
         # Create a new GameSession and add a player
         u = self.client.get(default.User.filter(name="Elsa"))
@@ -4922,7 +4924,7 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(p.__linkprops__.is_tall_enough, False)
 
     def test_modelgen_linkprops_03(self):
-        from models import default
+        from models.orm import default
 
         # This one only has a single player
         q = default.GameSession.select(
@@ -4956,7 +4958,7 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(p1.__linkprops__.is_tall_enough, False)
 
     def test_modelgen_linkprops_04(self):
-        from models import default
+        from models.orm import default
 
         # Test reusing the same anonymous link proxy for multiple objects
 
@@ -4992,7 +4994,7 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(link.__linkprops__.is_tall_enough, None)
 
     def test_modelgen_linkprops_05(self):
-        from models import default
+        from models.orm import default
 
         # Test reusing the same linked link proxy for multiple objects
 
@@ -5025,7 +5027,7 @@ class TestModelGenerator(tb.ModelTestCase):
     #       I'm keeping the test here, but I think we'll remove it later
     #       once we discuss this one more time.
     def test_modelgen_linkprops_06(self):
-        from models import default
+        from models.orm import default
 
         # Try to merge link props
         u = self.client.get(default.User.filter(name="Zoe"))
@@ -5042,7 +5044,7 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(member.__linkprops__.role, "first mate")
 
     def test_modelgen_linkprops_07(self):
-        from models import default
+        from models.orm import default
 
         # Try to merge link props
         u = self.client.get(default.User.filter(name="Zoe"))
@@ -5073,7 +5075,7 @@ class TestModelGenerator(tb.ModelTestCase):
     # victor: merge doesn't happen
     # yury: read the comment in test_modelgen_linkprops_06
     def test_modelgen_linkprops_08(self):
-        from models import default
+        from models.orm import default
 
         # Try to merge link props
         u = self.client.get(default.User.filter(name="Zoe"))
@@ -5097,7 +5099,7 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(member.__linkprops__.role, "sorceress")
 
     def test_modelgen_linkprops_09(self):
-        from models import default
+        from models.orm import default
 
         # Change a fetched link property (targeting __gel_has_changes__)
 
@@ -5115,11 +5117,11 @@ class TestModelGenerator(tb.ModelTestCase):
 
     def test_modelgen_globals_01(self):
         """Test reflection of globals"""
-        from models import default
+        from models.orm import default
 
         self.assertEqual(
             reveal_type(default.current_game_session_num),
-            "type[models.__shapes__.std.int64]",
+            "type[models.orm.__shapes__.std.int64]",
         )
 
         sess_num = 988
@@ -5165,7 +5167,7 @@ class TestModelGenerator(tb.ModelTestCase):
 
     @tb.skip_typecheck
     def test_modelgen_reflection_1(self):
-        from models import default
+        from models.orm import default
 
         from gel._internal._edgeql import Cardinality, PointerKind
 
@@ -5323,7 +5325,7 @@ class TestModelGenerator(tb.ModelTestCase):
         import textwrap
         import json
 
-        from models import default
+        from models.orm import default
         from gel._testbase_schema import render_schema_from_json
 
         schema = render_schema_from_json(
@@ -5380,7 +5382,7 @@ class TestModelGenerator(tb.ModelTestCase):
         import textwrap
         import json
 
-        from models import default
+        from models.orm import default
         from gel._testbase_schema import render_schema_from_json
 
         class CreateUser(default.User.__shapes__.Create):
@@ -5464,7 +5466,7 @@ class TestModelGenerator(tb.ModelTestCase):
 
     def test_modelgen_function_overloads_01(self):
         """Test basic function overloads with different parameter types"""
-        from models import default
+        from models.orm import default
 
         # Test integer addition
         result_int: int = self.client.query_required_single(
@@ -5486,7 +5488,7 @@ class TestModelGenerator(tb.ModelTestCase):
 
     def test_modelgen_function_overloads_02(self):
         """Test function overloads with optional parameters"""
-        from models import default
+        from models.orm import default
 
         # Test with default prefix
         result_1: str = self.client.query_required_single(
@@ -5509,7 +5511,7 @@ class TestModelGenerator(tb.ModelTestCase):
     @tb.to_be_fixed  # scalar/object overloads seem to be broken
     def test_modelgen_function_overloads_03(self):
         """Test function overloads with different return types"""
-        from models import default
+        from models.orm import default
 
         # Test string input
         result_str: str = self.client.query_required_single(
@@ -5533,7 +5535,7 @@ class TestModelGenerator(tb.ModelTestCase):
     @tb.to_be_fixed  # python value casting for arrays
     def test_modelgen_function_overloads_04(self):
         """Test function overloads with array parameters"""
-        from models import default
+        from models.orm import default
 
         # Test integer array
         result_int: int = self.client.query_required_single(
@@ -5550,7 +5552,7 @@ class TestModelGenerator(tb.ModelTestCase):
     @tb.to_be_fixed  # python value casting for tuples
     def test_modelgen_function_overloads_05(self):
         """Test function overloads with tuple parameters"""
-        from models import default
+        from models.orm import default
 
         # Test tuple with str, int64
         result_1: str = self.client.query_required_single(
@@ -5566,7 +5568,7 @@ class TestModelGenerator(tb.ModelTestCase):
 
     def test_modelgen_function_overloads_06(self):
         """Test complex function overloads with overlapping parameters"""
-        from models import default
+        from models.orm import default
 
         # Test single int parameter
         result_int: str = self.client.query_required_single(
@@ -5600,7 +5602,7 @@ class TestModelGenerator(tb.ModelTestCase):
 
     def test_modelgen_function_overloads_with_python_values(self):
         """Test that function overloads work with regular Python values"""
-        from models import default
+        from models.orm import default
 
         # Test with Python int (should work with int64 overload)
         python_int = 10
@@ -5636,7 +5638,7 @@ class TestModelGenerator(tb.ModelTestCase):
 
     def test_modelgen_function_simple_defaults_01(self):
         """Test functions with simple default parameters"""
-        from models import default
+        from models.orm import default
 
         # Test simple_add with default value
         result_int: int = self.client.query_required_single(
@@ -5664,7 +5666,7 @@ class TestModelGenerator(tb.ModelTestCase):
 
     def test_modelgen_function_optional_params(self):
         """Test functions with optional parameters"""
-        from models import default
+        from models.orm import default
 
         # Test with default (empty) multiplier
         result_float: float = self.client.query_required_single(
@@ -5683,7 +5685,7 @@ class TestModelGenerator(tb.ModelTestCase):
     @tb.to_be_fixed  # Python auto-cast for lists is missing
     def test_modelgen_function_array_params(self):
         """Test functions with array parameters and defaults"""
-        from models import default
+        from models.orm import default
 
         # Test with default separator
         result_join: str = self.client.query_required_single(
@@ -5699,7 +5701,7 @@ class TestModelGenerator(tb.ModelTestCase):
 
     def test_modelgen_function_multiple_defaults(self):
         """Test functions with multiple default parameters"""
-        from models import default
+        from models.orm import default
 
         # Test with all defaults
         result_fmt: str = self.client.query_required_single(
@@ -5736,7 +5738,7 @@ class TestModelGenerator(tb.ModelTestCase):
     def test_modelgen_function_defaults_with_python_values(self):
         """Test that default parameter functions work with regular
         Python values"""
-        from models import default
+        from models.orm import default
 
         # Test with Python int
         python_int = 25
@@ -5759,7 +5761,7 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(result_py_fmt, "Python  with defaults")
 
     def test_modelgen_function_variadic_01(self):
-        from models import default
+        from models.orm import default
 
         # Test basic variadic function with no variadic args
         result: str = self.client.query_required_single(
@@ -5768,7 +5770,7 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(result, "pref-hello0-suf")
 
     def test_modelgen_function_variadic_02(self):
-        from models import default
+        from models.orm import default
 
         # Test variadic function with single arg
         result: str = self.client.query_required_single(
@@ -5777,7 +5779,7 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(result, "pref-hello5-suf")
 
     def test_modelgen_function_variadic_03(self):
-        from models import default
+        from models.orm import default
 
         # Test variadic function with multiple args
         result: str = self.client.query_required_single(
@@ -5786,7 +5788,7 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(result, "pref-hello15-suf")
 
     def test_modelgen_function_variadic_04(self):
-        from models import default
+        from models.orm import default
 
         # Test variadic function with named-only parameters
         result: str = self.client.query_required_single(
@@ -5795,7 +5797,7 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(result, "pref-hello3-END")
 
     def test_modelgen_function_variadic_05(self):
-        from models import default
+        from models.orm import default
 
         # Test variadic function with both named-only parameters
         result: str = self.client.query_required_single(
@@ -5806,14 +5808,14 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(result, "START-hello30-DONE")
 
     def test_modelgen_function_variadic_06(self):
-        from models import default
+        from models.orm import default
 
         # Test simple variadic sum function
         result: int = self.client.query_required_single(default.sum_variadic())
         self.assertEqual(result, 0)
 
     def test_modelgen_function_variadic_07(self):
-        from models import default
+        from models.orm import default
 
         # Test variadic sum with multiple values
         result: int = self.client.query_required_single(
@@ -5822,7 +5824,7 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(result, 15)
 
     def test_modelgen_function_variadic_08(self):
-        from models import default
+        from models.orm import default
 
         # Test variadic join function
         result: str = self.client.query_required_single(
@@ -5831,7 +5833,7 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(result, "a-b-c-d")
 
     def test_modelgen_function_variadic_11(self):
-        from models import default
+        from models.orm import default
 
         # Test process_variadic with default multiplier
         result: str = self.client.query_required_single(
@@ -5840,7 +5842,7 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(result, "sum: 6")
 
     def test_modelgen_function_variadic_12(self):
-        from models import default
+        from models.orm import default
 
         # Test process_variadic with custom multiplier
         result: str = self.client.query_required_single(
@@ -5849,7 +5851,7 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(result, "sum: 60")
 
     def test_modelgen_function_named_only_01(self):
-        from models import default
+        from models.orm import default
 
         # Test named-only parameters with defaults
         result: str = self.client.query_required_single(
@@ -5858,7 +5860,7 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(result, "hello")
 
     def test_modelgen_function_named_only_02(self):
-        from models import default
+        from models.orm import default
 
         # Test named-only parameters with bold
         result: str = self.client.query_required_single(
@@ -5867,7 +5869,7 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(result, "[BOLD]hello[/BOLD]")
 
     def test_modelgen_function_named_only_03(self):
-        from models import default
+        from models.orm import default
 
         # Test named-only parameters with bold and italic
         result: str = self.client.query_required_single(
@@ -5876,7 +5878,7 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(result, "[BOLD][ITALIC]hello[/ITALIC][/BOLD]")
 
     def test_modelgen_function_named_only_04(self):
-        from models import default
+        from models.orm import default
 
         # Test named-only parameters with prefix and suffix
         result: str = self.client.query_required_single(
@@ -5885,7 +5887,7 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(result, ">>> hello <<<")
 
     def test_modelgen_function_named_only_05(self):
-        from models import default
+        from models.orm import default
 
         # Test named-only parameters with all options
         result: str = self.client.query_required_single(
@@ -5902,14 +5904,14 @@ class TestModelGenerator(tb.ModelTestCase):
         )
 
     def test_modelgen_function_optional_variadic_01(self):
-        from models import default
+        from models.orm import default
 
         # Test optional variadic with default base
         result: int = self.client.query_required_single(default.optional_sum())
         self.assertEqual(result, 0)
 
     def test_modelgen_function_optional_variadic_02(self):
-        from models import default
+        from models.orm import default
 
         # Test optional variadic with custom base
         result: int = self.client.query_required_single(
@@ -5918,7 +5920,7 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(result, 100)
 
     def test_modelgen_function_optional_variadic_03(self):
-        from models import default
+        from models.orm import default
 
         # Test optional variadic with base and variadic args
         result: int = self.client.query_required_single(
@@ -5927,7 +5929,7 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(result, 20)
 
     def test_modelgen_function_complex_variadic_01(self):
-        from models import default
+        from models.orm import default
 
         # Test complex variadic with minimal args
         result: str = self.client.query_required_single(
@@ -5936,7 +5938,7 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(result, "test (default) sum=0")
 
     def test_modelgen_function_complex_variadic_02(self):
-        from models import default
+        from models.orm import default
 
         # Test complex variadic with optional param
         result: str = self.client.query_required_single(
@@ -5945,7 +5947,7 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(result, "test (custom) sum=0")
 
     def test_modelgen_function_complex_variadic_03(self):
-        from models import default
+        from models.orm import default
 
         # Test complex variadic with variadic args
         result: str = self.client.query_required_single(
@@ -5954,7 +5956,7 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(result, "test (custom) sum=60")
 
     def test_modelgen_function_complex_variadic_04(self):
-        from models import default
+        from models.orm import default
 
         # Test complex variadic with named-only flag
         result: str = self.client.query_required_single(
@@ -5963,7 +5965,7 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(result, "test (custom) sum=30 [FLAG]")
 
     def test_modelgen_function_complex_variadic_05(self):
-        from models import default
+        from models.orm import default
 
         # Test complex variadic with multiplier
         result: str = self.client.query_required_single(
@@ -5972,7 +5974,7 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(result, "test (custom) sum=75")
 
     def test_modelgen_function_complex_variadic_06(self):
-        from models import default
+        from models.orm import default
 
         # Test complex variadic with all parameters
         result: str = self.client.query_required_single(
@@ -5983,7 +5985,7 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(result, "test (custom) sum=70 [FLAG]")
 
     def test_modelgen_function_variadic_with_python_values(self):
-        from models import default
+        from models.orm import default
 
         # Test variadic functions with Python values mixed with model calls
         python_str = "python_value"
@@ -5998,7 +6000,7 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(result, "PY-python_value6-suf")
 
     def test_modelgen_function_named_only_edge_cases(self):
-        from models import default
+        from models.orm import default
 
         # Test that named-only parameters cannot be passed positionally
         # This should work fine since we're using named parameters
@@ -6009,7 +6011,7 @@ class TestModelGenerator(tb.ModelTestCase):
 
     def test_modelgen_operators_string_comparison(self):
         """Test string comparison operators with mixed Python/Gel values"""
-        from models import default
+        from models.orm import default
 
         # Test equality operators
         alice = self.client.query_required_single(
@@ -6047,7 +6049,7 @@ class TestModelGenerator(tb.ModelTestCase):
 
     def test_modelgen_operators_string_arithmetic(self):
         """Test string concatenation and repetition operators"""
-        from models import default, std
+        from models.orm import default, std
 
         # Test string concatenation in computed field
         class UserWithFullName(default.User):
@@ -6084,7 +6086,7 @@ class TestModelGenerator(tb.ModelTestCase):
 
     def test_modelgen_operators_integer_arithmetic(self):
         """Test integer arithmetic operators with mixed Python/Gel values"""
-        from models import default, std
+        from models.orm import default, std
 
         # Test basic arithmetic operations
         class UserWithMath(default.User):
@@ -6110,7 +6112,7 @@ class TestModelGenerator(tb.ModelTestCase):
 
     def test_modelgen_operators_integer_comparison(self):
         """Test integer comparison operators"""
-        from models import default
+        from models.orm import default
 
         # Filter by computed length comparisons
         long_name_users = self.client.query(
@@ -6134,7 +6136,7 @@ class TestModelGenerator(tb.ModelTestCase):
     @tb.to_be_fixed  # comparisons with None are broken
     def test_modelgen_operators_boolean_logical(self):
         """Test boolean logical operators and functions"""
-        from models import default, std
+        from models.orm import default, std
 
         # Test std.and_ function
         users_std_and = self.client.query(
@@ -6157,7 +6159,7 @@ class TestModelGenerator(tb.ModelTestCase):
 
     def test_modelgen_operators_boolean_not(self):
         """Test boolean not operator and std.not_ function"""
-        from models import default, std
+        from models.orm import default, std
 
         # Test negation of comparison
         users_not_alice = self.client.query(
@@ -6168,7 +6170,7 @@ class TestModelGenerator(tb.ModelTestCase):
 
     def test_modelgen_operators_mixed_types_with_casting(self):
         """Test operators with mixed types requiring casting"""
-        from models import default, std
+        from models.orm import default, std
 
         class GameSessionWithMath(default.GameSession):
             num_as_str: std.str
@@ -6192,7 +6194,7 @@ class TestModelGenerator(tb.ModelTestCase):
     @tb.to_be_fixed  # comparisons with None are broken
     def test_modelgen_operators_complex_expressions(self):
         """Test complex operator expressions combining multiple types"""
-        from models import default, std
+        from models.orm import default, std
 
         # Complex filter combining multiple operator types
         complex_users = self.client.query(
@@ -6212,7 +6214,7 @@ class TestModelGenerator(tb.ModelTestCase):
 
     def test_modelgen_operators_with_python_values_in_computeds(self):
         """Test operators using Python values in computed expressions"""
-        from models import default, std
+        from models.orm import default, std
 
         class UserWithPythonOps(default.User):
             name_plus_suffix: std.str
@@ -6248,7 +6250,7 @@ class TestModelGenerator(tb.ModelTestCase):
 
     def test_modelgen_operators_string_contains_and_patterns(self):
         """Test string containment and pattern matching operators"""
-        from models import default, std
+        from models.orm import default, std
 
         # Test string contains-like operations
         users_with_a = self.client.query(
@@ -6269,7 +6271,7 @@ class TestModelGenerator(tb.ModelTestCase):
 
     def test_modelgen_operators_numeric(self):
         """Test numeric operators with edge cases and mixed precision"""
-        from models import default, std
+        from models.orm import default, std
 
         class GameSessionNumeric(default.GameSession):
             num_div_result: std.float64
@@ -6300,7 +6302,7 @@ class TestModelGenerator(tb.ModelTestCase):
 
     def test_modelgen_ad_hoc_computeds_are_frozen(self):
         """Test that ad-hoc computeds cannot be passed to init or mutated"""
-        from models import default, std
+        from models.orm import default, std
 
         class UserWithUpperName(default.User):
             upper_name: std.str
@@ -6358,15 +6360,15 @@ class TestModelGenerator(tb.ModelTestCase):
             users[0].upper_name = "foo"
 
     def test_modelgen_result_inference(self):
-        import models.std as std
-        from models import default
+        import models.orm.std as std
+        from models.orm import default
 
         c = self.client.get(std.count(default.User.filter(name="Alice")))
         self.assertEqual(reveal_type(c), "builtins.int")
         self.assertEqual(c, 1)
 
     def test_modelgen_abstract_type_no_init(self):
-        from models import default
+        from models.orm import default
 
         # Try instantiating an abstract type
         with self.assertRaisesRegex(TypeError, r"cannot instantiate abstract"):
@@ -6374,7 +6376,7 @@ class TestModelGenerator(tb.ModelTestCase):
             default.Named(name="aaa")  # type: ignore
 
     def test_modelgen_escape_01(self):
-        from models import default
+        from models.orm import default
         # insert an object that needs a lot of escaping
 
         a = self.client.get(default.User.filter(name="Alice"))
@@ -6405,7 +6407,7 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(conf.__linkprops__.create, True)
 
     def test_modelgen_escape_02(self):
-        from models import default
+        from models.orm import default
         # insert and update an object that needs a lot of escaping
 
         a = self.client.get(default.User.filter(name="Alice"))
@@ -6439,7 +6441,7 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(conf.__linkprops__.create, True)
 
     def test_modelgen_sync_warning(self):
-        from models import default
+        from models.orm import default
 
         g = default.UserGroup(
             name="Pickle Pirates",
@@ -6466,10 +6468,11 @@ class TestModelGenerator(tb.ModelTestCase):
 @tb.typecheck
 class TestEmptyModelGenerator(tb.ModelTestCase):
     DEFAULT_MODULE = "default"
+    SCHEMA = os.path.join(os.path.dirname(__file__), "dbsetup", "empty.gel")
 
     def test_modelgen_empty_schema_1(self):
         # This is it, we're just testing empty import.
-        from models import default, std  # noqa: F401
+        from models.empty import default, std  # noqa: F401
 
 
 @tb.typecheck
@@ -6479,15 +6482,15 @@ class TestEmptyAiModelGenerator(tb.ModelTestCase):
 
     def test_modelgen_empty_ai_schema_1(self):
         # This is it, we're just testing empty import.
-        import models
+        import models.empty_ai
 
         self.assertEqual(
-            models.sys.ExtensionPackage.__name__, "ExtensionPackage"
+            models.empty_ai.sys.ExtensionPackage.__name__, "ExtensionPackage"
         )
 
     def test_modelgen_empty_ai_schema_2(self):
         # This is it, we're just testing empty import.
-        from models.ext import ai  # noqa: F401
+        from models.empty_ai.ext import ai  # noqa: F401
 
 
 class TestModelGeneratorReproducibility(tb.ModelTestCase):
