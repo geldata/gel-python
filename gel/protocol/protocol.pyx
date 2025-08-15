@@ -1081,9 +1081,14 @@ cdef class SansIOProtocol:
             raise exc
 
     def terminate(self):
+        import threading
+        ident = f"{threading.get_ident()} {id(self)}"
+        print(ident, "SansProtocol: terminating connection")
         try:
             self.write(WriteBuffer.new_message(TERMINATE_MSG).end_message())
+            print(ident, "SansProtocol: terminate message sent")
         except errors.ClientConnectionError:
+            print(ident, "SansProtocol: connection already closed, terminate message not sent")
             pass
 
     async def connect(self):

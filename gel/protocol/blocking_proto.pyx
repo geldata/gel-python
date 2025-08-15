@@ -44,14 +44,20 @@ cdef class BlockingIOProtocol(protocol.SansIOProtocolBackwardsCompatible):
         self._disconnect()
 
     cdef _disconnect(self):
+        import threading
+        ident = f"{threading.get_ident()} {id(self)}"
+        print(ident, "Protocol: disconnecting")
         self.connected = False
         sock, self.sock = self.sock, None
         if sock is not None:
             try:
                 sock.shutdown(socket.SHUT_RDWR)
+                print(ident, "Protocol: shutdown is sent")
             except OSError:
+                print(ident, "Protocol: shutdown failed, skipping")
                 pass
             sock.close()
+            print(ident, "Protocol: socket is closed")
 
     cdef write(self, WriteBuffer buf):
         try:

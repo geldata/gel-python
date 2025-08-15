@@ -703,6 +703,7 @@ class TestSyncQuery(tb.SyncQueryTestCase):
                 self.assertTrue(tx.query_single(
                     'select sys::_advisory_lock(<int64>$0)',
                     lock_key))
+                print(tx.query('select cfg::Config.session_idle_transaction_timeout'))
 
                 evt = threading.Event()
 
@@ -725,6 +726,7 @@ class TestSyncQuery(tb.SyncQueryTestCase):
                 t = threading.Thread(target=exec_to_fail)
                 t.start()
 
+                now = time.monotonic()
                 try:
                     evt.wait(1)
                     time.sleep(0.1)
@@ -739,6 +741,7 @@ class TestSyncQuery(tb.SyncQueryTestCase):
                         client2.close(timeout=0.5)
                 finally:
                     t.join()
+                    print("total time: %.2fs" % (time.monotonic() - now))
                     self.assertEqual(
                         tx.query(
                             'select sys::_advisory_unlock(<int64>$0)',

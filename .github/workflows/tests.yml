@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - master
+      - debug
       - ci
   pull_request:
     branches:
@@ -25,9 +26,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.10", "3.11", "3.12", "3.13"]
+        python-version: ["3.13"]
         gel-version: [6, nightly]
-        os: [ubuntu-latest, macos-latest, windows-2025]
+        os: [macos-latest]
         loop: [asyncio, uvloop]
         exclude:
           # uvloop does not support windows
@@ -95,7 +96,7 @@ jobs:
         uv run --verbose --extra=test --no-editable --isolated \
             --project="${{ github.workspace }}" \
             --directory="${{ runner.temp }}/pytests" \
-            python -m unittest -v tests.suite
+            python -m unittest -v -k test_sync_wait_cancel_01
 
   # This job exists solely to act as the test job aggregate to be
   # targeted by branch policies.
