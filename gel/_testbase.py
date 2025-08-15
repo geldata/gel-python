@@ -479,15 +479,19 @@ class ConnectedTestCaseMixin:
                 if cls.is_client_async
                 else blocking_client.BlockingIOConnection
             )
-        client_class = (
-            TestAsyncIOClient
-            if issubclass(connection_class, asyncio_client.AsyncIOConnection)
-            else TestClient
-        )
+        client_class = cls._get_client_class(connection_class)
         return client_class(
             connection_class=connection_class,
             max_concurrency=1,
             **conargs,
+        )
+
+    @classmethod
+    def _get_client_class(cls, connection_class):
+        return (
+            TestAsyncIOClient
+            if issubclass(connection_class, asyncio_client.AsyncIOConnection)
+            else TestClient
         )
 
     @classmethod

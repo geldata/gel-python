@@ -39,7 +39,12 @@ from . import transaction
 from .protocol import blocking_proto  # type: ignore [attr-defined, unused-ignore]
 from .protocol.protocol import InputLanguage, OutputFormat
 
-from ._internal._save import make_save_executor_constructor
+from ._internal._save import (
+    QueryBatch,
+    QueryRefetch,
+    SaveExecutor,
+    make_save_executor_constructor,
+)
 
 if typing.TYPE_CHECKING:
     from ._internal._qbmodel._pydantic import GelModel
@@ -651,6 +656,7 @@ class Client(
 
     __slots__ = ()
     _impl_class = _PoolImpl
+    _save_executor_type = SaveExecutor
 
     def _save_impl(
         self,
@@ -659,12 +665,9 @@ class Client(
         objs: tuple[GelModel, ...],
         warn_on_large_sync_set: bool = False,
     ) -> None:
-        opts = self._get_debug_options()
-
-        make_executor = make_save_executor_constructor(
-            objs,
+        make_executor = self._get_make_save_executor(
             refetch=refetch,
-            save_postcheck=opts.save_postcheck,
+            objs=objs,
             warn_on_large_sync_set=warn_on_large_sync_set,
         )
 
@@ -675,7 +678,7 @@ class Client(
                 with executor:
                     for batches in executor:
                         for batch in batches:
-                            tx.send_query(batch.query, batch.args)
+                            self._send_batch_query(tx, batch)
                         batch_ids = tx.wait()
                         for ids, batch in zip(batch_ids, batches, strict=True):
                             batch.feed_db_data(ids)
@@ -683,13 +686,44 @@ class Client(
                     if refetch:
                         ref_queries = executor.get_refetch_queries()
                         for ref in ref_queries:
-                            tx.send_query(ref.query, **ref.args)
+                            self._send_refetch_query(tx, ref)
 
                         refetch_data = tx.wait()
                         for ref_data, ref in zip(
                             refetch_data, ref_queries, strict=True
                         ):
                             ref.feed_db_data(ref_data)
+
+    def _get_make_save_executor(
+        self,
+        *,
+        refetch: bool,
+        objs: tuple[GelModel, ...],
+        warn_on_large_sync_set: bool = False,
+    ) -> typing.Callable[[], SaveExecutor]:
+        opts = self._get_debug_options()
+
+        return make_save_executor_constructor(
+            objs,
+            refetch=refetch,
+            save_postcheck=opts.save_postcheck,
+            warn_on_large_sync_set=warn_on_large_sync_set,
+            executor_type=self._save_executor_type,
+        )
+
+    def _send_batch_query(
+        self,
+        tx: BatchIteration,
+        batch: QueryBatch,
+    ) -> None:
+        tx.send_query(batch.query, batch.args)
+
+    def _send_refetch_query(
+        self,
+        tx: BatchIteration,
+        ref: QueryRefetch,
+    ) -> None:
+        tx.send_query(ref.query, **ref.args)
 
     def save(
         self,
@@ -718,6 +752,7 @@ class Client(
         make_executor = make_save_executor_constructor(
             objs,
             refetch=False,  # TODO
+            executor_type=self._save_executor_type,
         )
         plan_time = time.monotonic_ns() - ns
 
