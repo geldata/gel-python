@@ -677,8 +677,6 @@ class BasePoolImpl(abc.ABC, Generic[_T_Conn, _T_Event]):
 
     def terminate(self) -> None:
         """Terminate all connections in the pool."""
-        if self._closed:
-            return
         for ch in self._holders:
             ch.terminate()
         self._closed = True
