@@ -171,6 +171,46 @@ incompatibility. Expected 152 from C header, got 184 from PyObject
 
 Indicate that a `pyx` file has changed. A clean rebuild is necessary.
 
+
+#### Fix `site-packages/gel.pth` to resolve wall of mypy test errors
+
+A large number of mypy errors such as:
+```
+RuntimeError: mypy check failed for test_modelgen_operators_integer_arithmetic 
+
+test code:
+...
+
+mypy stdout:
+models/__shapes__/std/net/__init__.py:14: error: Cannot find implementation or library stub for module named "gel.models.pydantic"  [import-not-found]
+models/__shapes__/std/net/__init__.py:17: error: Class cannot subclass "AnyEnum" (has type "Any")  [misc]
+models/__shapes__/std/net/__init__.py:22: error: Class cannot subclass "AnyEnum" (has type "Any")  [misc]
+models/__shapes__/std/enc.py:14: error: Cannot find implementation or library stub for module named "gel.models.pydantic"  [import-not-found]
+models/__shapes__/std/enc.py:17: error: Class cannot subclass "AnyEnum" (has type "Any")  [misc]
+models/__shapes__/sys/__init__.py:20: error: Cannot find implementation or library stub for module named "gel.models.pydantic"  [import-not-found]
+models/__shapes__/sys/__init__.py:53: error: Class cannot subclass "AnyEnum" (has type "Any")  [misc]
+models/__shapes__/sys/__init__.py:60: error: Class cannot subclass "AnyEnum" (has type "Any")  [misc]
+models/__shapes__/sys/__init__.py:65: error: Class cannot subclass "AnyEnum" (has type "Any")  [misc]
+models/__shapes__/sys/__init__.py:70: error: Class cannot subclass "AnyEnum" (has type "Any")  [misc]
+models/__shapes__/sys/__init__.py:75: error: Class cannot subclass "AnyEnum" (has type "Any")  [misc]
+models/__shapes__/sys/__init__.py:80: error: Class cannot subclass "AnyEnum" (has type "Any")  [misc]
+```
+
+Indicates the `site-packages/gel.pth` file is not set up correctly.
+Possible causes include:
+- missing the prerequisite step
+- changing the project directory name
+- etc.
+
+For a better understanding of why this error occurs, look at in `_testbase.py`
+for the functions `BaseModelTestCase.setUpClass()` and `_typecheck`. A test
+class annotated with `@tb.typecheck` will:
+- set up a temp directory with the pydantic model.
+- create a copy of test function in a dummy class
+- run mypy on this file in a subprocess
+- check the result code
+
+
 #### Other errors
 
 Some other errors that are caused by a weird environment, but more details are
