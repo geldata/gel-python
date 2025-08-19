@@ -1156,11 +1156,21 @@ class QueryBatch:
                 pass
 
 
+@dataclasses.dataclass(kw_only=True, frozen=True)
+class QueryRefetchArgs:
+    spec: list[tuple[
+        uuid.UUID,
+        list[tuple[bool, list[uuid.UUID]]],
+    ]]
+    new: list[uuid.UUID]
+    existing: list[uuid.UUID]
+
+
 @_struct
 class QueryRefetch:
     executor: SaveExecutor
     query: TypeWrapper[type[GelModel]]
-    args: dict[str, Any]
+    args: QueryRefetchArgs
     shape: RefetchShape
 
     def feed_db_data(self, obj_data: Iterable[Any]) -> None:
@@ -1305,7 +1315,10 @@ class SaveExecutor:
         tuple[
             type[GelModel],
             TypeWrapper[type[GelModel]],
-            list[Any],
+            list[tuple[
+                uuid.UUID,
+                list[tuple[bool, list[uuid.UUID]]],
+            ]],
             RefetchShape,
         ]
     ]:
@@ -1411,11 +1424,14 @@ class SaveExecutor:
                         else:
                             obj_link_ids.append(self._get_id(s_link))
 
-            spec_arg = [
+            spec_arg: list[tuple[
+                uuid.UUID,
+                list[tuple[bool, list[uuid.UUID]]],
+            ]] = [
                 (
                     obj_id,
                     [
-                        (False, [])
+                        (False,[])
                         if (li := link_ids.get(lname)) is None
                         else (True, li)
                         for lname in link_arg_order
@@ -1469,11 +1485,11 @@ class SaveExecutor:
             QueryRefetch(
                 executor=self,
                 query=q[1],
-                args={
-                    "spec": q[2],
-                    "new": new_ids,
-                    "existing": list(self.existing_objects),
-                },
+                args=QueryRefetchArgs(
+                    spec=q[2],
+                    new=new_ids,
+                    existing=list(self.existing_objects),
+                ),
                 shape=q[3],
             )
             for q in self._compile_refetch()
