@@ -38,25 +38,48 @@ cdef class BlockingIOProtocol(protocol.SansIOProtocolBackwardsCompatible):
         protocol.SansIOProtocolBackwardsCompatible.__init__(self, con_params)
         self.sock = sock
         self.deadline = 0
+        # debug socket peer name
+        import threading, sys
+        ident = f"{threading.get_ident()} {id(self)}"
+        print(ident, "Protocol: connected to", sock.getpeername(), file=sys.stderr)
 
     cpdef abort(self):
+        # set send timeout to 0 to prevent blocking
+        import struct
+        self.sock.settimeout(1)
+        tl = struct.pack('ll', 1, 0)
+        self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_SNDTIMEO, tl)
+        # self.sock.setblocking(False)
         self.terminate()
         self._disconnect()
 
     cdef _disconnect(self):
+        import threading, sys
+        ident = f"{threading.get_ident()} {id(self)}"
+        print(ident, "Protocol: disconnecting", file=sys.stderr)
         self.connected = False
         sock, self.sock = self.sock, None
         if sock is not None:
             try:
                 sock.shutdown(socket.SHUT_RDWR)
+                print(ident, "Protocol: shutdown is sent", file=sys.stderr)
             except OSError:
+                print(ident, "Protocol: shutdown failed, skipping", file=sys.stderr)
                 pass
             sock.close()
+            print(ident, "Protocol: socket is closed", file=sys.stderr)
 
     cdef write(self, WriteBuffer buf):
+        import threading, sys
+        ident = f"{threading.get_ident()} {id(self)}"
+        print(ident, "Protocol: writing", len(bytes(buf)), "bytes", file=sys.stderr)
+        print(ident, "Protocol: sendbuf size", self.sock.getsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF), file=sys.stderr)
+        print(ident, "Protocol: send timeout", self.sock.getsockopt(socket.SOL_SOCKET, socket.SO_SNDTIMEO), file=sys.stderr)
         try:
             self.sock.send(buf)
+            print(ident, "Protocol: send done", file=sys.stderr)
         except OSError as e:
+            print(ident, "Protocol: send failed", e, file=sys.stderr)
             self._disconnect()
             raise con_utils.wrap_error(e) from e
 

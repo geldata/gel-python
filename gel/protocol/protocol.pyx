@@ -568,10 +568,14 @@ cdef class SansIOProtocol:
 
         result = []
         exc = None
+        import threading, sys
+        ident = f"{threading.get_ident()} {id(self)}"
         while True:
             if not self.buffer.take_message():
+                print(ident, "Protocol: waiting for message", file=sys.stderr)
                 await self.wait_for_message()
             mtype = self.buffer.get_message_type()
+            print(ident, "Protocol: got message", chr(mtype), file=sys.stderr)
 
             try:
                 if mtype == STMT_DATA_DESC_MSG:
@@ -1081,9 +1085,14 @@ cdef class SansIOProtocol:
             raise exc
 
     def terminate(self):
+        import threading, sys
+        ident = f"{threading.get_ident()} {id(self)}"
+        print(ident, "SansProtocol: terminating connection", file=sys.stderr)
         try:
             self.write(WriteBuffer.new_message(TERMINATE_MSG).end_message())
+            print(ident, "SansProtocol: terminate message sent", file=sys.stderr)
         except errors.ClientConnectionError:
+            print(ident, "SansProtocol: connection already closed, terminate message not sent", file=sys.stderr)
             pass
 
     async def connect(self):

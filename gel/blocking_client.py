@@ -224,19 +224,27 @@ class BlockingIOConnection(base_client.BaseConnection[threading.Event]):
 
     async def close(self, timeout: float | None = None) -> None:
         """Send graceful termination message wait for connection to drop."""
+        ident = f"{threading.get_ident()} {id(self)}"
+        print(ident, 'BlockingIOConnection.close() called', file=sys.stderr)
         if not self.is_closed():
             try:
+                ident += f" {id(self._protocol)}"
+                print(ident, 'BlockingIOConnection try to terminate protocol', file=sys.stderr)
                 self._protocol.terminate()
+                print(ident, 'BlockingIOConnection wait for protocol to disconnect, timeout', timeout, file=sys.stderr)
                 if timeout is None:
                     await self._protocol.wait_for_disconnect()
                 else:
                     await self._protocol.wait_for(
                         self._protocol.wait_for_disconnect(), timeout
                     )
+                print(ident, 'BlockingIOConnection protocol disconnected', file=sys.stderr)
             except TimeoutError:
+                print(ident, 'BlockingIOConnection protocol timeout', file=sys.stderr)
                 self.terminate()
                 raise errors.QueryTimeoutError()
             except Exception:
+                print(ident, 'BlockingIOConnection exception during close', file=sys.stderr)
                 self.terminate()
                 raise
             finally:
@@ -270,14 +278,21 @@ class _PoolConnectionHolder(
     async def close(
         self, *, wait: bool = True, timeout: float | None = None
     ) -> None:
+        ident = f"{threading.get_ident()} {id(self)}"
         if self._con is None:
+            print(ident, "holder.close() called, but no connection", file=sys.stderr)
             return
+        print(ident, "holder.close() called", timeout, file=sys.stderr)
         await self._con.close(timeout=timeout)
 
     async def wait_until_released(self, timeout: float | None = None) -> None:
+        ident = f"{threading.get_ident()} {id(self._con or self)}"
+        print(ident, "holder.wait_until_released() called", timeout, file=sys.stderr)
         result = self._release_event.wait(timeout)
         if timeout is not None and not result:
+            print(ident, "holder.wait_until_released() timeout", file=sys.stderr)
             raise TimeoutError
+        print(ident, "holder.wait_until_released() done", file=sys.stderr)
 
 
 class _PoolImpl(
@@ -292,6 +307,10 @@ class _PoolImpl(
         max_concurrency: int | None,
         connection_factory: type[BlockingIOConnection],
     ) -> None:
+        ident = f"{threading.get_ident()} {id(self)}"
+        print(ident, "_PoolImpl.__init__()", file=sys.stderr)
+        import traceback
+        traceback.print_stack(file=sys.stderr)
         if not issubclass(connection_factory, BlockingIOConnection):
             raise TypeError(
                 f"connection_factory is expected to be a subclass of "
@@ -365,6 +384,10 @@ class _PoolImpl(
         if self._closed:
             return
         self._closing = True
+        ident = f"{threading.get_ident()} {id(self)}"
+        print(ident, 'PoolImpl.close() called', timeout, len(self._holders), file=sys.stderr)
+        import traceback
+        traceback.print_stack(file=sys.stderr)
         try:
             if timeout is None:
                 for ch in self._holders:
@@ -384,17 +407,20 @@ class _PoolImpl(
                         raise TimeoutError
                     await ch.close(timeout=secs)
         except TimeoutError as e:
+            print(ident, 'PoolImpl.close() timeout', timeout, file=sys.stderr)
             self.terminate()
             raise errors.InterfaceError(
                 f"client is not fully closed in {timeout} seconds; "
                 "terminating now."
             ) from e
-        except Exception:
+        except Exception as e:
+            print(ident, 'PoolImpl.close() exception', e, file=sys.stderr)
             self.terminate()
             raise
         finally:
             self._closed = True
             self._closing = False
+        print(ident, 'PoolImpl.close() done', file=sys.stderr)
 
 
 class Iteration(transaction.BaseTransaction, abstract.Executor):

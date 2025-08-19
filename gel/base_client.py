@@ -679,9 +679,19 @@ class BasePoolImpl(abc.ABC, Generic[_T_Conn, _T_Event]):
         """Terminate all connections in the pool."""
         if self._closed:
             return
+        import threading, sys
+        ident = f"{threading.get_ident()} {id(self)}"
+        print(ident, "BasePoolImpl.terminate() called", file=sys.stderr)
+        ex = None
         for ch in self._holders:
-            ch.terminate()
+            try:
+                ch.terminate()
+            except Exception as e:
+                if ex is None:
+                    ex = e
         self._closed = True
+        if ex is not None:
+            raise ex
 
     def expire_connections(self) -> None:
         """Expire all currently open connections.
