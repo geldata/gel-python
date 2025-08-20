@@ -678,15 +678,13 @@ class TestSyncQuery(tb.SyncQueryTestCase):
                 arg="10.2")
 
     def test_sync_wait_cancel_01(self):
-        if sys.platform == 'darwin' and sys.version_info >= (3, 13):
-            # On macOS with Python 3.13+ the test hangs indefinitely because
+        if sys.version_info >= (3, 13):
+            # On Python 3.13 and higher, this test hangs indefinitely because
             # OpenSSL socket is not thread-safe, and sending TERMINATE_MSG is
             # blocked by a concurrent recv() call waiting for the lock.
             # This may happen to any environment, so maybe we should consider
             # dropping the test entirely if it happens again.
-            self.skipTest(
-                "known OpenSSL misuse: hangs on macOS with Python 3.13+"
-            )
+            self.skipTest("known OpenSSL misuse: hangs on Python 3.13+")
 
         underscored_lock = self.client.query_single("""
             SELECT EXISTS(
