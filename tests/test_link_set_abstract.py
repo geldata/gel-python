@@ -922,7 +922,7 @@ class TestAbstractMutableLinkSet(unittest.TestCase):
         # Remove contained items until empty
         box_a = BoxedInt(1)
         box_b = BoxedInt(2)
-        box_c = BoxedInt(3)
+        box_c = BoxedInt(3, __gel_new__=False)
         all_items = [box_a, box_b, box_c]
 
         for mode, wrap in _get_single_permutations():
@@ -1330,6 +1330,7 @@ class TestAbstractMutableLinkSet(unittest.TestCase):
                 __wrap_list__=wrap,
             )
 
+            self.assertFalse(lst.__gel_has_changes__())
             self.assertEqual(list(lst.__gel_get_added__()), [])
             self.assertEqual(list(lst.__gel_get_removed__()), [])
 
@@ -1347,9 +1348,11 @@ class TestAbstractMutableLinkSet(unittest.TestCase):
             )
 
             if wrap:
+                self.assertFalse(lst.__gel_has_changes__())
                 self.assertEqual(list(lst.__gel_get_added__()), [])
                 self.assertEqual(list(lst.__gel_get_removed__()), [])
             else:
+                self.assertTrue(lst.__gel_has_changes__())
                 self.assertEqual(
                     list(lst.__gel_get_added__()),
                     [box_a, box_b, box_c],
@@ -1372,9 +1375,11 @@ class TestAbstractMutableLinkSet(unittest.TestCase):
             lst.add(box_c)
 
             if wrap:
+                self.assertTrue(lst.__gel_has_changes__())
                 self.assertEqual(list(lst.__gel_get_added__()), [box_c])
                 self.assertEqual(list(lst.__gel_get_removed__()), [])
             else:
+                self.assertTrue(lst.__gel_has_changes__())
                 self.assertEqual(
                     list(lst.__gel_get_added__()),
                     [box_a, box_b, box_c],
@@ -1397,9 +1402,11 @@ class TestAbstractMutableLinkSet(unittest.TestCase):
             lst.add(box_c)
 
             if wrap:
+                self.assertFalse(lst.__gel_has_changes__())
                 self.assertEqual(list(lst.__gel_get_added__()), [])
                 self.assertEqual(list(lst.__gel_get_removed__()), [])
             else:
+                self.assertTrue(lst.__gel_has_changes__())
                 self.assertEqual(
                     list(lst.__gel_get_added__()),
                     [box_a, box_b, box_c],
@@ -1422,9 +1429,11 @@ class TestAbstractMutableLinkSet(unittest.TestCase):
             lst.remove(box_b)
 
             if wrap:
+                self.assertTrue(lst.__gel_has_changes__())
                 self.assertEqual(list(lst.__gel_get_added__()), [])
                 self.assertEqual(list(lst.__gel_get_removed__()), [box_b])
             else:
+                self.assertTrue(lst.__gel_has_changes__())
                 self.assertEqual(
                     list(lst.__gel_get_added__()),
                     [box_a, box_c],
@@ -1449,9 +1458,11 @@ class TestAbstractMutableLinkSet(unittest.TestCase):
                 lst.remove(box_d)
 
             if wrap:
+                self.assertFalse(lst.__gel_has_changes__())
                 self.assertEqual(list(lst.__gel_get_added__()), [])
                 self.assertEqual(list(lst.__gel_get_removed__()), [])
             else:
+                self.assertTrue(lst.__gel_has_changes__())
                 self.assertEqual(
                     list(lst.__gel_get_added__()),
                     [box_a, box_b, box_c],
@@ -1474,9 +1485,11 @@ class TestAbstractMutableLinkSet(unittest.TestCase):
             lst.discard(box_b)
 
             if wrap:
+                self.assertTrue(lst.__gel_has_changes__())
                 self.assertEqual(list(lst.__gel_get_added__()), [])
                 self.assertEqual(list(lst.__gel_get_removed__()), [box_b])
             else:
+                self.assertTrue(lst.__gel_has_changes__())
                 self.assertEqual(
                     list(lst.__gel_get_added__()),
                     [box_a, box_c],
@@ -1500,9 +1513,11 @@ class TestAbstractMutableLinkSet(unittest.TestCase):
             lst.discard(box_d)
 
             if wrap:
+                self.assertFalse(lst.__gel_has_changes__())
                 self.assertEqual(list(lst.__gel_get_added__()), [])
                 self.assertEqual(list(lst.__gel_get_removed__()), [])
             else:
+                self.assertTrue(lst.__gel_has_changes__())
                 self.assertEqual(
                     list(lst.__gel_get_added__()),
                     [box_a, box_b, box_c],
@@ -1524,12 +1539,14 @@ class TestAbstractMutableLinkSet(unittest.TestCase):
             lst.clear()
 
             if wrap:
+                self.assertTrue(lst.__gel_has_changes__())
                 self.assertEqual(list(lst.__gel_get_added__()), [])
                 self.assertEqual(
                     list(lst.__gel_get_removed__()),
                     [box_a, box_b, box_c],
                 )
             else:
+                self.assertFalse(lst.__gel_has_changes__())
                 self.assertEqual(list(lst.__gel_get_added__()), [])
                 self.assertEqual(list(lst.__gel_get_removed__()), [])
 
@@ -1548,9 +1565,11 @@ class TestAbstractMutableLinkSet(unittest.TestCase):
             lst.update([box_a, box_b])
 
             if wrap:
+                self.assertFalse(lst.__gel_has_changes__())
                 self.assertEqual(list(lst.__gel_get_added__()), [])
                 self.assertEqual(list(lst.__gel_get_removed__()), [])
             else:
+                self.assertTrue(lst.__gel_has_changes__())
                 self.assertEqual(
                     list(lst.__gel_get_added__()),
                     [box_a, box_b],
@@ -1574,9 +1593,11 @@ class TestAbstractMutableLinkSet(unittest.TestCase):
             lst.update([box_b, box_c, box_d])
 
             if wrap:
+                self.assertTrue(lst.__gel_has_changes__())
                 self.assertEqual(list(lst.__gel_get_added__()), [box_c, box_d])
                 self.assertEqual(list(lst.__gel_get_removed__()), [])
             else:
+                self.assertTrue(lst.__gel_has_changes__())
                 self.assertEqual(
                     list(lst.__gel_get_added__()),
                     [box_a, box_b, box_c, box_d],
@@ -1598,9 +1619,11 @@ class TestAbstractMutableLinkSet(unittest.TestCase):
             lst += [box_a, box_b]
 
             if wrap:
+                self.assertFalse(lst.__gel_has_changes__())
                 self.assertEqual(list(lst.__gel_get_added__()), [])
                 self.assertEqual(list(lst.__gel_get_removed__()), [])
             else:
+                self.assertTrue(lst.__gel_has_changes__())
                 self.assertEqual(
                     list(lst.__gel_get_added__()),
                     [box_a, box_b],
@@ -1624,9 +1647,11 @@ class TestAbstractMutableLinkSet(unittest.TestCase):
             lst += [box_b, box_c, box_d]
 
             if wrap:
+                self.assertTrue(lst.__gel_has_changes__())
                 self.assertEqual(list(lst.__gel_get_added__()), [box_c, box_d])
                 self.assertEqual(list(lst.__gel_get_removed__()), [])
             else:
+                self.assertTrue(lst.__gel_has_changes__())
                 self.assertEqual(
                     list(lst.__gel_get_added__()),
                     [box_a, box_b, box_c, box_d],
@@ -1650,9 +1675,11 @@ class TestAbstractMutableLinkSet(unittest.TestCase):
             lst -= [box_d]
 
             if wrap:
+                self.assertFalse(lst.__gel_has_changes__())
                 self.assertEqual(list(lst.__gel_get_added__()), [])
                 self.assertEqual(list(lst.__gel_get_removed__()), [])
             else:
+                self.assertTrue(lst.__gel_has_changes__())
                 self.assertEqual(
                     list(lst.__gel_get_added__()),
                     [box_a, box_b, box_c],
@@ -1676,12 +1703,14 @@ class TestAbstractMutableLinkSet(unittest.TestCase):
             lst -= [box_b, box_c, box_d]
 
             if wrap:
+                self.assertTrue(lst.__gel_has_changes__())
                 self.assertEqual(list(lst.__gel_get_added__()), [])
                 self.assertEqual(
                     list(lst.__gel_get_removed__()),
                     [box_b, box_c],
                 )
             else:
+                self.assertTrue(lst.__gel_has_changes__())
                 self.assertEqual(list(lst.__gel_get_added__()), [box_a])
                 self.assertEqual(list(lst.__gel_get_removed__()), [])
 
