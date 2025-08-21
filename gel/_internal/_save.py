@@ -1168,10 +1168,12 @@ RefetchSpecEntry = TypeAliasType(
     "RefetchSpecEntry",
     tuple[
         uuid.UUID,  # Refetched obj id
-        list[tuple[
-            bool,  # Whether the link is being refetched
-            list[uuid.UUID],  # Objects in the link
-        ]],
+        list[
+            tuple[
+                bool,  # Whether the link is being refetched
+                list[uuid.UUID],  # Objects in the link
+            ]
+        ],
     ],
 )
 
