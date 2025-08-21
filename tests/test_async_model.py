@@ -20,7 +20,7 @@ class TestAsyncModelGenerator(tb.AsyncModelTestCase):
 
     @tb.must_fail  # this test ensures that @typecheck is working
     async def test_async_modelgen__smoke_test_01(self):
-        from models import default
+        from models.orm import default
 
         self.assertEqual(reveal_type(default.User.groups), "this must fail")
 
@@ -30,7 +30,7 @@ class TestAsyncModelGenerator(tb.AsyncModelTestCase):
         raise AssertionError("this must fail")
 
     async def test_async_modelgen_01(self):
-        from models import default
+        from models.orm import default
 
         alice = await self.client.query_required_single(
             default.User.select(
@@ -41,7 +41,7 @@ class TestAsyncModelGenerator(tb.AsyncModelTestCase):
         )
 
         self.assertIn(
-            "ComputedLinkSet[models.default.UserGroup]",
+            "ComputedLinkSet[models.orm.default.UserGroup]",
             reveal_type(alice.groups),
         )
 
@@ -50,7 +50,7 @@ class TestAsyncModelGenerator(tb.AsyncModelTestCase):
     async def test_async_modelgen_02(self):
         import uuid
 
-        from models import default
+        from models.orm import default
         # insert an object with a required multi: no link props, one object
         # added to the link
 
@@ -80,7 +80,7 @@ class TestAsyncModelGenerator(tb.AsyncModelTestCase):
         self.assertEqual(m.nickname, "Hannibal")
 
     async def test_async_modelgen_save_refetch_modes(self):
-        from models import default
+        from models.orm import default
 
         u1 = default.User(name="Al")
         await self.client.sync(u1)
@@ -94,7 +94,7 @@ class TestAsyncModelGenerator(tb.AsyncModelTestCase):
         # This is a copy if test_async_modelgen_save_reload_links_07
         # ensuring the sync() is fully supported in async mode.
 
-        from models import default
+        from models.orm import default
 
         # Test backlink invalidation when adding a user to a different group
         # Fetch red and blue groups with nested user data and their groups
@@ -153,7 +153,7 @@ class TestAsyncModelGenerator(tb.AsyncModelTestCase):
         self.assertEqual({u.id for u in blue.users}, {alice.id})
 
     async def test_async_modelgen_sync_warning(self):
-        from models import default
+        from models.orm import default
 
         g = default.UserGroup(
             name="Pickle Pirates",

@@ -47,14 +47,14 @@ SITE_PACKAGES: Final[Path] = Path(site.getsitepackages()[0])
 MODELS_DEST: Final[Path] = SITE_PACKAGES / "models"
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-SCHEMA_SRC = REPO_ROOT / "tests" / "dbsetup" / "orm.gel"
-if not SCHEMA_SRC.exists():
+SCHEMAS_ROOT = REPO_ROOT / "tests" / "dbsetup"
+if not SCHEMAS_ROOT.exists():
     # Try fallback when executed from repository root.
-    alt = Path(__file__).resolve().parents[1] / "tests" / "dbsetup" / "orm.gel"
+    alt = Path(__file__).resolve().parents[1] / "tests" / "dbsetup"
     if alt.exists():
-        SCHEMA_SRC = alt
+        SCHEMAS_ROOT = alt
     else:
-        sys.stderr.write(f"error: schema file not found: {SCHEMA_SRC}\n")
+        sys.stderr.write(f"error: schema file not found: {SCHEMAS_ROOT}\n")
         raise SystemExit(1)
 
 
@@ -66,6 +66,8 @@ if not SCHEMA_SRC.exists():
 def _run(cmd: list[str] | tuple[str, ...], *, cwd: Path | None = None) -> None:
     """Run *cmd* via :pyfunc:`subprocess.run` with *check=True* and TTY-friendly I/O."""
     try:
+        env = os.environ.copy()
+        env['GEL_AUTO_BACKUP_MODE'] = 'disabled'
         subprocess.run(cmd, cwd=cwd, check=True)
     except FileNotFoundError as exc:  # pragma: no cover
         sys.stderr.write(
@@ -92,6 +94,9 @@ def main() -> None:  # noqa: D401 – simple script entry-point
         tmpdir = Path(tmp)
         instance_name = tmpdir.name  # gel derives instance name from dir name
 
+        if MODELS_DEST.exists():
+            shutil.rmtree(MODELS_DEST)
+
         instance_created = False
         try:
             # 1. Initialise a new Gel project (creates an instance)
@@ -101,28 +106,58 @@ def main() -> None:  # noqa: D401 – simple script entry-point
             # 2. Copy schema into the freshly created project.
             dbschema_dir = tmpdir / "dbschema"
             dbschema_dir.mkdir(exist_ok=True)
-            shutil.copy2(SCHEMA_SRC, dbschema_dir / "orm.gel")
 
-            # 3. Create & apply migration, then generate models.
-            _run(
-                ["gel", "migration", "create", "--non-interactive"], cwd=tmpdir
-            )
-            _run(["gel", "migrate"], cwd=tmpdir)
-            _run(["gel-generate-py", "--no-cache", "models"], cwd=tmpdir)
+            for schema_file in SCHEMAS_ROOT.glob('*.gel'):
+                generated_models = tmpdir / "models"
+                if generated_models.exists():
+                    shutil.rmtree(generated_models)
 
-            # 4. Install models into *site-packages*.
-            generated_models = tmpdir / "models"
-            if (
-                not generated_models.exists()
-            ):  # pragma: no cover – sanity check
-                sys.stderr.write(
-                    "error: models directory not produced by codegen\n"
+                migrations_dir = dbschema_dir / "migrations"
+                if migrations_dir.exists():
+                    shutil.rmtree(migrations_dir)
+
+                shutil.copy2(schema_file, dbschema_dir / 'schema.gel')
+
+                _run(
+                    ["gel", "branch", "create", "--empty", schema_file.stem], cwd=tmpdir,
                 )
-                raise SystemExit(1)
 
-            if MODELS_DEST.exists():
-                shutil.rmtree(MODELS_DEST)
-            shutil.copytree(generated_models, MODELS_DEST)
+                _run(
+                    ["gel", "branch", "switch", schema_file.stem], cwd=tmpdir,
+                )
+
+
+                # 3. Create & apply migration, then generate models.
+                _run(
+                    ["gel", "migration", "create", "--non-interactive"], cwd=tmpdir
+                )
+                _run(["gel", "migrate"], cwd=tmpdir)
+                _run(
+                    [
+                        "gel-generate-py",
+                        "--no-cache",
+                        "models",
+                        "--output",
+                        f"models/{schema_file.stem}",
+                    ],
+                    cwd=tmpdir,
+                )
+
+                # 4. Install models into *site-packages*.
+                if (
+                    not generated_models.exists()
+                ):  # pragma: no cover – sanity check
+                    sys.stderr.write(
+                        "error: models directory not produced by codegen\n"
+                    )
+                    raise SystemExit(1)
+
+                shutil.copytree(generated_models, MODELS_DEST, dirs_exist_ok=True)
+
+                print(
+                    f"✅  {schema_file.name} has been reflected"
+                )
+
 
             print(
                 f"✅  Models have been generated and installed into {MODELS_DEST}"
