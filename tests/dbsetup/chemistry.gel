@@ -1,0 +1,63 @@
+module default {
+    type Named {
+        required name: std::str;
+    };
+
+    type Element extending Named {
+        required symbol: str;
+        required number: int64;
+        required valence: int64;
+        required weight: float64;
+    };
+
+    # We do this for now, since self multi links aren't well supported
+    type BaseAtom {
+        # Single link no props
+        required element: Element;
+
+        # Computed single prop
+        weight := sum(.element.weight);
+    };
+
+    type RefAtom extending BaseAtom {
+        # Multi link with props
+        multi bonds: BaseAtom {
+            count: int64;
+        }
+
+        # Computed single link
+        compound := .<atoms[is Compound];
+    };
+
+    type Compound extending Named {
+        # Multi link no props
+        multi atoms: RefAtom;
+
+        # Multi prop
+        multi alternate_names: str;
+    };
+
+    type Reactor {
+        # Computed multi link
+        multi atoms := .<reactor[is Atom];
+
+        # Computed single prop
+        total_weight := sum(.atoms.weight);
+        # Computed multi prop
+        atom_weights := .atoms.weight;
+    };
+
+    type Atom extending BaseAtom {
+        # Multi link with props
+        multi bonds: BaseAtom {
+            count: int64;
+        }
+
+        # Single link with props
+        required reactor: Reactor;
+
+        # Computed single prop using link props
+        total_bond_count := sum(.bonds@count);
+        total_bond_weight := sum(.bonds.weight);
+    };
+}
