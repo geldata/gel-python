@@ -1156,12 +1156,29 @@ class QueryBatch:
                 pass
 
 
+# Refetching links will only refetch linked objects which are already in the
+# link, or are in the sync objects.
+#
+# A refetched object will therefore need, per link:
+# - whether that link is being being refetched, and if so,
+# - the objects already in the link.
+#
+# The order of links is kept consistent with the refetch shape.
+RefetchSpecEntry = TypeAliasType(
+    "RefetchSpecEntry",
+    tuple[
+        uuid.UUID,  # Refetched obj id
+        list[tuple[
+            bool,  # Whether the link is being refetched
+            list[uuid.UUID],  # Objects in the link
+        ]],
+    ],
+)
+
+
 @dataclasses.dataclass(kw_only=True, frozen=True)
 class QueryRefetchArgs:
-    spec: list[tuple[
-        uuid.UUID,
-        list[tuple[bool, list[uuid.UUID]]],
-    ]]
+    spec: list[RefetchSpecEntry]
     new: list[uuid.UUID]
     existing: list[uuid.UUID]
 
@@ -1315,10 +1332,7 @@ class SaveExecutor:
         tuple[
             type[GelModel],
             TypeWrapper[type[GelModel]],
-            list[tuple[
-                uuid.UUID,
-                list[tuple[bool, list[uuid.UUID]]],
-            ]],
+            list[RefetchSpecEntry],
             RefetchShape,
         ]
     ]:
@@ -1424,14 +1438,11 @@ class SaveExecutor:
                         else:
                             obj_link_ids.append(self._get_id(s_link))
 
-            spec_arg: list[tuple[
-                uuid.UUID,
-                list[tuple[bool, list[uuid.UUID]]],
-            ]] = [
+            spec_arg: list[RefetchSpecEntry] = [
                 (
                     obj_id,
                     [
-                        (False,[])
+                        (False, [])
                         if (li := link_ids.get(lname)) is None
                         else (True, li)
                         for lname in link_arg_order
