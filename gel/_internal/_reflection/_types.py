@@ -259,6 +259,8 @@ class ObjectType(InheritingType):
     union_of: tuple[TypeRef, ...]
     intersection_of: tuple[TypeRef, ...]
     compound_type: bool
+    # N.B: We store Pointers sorted by name, from the
+    # introspection query
     pointers: tuple[Pointer, ...]
 
     def get_pointer(self, name: str) -> Pointer:
@@ -729,6 +731,8 @@ class Pointer(SchemaObject):
     is_computed: bool
     is_readonly: bool
     has_default: bool
+    # N.B: We store Pointers sorted by name, from the
+    # introspection query
     pointers: tuple[Pointer, ...] | None = None
 
 

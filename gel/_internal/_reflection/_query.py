@@ -259,8 +259,8 @@ SELECT Type {
                 EXISTS .default
                 OR ("std::sequence" IN .target[IS ScalarType].ancestors.name)
             ),
-        } FILTER .name != 'source' AND .name != 'target'
-    } FILTER any(@is_owned),
+        } FILTER .name != 'source' AND .name != 'target' ORDER BY .name
+    } FILTER any(@is_owned) ORDER BY .name,
     exclusives := assert_distinct((
         [IS schema::ObjectType].constraints
         UNION

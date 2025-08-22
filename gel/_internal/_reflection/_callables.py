@@ -213,6 +213,21 @@ class CallableSignature(NamedTuple):
     kwargs: frozenset[str]
     kwargs_with_defaults: frozenset[str]
 
+    def sort_key(self) -> tuple[object, ...]:
+        """Produce something that is safe to sort on
+
+        Sets < is set inclusion, which is not something you can sort
+        an array with!
+        """
+        return (
+            self.name,
+            self.num_pos,
+            self.num_pos_with_defaults,
+            self.has_variadic,
+            sorted(self.kwargs),
+            sorted(self.kwargs_with_defaults),
+        )
+
     def contains(self, other: CallableSignature) -> bool:
         """Determine if this signature contains the other signature.
 
