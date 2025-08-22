@@ -775,9 +775,7 @@ class BaseModelTestCase(DatabaseTestCase):
                 argparse.Namespace(
                     no_cache=True,
                     quiet=True,
-                    output=(
-                        base / short_name
-                    ).absolute(),
+                    output=(base / short_name).absolute(),
                 ),
                 project_dir=pathlib.Path(cls.tmp_model_dir.name),
                 client=gen_client,
@@ -800,12 +798,12 @@ class BaseModelTestCase(DatabaseTestCase):
         sys.path.insert(0, cls.tmp_model_dir.name)
 
         import models
-        assert (
-            models.__file__
-            == os.path.join(cls.tmp_model_dir.name, 'models', '__init__.py')
+
+        assert models.__file__ == os.path.join(
+            cls.tmp_model_dir.name, "models", "__init__.py"
         ), (
             models.__file__,
-            os.path.join(cls.tmp_model_dir.name, 'models', '__init__.py')
+            os.path.join(cls.tmp_model_dir.name, "models", "__init__.py"),
         )
 
     @classmethod
