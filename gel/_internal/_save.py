@@ -1156,11 +1156,40 @@ class QueryBatch:
                 pass
 
 
+# Refetching links will only refetch linked objects which are already in the
+# link, or are in the sync objects.
+#
+# A refetched object will therefore need, per link:
+# - whether that link is being being refetched, and if so,
+# - the objects already in the link.
+#
+# The order of links is kept consistent with the refetch shape.
+RefetchSpecEntry = TypeAliasType(
+    "RefetchSpecEntry",
+    tuple[
+        uuid.UUID,  # Refetched obj id
+        list[
+            tuple[
+                bool,  # Whether the link is being refetched
+                list[uuid.UUID],  # Objects in the link
+            ]
+        ],
+    ],
+)
+
+
+@dataclasses.dataclass(kw_only=True, frozen=True)
+class QueryRefetchArgs:
+    spec: list[RefetchSpecEntry]
+    new: list[uuid.UUID]
+    existing: list[uuid.UUID]
+
+
 @_struct
 class QueryRefetch:
     executor: SaveExecutor
     query: TypeWrapper[type[GelModel]]
-    args: dict[str, Any]
+    args: QueryRefetchArgs
     shape: RefetchShape
 
     def feed_db_data(self, obj_data: Iterable[Any]) -> None:
@@ -1305,7 +1334,7 @@ class SaveExecutor:
         tuple[
             type[GelModel],
             TypeWrapper[type[GelModel]],
-            list[Any],
+            list[RefetchSpecEntry],
             RefetchShape,
         ]
     ]:
@@ -1411,7 +1440,7 @@ class SaveExecutor:
                         else:
                             obj_link_ids.append(self._get_id(s_link))
 
-            spec_arg = [
+            spec_arg: list[RefetchSpecEntry] = [
                 (
                     obj_id,
                     [
@@ -1469,11 +1498,11 @@ class SaveExecutor:
             QueryRefetch(
                 executor=self,
                 query=q[1],
-                args={
-                    "spec": q[2],
-                    "new": new_ids,
-                    "existing": list(self.existing_objects),
-                },
+                args=QueryRefetchArgs(
+                    spec=q[2],
+                    new=new_ids,
+                    existing=list(self.existing_objects),
+                ),
                 shape=q[3],
             )
             for q in self._compile_refetch()

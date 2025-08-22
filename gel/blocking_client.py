@@ -683,7 +683,12 @@ class Client(
                     if refetch:
                         ref_queries = executor.get_refetch_queries()
                         for ref in ref_queries:
-                            tx.send_query(ref.query, **ref.args)
+                            tx.send_query(
+                                ref.query,
+                                spec=ref.args.spec,
+                                new=ref.args.new,
+                                existing=ref.args.existing,
+                            )
 
                         refetch_data = tx.wait()
                         for ref_data, ref in zip(
