@@ -1023,7 +1023,8 @@ class BaseGeneratedModule:
                 )
                 self.write(f"return {objtype_mod}.ObjectType(")
                 with self.indented():
-                    self.write(f"id={uuid_}(int={objtype.uuid.int}),")
+                    self.write(f"# Dummy id, for stability/portability")
+                    self.write(f"id={uuid_}(int=0),")
                     self.write(f"name={objtype.name!r},")
                     self.write(f"builtin={objtype.builtin!r},")
                     self.write(f"internal={objtype.internal!r},")
@@ -1277,7 +1278,11 @@ class BaseGeneratedModule:
         t: reflection.NamedTupleType,
     ) -> str:
         names = [elem.name.capitalize() for elem in t.tuple_elements]
-        digest = base64.b64encode(t.uuid.bytes[:4], altchars=b"__").decode()
+        # Base64ing the name is pretty horrific but it avoids needing
+        # to escape it into Python safely.
+        digest = base64.b64encode(
+            t.name.encode("utf-8"), altchars=b"__"
+        ).decode()
         return "".join(names) + "_Tuple_" + digest.rstrip("=")
 
     def _resolve_rel_import(
@@ -3026,6 +3031,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         ]
         | None = None,
     ) -> None:
+        callables = sorted(callables, key=lambda c: c.ident)
         partitions = self._partition_nominal_overloads(callables)
         for overloads in partitions.values():
             self._write_nominal_overloads(
@@ -3079,7 +3085,10 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             overloads
         )
         num_generated_total = 0
-        for overlapping in partitions.values():
+        # Sort for determinism.
+        for _, overlapping in sorted(
+            partitions.items(), key=lambda kv: kv[0].sort_key()
+        ):
             generated = self._write_potentially_overlapping_overloads(
                 overlapping,
                 style=style,
@@ -3147,14 +3156,19 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             reflection.CallableParamKey, set[_Callable_T]
         ] = defaultdict(set)
 
-        # Sort overloads by generality from least generic to most generic
+        # Sort overloads by generality from least generic to most
+        # generic, which is needed for typing correctness, and then by
+        # their edgeql signature, to ensure determisim.
         generality_key = functools.cmp_to_key(
             functools.partial(
                 reflection.compare_callable_generality,
                 schema=self._types,
             )
         )
-        overloads = sorted(overloads, key=generality_key)
+        overloads = sorted(
+            overloads,
+            key=lambda o: (generality_key(o), o.edgeql_signature),
+        )
 
         for overload in overloads:
             overload_signatures[overload] = {}
