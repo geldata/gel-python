@@ -35,6 +35,7 @@ import pathlib
 import pickle
 import re
 import shutil
+import site
 import subprocess
 import sys
 import tempfile
@@ -62,6 +63,12 @@ from gel.orm.django.generator import ModelGenerator as DjangoModGen
 log = logging.getLogger(__name__)
 
 _unset = object()
+
+
+SITE_PACKAGES: typing.Final[pathlib.Path] = pathlib.Path(
+    site.getsitepackages()[0]
+)
+MODELS_DEST: typing.Final[pathlib.Path] = SITE_PACKAGES / "models"
 
 
 @contextlib.contextmanager
@@ -628,35 +635,55 @@ class DatabaseTestCase(ClusterTestCase, ConnectedTestCaseMixin):
         return dbname.lower()
 
     @classmethod
-    def get_setup_script(cls):
-        script = ""
-        schema = []
+    def get_schema_texts(cls) -> list[str]:
+        schema_texts: list[str] = []
 
         # Look at all SCHEMA entries and potentially create multiple
         # modules, but always create the test module, if not `default`.
         if cls.DEFAULT_MODULE != "default":
-            schema.append(f"\nmodule {cls.DEFAULT_MODULE} {{}}")
-        for name, val in cls.__dict__.items():
-            m = re.match(r"^SCHEMA(?:_(\w+))?", name)
-            if m:
-                module_name = (
-                    (m.group(1) or cls.DEFAULT_MODULE)
-                    .lower()
-                    .replace("_", "::")
-                )
+            schema_texts.append(f"\nmodule {cls.DEFAULT_MODULE} {{}}")
 
-                with open(val, "r") as sf:
-                    module = sf.read()
+        for name in cls.__dict__:
+            if schema_text := cls.get_schema_text(name):
+                schema_texts.append(schema_text)
 
-                if f"module {module_name}" not in module:
-                    schema.append(f"\nmodule {module_name} {{ {module} }}")
-                else:
-                    schema.append(module)
+        return schema_texts
+
+    @classmethod
+    def get_schema_text(cls, field: str) -> str | None:
+        m = re.match(r"^SCHEMA(?:_(\w+))?", field)
+        if not m:
+            return None
+
+        val = cls.__dict__.get(field)
+        if val is None:
+            return None
+        assert isinstance(val, str)
+
+        module_name = (
+            (m.group(1) or cls.DEFAULT_MODULE).lower().replace("_", "::")
+        )
+
+        if os.path.exists(val):
+            with open(val, "r") as sf:
+                module = sf.read()
+        else:
+            module = val
+
+        if f"module {module_name}" not in module:
+            module = f"\nmodule {module_name} {{ {module} }}"
+
+        return module
+
+    @classmethod
+    def get_setup_script(cls):
+        script = ""
+        schema = "\n\n".join(st for st in cls.get_schema_texts())
 
         # Don't wrap the script into a transaction here, so that
         # potentially it's easier to stitch multiple such scripts
         # together in a fashion similar to what `edb inittestdb` does.
-        script += f"\nSTART MIGRATION TO {{ {''.join(schema)} }};"
+        script += f"\nSTART MIGRATION TO {{ {schema} }};"
         script += f"\nPOPULATE MIGRATION; \nCOMMIT MIGRATION;"
 
         if cls.SETUP:
@@ -741,6 +768,14 @@ class BaseModelTestCase(DatabaseTestCase):
     client: typing.ClassVar[gel.Client]
 
     @classmethod
+    def _model_info(cls) -> tuple[bool, str]:
+        assert isinstance(cls.SCHEMA, str)
+        if os.path.exists(cls.SCHEMA):
+            return True, pathlib.Path(cls.SCHEMA).stem
+        else:
+            return False, cls.__name__
+
+    @classmethod
     def setUpClass(cls):
         super().setUpClass()
 
@@ -755,8 +790,7 @@ class BaseModelTestCase(DatabaseTestCase):
 
         cls.tmp_model_dir = tempfile.TemporaryDirectory(**td_kwargs)
 
-        assert isinstance(cls.SCHEMA, str)
-        short_name = pathlib.Path(cls.SCHEMA).stem
+        model_from_file, model_name = cls._model_info()
 
         if cls.orm_debug:
             print(cls.tmp_model_dir.name)
@@ -770,12 +804,13 @@ class BaseModelTestCase(DatabaseTestCase):
         try:
             gen_client.ensure_connected()
             base = pathlib.Path(cls.tmp_model_dir.name) / "models"
+            model_output_dir = (base / model_name).absolute()
 
             cls.gen = PydanticModelsGenerator(
                 argparse.Namespace(
                     no_cache=True,
                     quiet=True,
-                    output=(base / short_name).absolute(),
+                    output=model_output_dir,
                 ),
                 project_dir=pathlib.Path(cls.tmp_model_dir.name),
                 client=gen_client,
@@ -794,6 +829,15 @@ class BaseModelTestCase(DatabaseTestCase):
                 ) from e
         finally:
             gen_client.terminate()
+
+        if not model_from_file:
+            # This is a direct schema, let's copy it to the site paths
+            site_model_dir = MODELS_DEST / model_name
+            if site_model_dir.exists():
+                shutil.rmtree(site_model_dir)
+            shutil.copytree(
+                model_output_dir, site_model_dir, dirs_exist_ok=True
+            )
 
         sys.path.insert(0, cls.tmp_model_dir.name)
 
