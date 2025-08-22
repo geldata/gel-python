@@ -769,14 +769,14 @@ class BaseModelTestCase(DatabaseTestCase):
         )
         try:
             gen_client.ensure_connected()
+            base = pathlib.Path(cls.tmp_model_dir.name) / "models"
+
             cls.gen = PydanticModelsGenerator(
                 argparse.Namespace(
                     no_cache=True,
                     quiet=True,
                     output=(
-                        pathlib.Path(cls.tmp_model_dir.name)
-                        / "models"
-                        / short_name
+                        base / short_name
                     ).absolute(),
                 ),
                 project_dir=pathlib.Path(cls.tmp_model_dir.name),
@@ -786,6 +786,9 @@ class BaseModelTestCase(DatabaseTestCase):
 
             try:
                 cls.gen.run()
+                # Make sure the base "models" directory has an __init__.py
+                (base / "__init__.py").touch()
+
             except Exception as e:
                 raise RuntimeError(
                     f"error running model codegen, its stderr:\n"
@@ -795,6 +798,15 @@ class BaseModelTestCase(DatabaseTestCase):
             gen_client.terminate()
 
         sys.path.insert(0, cls.tmp_model_dir.name)
+
+        import models
+        assert (
+            models.__file__
+            == os.path.join(cls.tmp_model_dir.name, 'models', '__init__.py')
+        ), (
+            models.__file__,
+            os.path.join(cls.tmp_model_dir.name, 'models', '__init__.py')
+        )
 
     @classmethod
     def tearDownClass(cls):
