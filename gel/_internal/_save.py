@@ -617,27 +617,60 @@ def model_attr(
         return dct.get(name, default)
 
 
-def push_refetch(
+def _add_refetch_shape(
     obj: GelModel,
-    existing_objects: dict[uuid.UUID, GelModel | IDTracker[GelModel, None]],
     refetch_ops: RefetchBatch,
 ) -> None:
     tp_obj: type[GelModel] = type(obj)
     tp_pointers = tp_obj.__gel_reflection__.pointers
     ref_shape = refetch_ops[tp_obj]
     ref_shape.models.append(obj)
-    for field_name in obj.__pydantic_fields_set__:
-        if field_name in ref_shape.fields or field_name in _STOP_FIELDS_NO_ID:
-            continue
+    if not obj.__gel_new__:
+        # Existing objects should refetch anything that was previously set
+        for field_name in obj.__pydantic_fields_set__:
+            if (
+                field_name in ref_shape.fields
+                or field_name in _STOP_FIELDS_NO_ID
+            ):
+                continue
 
-        try:
-            ptr_info = tp_pointers[field_name]
-        except KeyError:
-            # ad-hoc computed
-            pass
-        else:
-            ref_shape.fields[field_name] = ptr_info
+            try:
+                ptr_info = tp_pointers[field_name]
+            except KeyError:
+                # ad-hoc computed
+                pass
+            else:
+                ref_shape.fields[field_name] = ptr_info
 
+    else:
+        # New objects only need computeds refetched
+        for field_name in obj.__pydantic_computed_fields__:
+            if field_name in ref_shape.fields:
+                continue
+
+            try:
+                ptr_info = tp_pointers[field_name]
+            except KeyError:
+                # ad-hoc computed
+                pass
+            else:
+                ref_shape.fields[field_name] = ptr_info
+
+
+def push_refetch_new(
+    obj: GelModel,
+    refetch_ops: RefetchBatch,
+) -> None:
+    _add_refetch_shape(obj, refetch_ops)
+    # new objects are created and tracked by the SaveExecutor
+
+
+def push_refetch_existing(
+    obj: GelModel,
+    existing_objects: dict[uuid.UUID, GelModel | IDTracker[GelModel, None]],
+    refetch_ops: RefetchBatch,
+) -> None:
+    _add_refetch_shape(obj, refetch_ops)
     try:
         elst = existing_objects[obj.id]
     except KeyError:
@@ -683,8 +716,17 @@ def make_plan(
         requireds: FieldChangeMap = {}
         sched: FieldChangeLists = collections.defaultdict(list)
 
-        if refetch and not obj.__gel_new__:
-            push_refetch(obj, existing_objects, refetch_ops)
+        if refetch:
+            if not obj.__gel_new__:
+                push_refetch_existing(obj, existing_objects, refetch_ops)
+
+            elif any(
+                prop.kind == PointerKind.Property and prop.computed
+                for prop in pointers
+            ):
+                # Refetch computed properties, they may depend on other objects
+                # being inserted later
+                push_refetch_new(obj, refetch_ops)
 
         for prop in pointers:
             # Skip computeds, we can't update them.
@@ -1043,7 +1085,7 @@ def make_plan(
                     # now we're using it to make sure we don't submit
                     # removed objects to refetch more than once.
                     iter_graph_tracker.track(m)
-                    push_refetch(m, existing_objects, refetch_ops)
+                    push_refetch_existing(m, existing_objects, refetch_ops)
 
     # Plan batch inserts of new objects -- we have to insert objects
     # in batches respecting their required cross-dependencies.
@@ -1334,7 +1376,7 @@ class SaveExecutor:
                 collections.defaultdict(dict)
             )
             for obj in shape.models:
-                link_ids = obj_links_all[obj.id]
+                link_ids = obj_links_all[self._get_id(obj)]
                 for lname in link_arg_order:
                     if lname not in obj.__pydantic_fields_set__:
                         # `model_attr` below this 'if' will always succeed
@@ -1476,9 +1518,11 @@ class SaveExecutor:
         return [
             QueryBatch(
                 executor=self,
-                query=TypeWrapper(lqs[0][0], lqs[0][1].multi_query)
-                if self.refetch
-                else lqs[0][1].multi_query,
+                query=(
+                    TypeWrapper(lqs[0][0], lqs[0][1].multi_query)
+                    if self.refetch
+                    else lqs[0][1].multi_query
+                ),
                 args_query=lqs[0][1].args_query,
                 args=[lq[1].arg for lq in lqs],
                 changes=[lq[1].change for lq in lqs],
@@ -1505,7 +1549,12 @@ class SaveExecutor:
             obj_dict = obj.__dict__
             gel_id: uuid.UUID = obj.id
 
-            model_or_models = self.existing_objects[gel_id]
+            model_or_models: GelModel | IDTracker[GelModel, None]
+            if gel_id in self.new_objects:
+                model_or_models = self.new_objects[gel_id]
+            else:
+                model_or_models = self.existing_objects[gel_id]
+
             models: Iterable[GelModel]
             if isinstance(model_or_models, IDTracker):
                 # In some situations we might have multiple objects with
@@ -1670,6 +1719,22 @@ class SaveExecutor:
                         # we still need to commit it recursively;
                         # see the above comment.
                         multi_prop_commit_recursive(linked)
+
+            if (
+                self.refetch
+                and obj in self.new_object_ids
+                and (new_obj_id := self.new_object_ids.get(obj))
+            ):
+                # Update computed properties for new objects
+                for prop in get_pointers(type(obj)):
+                    if not prop.computed or prop.kind is PointerKind.Link:
+                        continue
+
+                    assert prop.kind is PointerKind.Property
+
+                    new_obj = self.new_objects.get(new_obj_id)
+                    obj.__dict__[prop.name] = new_obj.__dict__[prop.name]
+                    obj.__pydantic_fields_set__.add(prop.name)
 
         for o in self.objs:
             _traverse(o)
