@@ -20,6 +20,7 @@ from collections.abc import (
     Mapping,
 )
 
+from gel._internal._qbmodel import _abstract
 
 if TYPE_CHECKING:
     from pydantic import BaseModel
@@ -201,13 +202,24 @@ def massage_model_dump_kwargs(
         exclude = kwargs["exclude"] = set()
 
     if model.__gel_has_id_field__ and model.__gel_new__:
+        # You're generally not supposed to dump an unsaved model,
+        # so this branch might be a bit slow -- we can potentially
+        # optimize it later.
+
+        exclude_fields = ["id"]
+
+        for field, value in model.__dict__.items():
+            if value is _abstract.DEFAULT_VALUE:
+                exclude_fields.append(field)
+
         # Exclude unset `id` field from the dump or the serializer
         # will crash with an
         if isinstance(exclude, set):
-            exclude.add("id")
+            exclude.update(exclude_fields)
         else:
             assert isinstance(exclude, dict)
-            exclude["id"] = True
+            for field in exclude_fields:
+                exclude[field] = True
 
     if model.__pydantic_computed_fields__:
         to_exclude: set[str]

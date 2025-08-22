@@ -194,6 +194,7 @@ class BaseQueryContext(Generic[_T_ql]):
             output_format=self.query_options.output_format,
             expect_one=self.query_options.expect_one,
             required_one=self.query_options.required_one,
+            inline_typenames=self.query.return_type is not None,
             allow_capabilities=allow_capabilities,
             state=self.state.as_dict() if self.state else None,
             annotations=self.annotations,

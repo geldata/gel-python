@@ -181,6 +181,20 @@ class StringLiteral(Literal):
 class SetLiteral(AtomicExpr):
     items: tuple[Expr, ...]
 
+    def __init__(
+        self,
+        /,
+        *,
+        items: Iterable[ExprCompatible],
+        type_: SchemaPath,
+    ) -> None:
+        object.__setattr__(
+            self,
+            "items",
+            tuple(edgeql_qb_expr(it) for it in items),
+        )
+        super().__init__(type_=type_)
+
     def subnodes(self) -> Iterable[Node]:
         return self.items
 

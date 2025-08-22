@@ -498,7 +498,7 @@ class AsyncIOBatchIteration(transaction.BaseTransaction):
     ) -> None:
         self._batched_ops.append(
             abstract.QueryContext(
-                query=abstract.QueryWithArgs(query, None, args, kwargs),
+                query=abstract.QueryWithArgs.from_query(query, args, kwargs),
                 cache=self._client._get_query_cache(),
                 retry_options=None,
                 state=self._client._get_state(),
@@ -516,7 +516,7 @@ class AsyncIOBatchIteration(transaction.BaseTransaction):
     ) -> None:
         self._batched_ops.append(
             abstract.QuerySingleContext(
-                query=abstract.QueryWithArgs(query, None, args, kwargs),
+                query=abstract.QueryWithArgs.from_query(query, args, kwargs),
                 cache=self._client._get_query_cache(),
                 retry_options=None,
                 state=self._client._get_state(),
@@ -534,7 +534,7 @@ class AsyncIOBatchIteration(transaction.BaseTransaction):
     ) -> None:
         self._batched_ops.append(
             abstract.QueryRequiredSingleContext(
-                query=abstract.QueryWithArgs(query, None, args, kwargs),
+                query=abstract.QueryWithArgs.from_query(query, args, kwargs),
                 cache=self._client._get_query_cache(),
                 retry_options=None,
                 state=self._client._get_state(),
@@ -633,10 +633,12 @@ class AsyncIOClient(
             )
         )
 
-    async def save(
+    async def _save_impl(
         self,
-        *objs: GelModel,
-        refetch: bool = True,
+        *,
+        refetch: bool,
+        objs: tuple[GelModel, ...],
+        warn_on_large_sync_set: bool = False,
     ) -> None:
         opts = self._get_debug_options()
 
@@ -644,20 +646,58 @@ class AsyncIOClient(
             objs,
             refetch=refetch,
             save_postcheck=opts.save_postcheck,
+            warn_on_large_sync_set=warn_on_large_sync_set,
         )
 
         async for tx in self._batch():
             async with tx:
                 executor = make_executor()
 
-                for batches in executor:
-                    for batch in batches:
-                        await tx.send_query(batch.query, batch.args)
-                    batch_ids = await tx.wait()
-                    for ids, batch in zip(batch_ids, batches, strict=True):
-                        batch.feed_db_data(ids)
+                with executor:
+                    for batches in executor:
+                        for batch in batches:
+                            await tx.send_query(batch.query, batch.args)
+                        batch_ids = await tx.wait()
+                        for ids, batch in zip(batch_ids, batches, strict=True):
+                            batch.feed_db_data(ids)
 
-                executor.commit()
+                    if refetch:
+                        ref_queries = executor.get_refetch_queries()
+                        for ref in ref_queries:
+                            await tx.send_query(
+                                ref.query,
+                                spec=ref.args.spec,
+                                new=ref.args.new,
+                                existing=ref.args.existing,
+                            )
+
+                        refetch_data = await tx.wait()
+                        for ref_data, ref in zip(
+                            refetch_data, ref_queries, strict=True
+                        ):
+                            ref.feed_db_data(ref_data)
+
+    async def save(
+        self,
+        *objs: GelModel,
+    ) -> None:
+        """Persist objects without refetching updated data back.
+
+        This is a subset of `sync()`, optimized to avoid refetching.
+        """
+        await self._save_impl(refetch=False, objs=objs)
+
+    async def sync(
+        self,
+        *objs: GelModel,
+        warn_on_large_sync: bool = True,
+    ) -> None:
+        """Persist objects and refetch updated data back into them."""
+        await self._save_impl(
+            refetch=True,
+            objs=objs,
+            warn_on_large_sync_set=warn_on_large_sync,
+        )
 
     async def __aenter__(self) -> Self:
         return await self.ensure_connected()

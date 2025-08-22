@@ -36,6 +36,7 @@ from gel._internal._qb import (
     PrefixOp,
     FuncCall,
     PathAlias,
+    SetLiteral,
 )
 
 from gel._internal._qbmodel._abstract import (
@@ -176,6 +177,7 @@ __all__ = (
     "RequiredMultiLink",
     "RequiredMultiLinkWithProps",
     "SchemaPath",
+    "SetLiteral",
     "TimeDeltaImpl",
     "TimeImpl",
     "Tuple",

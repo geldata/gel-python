@@ -33,7 +33,7 @@ class TestQueryBuilder(tb.ModelTestCase):
 
     def test_qb_computed_01(self):
         """Replace an existing field with a computed literal value"""
-        from models import default, std
+        from models.orm import default, std
 
         res1 = self.client.get(
             default.User.select(
@@ -54,7 +54,7 @@ class TestQueryBuilder(tb.ModelTestCase):
         self.assertEqual(res2.nickname, "hello")
 
     def test_qb_computed_02(self):
-        from models import default
+        from models.orm import default
 
         res = self.client.get(
             default.User.select(
@@ -67,7 +67,7 @@ class TestQueryBuilder(tb.ModelTestCase):
 
     @tb.xfail
     def test_qb_computed_03(self):
-        from models import default, std
+        from models.orm import default, std
 
         res = self.client.get(
             default.User.select(
@@ -79,7 +79,7 @@ class TestQueryBuilder(tb.ModelTestCase):
         self.assertEqual(res.nickname, "Alice5")
 
     def test_qb_computed_04(self):
-        from models import default, std
+        from models.orm import default, std
 
         class MyUser(default.User):
             foo: std.str
@@ -94,7 +94,7 @@ class TestQueryBuilder(tb.ModelTestCase):
         self.assertEqual(res.foo, "hello")
 
     def test_qb_computed_05(self):
-        from models import default
+        from models.orm import default
 
         res = self.client.get(
             default.User.select(
@@ -115,7 +115,7 @@ class TestQueryBuilder(tb.ModelTestCase):
         self.assertEqual(res2.name_len, 15)
 
     def test_qb_computed_06(self):
-        from models import default
+        from models.orm import default
 
         res = self.client.get(
             default.User.select(
@@ -144,7 +144,7 @@ class TestQueryBuilder(tb.ModelTestCase):
         self.assertEqual(res3.name, "A!")
 
     def test_qb_order_01(self):
-        from models import default
+        from models.orm import default
 
         res = self.client.query(default.User.order_by(name=True))
         self.assertEqual(
@@ -153,7 +153,7 @@ class TestQueryBuilder(tb.ModelTestCase):
         )
 
     def test_qb_order_02(self):
-        from models import default
+        from models.orm import default
 
         res = self.client.get(
             default.GameSession.select(
@@ -171,7 +171,7 @@ class TestQueryBuilder(tb.ModelTestCase):
         )
 
     def test_qb_order_03(self):
-        from models import default
+        from models.orm import default
 
         res = self.client.get(
             default.GameSession.select(
@@ -188,7 +188,7 @@ class TestQueryBuilder(tb.ModelTestCase):
         )
 
     def test_qb_filter_01(self):
-        from models import default, std
+        from models.orm import default, std
 
         res = self.client.query(
             default.User.filter(lambda u: std.like(u.name, "%e%")).order_by(
@@ -215,7 +215,7 @@ class TestQueryBuilder(tb.ModelTestCase):
         self.assertEqual(list(res), list(res2))
 
     def test_qb_filter_02(self):
-        from models import default
+        from models.orm import default
 
         res = self.client.get(
             default.UserGroup.select("*", users=True).filter(name="red")
@@ -229,7 +229,7 @@ class TestQueryBuilder(tb.ModelTestCase):
 
     @tb.xfail
     def test_qb_filter_03(self):
-        from models import default
+        from models.orm import default
 
         res = self.client.get(
             default.UserGroup.select(
@@ -245,7 +245,7 @@ class TestQueryBuilder(tb.ModelTestCase):
         )
 
     def test_qb_filter_04(self):
-        from models import default, std
+        from models.orm import default, std
 
         res = self.client.get(
             default.UserGroup.select(
@@ -263,7 +263,7 @@ class TestQueryBuilder(tb.ModelTestCase):
 
     @tb.xfail
     def test_qb_filter_05(self):
-        from models import default, std
+        from models.orm import default, std
 
         # Test filter by ad-hoc computed
         res = self.client.get(
@@ -277,7 +277,7 @@ class TestQueryBuilder(tb.ModelTestCase):
 
     @tb.xfail
     def test_qb_filter_06(self):
-        from models import default, std
+        from models.orm import default, std
 
         # Test filter by compex expression
         res = self.client.get(
@@ -294,9 +294,8 @@ class TestQueryBuilder(tb.ModelTestCase):
         self.assertEqual(res.name, "red")
         self.assertEqual(res.count, 2)
 
-    @tb.xfail
     def test_qb_filter_07(self):
-        from models import default
+        from models.orm import default
 
         # Test filter with nested property expression
         res = self.client.query(
@@ -310,14 +309,13 @@ class TestQueryBuilder(tb.ModelTestCase):
         self.assertEqual(res[1].author.name, "Alice")
         self.assertEqual(res[1].body, "I'm Alice")
 
-    @tb.xfail
     def test_qb_filter_08(self):
-        from models import default
+        from models.orm import default, std
 
         # Test filter with nested property expression
         res = self.client.query(
             default.Post.select("**").filter(
-                lambda p: "red" not in p.author.groups.name
+                lambda p: std.not_in("red", p.author.groups.name)
             )
         )
         self.assertEqual(len(res), 1)
@@ -327,7 +325,7 @@ class TestQueryBuilder(tb.ModelTestCase):
 
     @tb.xfail
     def test_qb_filter_09(self):
-        from models import default, std
+        from models.orm import default, std
 
         # Find GameSession with same players as the green group
         green = default.UserGroup.filter(name="green")
@@ -347,7 +345,7 @@ class TestQueryBuilder(tb.ModelTestCase):
 
     @tb.xfail
     def test_qb_filter_10(self):
-        from models import default, std
+        from models.orm import default, std
 
         # Find GameSession with same *number* of players as the green group
         green = default.UserGroup.filter(name="green")
@@ -363,7 +361,7 @@ class TestQueryBuilder(tb.ModelTestCase):
         )
 
     def test_qb_link_property_01(self):
-        from models import default
+        from models.orm import default
 
         # Test fetching GameSession with players multi-link
         res = self.client.get(
@@ -381,7 +379,7 @@ class TestQueryBuilder(tb.ModelTestCase):
         )
 
     def test_qb_link_property_02(self):
-        from models import default
+        from models.orm import default
 
         # Test filtering players based on link property
         res = self.client.get(
@@ -396,7 +394,7 @@ class TestQueryBuilder(tb.ModelTestCase):
         self.assertEqual([u.name for u in res.players], ["Billie"])
 
     def test_qb_multiprop_01(self):
-        from models import default
+        from models.orm import default
 
         res = self.client.query(
             default.KitchenSink.select(
@@ -413,7 +411,7 @@ class TestQueryBuilder(tb.ModelTestCase):
 
     @tb.xfail
     def test_qb_multiprop_02(self):
-        from models import default
+        from models.orm import default
 
         # FIXME: This straight up hangs
         raise Exception("This filter will hang")
@@ -428,7 +426,7 @@ class TestQueryBuilder(tb.ModelTestCase):
 
     @tb.xfail
     def test_qb_multiprop_03(self):
-        from models import default
+        from models.orm import default
 
         res = self.client.get(
             default.KitchenSink.select(
@@ -442,7 +440,7 @@ class TestQueryBuilder(tb.ModelTestCase):
 
     @tb.xfail
     def test_qb_multiprop_04(self):
-        from models import default
+        from models.orm import default
 
         res = self.client.get(
             default.KitchenSink.select(
@@ -456,7 +454,7 @@ class TestQueryBuilder(tb.ModelTestCase):
 
     @tb.xfail
     def test_qb_multiprop_05(self):
-        from models import default, std
+        from models.orm import default, std
 
         res = self.client.get(
             default.KitchenSink.select(
@@ -471,7 +469,7 @@ class TestQueryBuilder(tb.ModelTestCase):
         self.assertEqual(set(res.p_multi_str), {"brown", "jumps"})
 
     def test_qb_limit_offset_01(self):
-        from models import default, std
+        from models.orm import default, std
 
         res = self.client.get(
             default.User.select(name=True)
@@ -488,7 +486,7 @@ class TestQueryBuilder(tb.ModelTestCase):
         )
 
     def test_qb_boolean_operator_error_01(self):
-        from models import default
+        from models.orm import default
 
         # Test that using 'and' operator raises TypeError
         with self.assertRaisesRegex(TypeError, "use std.and_"):
@@ -537,7 +535,7 @@ class TestQueryBuilder(tb.ModelTestCase):
 
     @tb.xfail
     def test_qb_enum_01(self):
-        from models import default
+        from models.orm import default
 
         e = self.client.get(default.EnumTest.filter(color=default.Color.Red))
 
@@ -555,7 +553,7 @@ class TestQueryBuilderModify(tb.ModelTestCase):
     ISOLATED_TEST_BRANCHES = True
 
     def test_qb_update_01(self):
-        from models import default
+        from models.orm import default
 
         self.client.query(
             default.User.filter(name="Alice").update(
@@ -568,13 +566,14 @@ class TestQueryBuilderModify(tb.ModelTestCase):
         self.assertEqual(res.name, "Cooper")
         self.assertEqual(res.nickname, "singer")
 
-    @tb.xfail
     def test_qb_update_02(self):
-        from models import default
+        from models.orm import default, std
 
         self.client.query(
             default.UserGroup.filter(name="blue").update(
-                users=default.User.filter(lambda u: u.name in {"Zoe", "Dana"})
+                users=default.User.filter(
+                    lambda u: std.in_(u.name, {"Zoe", "Dana"})
+                )
             )
         )
 
@@ -586,7 +585,7 @@ class TestQueryBuilderModify(tb.ModelTestCase):
 
     @tb.xfail
     def test_qb_update_03(self):
-        from models import default, std
+        from models.orm import default, std
 
         # Combine update and select of the updated object
         res = self.client.get(
@@ -603,11 +602,13 @@ class TestQueryBuilderModify(tb.ModelTestCase):
 
     @tb.xfail
     def test_qb_update_04(self):
-        from models import default, std
+        from models.orm import default, std
 
         self.client.query(
             default.UserGroup.filter(name="blue").update(
-                users=default.User.filter(lambda u: u.name in {"Zoe", "Dana"})
+                users=default.User.filter(
+                    lambda u: std.in_(u.name, {"Zoe", "Dana"})
+                )
             )
         )
 
@@ -650,7 +651,7 @@ class TestQueryBuilderModify(tb.ModelTestCase):
         self.assertEqual({u.name for u in res2.users}, {"Zoe", "Alice"})
 
     def test_qb_delete_01(self):
-        from models import default
+        from models.orm import default
 
         before = self.client.query(
             default.Post.select(body=True).order_by(body=True)
@@ -671,7 +672,7 @@ class TestQueryBuilderModify(tb.ModelTestCase):
         )
 
     def test_qb_delete_02(self):
-        from models import default
+        from models.orm import default
 
         before = self.client.query(
             default.Post.select(body=True).order_by(body=True)
@@ -693,9 +694,8 @@ class TestQueryBuilderModify(tb.ModelTestCase):
             [p.body for p in after], ["*magic stuff*", "I'm Cameron"]
         )
 
-    @tb.xfail
     def test_qb_delete_03(self):
-        from models import default
+        from models.orm import default
 
         # Delete posts by Alice and fetch the deleted stuff
         res = self.client.query(
@@ -712,7 +712,7 @@ class TestQueryBuilderModify(tb.ModelTestCase):
 
     @tb.xfail
     def test_qb_enum_edit_01(self):
-        from models import default
+        from models.orm import default
 
         e = self.client.get(
             default.EnumTest.filter(
@@ -727,7 +727,7 @@ class TestQueryBuilderModify(tb.ModelTestCase):
 
     @tb.xfail
     def test_qb_enum_edit_02(self):
-        from models import default
+        from models.orm import default
 
         e = self.client.get(
             default.EnumTest.filter(

@@ -89,7 +89,7 @@ class BaseGelModel(AbstractGelModel):
         def select(
             cls,
             /,
-            *elements: _qb.PathAlias | Literal["*"],
+            *elements: _qb.PathAlias | Literal["*", "**"],
             __operand__: _qb.ExprAlias | None = None,
             **kwargs: Any,
         ) -> type[Self]:

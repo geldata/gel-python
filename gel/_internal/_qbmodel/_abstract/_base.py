@@ -18,34 +18,21 @@ from typing import (
 
 from typing_extensions import Self
 
-import dataclasses
 import functools
 import typing
 import weakref
 
-from gel._internal import _edgeql
 from gel._internal import _qb
 from gel._internal._xmethod import hybridmethod
 
 if TYPE_CHECKING:
     import abc
     import types
-    import uuid
     from collections.abc import Iterator
 
 
 T = TypeVar("T")
 T_co = TypeVar("T_co", covariant=True)
-
-
-@dataclasses.dataclass(kw_only=True, frozen=True)
-class PointerInfo:
-    computed: bool = False
-    readonly: bool = False
-    has_props: bool = False
-    cardinality: _edgeql.Cardinality = _edgeql.Cardinality.One
-    annotation: type[Any] | None = None
-    kind: _edgeql.PointerKind | None = None
 
 
 if TYPE_CHECKING:
@@ -134,6 +121,10 @@ class AbstractGelSourceModel(_qb.GelSourceMetadata):
         # an `.id` corresponding to a database object.
         __gel_new__: bool
 
+        # Set of fields that have been changed since the last commit;
+        # used by `client.save()`.
+        __gel_changed_fields__: set[str] | None
+
     @classmethod
     def __gel_validate__(cls, value: Any) -> Self:
         raise NotImplementedError
@@ -142,15 +133,20 @@ class AbstractGelSourceModel(_qb.GelSourceMetadata):
     def __gel_model_construct__(cls, __dict__: dict[str, Any] | None) -> Self:
         raise NotImplementedError
 
+    def __gel_get_changed_fields__(self) -> set[str]:
+        raise NotImplementedError
+
 
 class AbstractGelModelMeta(GelTypeMeta):
     __gel_class_registry__: ClassVar[
-        weakref.WeakValueDictionary[uuid.UUID, type[Any]]
+        weakref.WeakValueDictionary[str, type[Any]]
     ] = weakref.WeakValueDictionary()
 
-    if TYPE_CHECKING:
-        # Splat qb protocol
-        def __iter__(cls) -> Iterator[_qb.ShapeElement]: ...
+    # Splat qb protocol
+    def __iter__(cls) -> Iterator[_qb.ShapeElement]:
+        cls = cast("type[AbstractGelModel]", cls)
+        shape = _qb.get_object_type_splat(cls)
+        return iter(shape.elements)
 
     def __new__(
         mcls,
@@ -158,33 +154,27 @@ class AbstractGelModelMeta(GelTypeMeta):
         bases: tuple[type[Any], ...],
         namespace: dict[str, Any],
         *,
-        __gel_type_id__: uuid.UUID | None = None,
-        __gel_variant__: str | None = None,
+        __gel_shape__: str | None = None,
         **kwargs: Any,
     ) -> AbstractGelModelMeta:
         cls = cast(
             "type[AbstractGelModel]",
             super().__new__(mcls, name, bases, namespace, **kwargs),
         )
-        if __gel_type_id__ is not None:
-            mcls.__gel_class_registry__[__gel_type_id__] = cls
-        cls.__gel_variant__ = __gel_variant__
+        reflection = cls.__gel_reflection__
+        if (tname := getattr(reflection, "name", None)) is not None:
+            mcls.__gel_class_registry__[tname] = cls
+        cls.__gel_shape__ = __gel_shape__
         return cls
 
     @classmethod
-    def get_class_by_id(cls, tid: uuid.UUID) -> type[AbstractGelModel]:
+    def get_class_by_name(cls, tname: str) -> type[AbstractGelModel]:
         try:
-            return cls.__gel_class_registry__[tid]
+            return cls.__gel_class_registry__[tname]
         except KeyError:
             raise LookupError(
-                f"cannot find GelModel for object type id {tid}"
+                f"cannot find GelModel for object type {tname}"
             ) from None
-
-    @classmethod
-    def register_class(
-        cls, tid: uuid.UUID, type_: type[AbstractGelModel]
-    ) -> None:
-        cls.__gel_class_registry__[tid] = cls
 
 
 class AbstractGelModel(
@@ -193,12 +183,12 @@ class AbstractGelModel(
     _qb.GelObjectTypeMetadata,
     metaclass=AbstractGelModelMeta,
 ):
-    __gel_variant__: ClassVar[str | None] = None
+    __gel_shape__: ClassVar[str | None] = None
     """Auto-reflected model variant marker."""
 
     def __init_subclass__(cls) -> None:
         super().__init_subclass__()
-        cls.__gel_variant__ = None
+        cls.__gel_shape__ = None
 
     @classmethod
     def __edgeql_qb_expr__(cls) -> _qb.Expr:  # pyright: ignore [reportIncompatibleMethodOverride]
@@ -228,7 +218,14 @@ class AbstractGelModel(
 
 
 class AbstractGelLinkModel(AbstractGelSourceModel):
-    pass
+    if TYPE_CHECKING:
+        # Whether the model was copied by reference and must
+        # be copied by value before being accessed by the user.
+        __gel_copied_by_ref__: bool
+
+        # Whether the model has mutable properties; determined
+        # at the codegen time.
+        __gel_has_mutable_props__: ClassVar[bool]
 
 
 def is_gel_model(t: Any) -> TypeGuard[type[AbstractGelModel]]:
@@ -252,7 +249,7 @@ def maybe_collapse_object_type_variant_union(
         elif typename != union_arg.__gel_reflection__.name:
             # Reflections of different object types, cannot collapse.
             return None
-        if union_arg.__gel_variant__ == "Default" and default_variant is None:
+        if union_arg.__gel_shape__ == "Default" and default_variant is None:
             default_variant = union_arg
 
     return default_variant

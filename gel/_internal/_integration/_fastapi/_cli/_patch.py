@@ -4,6 +4,7 @@ from typing import (
 
 import inspect
 import importlib.util
+import pathlib
 import types
 
 
@@ -20,20 +21,24 @@ def _get_fastapi_cli_import_site() -> types.FrameType | None:
     return None
 
 
-def maybe_patch_fastapi_cli() -> None:
+def maybe_patch_fastapi_cli() -> bool:
     if importlib.util.find_spec("fastapi") is None:
         # No FastAPI here, move along.
-        return
+        return False
 
     try:
         import uvicorn  # noqa: PLC0415  # pyright: ignore [reportMissingImports]
     except ImportError:
-        return
+        return False
 
     fastapi_cli_import_site = _get_fastapi_cli_import_site()
     if fastapi_cli_import_site is None:
         # Not being imported by fastapi.cli
-        return
+        return False
+
+    if fastapi_cli_import_site.f_locals.get("command") != "dev":
+        # Don't patch in production mode.
+        return False
 
     def _patched_uvicorn_run(*args: Any, **kwargs: Any) -> None:
         from . import _lifespan  # noqa: PLC0415
@@ -42,7 +47,15 @@ def maybe_patch_fastapi_cli() -> None:
         cli = fastapi_cli_import_site.f_locals.get("toolkit")
         if import_data is not None and cli is not None:
             app_path = import_data.module_data.module_paths[-1].parent
-            with _lifespan.fastapi_cli_lifespan(cli, app_path):
+            with _lifespan.fastapi_cli_lifespan(cli, app_path) as reload_watch:
+                dirs = kwargs.get("reload_dirs")
+                if dirs is None:
+                    kwargs["reload_dirs"] = [pathlib.Path.cwd(), reload_watch]
+                elif isinstance(dirs, str):
+                    kwargs["reload_dirs"] = [dirs, reload_watch]
+                else:
+                    assert isinstance(dirs, list)
+                    kwargs["reload_dirs"].append(reload_watch)
                 uvicorn.run(*args, **kwargs)
         else:
             uvicorn.run(*args, **kwargs)
@@ -58,3 +71,4 @@ def maybe_patch_fastapi_cli() -> None:
         uvicorn.__name__,
         doc=uvicorn.__doc__,
     )
+    return True

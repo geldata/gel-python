@@ -2,6 +2,15 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright Gel Data Inc. and the contributors.
 
+"""
+Utility for runtime overload dispatch based on type hints.
+
+This module provides a decorator ``dispatch_overload`` that transforms a
+function with ``@overload`` definitions into a callable object which selects
+the correct implementation at runtime by inspecting the arguments' types
+against the type hints of each overload. It mimics the behaviour of static
+overload resolution but works dynamically.
+"""
 
 from typing import (
     Any,
@@ -12,6 +21,8 @@ from typing import (
 )
 from collections.abc import (
     Callable,
+    Collection,
+    Mapping,
 )
 from typing_extensions import (
     get_overloads,
@@ -23,19 +34,30 @@ import types
 import typing
 
 from gel._internal import _namespace
+from gel._internal import _typing_eval
 from gel._internal import _typing_inspect
+from gel._internal._utils import type_repr
 
 _P = ParamSpec("_P")
 _R_co = TypeVar("_R_co", covariant=True)
 
 
 def _isinstance(obj: Any, tp: Any) -> bool:
+    # Handle Any type - matches everything
+    if tp is Any:
+        return True
+
+    # Handle basic types
     if _typing_inspect.is_valid_isinstance_arg(tp):
         return isinstance(obj, tp)
-    elif isinstance(tp, tuple):
-        return any(_isinstance(obj, el) for el in tp)
+
     elif _typing_inspect.is_union_type(tp):
         return any(_isinstance(obj, el) for el in typing.get_args(tp))
+
+    elif _typing_inspect.is_literal(tp):
+        # For Literal types, check if obj is one of the literal values
+        return obj in typing.get_args(tp)
+
     elif _typing_inspect.is_generic_alias(tp):
         origin = typing.get_origin(tp)
         args = typing.get_args(tp)
@@ -47,9 +69,72 @@ def _isinstance(obj: Any, tp: Any) -> bool:
                 return any(issubclass(c, args[0]) for c in genalias_mro)
             else:
                 return False
-        else:
-            raise TypeError(f"_isinstance() argument 2 is {tp!r}")
 
+        elif not isinstance(origin, type):  # pragma: no cover
+            raise TypeError(
+                "_isinstance() argument 2 contains a generic with non-type "
+                "origin"
+            )
+
+        elif issubclass(origin, Mapping):
+            # Check the container type first
+            if not isinstance(obj, origin):
+                return False
+
+            # If no type args or empty mapping, we're done
+            if not args or len(obj) == 0:
+                return True
+
+            if len(args) != 2:
+                raise TypeError(
+                    f"_isinstance() argument 2 contains improperly typed "
+                    f"{type_repr(origin)} generic"
+                )
+
+            # For Mapping[K, V], check first key and first value
+            k, v = next(iter(obj.items()))
+            return _isinstance(k, args[0]) and _isinstance(v, args[1])
+
+        elif issubclass(origin, tuple):
+            # Check the container type first
+            if not isinstance(obj, origin):
+                return False
+
+            num_args = len(args)
+            num_elems = len(obj)
+
+            # If no type args or empty container, we're done
+            if num_args == 0 or num_elems == 0:
+                return True
+
+            # Tuples can be homogeneous tuple[T, ...] or
+            # heterogeneous tuple[*T]
+            if num_args == 2 and args[1] is ...:
+                # Homogeneous tuple like tuple[int, ...]
+                return _isinstance(next(iter(obj)), args[0])
+            elif num_args != num_elems:
+                # Shape of tuple value does not match type definition
+                return False
+            else:
+                for el_type, el_val in zip(args, obj, strict=True):
+                    if not _isinstance(el_val, el_type):
+                        return False
+                return True
+
+        elif issubclass(origin, Collection):
+            # Check the container type first
+            if not isinstance(obj, origin):
+                return False
+
+            # If no type args or empty container, we're done
+            if not args or len(obj) == 0:
+                return True
+
+            return _isinstance(next(iter(obj)), args[0])
+
+        else:
+            # For other generic types, fall back to checking the origin
+            return isinstance(obj, origin)
     else:
         raise TypeError(f"_isinstance() argument 2 is {tp!r}")
 
@@ -60,23 +145,29 @@ class _OverloadDispatch(Generic[_P, _R_co]):
         func: Callable[_P, _R_co],
     ) -> None:
         self._qname = func.__qualname__
-        self._overloads = {
-            fn: inspect.signature(fn) for fn in get_overloads(func)
-        }
-        self._type_hints: dict[Callable[..., Any], dict[str, Any]] = {}
+        self._overloads: dict[Callable[..., _R_co], inspect.Signature] = {}
+        for fn in get_overloads(func):
+            real_fn: Callable[..., Any] = getattr(fn, "__func__", fn)
+            self._overloads[real_fn] = inspect.signature(real_fn)
+        self._param_types: dict[Callable[..., Any], dict[str, Any]] = {}
+        self._is_classmethod = isinstance(func, classmethod)
+        self._is_staticmethod = isinstance(func, staticmethod)
+        self._is_method = False
         self._attr_name: str | None = None
-        self._boundcall = functools.partial(self._call, boundmethod=True)
-        functools.update_wrapper(self._boundcall, func)
         functools.update_wrapper(self, func)
 
-    def __set_name__(self, name: str, owner: type[Any]) -> None:
+    def __set_name__(self, owner: type[Any], name: str) -> None:
         self._attr_name = name
+        self._is_method = (
+            not self._is_classmethod and not self._is_staticmethod
+        )
 
     @overload
     def __get__(
         self,
         instance: None,
         owner: type[Any],
+        /,
     ) -> Callable[_P, _R_co]: ...
 
     @overload
@@ -84,59 +175,114 @@ class _OverloadDispatch(Generic[_P, _R_co]):
         self,
         instance: Any,
         owner: type[Any] | None = None,
+        /,
     ) -> Callable[_P, _R_co]: ...
 
     def __get__(
         self,
         instance: Any | None,
         owner: type[Any] | None = None,
+        /,
     ) -> Callable[_P, _R_co]:
         if instance is None:
-            return self
+            if self._is_classmethod:
+
+                def closure(
+                    cls: type[Any],
+                    /,
+                    *args: _P.args,
+                    **kwargs: _P.kwargs,
+                ) -> _R_co:
+                    return self._call(cls, *args, **kwargs)
+
+                functools.update_wrapper(closure, self)
+
+                cm = classmethod(closure).__get__(None, owner)
+                if self._attr_name is not None:
+                    try:
+                        setattr(owner, self._attr_name, cm)
+                    except (TypeError, AttributeError):  # pragma: no cover
+                        pass
+                return cm
+            else:
+                return self
         else:
-            return types.MethodType(self._boundcall, instance)
+
+            def method(
+                instance: Any,
+                /,
+                *args: _P.args,
+                **kwargs: _P.kwargs,
+            ) -> _R_co:
+                return self._call(instance, *args, **kwargs)
+
+            functools.update_wrapper(method, self)
+
+            m = types.MethodType(method, instance)
+            if self._attr_name is not None:
+                try:
+                    setattr(instance, self._attr_name, m)
+                except (TypeError, AttributeError):  # pragma: no cover
+                    pass
+            return m
 
     def __call__(self, *args: _P.args, **kwargs: _P.kwargs) -> _R_co:
-        return self._call(args, kwargs)
+        return self._call(None, *args, **kwargs)
 
     def _call(
         self,
-        args: tuple[Any, ...],
-        kwargs: dict[str, Any],
-        *,
-        boundmethod: bool = False,
+        bound_to: object | type[Any] | None = None,
+        /,
+        *args: _P.args,
+        **kwargs: _P.kwargs,
     ) -> _R_co:
         for fn, sig in self._overloads.items():
             try:
-                bound = sig.bind(*args, **kwargs)
+                if bound_to is not None:
+                    bound = sig.bind(bound_to, *args, **kwargs)
+                else:
+                    bound = sig.bind(*args, **kwargs)
+                bound.apply_defaults()
             except TypeError:
                 continue
 
-            param_types = self._type_hints.get(fn)
-            if param_types is None:
-                param_types = typing.get_type_hints(
-                    fn,
-                    globalns=_namespace.module_ns_of(fn),
-                )
-                self._type_hints[fn] = param_types
-            bound_args = iter(bound.arguments.items())
-            if boundmethod or self._attr_name:
-                next(bound_args)
+            # Get the bound arguments, skipping 'self' for methods
 
+            param_types = self._param_types.get(fn)
+            if param_types is None:
+                ns = _namespace.module_ns_of(fn)
+                type_hints = typing.get_type_hints(fn, globalns=ns)
+                param_types = {
+                    n: _typing_eval.resolve_type(t, globals=ns)
+                    for n, t in type_hints.items()
+                }
+                self._param_types[fn] = param_types
+
+            bound_args = iter(bound.arguments.items())
+            # Methods might be called in unbound mode,
+            # e.g Class.method(obj, *args, **kwargs)
+            if bound_to is not None or self._is_method:
+                next(bound_args)  # skip cls/self
             for pn, arg in bound_args:
-                pt = param_types[pn]
+                pt = param_types.get(pn)
+                if pt is None:  # pragma: no cover
+                    raise TypeError(
+                        f"cannot dispatch to {self._qname}: an overload "
+                        f"is missing a type annotation on the {pn} parameter"
+                    )
                 if not _isinstance(arg, pt):
                     break
             else:
-                result = fn(*args, **kwargs)
-                break
-        else:
-            raise TypeError(
-                f"cannot dispatch to {self._qname}: no overload found for "
-                f"args={args} and kwargs={kwargs}"
-            )
+                if bound_to is not None:
+                    return fn(bound_to, *args, **kwargs)
+                else:
+                    return fn(*args, **kwargs)
 
-        return result  # type: ignore [return-value]
+        # No matching overload found
+        raise TypeError(
+            f"cannot dispatch to {self._qname}: no overload found for "
+            f"args={args!r} kwargs={kwargs!r}"
+        )
 
 
 def dispatch_overload(

@@ -12,6 +12,7 @@ from typing_extensions import (
 from collections.abc import MutableMapping
 
 import dataclasses
+import operator
 import uuid
 from collections import ChainMap, defaultdict, deque
 
@@ -64,7 +65,8 @@ def _trace_all_casts(
 
     # Remove the starting type from results (distance 0 to itself)
     distances.pop(from_type, None)
-    return distances
+    # Sort the distance map so that uses of it are deterministic.
+    return dict(sorted(distances.items(), key=operator.itemgetter(1, 0)))
 
 
 @struct

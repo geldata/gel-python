@@ -16,6 +16,20 @@
 # limitations under the License.
 #
 
+
+#    ███    ██  ██████  ████████ ███████
+#    ████   ██ ██    ██    ██    ██
+#    ██ ██  ██ ██    ██    ██    █████
+#    ██  ██ ██ ██    ██    ██    ██
+#    ██   ████  ██████     ██    ███████
+#
+#    Run `python tools/gen_models.py` to generate the models
+#    module from the `orm.gel` schema and get your IDE to
+#    recognize `from models.orm import default`.
+#
+#    Don't forget to re-run if you are messing with codegen
+#    implementation or testing different versions of Gel.
+
 from __future__ import annotations
 
 import os
@@ -34,7 +48,7 @@ if typing.TYPE_CHECKING:
 from gel import _testbase as tb
 from gel._internal import _dirdiff
 from gel._internal import _typing_inspect
-from gel._internal._qbmodel._abstract import DistinctList, ProxyDistinctList
+from gel._internal._qbmodel._abstract import LinkSet, LinkWithPropsSet
 from gel._internal._edgeql import Cardinality, PointerKind
 from gel._internal._qbmodel._pydantic._models import GelModel
 from gel._internal._schemapath import SchemaPath
@@ -101,26 +115,26 @@ class TestModelGenerator(tb.ModelTestCase):
             if _typing_inspect.is_valid_isinstance_arg(
                 p.type
             ) and _typing_inspect.is_valid_isinstance_arg(e.type):
-                if issubclass(e.type, DistinctList):
-                    if not issubclass(p.type, DistinctList):
+                if issubclass(e.type, LinkSet):
+                    if not issubclass(p.type, LinkSet):
                         self.fail(
                             f"{obj.__name__}.{p.name} eq_type check failed: "
-                            f"p.type is not a DistinctList, but expected "
+                            f"p.type is not a LinkSet, but expected "
                             f"type is {e.type!r}",
                         )
 
-                if issubclass(p.type, ProxyDistinctList):
-                    if not issubclass(e.type, ProxyDistinctList):
+                if issubclass(p.type, LinkWithPropsSet):
+                    if not issubclass(e.type, LinkWithPropsSet):
                         self.fail(
                             f"{obj.__name__}.{p.name} eq_type check "
-                            f" failed: p.type is ProxyDistinctList, "
+                            f" failed: p.type is LinkWithPropsSet, "
                             f"but expected type is {e.type!r}",
                         )
                 else:
-                    if issubclass(e.type, ProxyDistinctList):
+                    if issubclass(e.type, LinkWithPropsSet):
                         self.fail(
                             f"{obj.__name__}.{p.name} eq_type check failed: "
-                            f"p.type is not a ProxyDistinctList, but "
+                            f"p.type is not a LinkWithPropsSet, but "
                             f"expected type is {e.type!r}",
                         )
 
@@ -145,32 +159,45 @@ class TestModelGenerator(tb.ModelTestCase):
 
     @tb.must_fail  # this test ensures that @typecheck is working
     def test_modelgen__smoke_test(self):
-        from models import default
+        from models.orm import default
 
         self.assertEqual(reveal_type(default.User.groups), "this must fail")
 
+    def test_modelgen_save_refetch_modes(self):
+        from models.orm import default
+
+        u1 = default.User(name="Al")
+        self.client.sync(u1)
+        self.assertTrue(hasattr(u1, "name_len"))
+
+        u2 = default.User(name="Al")
+        self.client.save(u2)
+        self.assertFalse(hasattr(u2, "name_len"))
+
     def test_modelgen_01(self):
-        from models import default
+        from models.orm import default
 
         self.assertEqual(
-            reveal_type(default.User.name), "type[models.__shapes__.std.str]"
+            reveal_type(default.User.name),
+            "type[models.orm.__shapes__.std.str]",
         )
 
         self.assertEqual(
-            reveal_type(default.User.groups), "type[models.default.UserGroup]"
+            reveal_type(default.User.groups),
+            "type[models.orm.default.UserGroup]",
         )
 
         q = self.client.query_required_single(
             default.User.select(groups=True).limit(1)
         )
 
-        self.assertEqual(
+        self.assertIn(
+            "ComputedLinkSet[models.orm.default.UserGroup]",
             reveal_type(q.groups),
-            "builtins.tuple[models.default.UserGroup, ...]",
         )
 
     def test_modelgen_02(self):
-        from models import default
+        from models.orm import default
 
         a = self.client.get(default.User.filter(name="Alice"))
         t = default.Team(
@@ -179,11 +206,12 @@ class TestModelGenerator(tb.ModelTestCase):
         )
 
         self.assertTrue(a == a)
-        self.assertTrue(t.members[0] == t.members[0])
-        self.assertTrue(a == t.members[0])
-        self.assertTrue(t.members[0] == a)
+        fm = next(iter(t.members))
+        self.assertTrue(fm == fm)
+        self.assertTrue(a == fm)
+        self.assertTrue(fm == a)
 
-        self.client.save(t)
+        self.client.sync(t)
         t2 = self.client.get(
             default.Team.select(
                 name=True,
@@ -191,12 +219,13 @@ class TestModelGenerator(tb.ModelTestCase):
             ).filter(name="Alice's team"),
         )
 
-        self.assertTrue(a == t.members[0])
-        self.assertTrue(a == t2.members[0])
-        self.assertTrue(t.members[0] == t2.members[0])
+        fm2 = next(iter(t2.members))
+        self.assertTrue(a == fm)
+        self.assertTrue(a == fm2)
+        self.assertTrue(fm == fm2)
 
     def test_modelgen_03(self):
-        from models import default
+        from models.orm import default
 
         a = self.client.get(default.User.filter(name="Alice"))
         m = default.Team.members.link(a, rank=1)
@@ -207,7 +236,7 @@ class TestModelGenerator(tb.ModelTestCase):
             default.Team.members.link(m, rank=1)
 
     def test_modelgen_04(self):
-        from models import default
+        from models.orm import default
 
         with self.assertRaisesRegex(
             TypeError, r"without id value are unhashable"
@@ -215,7 +244,7 @@ class TestModelGenerator(tb.ModelTestCase):
             set([default.User(name="Xavier")])
 
     def test_modelgen_05(self):
-        from models import default
+        from models.orm import default
 
         with self.assertRaisesRegex(
             TypeError, r"without id value are unhashable"
@@ -224,7 +253,7 @@ class TestModelGenerator(tb.ModelTestCase):
 
     def test_modelgen_data_unpack_1a(self):
         import gel
-        from models import default
+        from models.orm import default
 
         q = gel.expr(
             default.Post,
@@ -241,7 +270,7 @@ class TestModelGenerator(tb.ModelTestCase):
         d = self.client.query_single(q)
 
         assert d is not None
-        self.assertEqual(reveal_type(d), "models.default.Post")
+        self.assertEqual(reveal_type(d), "models.orm.default.Post")
 
         self.assertIsInstance(d, default.Post)
         self.assertEqual(d.body, "Hello")
@@ -253,7 +282,7 @@ class TestModelGenerator(tb.ModelTestCase):
         "dispatch_overload currently broken under Python 3.10",
     )
     def test_modelgen_data_unpack_1b(self):
-        from models import default, std
+        from models.orm import default, std
 
         q = (
             default.Post.select(
@@ -269,7 +298,7 @@ class TestModelGenerator(tb.ModelTestCase):
         )
         d = self.client.get(q)
 
-        self.assertEqual(reveal_type(d), "models.default.Post")
+        self.assertEqual(reveal_type(d), "models.orm.default.Post")
 
         self.assertEqual(reveal_type(d.id), "uuid.UUID")
 
@@ -280,7 +309,7 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(d.author.name, "Alice")
 
     def test_modelgen_data_unpack_1c(self):
-        from models import default, std
+        from models.orm import default, std
 
         class MyUser(default.User):
             posts: std.int64
@@ -316,16 +345,19 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(d.posts, 2)
 
     def test_modelgen_data_unpack_2(self):
-        from models import default
+        from models.orm import default
 
         q = default.Post.select().filter(body="Hello")
         d = self.client.query(q)[0]
         self.assertIsInstance(d, default.Post)
 
     def test_modelgen_data_unpack_3(self):
-        from models import default
+        from models.orm import default
 
-        from gel._internal._qbmodel._abstract import ProxyDistinctList
+        from gel._internal._qbmodel._abstract import (
+            LinkWithPropsSet,
+            ComputedLinkSet,
+        )
 
         q = (
             default.GameSession.select(
@@ -352,11 +384,12 @@ class TestModelGenerator(tb.ModelTestCase):
 
         self.assertIsInstance(d, default.GameSession)
 
-        # Test that links are unpacked into a DistinctList, not a vanilla list
-        self.assertIsInstance(d.players, ProxyDistinctList)
-        self.assertIsInstance(d.players[0].groups, tuple)
+        # Test that links are unpacked into a LinkSet, not a vanilla list
+        self.assertIsInstance(d.players, LinkWithPropsSet)
+        first_player = next(iter(d.players))
+        self.assertIsInstance(first_player.groups, ComputedLinkSet)
 
-        post = default.Post(author=d.players[0], body="test")
+        post = default.Post(author=first_player, body="test")
 
         # Check that validation is enabled for objects created by codecs
 
@@ -364,7 +397,7 @@ class TestModelGenerator(tb.ModelTestCase):
             ValueError,
             r"(?s)\bplayers\b\n.*dictionary or instance of players",
         ):
-            d.players.append(post)  # type: ignore [arg-type]
+            d.players.add(post)  # type: ignore [arg-type]
 
         with self.assertRaisesRegex(
             ValueError, r"(?s)xxx.*Object has no attribute 'xxx'"
@@ -372,7 +405,7 @@ class TestModelGenerator(tb.ModelTestCase):
             post.xxx = 123
 
     def test_modelgen_data_unpack_4(self):
-        from models import default
+        from models.orm import default
 
         q = default.Post.select(
             author=True,
@@ -384,23 +417,23 @@ class TestModelGenerator(tb.ModelTestCase):
             d.body
 
     def test_modelgen_pdlist_parametrized(self):
-        from models import default
+        from models.orm import default
         from gel._internal._qbmodel._abstract import (
-            ProxyDistinctList,
+            LinkWithPropsSet,
         )
 
         sess = default.GameSession(num=1, public=False)
         pl = sess.players
 
-        self.assertIsInstance(pl, ProxyDistinctList)
-        self.assertIs(pl.type, default.GameSession.__links__.players)
-        self.assertIs(pl.basetype, default.User)
+        self.assertIsInstance(pl, LinkWithPropsSet)
+        self.assertIs(pl.proxytype, default.GameSession.__links__.players)
+        self.assertIs(pl.type, default.User)
 
     def test_modelgen_data_init_unfetched_link(self):
         from gel._internal._qbmodel._abstract import (
-            AbstractDistinctList,
+            AbstractLinkSet,
         )
-        import models as m
+        import models.orm as m
 
         ug = self.client.query_required_single(m.UserGroup.limit(1))
 
@@ -410,11 +443,11 @@ class TestModelGenerator(tb.ModelTestCase):
         # This is basic usability -- we don't want your code to break
         # at runtime because you changed the query and `.append()` calls
         # stopped working.
-        ug.users.append(m.User(name="test test test"))
-        self.assertIsInstance(ug.users, AbstractDistinctList)
+        ug.users.add(m.User(name="test test test"))
+        self.assertIsInstance(ug.users, AbstractLinkSet)
 
         # And now we'll test that the data will actually
-        self.client.save(ug)
+        self.client.sync(ug)
 
         ug2 = self.client.query_required_single(
             m.UserGroup.filter(
@@ -428,7 +461,7 @@ class TestModelGenerator(tb.ModelTestCase):
         # regression test for https://github.com/geldata/gel-python/issues/722
 
         import pydantic
-        from models import default
+        from models.orm import default
 
         class UserUpdate(pydantic.BaseModel):
             name: str | None = None
@@ -497,7 +530,7 @@ class TestModelGenerator(tb.ModelTestCase):
 
     def test_modelgen_pydantic_apis_02(self):
         import json
-        from models import default
+        from models.orm import default
 
         user_loaded = self.client.get(
             default.User.select(name=True).filter(name="Alice").limit(1)
@@ -596,7 +629,7 @@ class TestModelGenerator(tb.ModelTestCase):
         # via a single link.
 
         import json
-        from models import default
+        from models.orm import default
         from gel._testbase import pop_ids, pop_ids_json
 
         sl = self.client.query_required_single(
@@ -707,7 +740,7 @@ class TestModelGenerator(tb.ModelTestCase):
         # via a multi link.
 
         import json
-        from models import default
+        from models.orm import default
         from gel._testbase import pop_ids, pop_ids_json
 
         sl = self.client.query_required_single(
@@ -769,7 +802,7 @@ class TestModelGenerator(tb.ModelTestCase):
     def test_modelgen_pydantic_apis_05(self):
         # Test pickling a nested model that has a multi link with link props.
 
-        from models import default
+        from models.orm import default
         from gel._testbase import repickle
 
         sl = self.client.query_required_single(
@@ -786,8 +819,11 @@ class TestModelGenerator(tb.ModelTestCase):
         sl2 = repickle(sl)
         self.assertEqual(sl.model_dump(), sl2.model_dump())
 
+        self.assertIsInstance(sl2.players, type(sl.players))
+        self.assertIs(sl2.players.type, type(sl.players).type)
+
         sl.num += 1
-        _pl = sl.players[0]
+        _pl = next(iter(sl.players))
         _pl.name += "Alice the 2nd"
         _pl.__linkprops__.is_tall_enough = not _pl.__linkprops__.is_tall_enough
 
@@ -808,12 +844,12 @@ class TestModelGenerator(tb.ModelTestCase):
             sl2.__gel_get_changed_fields__(),
         )
         self.assertEqual(
-            sl.players[0]._p__obj__.__gel_get_changed_fields__(),
-            sl2.players[0]._p__obj__.__gel_get_changed_fields__(),
+            next(iter(sl.players))._p__obj__.__gel_get_changed_fields__(),
+            next(iter(sl2.players))._p__obj__.__gel_get_changed_fields__(),
         )
         self.assertEqual(
-            sl.players[0].__linkprops__.__gel_get_changed_fields__(),
-            sl2.players[0].__linkprops__.__gel_get_changed_fields__(),
+            next(iter(sl.players)).__linkprops__.__gel_get_changed_fields__(),
+            next(iter(sl2.players)).__linkprops__.__gel_get_changed_fields__(),
         )
 
         self.assertIsInstance(sl2.players, type(sl.players))
@@ -821,7 +857,7 @@ class TestModelGenerator(tb.ModelTestCase):
     def test_modelgen_pydantic_apis_06(self):
         # Test pickling a nested model that has a single link with link props.
 
-        from models import default
+        from models.orm import default
         from gel._testbase import repickle
 
         sl = self.client.query_required_single(
@@ -876,7 +912,7 @@ class TestModelGenerator(tb.ModelTestCase):
     def test_modelgen_pydantic_apis_07(self):
         # Test pickling a nested model that has a multi link.
 
-        from models import default
+        from models.orm import default
         from gel._testbase import repickle
 
         sl = self.client.query_required_single(
@@ -894,7 +930,7 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(sl.model_dump(), sl2.model_dump())
 
         sl.name += "aaa"
-        pl = sl.users[0]
+        pl = next(iter(sl.users))
         pl.name += "Alice the 2nd"
 
         sl2 = repickle(sl)
@@ -909,25 +945,28 @@ class TestModelGenerator(tb.ModelTestCase):
             sl2.model_dump(context={"gel_allow_unsaved": True}),
         )
 
+        sl_users = list(sl.users)
+        sl2_users = list(sl2.users)
+
         self.assertEqual(
             sl.__gel_get_changed_fields__(),
             sl2.__gel_get_changed_fields__(),
         )
         self.assertEqual(
-            sl.users[0],
-            sl2.users[0],
+            sl_users[0],
+            sl2_users[0],
         )
         self.assertEqual(
-            sl.users[1],
-            sl2.users[1],
+            sl_users[1],
+            sl2_users[1],
         )
         self.assertEqual(
-            sl.users[0].__gel_get_changed_fields__(),
-            sl2.users[0].__gel_get_changed_fields__(),
+            sl_users[0].__gel_get_changed_fields__(),
+            sl2_users[0].__gel_get_changed_fields__(),
         )
         self.assertEqual(
-            sl.users[1].__gel_get_changed_fields__(),
-            sl2.users[1].__gel_get_changed_fields__(),
+            sl_users[1].__gel_get_changed_fields__(),
+            sl2_users[1].__gel_get_changed_fields__(),
         )
 
         self.assertIsInstance(sl2.users, type(sl.users))
@@ -935,7 +974,7 @@ class TestModelGenerator(tb.ModelTestCase):
     def test_modelgen_pydantic_apis_08(self):
         # Test pickling a model that has a multi prop.
 
-        from models import default
+        from models.orm import default
         from gel._testbase import repickle
 
         sl = self.client.query_required_single(
@@ -971,7 +1010,7 @@ class TestModelGenerator(tb.ModelTestCase):
         # test nested serialization -- that it doesn't crash on
         # unfetched computeds and does not leak UNSET_UUID.
 
-        from models import default
+        from models.orm import default
 
         ug = self.client.query_required_single(
             default.UserGroup.select(
@@ -985,7 +1024,7 @@ class TestModelGenerator(tb.ModelTestCase):
         )
 
         u = default.User(name="aaa")
-        ug.users.append(u)
+        ug.users.add(u)
 
         expected = {
             "name": "red",
@@ -1006,7 +1045,7 @@ class TestModelGenerator(tb.ModelTestCase):
         # test *single required* link serialization
 
         import pydantic
-        from models import default
+        from models.orm import default
 
         p = self.client.get(
             default.Post.select(
@@ -1033,7 +1072,7 @@ class TestModelGenerator(tb.ModelTestCase):
         # Test model_dump() and model_dump_json() on models;
         # test *single required* link serialization in all combinations
 
-        from models import default
+        from models.orm import default
 
         u = default.User(name="aaa")
         t = default.TestSingleLinks(
@@ -1091,7 +1130,7 @@ class TestModelGenerator(tb.ModelTestCase):
             },
         )
 
-        self.client.save(t)
+        self.client.sync(t)
 
         t2 = self.client.get(
             default.TestSingleLinks.select(
@@ -1222,7 +1261,7 @@ class TestModelGenerator(tb.ModelTestCase):
 
     def test_modelgen_pydantic_apis_12(self):
         import uuid
-        from models import default
+        from models.orm import default
 
         expected = uuid.uuid4()
         ids = [
@@ -1241,17 +1280,17 @@ class TestModelGenerator(tb.ModelTestCase):
         with self.assertRaisesRegex(ValueError, "id argument"):
             default.UserGroup(None)  # type: ignore
 
-    @unittest.skipIf(sys.platform == "win32", "crashes")
+    @unittest.skip("blows stack and segfaults due to infinite recursion")
     @tb.xfail
     def test_modelgen_pydantic_apis_13(self):
         # https://github.com/geldata/gel-python/issues/785
 
-        from models import default
+        from models.orm import default
         # insert an object with an optional link to self set to self
 
         p = default.LinearPath(label="singleton")
         p.next = p
-        self.client.save(p)
+        self.client.sync(p)
 
         self.assertEqual(
             p.model_dump(),
@@ -1263,19 +1302,18 @@ class TestModelGenerator(tb.ModelTestCase):
         # and that one list with proxies can't leak wrong proxies
         # into anoher list
 
-        from models import default
+        from models.orm import default
 
         # case 1: append a proxy
 
         u1 = default.User(name="aaa")
         ug = default.UserGroup(name="aaa")
-        ug.users.append(
-            default.GameSession.players.link(
-                u1,
-                is_tall_enough=True,
-            )
+        uu = default.GameSession.players.link(
+            u1,
+            is_tall_enough=True,
         )
-        self.assertFalse(hasattr(ug.users[0], "__linkprops__"))
+        ug.users.add(uu)
+        self.assertFalse(hasattr(next(iter(ug.users)), "__linkprops__"))
 
         # case 2: initialize with a list of proxies
 
@@ -1288,30 +1326,33 @@ class TestModelGenerator(tb.ModelTestCase):
 
         ug = default.UserGroup(name="aaa", users=gs.players)
 
-        self.assertFalse(hasattr(ug.users[0], "__linkprops__"))
+        self.assertFalse(hasattr(next(iter(ug.users)), "__linkprops__"))
 
         # case 3: setattr to a list of proxies
 
         ug = default.UserGroup(name="aaa")
         ug.users = gs.players
-        self.assertFalse(hasattr(ug.users[0], "__linkprops__"))
+        ug_users_0 = next(iter(ug.users))
+        self.assertFalse(hasattr(ug_users_0, "__linkprops__"))
 
         # case 4: a list with wrong list props into a list with link props
 
         r = default.Raid(name="r", members=gs.players)
+        r_members_0 = next(iter(r.members))
         self.assertFalse(
-            hasattr(r.members[0].__linkprops__, "is_tall_enough"),
+            hasattr(r_members_0.__linkprops__, "is_tall_enough"),
         )
 
         # case 5: appending a wrong proxy to a list of proxies
 
         r = default.Raid(name="r", members=gs.players)
-        r.members.append(gs.players[0])
+        r.members.add(next(iter(gs.players)))
+        r_members_0 = next(iter(r.members))
         self.assertFalse(
-            hasattr(r.members[0].__linkprops__, "is_tall_enough"),
+            hasattr(r_members_0.__linkprops__, "is_tall_enough"),
         )
         self.assertIsInstance(
-            r.members[0],
+            r_members_0,
             default.Raid.__links__.members,
         )
 
@@ -1320,12 +1361,13 @@ class TestModelGenerator(tb.ModelTestCase):
         r = default.Raid(
             name="r", members=[default.Raid.members.link(u1, role="tank")]
         )
+        r_members_0 = next(iter(r.members))
         self.assertIsInstance(
-            r.members[0],
+            r_members_0,
             default.Raid.__links__.members,
         )
-        self.assertEqual(r.members[0].__linkprops__.role, "tank")
-        self.assertEqual(r.members[0].name, u1.name)
+        self.assertEqual(r_members_0.__linkprops__.role, "tank")
+        self.assertEqual(r_members_0.name, u1.name)
 
     def test_modelgen_pydantic_apis_15(self):
         # Test that GelModel's custom dump is working even
@@ -1334,7 +1376,7 @@ class TestModelGenerator(tb.ModelTestCase):
 
         import json
         import pydantic
-        from models import default
+        from models.orm import default
         from gel._testbase import pop_ids, pop_ids_json
 
         class MyGroup(pydantic.BaseModel):
@@ -1382,8 +1424,154 @@ class TestModelGenerator(tb.ModelTestCase):
         def select_everything(model: type[T]) -> Any:
             return model.select("*")
 
+    def test_modelgen_pydantic_apis_17(self):
+        from models.orm import default
+
+        client = self.client
+
+        u = client.get(default.User.filter(name="Alice"))
+        u_link = default.Image.author.link(u, caption="zzz")
+
+        u_lp_1 = object.__getattribute__(u_link, "__linkprops__")
+
+        im1 = default.Image(
+            file="aaa",
+            author=u_link,
+            # should copy linkprops, as they're coming from
+            # the `.link()` call -- that's the API to set linkprops
+        )
+
+        im2 = default.Image(
+            file="aaa",
+            author=im1.author,
+            # should not copy linkprops (!!!)
+            # linkprops would be copied from another
+            # link which would be confusing
+        )
+
+        u_lp_2 = object.__getattribute__(u_link, "__linkprops__")
+        im1_alp = object.__getattribute__(im1.author, "__linkprops__")
+        im2_alp = object.__getattribute__(im2.author, "__linkprops__")
+
+        self.assertIs(u_lp_1, u_lp_2)
+
+        # Validate that linkprops are copied by ref
+        self.assertTrue(getattr(u_lp_1, "__gel_copied_by_ref__", False))
+
+        self.assertIsNot(im1_alp, im2_alp)
+        self.assertEqual(
+            im1_alp.model_dump(), {"caption": "zzz", "year": None}
+        )
+
+        # validate that linkprops are still copied by red
+        # even after model_dump()
+        self.assertTrue(
+            getattr(
+                object.__getattribute__(im1.author, "__linkprops__"),
+                "__gel_copied_by_ref__",
+                False,
+            )
+        )
+
+        client.sync(im1, im2)
+
+        # validate that linkprops are still copied by red
+        # even after save()
+        self.assertTrue(
+            getattr(
+                object.__getattribute__(im1.author, "__linkprops__"),
+                "__gel_copied_by_ref__",
+                False,
+            )
+        )
+
+        self.assertIs(im1_alp, u_lp_1)
+        self.assertEqual(im2_alp.model_dump(), {})
+
+        # validate that linkprops are "materialized" after
+        # accessing the __linkprops__ attribute
+        self.assertIsNot(u_lp_1, u_link.__linkprops__)
+        self.assertFalse(
+            getattr(u_link.__linkprops__, "__gel_copied_by_ref__", False)
+        )
+
+    def test_modelgen_pydantic_apis_18(self):
+        from models.orm import default
+
+        # test that __pydantic_fields_set__ is correct and is
+        # only updated when the field is set by the user, not by
+        # using any of Pydantic read APIs or Gel's own APIs.
+
+        g = self.client.get(
+            default.UserGroup.select(
+                name=True,
+                mascot=True,
+            ).filter(name="red")
+        )
+
+        expected = {"id", "name", "mascot"}
+
+        self.assertEqual(g.__pydantic_fields_set__, expected)
+
+        g.model_dump()
+        self.assertEqual(g.__pydantic_fields_set__, expected)
+
+        repr(g)
+        self.assertEqual(g.__pydantic_fields_set__, expected)
+
+        with self.assertRaises(AttributeError):
+            object.__getattribute__(g, "users")
+        self.assertEqual(g.__pydantic_fields_set__, expected)
+
+        self.client.save(g)
+        self.assertEqual(g.__pydantic_fields_set__, expected)
+
+        self.client.sync(g)
+        self.assertEqual(g.__pydantic_fields_set__, expected)
+
+        g.name = "zzzzzzz"
+        self.client.sync(g)
+        self.assertEqual(g.__pydantic_fields_set__, expected)
+
+        g.users
+        self.assertEqual(g.__pydantic_fields_set__, expected | {"users"})
+
+    def test_modelgen_pydantic_apis_19(self):
+        from models.orm import default
+
+        g = default.GameSession(num=1, public=True)
+        self.assertEqual(
+            g.model_dump(context={"gel_allow_unsaved": True}),
+            {"num": 1, "public": True, "players": []},
+        )
+        self.assertEqual(
+            g.model_dump_json(context={"gel_allow_unsaved": True}),
+            '{"num":1,"public":true,"players":[]}',
+        )
+
+    def test_modelgen_pydantic_apis_20(self):
+        # Test that ComputedLinkSet can be pickled / dumped
+
+        from models.orm import default
+        from gel._testbase import repickle
+
+        alice = self.client.get(
+            default.User.select(
+                name=True, groups=lambda s: s.groups.select("*")
+            ).filter(name="Alice")
+        )
+
+        alice2 = repickle(alice)
+        self.assertIsInstance(alice2.groups, type(alice.groups))
+        self.assertIs(alice2.groups.type, type(alice.groups).type)
+
+        self.assertEqual(
+            {g["name"] for g in alice.model_dump()["groups"]},
+            {"red", "green"},
+        )
+
     def test_modelgen_data_unpack_polymorphic(self):
-        from models import default
+        from models.orm import default
 
         q = default.Named.select(
             "*",
@@ -1395,7 +1583,7 @@ class TestModelGenerator(tb.ModelTestCase):
                 self.assertIsNotNone(item.mascot)
 
     def test_modelgen_assert_single(self):
-        from models import default
+        from models.orm import default
 
         from gel import errors
 
@@ -1413,19 +1601,19 @@ class TestModelGenerator(tb.ModelTestCase):
             self.client.query(q)
 
     def test_modelgen_submodules_and_reexports(self):
-        import models
+        import models.orm as models
 
         models.default.Post
         models.std.str
 
         self.assertEqual(
             reveal_type(models.sub.TypeInSub.post),
-            "type[models.default.Post]",
+            "type[models.orm.default.Post]",
         )
 
     def test_modelgen_typed_query_expr(self):
         import gel
-        import models
+        import models.orm as models
 
         client: gel.Executor = self.client
 
@@ -1441,7 +1629,7 @@ class TestModelGenerator(tb.ModelTestCase):
         p = client.query(typed)
         self.assertEqual(
             reveal_type(p),
-            "builtins.list[models.default.Post]",
+            "builtins.list[models.orm.default.Post]",
         )
 
         assert len(p) == 1
@@ -1452,7 +1640,7 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(p[0].id, p_expected.id)
 
     def test_modelgen_query_methods_on_instances(self):
-        import models
+        import models.orm as models
 
         q = models.default.Post.limit(1).__gel_assert_single__()
         d = self.client.query(q)[0]
@@ -1475,12 +1663,12 @@ class TestModelGenerator(tb.ModelTestCase):
     def test_modelgen_data_model_validation_1(self):
         from typing import cast
 
-        from models import default, std
+        from models.orm import default, std
 
-        from gel._internal._qbmodel._abstract import ProxyDistinctList
+        from gel._internal._qbmodel._abstract import LinkWithPropsSet
 
         gs = default.GameSession(num=7)
-        self.assertIsInstance(gs.players, ProxyDistinctList)
+        self.assertIsInstance(gs.players, LinkWithPropsSet)
 
         with self.assertRaisesRegex(
             ValueError, r"(?s)only instances of User are allowed, got .*int"
@@ -1579,7 +1767,7 @@ class TestModelGenerator(tb.ModelTestCase):
             u.name_len = cast(std.int64, 123)  # type: ignore[assignment]
 
     def test_modelgen_data_model_validation_2(self):
-        from models import default
+        from models.orm import default
 
         T = default.TestSingleLinks
 
@@ -1626,12 +1814,12 @@ class TestModelGenerator(tb.ModelTestCase):
         with self.assertRaisesRegex(
             ValueError,
             r"(?s)is expected to satisfy Python type system.*"
-            r"models.default.TestSingleLinks.opt_wprop_friend.link\(\)",
+            r"models.orm.default.TestSingleLinks.opt_wprop_friend.link\(\)",
         ):
             t.opt_wprop_friend = u1  # type: ignore [assignment]
 
     def test_modelgen_save_01(self):
-        from models import default
+        from models.orm import default
 
         pq = (
             default.Post.select(
@@ -1653,8 +1841,8 @@ class TestModelGenerator(tb.ModelTestCase):
         with self.assertRaisesRegex(NotImplementedError, '"del" operation'):
             del p.body
 
-        self.client.save(p)
-        self.client.save(p)  # should be no op
+        self.client.sync(p)
+        self.client.sync(p)  # should be no op
 
         p2 = self.client.query_required_single("""
             select Post {body, author: {name}}
@@ -1668,8 +1856,8 @@ class TestModelGenerator(tb.ModelTestCase):
 
         a = default.User(name="New Alice")
         p.author = a
-        self.client.save(p)
-        self.client.save(p)  # should be no op
+        self.client.sync(p)
+        self.client.sync(p)  # should be no op
 
         p2 = self.client.query_required_single("""
             with
@@ -1700,7 +1888,7 @@ class TestModelGenerator(tb.ModelTestCase):
     def test_modelgen_save_02(self):
         import uuid
 
-        from models import default
+        from models.orm import default
         # insert an object with a required multi: no link props, one object
         # added to the link
 
@@ -1713,7 +1901,7 @@ class TestModelGenerator(tb.ModelTestCase):
                 ),
             ],
         )
-        self.client.save(party)
+        self.client.sync(party)
 
         # Fetch and verify
         raw_id = uuid.UUID(str(party.id))
@@ -1725,12 +1913,12 @@ class TestModelGenerator(tb.ModelTestCase):
         )
         self.assertEqual(res.name, "Solo")
         self.assertEqual(len(res.members), 1)
-        m = res.members[0]
+        m = next(iter(res.members))
         self.assertEqual(m.name, "John Smith")
         self.assertEqual(m.nickname, "Hannibal")
 
     def test_modelgen_save_03(self):
-        from models import default
+        from models.orm import default
         # insert an object with a required multi: no link props, more than one
         # object added to the link
 
@@ -1755,7 +1943,7 @@ class TestModelGenerator(tb.ModelTestCase):
                 ),
             ],
         )
-        self.client.save(party)
+        self.client.sync(party)
 
         # Fetch and verify
         res = self.client.get(
@@ -1780,7 +1968,7 @@ class TestModelGenerator(tb.ModelTestCase):
             self.assertEqual(m.nickname, nickname)
 
     def test_modelgen_save_04(self):
-        from models import default
+        from models.orm import default
         # insert an object with a required multi: with link props, one object
         # added to the link
 
@@ -1797,7 +1985,7 @@ class TestModelGenerator(tb.ModelTestCase):
                 )
             ],
         )
-        self.client.save(raid)
+        self.client.sync(raid)
 
         # Fetch and verify
         res = self.client.get(
@@ -1808,7 +1996,7 @@ class TestModelGenerator(tb.ModelTestCase):
         )
         self.assertEqual(res.name, "Solo")
         self.assertEqual(len(res.members), 1)
-        m = res.members[0]
+        m = next(iter(res.members))
         self.assertEqual(m.name, "John Smith")
         self.assertEqual(m.nickname, "Hannibal")
         self.assertEqual(m.__linkprops__.role, "everything")
@@ -1816,7 +2004,7 @@ class TestModelGenerator(tb.ModelTestCase):
 
         # Update link property
         m.__linkprops__.rank = 2
-        self.client.save(res)
+        self.client.sync(res)
 
         # Re-Fetch and verify
         res = self.client.get(
@@ -1826,11 +2014,11 @@ class TestModelGenerator(tb.ModelTestCase):
             ).filter(name="Solo")
         )
         self.assertEqual(len(res.members), 1)
-        m = res.members[0]
+        m = next(iter(res.members))
         self.assertEqual(m.__linkprops__.rank, 2)
 
     def test_modelgen_save_05(self):
-        from models import default
+        from models.orm import default
         # insert an object with a required multi: with link props, more than
         # one object added to the link; have one link prop for the first
         # object within the link, and another for the second object within the
@@ -1867,7 +2055,7 @@ class TestModelGenerator(tb.ModelTestCase):
                 ),
             ],
         )
-        self.client.save(raid)
+        self.client.sync(raid)
 
         # Fetch and verify
         res = self.client.get(
@@ -1902,7 +2090,7 @@ class TestModelGenerator(tb.ModelTestCase):
             self.assertEqual(m["@rank"], rank)
 
     def test_modelgen_save_06(self):
-        from models import default
+        from models.orm import default
         # Update object adding multiple existing objects to an exiting link
         # (no link props)
 
@@ -1916,8 +2104,8 @@ class TestModelGenerator(tb.ModelTestCase):
         a = self.client.get(default.User.filter(name="Alice"))
         c = self.client.get(default.User.filter(name="Cameron"))
         z = self.client.get(default.User.filter(name="Zoe"))
-        gr.users.extend([a, c, z])
-        self.client.save(gr)
+        gr.users.update([a, c, z])
+        self.client.sync(gr)
 
         # Fetch and verify
         res = self.client.query("""
@@ -1926,7 +2114,7 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(set(res), {"Alice", "Cameron", "Zoe"})
 
     def test_modelgen_save_07(self):
-        from models import default
+        from models.orm import default
         # Update object adding multiple existing objects to an exiting link
         # (no link props)
 
@@ -1940,8 +2128,8 @@ class TestModelGenerator(tb.ModelTestCase):
         a = self.client.get(default.User.filter(name="Alice"))
         c = self.client.get(default.User.filter(name="Cameron"))
         z = self.client.get(default.User.filter(name="Zoe"))
-        gr.users.extend([a, c, z])
-        self.client.save(gr)
+        gr.users.update([a, c, z])
+        self.client.sync(gr)
 
         # Fetch and verify
         res = self.client.query("""
@@ -1950,12 +2138,12 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(set(res), {"Alice", "Billie", "Cameron", "Zoe"})
 
     def test_modelgen_save_08(self):
-        from models import default
+        from models.orm import default
         # Update object adding multiple existing objects to an exiting link
         # with link props (try variance of props within the same multi link
         # for the same object)
 
-        self.client.save(default.Team(name="test team 8"))
+        self.client.sync(default.Team(name="test team 8"))
         team = self.client.get(
             default.Team.select(
                 name=True,
@@ -1967,20 +2155,18 @@ class TestModelGenerator(tb.ModelTestCase):
         b = self.client.get(default.User.filter(name="Billie"))
         c = self.client.get(default.User.filter(name="Cameron"))
         z = self.client.get(default.User.filter(name="Zoe"))
-        team.members.extend(
-            [
-                default.Team.members.link(
-                    a,
-                    role="lead",
-                    rank=1,
-                ),
-                default.Team.members.link(
-                    b,
-                    rank=2,
-                ),
-            ]
-        )
-        self.client.save(team)
+        team.members += [
+            default.Team.members.link(
+                a,
+                role="lead",
+                rank=1,
+            ),
+            default.Team.members.link(
+                b,
+                rank=2,
+            ),
+        ]
+        self.client.sync(team)
 
         # Fetch and verify
         res = self.client.query_required_single("""
@@ -2008,7 +2194,7 @@ class TestModelGenerator(tb.ModelTestCase):
                 members=True,
             ).filter(name="test team 8")
         )
-        team.members.extend(
+        team.members.update(
             [
                 default.Team.members.link(
                     c,
@@ -2017,7 +2203,7 @@ class TestModelGenerator(tb.ModelTestCase):
                 z,
             ]
         )
-        self.client.save(team)
+        self.client.sync(team)
 
         res = self.client.query_required_single("""
             select Team {
@@ -2040,7 +2226,7 @@ class TestModelGenerator(tb.ModelTestCase):
         )
 
     def test_modelgen_save_09(self):
-        from models import default
+        from models.orm import default
         # Update object removing multiple existing objects from an existing
         # multi link
 
@@ -2058,7 +2244,7 @@ class TestModelGenerator(tb.ModelTestCase):
         for u in list(gr.users):
             if u.name in {"Billie", "Cameron"}:
                 gr.users.remove(u)
-        self.client.save(gr)
+        self.client.sync(gr)
 
         # Fetch and verify
         res = self.client.query("""
@@ -2067,7 +2253,7 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(set(res), {"Alice", "Dana"})
 
     def test_modelgen_save_10(self):
-        from models import default
+        from models.orm import default
         # Update object removing multiple existing objects from an existing
         # multi link
 
@@ -2102,7 +2288,7 @@ class TestModelGenerator(tb.ModelTestCase):
         for u in list(team.members):
             if u.name in {"Alice", "Cameron"}:
                 team.members.remove(u)
-        self.client.save(team)
+        self.client.sync(team)
 
         # Fetch and verify
         res = self.client.query_required_single("""
@@ -2123,7 +2309,7 @@ class TestModelGenerator(tb.ModelTestCase):
         )
 
     def test_modelgen_save_11(self):
-        from models import default
+        from models.orm import default
         # Update object adding an existing objecs to an exiting single
         # required link (no link props)
 
@@ -2136,7 +2322,7 @@ class TestModelGenerator(tb.ModelTestCase):
         z = self.client.get(default.User.filter(name="Zoe"))
         self.assertEqual(post.author.name, "Alice")
         post.author = z
-        self.client.save(post)
+        self.client.sync(post)
 
         # Fetch and verify
         res = self.client.query("""
@@ -2147,7 +2333,7 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(res[0].author.name, "Zoe")
 
     def test_modelgen_save_12(self):
-        from models import default
+        from models.orm import default
 
         # Update object adding an existing object to an exiting single
         # required link (with link props)
@@ -2163,7 +2349,7 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(img.author.__linkprops__.year, 2025)
 
         img.author = default.Image.author.link(z, caption="kitty!")
-        self.client.save(img)
+        self.client.sync(img)
 
         # Re-fetch and verify
         img = self.client.get(img_query)
@@ -2172,7 +2358,7 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(img.author.__linkprops__.year, None)
 
         img.author = default.Image.author.link(a)
-        self.client.save(img)
+        self.client.sync(img)
 
         # Re-fetch and verify
         img = self.client.get(img_query)
@@ -2181,7 +2367,7 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(img.author.__linkprops__.year, None)
 
         img.author = default.Image.author.link(z, caption="cute", year=2024)
-        self.client.save(img)
+        self.client.sync(img)
 
         # Re-fetch and verify
         img = self.client.get(img_query)
@@ -2190,7 +2376,7 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(img.author.__linkprops__.year, 2024)
 
     def test_modelgen_save_13(self):
-        from models import default
+        from models.orm import default
         # Update object adding an existing object to an exiting single
         # optional link (no link props)
 
@@ -2204,7 +2390,7 @@ class TestModelGenerator(tb.ModelTestCase):
         assert loot.owner is not None
         self.assertEqual(loot.owner.name, "Billie")
         loot.owner = z
-        self.client.save(loot)
+        self.client.sync(loot)
 
         # Fetch and verify
         res = self.client.get("""
@@ -2214,7 +2400,7 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(res.owner.name, "Zoe")
 
     def test_modelgen_save_14(self):
-        from models import default
+        from models.orm import default
         # Update object adding an existing object to an exiting single
         # optional link (with link props)
 
@@ -2235,7 +2421,7 @@ class TestModelGenerator(tb.ModelTestCase):
             z,
             count=12,
         )
-        self.client.save(loot)
+        self.client.sync(loot)
 
         # Re-fetch and verify
         loot = self.client.get(
@@ -2250,7 +2436,7 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(loot.owner.__linkprops__.bonus, None)
 
         loot.owner = default.StackableLoot.owner.link(a)
-        self.client.save(loot)
+        self.client.sync(loot)
 
         # Re-fetch and verify
         loot = self.client.get(
@@ -2265,7 +2451,7 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(loot.owner.__linkprops__.bonus, None)
 
         loot.owner = default.StackableLoot.owner.link(z, count=56, bonus=False)
-        self.client.save(loot)
+        self.client.sync(loot)
 
         # Re-fetch and verify
         loot = self.client.get(
@@ -2280,7 +2466,7 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(loot.owner.__linkprops__.bonus, False)
 
     def test_modelgen_save_15(self):
-        from models import default
+        from models.orm import default
         # insert an object with a required single: no link props, one object
         # added to the link
 
@@ -2289,7 +2475,7 @@ class TestModelGenerator(tb.ModelTestCase):
             body="test post 15",
             author=z,
         )
-        self.client.save(post)
+        self.client.sync(post)
 
         # Fetch and verify
         res = self.client.get("""
@@ -2301,7 +2487,7 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(res.author.name, "Zoe")
 
     def test_modelgen_save_16(self):
-        from models import default
+        from models.orm import default
         # insert an object with a required single: with link props
 
         a = self.client.get(default.User.filter(name="Alice"))
@@ -2313,7 +2499,7 @@ class TestModelGenerator(tb.ModelTestCase):
                 year=2000,
             ),
         )
-        self.client.save(img)
+        self.client.sync(img)
 
         # Re-fetch and verify
         img = self.client.get(
@@ -2327,7 +2513,7 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(img.author.__linkprops__.year, 2000)
 
     def test_modelgen_save_17(self):
-        from models import default
+        from models.orm import default
         # insert an object with an optional single: no link props, one object
         # added to the link
 
@@ -2336,7 +2522,7 @@ class TestModelGenerator(tb.ModelTestCase):
             name="Pony",
             owner=z,
         )
-        self.client.save(loot)
+        self.client.sync(loot)
 
         # Fetch and verify
         res = self.client.get("""
@@ -2347,7 +2533,7 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(res.owner.name, "Zoe")
 
     def test_modelgen_save_18(self):
-        from models import default
+        from models.orm import default
         # insert an object with an optional single: with link props
 
         a = self.client.get(default.User.filter(name="Alice"))
@@ -2359,7 +2545,7 @@ class TestModelGenerator(tb.ModelTestCase):
                 bonus=False,
             ),
         )
-        self.client.save(loot)
+        self.client.sync(loot)
 
         # Re-fetch and verify
         loot = self.client.get(
@@ -2374,12 +2560,12 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(loot.owner.__linkprops__.bonus, False)
 
     def test_modelgen_save_19(self):
-        from models import default
+        from models.orm import default
         # insert an object with an optional link to self set to self
 
         p = default.LinearPath(label="singleton")
         p.next = p
-        self.client.save(p)
+        self.client.sync(p)
 
         # Fetch and verify
         res = self.client.query("""
@@ -2391,14 +2577,14 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(res[0].id, res[0].next.id)
 
     def test_modelgen_save_20(self):
-        from models import default
+        from models.orm import default
         # make a self loop in 2 steps
 
         p = default.LinearPath(label="singleton")
-        self.client.save(p)
+        self.client.sync(p)
         # close the loop
         p.next = self.client.get(default.LinearPath.filter(label="singleton"))
-        self.client.save(p)
+        self.client.sync(p)
 
         # Fetch and verify
         res = self.client.query("""
@@ -2410,7 +2596,7 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(res[0].id, res[0].next.id)
 
     def test_modelgen_save_21(self):
-        from models import default
+        from models.orm import default
         # insert an object with an optional link to self set to self
 
         p = default.LinearPath(
@@ -2422,7 +2608,7 @@ class TestModelGenerator(tb.ModelTestCase):
         assert p.next is not None
         assert p.next.next is not None
         p.next.next.next = p
-        self.client.save(p)
+        self.client.sync(p)
 
         # Fetch and verify
         res = self.client.query("""
@@ -2441,7 +2627,7 @@ class TestModelGenerator(tb.ModelTestCase):
         # Test empty object insertion; regression test for
         # https://github.com/geldata/gel-python/issues/720
 
-        from models import default
+        from models.orm import default
 
         from gel._internal._unsetid import UNSET_UUID
 
@@ -2449,8 +2635,8 @@ class TestModelGenerator(tb.ModelTestCase):
         y = default.AllOptional()
         z = default.AllOptional(pointer=x)
 
-        self.client.save(z)
-        self.client.save(y)
+        self.client.sync(z)
+        self.client.sync(y)
 
         self.assertIsNot(x.id, UNSET_UUID)
         self.assertIsNot(y.id, UNSET_UUID)
@@ -2462,11 +2648,11 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertIs(z.pointer, x)
 
     def test_modelgen_save_23(self):
-        from models import default
+        from models.orm import default
 
         p = default.Post(body="save 23", author=default.User(name="Sally"))
 
-        self.client.save(p)
+        self.client.sync(p)
 
         p2 = self.client.query_required_single("""
             select Post {body, author: {name}}
@@ -2480,7 +2666,7 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(p.author.id, p2.author.id)
 
     def test_modelgen_save_24(self):
-        from models import default
+        from models.orm import default
 
         z = self.client.get(default.User.filter(name="Zoe"))
         p = self.client.get(
@@ -2491,7 +2677,7 @@ class TestModelGenerator(tb.ModelTestCase):
 
         p.body = "Hello world"
         p.author = z
-        self.client.save(p)
+        self.client.sync(p)
 
         p2 = self.client.query_required_single("""
             select Post {body, author: {name}}
@@ -2503,7 +2689,7 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(p2.author.name, "Zoe")
 
     def test_modelgen_save_25(self):
-        from models import default
+        from models.orm import default
 
         g = self.client.get(
             default.UserGroup.select(
@@ -2515,7 +2701,7 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(g.mascot, "dragon")
 
         g.mascot = "iguana"
-        self.client.save(g)
+        self.client.sync(g)
 
         g2 = self.client.get(
             default.UserGroup.select(
@@ -2526,7 +2712,7 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(g2.mascot, "iguana")
 
     def test_modelgen_save_26(self):
-        from models import default
+        from models.orm import default
 
         l0 = default.ImpossibleLink0(val="A", il1=default.BaseLink(val="X"))
         l1 = default.ImpossibleLink1(val="2nd", il0=l0)
@@ -2544,10 +2730,10 @@ class TestModelGenerator(tb.ModelTestCase):
             RuntimeError,
             r"Cannot resolve recursive dependencies",
         ):
-            self.client.save(l0, l1)
+            self.client.sync(l0, l1)
 
     def test_modelgen_save_27(self):
-        from models import default
+        from models.orm import default
 
         a = self.client.get(default.User.filter(name="Alice"))
         b = self.client.get(default.User.filter(name="Billie"))
@@ -2558,7 +2744,7 @@ class TestModelGenerator(tb.ModelTestCase):
                 default.Raid.members.link(b, rank=2),
             ],
         )
-        self.client.save(p)
+        self.client.sync(p)
 
         # Fetch and verify
         res = self.client.get(
@@ -2575,22 +2761,22 @@ class TestModelGenerator(tb.ModelTestCase):
         )
 
         # technically this won't change things
-        p.members.extend(p.members)
-        self.client.save(p)
+        p.members.update(p.members)
+        self.client.sync(p)
 
         # technically this won't change things
-        p.members.extend(list(p.members))
-        self.client.save(p)
-
-        # technically this won't change things
-        for el in list(p.members):
-            p.members.append(el)
-        self.client.save(p)
+        p.members.update(list(p.members))
+        self.client.sync(p)
 
         # technically this won't change things
         for el in list(p.members):
-            p.members.append(el._p__obj__)
-        self.client.save(p)
+            p.members.add(el)
+        self.client.sync(p)
+
+        # technically this won't change things
+        for el in list(p.members):
+            p.members.add(el._p__obj__)
+        self.client.sync(p)
 
         # Fetch and verify
         res2 = self.client.get(
@@ -2607,7 +2793,7 @@ class TestModelGenerator(tb.ModelTestCase):
         )
 
     def test_modelgen_save_28(self):
-        from models import default
+        from models.orm import default
 
         a = self.client.get(default.User.filter(name="Alice"))
         p = default.Raid(
@@ -2616,7 +2802,7 @@ class TestModelGenerator(tb.ModelTestCase):
                 default.Raid.members.link(a, rank=1),
             ],
         )
-        self.client.save(p)
+        self.client.sync(p)
 
         # Fetch and verify
         res = self.client.get(
@@ -2627,13 +2813,13 @@ class TestModelGenerator(tb.ModelTestCase):
         )
         self.assertEqual(res.name, "mixed raid")
         self.assertEqual(len(res.members), 1)
-        m = res.members[0]
+        m = next(iter(res.members))
         self.assertEqual(m.name, "Alice")
         self.assertEqual(m.__linkprops__.rank, 1)
 
         x = default.CustomUser(name="Xavier")
-        p.members.extend([x])
-        self.client.save(p)
+        p.members.update([x])
+        self.client.sync(p)
 
         res2 = self.client.get(
             default.Raid.select(
@@ -2649,7 +2835,7 @@ class TestModelGenerator(tb.ModelTestCase):
         )
 
     def test_modelgen_save_29(self):
-        from models import default
+        from models.orm import default
 
         a = self.client.get(default.User.filter(name="Alice"))
         p = default.Raid(
@@ -2658,7 +2844,7 @@ class TestModelGenerator(tb.ModelTestCase):
                 default.Raid.members.link(a, rank=1),
             ],
         )
-        self.client.save(p)
+        self.client.sync(p)
 
         # Fetch and verify
         res = self.client.get(
@@ -2669,13 +2855,13 @@ class TestModelGenerator(tb.ModelTestCase):
         )
         self.assertEqual(res.name, "bad raid")
         self.assertEqual(len(res.members), 1)
-        m = res.members[0]
+        m = next(iter(res.members))
         self.assertEqual(m.name, "Alice")
         self.assertEqual(m.__linkprops__.rank, 1)
 
     def test_modelgen_save_30(self):
         from gel import errors
-        from models import default
+        from models.orm import default
 
         a = self.client.get(default.User.filter(name="Alice"))
         p = default.Raid(
@@ -2684,7 +2870,7 @@ class TestModelGenerator(tb.ModelTestCase):
                 default.Raid.members.link(a, rank=1),
             ],
         )
-        self.client.save(p)
+        self.client.sync(p)
 
         # Fetch and verify
         res = self.client.get(
@@ -2695,7 +2881,7 @@ class TestModelGenerator(tb.ModelTestCase):
         )
         self.assertEqual(res.name, "mixed raid")
         self.assertEqual(len(res.members), 1)
-        m = res.members[0]
+        m = next(iter(res.members))
         self.assertEqual(m.name, "Alice")
         self.assertEqual(m.__linkprops__.rank, 1)
 
@@ -2704,13 +2890,13 @@ class TestModelGenerator(tb.ModelTestCase):
             errors.MissingRequiredError,
             "missing value for required link 'members'",
         ):
-            self.client.save(p)
+            self.client.sync(p)
 
     def test_modelgen_save_31(self):
         # Test that using model_copy with a sparse model updates
         # the target model
 
-        from models import default
+        from models.orm import default
         from pydantic import BaseModel
 
         class SparseUser(BaseModel):
@@ -2718,11 +2904,11 @@ class TestModelGenerator(tb.ModelTestCase):
             nickname: str | None = None
 
         user = default.User(name="Anna", nickname="An")
-        self.client.save(user)
+        self.client.sync(user)
 
         user_in = SparseUser(nickname="Lacey")
         updated = user.model_copy(update=user_in.model_dump(exclude_none=True))
-        self.client.save(updated)
+        self.client.sync(updated)
 
         user2 = self.client.get(default.User.filter(name="Anna").limit(1))
         self.assertEqual(user2.nickname, "Lacey")
@@ -2730,14 +2916,14 @@ class TestModelGenerator(tb.ModelTestCase):
     def test_modelgen_save_32(self):
         # Test updating an existing model
 
-        import models.std as std
-        from models import default
+        import models.orm.std as std
+        from models.orm import default
 
         u = self.client.get(default.User.filter(name="Alice").limit(1))
 
         new_u = default.User(u.id, name="Victoria")
-        self.client.save(new_u)
-        self.client.save(u)
+        self.client.sync(new_u)
+        self.client.sync(u)
 
         c = self.client.get(std.count(default.User.filter(name="Alice")))
         self.assertEqual(c, 0)
@@ -2754,7 +2940,7 @@ class TestModelGenerator(tb.ModelTestCase):
         #   new data, default values)
 
         from gel._internal._tracked_list import Mode
-        from models import default
+        from models.orm import default
 
         u = default.User(name="Wat")
         self.assertPydanticChangedFields(u, {"name"})
@@ -2784,7 +2970,7 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(g.players._mode, Mode.ReadWrite)
         self.assertPydanticChangedFields(g, {"num", "public", "players"})
 
-        self.client.save(g)
+        self.client.sync(g)
         self.assertFalse(g.players.__gel_overwrite_data__)
         self.assertEqual(g.__gel_get_changed_fields__(), set())
         self.assertEqual(g.players._mode, Mode.ReadWrite)
@@ -2798,7 +2984,9 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(g.players._mode, Mode.ReadWrite)
         self.assertPydanticChangedFields(
             g,
-            {"num", "public", "players"},
+            # "time_limit" will be fetched by sync() as `g` is a new object
+            # and for new objects we fetch all properties by splat.
+            {"num", "public", "players", "time_limit"},
             expected_gel={"players"},
         )
 
@@ -2813,7 +3001,7 @@ class TestModelGenerator(tb.ModelTestCase):
 
         g = default.GameSession(num=909, public=False, players=[])
         self.assertEqual(g.players._mode, Mode.ReadWrite)
-        self.assertEqual(g.players, [])
+        self.assertEqual(g.players, set())
         self.assertTrue(g.players.__gel_overwrite_data__)
         self.assertPydanticChangedFields(g, {"num", "public", "players"})
 
@@ -2837,7 +3025,7 @@ class TestModelGenerator(tb.ModelTestCase):
             ).limit(1)
         )
         self.assertEqual(gdb.players._mode, Mode.ReadWrite)
-        self.assertEqual(gdb.players, [])
+        self.assertEqual(gdb.players, set())
         self.assertFalse(gdb.players.__gel_overwrite_data__)
         gdb.players = []
         self.assertEqual(gdb.players._mode, Mode.ReadWrite)
@@ -2847,7 +3035,7 @@ class TestModelGenerator(tb.ModelTestCase):
 
         g = default.GameSession(id=gdb.id, num=909, public=False, players=[])
         self.assertEqual(g.players._mode, Mode.ReadWrite)
-        self.assertEqual(g.players, [])
+        self.assertEqual(g.players, set())
         self.assertTrue(g.players.__gel_overwrite_data__)
         self.assertPydanticChangedFields(g, {"num", "public", "players"})
 
@@ -2890,7 +3078,7 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(g.players.unsafe_len(), 0)
         self.assertFalse(g.players.__gel_overwrite_data__)
         self.assertPydanticChangedFields(g, {"num", "public"})
-        g.players.append(u)
+        g.players.add(u)
         self.assertEqual(g.players._mode, Mode.Write)
         self.assertEqual(g.players.unsafe_len(), 1)
         self.assertFalse(g.players.__gel_overwrite_data__)
@@ -2915,19 +3103,19 @@ class TestModelGenerator(tb.ModelTestCase):
         # new User and GameSession objects with players assignment
         # Select data, modify it, check consistency
         from gel._internal._tracked_list import Mode
-        from models import default
+        from models.orm import default
 
         # Create new users
         u1 = default.User(name="TestUser1")
         u2 = default.User(name="TestUser2")
 
         # Save users first
-        self.client.save(u1)
-        self.client.save(u2)
+        self.client.sync(u1)
+        self.client.sync(u2)
 
         # Create new GameSession
         g = default.GameSession(num=1000, public=True)
-        self.assertEqual(g.players, [])
+        self.assertEqual(g.players, set())
         self.assertTrue(g.players.__gel_overwrite_data__)
         self.assertEqual(g.players._mode, Mode.ReadWrite)
 
@@ -2939,7 +3127,7 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(g.players._mode, Mode.ReadWrite)
 
         # Save and verify
-        self.client.save(g)
+        self.client.sync(g)
         self.assertFalse(g.players.__gel_overwrite_data__)
         self.assertEqual(g.players._mode, Mode.ReadWrite)
 
@@ -2958,7 +3146,7 @@ class TestModelGenerator(tb.ModelTestCase):
         players = [default.GameSession.players.link(u) for u in [u1]]
         g_fetched.players = players
         self.assertTrue(g_fetched.players.__gel_overwrite_data__)
-        self.client.save(g_fetched)
+        self.client.sync(g_fetched)
 
         # Check consistency
         g_final = self.client.get(
@@ -2967,13 +3155,13 @@ class TestModelGenerator(tb.ModelTestCase):
             )
         )
         self.assertEqual(len(g_final.players), 1)
-        self.assertEqual(g_final.players[0].name, "TestUser1")
+        self.assertEqual(next(iter(g_final.players)).name, "TestUser1")
 
     def test_modelgen_save_35(self):
         # GameSession with players assignment then clear
         # Select data, modify it, check consistency
         from gel._internal._tracked_list import Mode
-        from models import default
+        from models.orm import default
 
         # Get existing user
         u = self.client.get(default.User.filter(name="Elsa"))
@@ -2985,7 +3173,7 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(g.players._mode, Mode.ReadWrite)
 
         # Save
-        self.client.save(g)
+        self.client.sync(g)
         self.assertFalse(g.players.__gel_overwrite_data__)
 
         # Select the saved game
@@ -2995,12 +3183,12 @@ class TestModelGenerator(tb.ModelTestCase):
             )
         )
         self.assertEqual(len(g_fetched.players), 1)
-        self.assertEqual(g_fetched.players[0].name, "Elsa")
+        self.assertEqual(next(iter(g_fetched.players)).name, "Elsa")
 
         # Clear players
         g_fetched.players = []
         self.assertTrue(g_fetched.players.__gel_overwrite_data__)
-        self.client.save(g_fetched)
+        self.client.sync(g_fetched)
 
         # Check consistency
         g_final = self.client.get(
@@ -3015,7 +3203,7 @@ class TestModelGenerator(tb.ModelTestCase):
         # instance, pass id to it (but not players). Test overriding
         # `.players` link with a new collection
         from gel._internal._tracked_list import Mode
-        from models import default
+        from models.orm import default
 
         # Get existing GameSession with players
         existing_session = self.client.get(
@@ -3044,7 +3232,7 @@ class TestModelGenerator(tb.ModelTestCase):
 
         # Override players with new collection
         new_session.players = [elsa, zoe]
-        self.assertIn("ProxyDistinctList", reveal_type(new_session.players))
+        self.assertIn("LinkWithPropsSet", reveal_type(new_session.players))
 
         self.assertEqual(new_session.players._mode, Mode.ReadWrite)
         self.assertTrue(new_session.players.__gel_overwrite_data__)
@@ -3054,7 +3242,7 @@ class TestModelGenerator(tb.ModelTestCase):
         )
 
         # Save the changes
-        self.client.save(new_session)
+        self.client.sync(new_session)
 
         # Verify the changes persisted
         final_session = self.client.get(
@@ -3074,7 +3262,7 @@ class TestModelGenerator(tb.ModelTestCase):
         # Make a new GameSession instance,
         # pass id to it. Test appending to players.
         from gel._internal._tracked_list import Mode
-        from models import default
+        from models.orm import default
 
         # Get existing GameSession with players
         existing_session = self.client.get(
@@ -3084,7 +3272,7 @@ class TestModelGenerator(tb.ModelTestCase):
         )
         session_id = existing_session.id
         self.assertEqual(len(existing_session.players), 1)
-        self.assertEqual(existing_session.players[0].name, "Dana")
+        self.assertEqual(next(iter(existing_session.players)).name, "Dana")
 
         # Create new instance with same id
         new_session = default.GameSession(id=session_id, num=789, public=True)
@@ -3097,14 +3285,14 @@ class TestModelGenerator(tb.ModelTestCase):
         zoe = self.client.get(default.User.filter(name="Zoe"))
 
         # Append to players (this should use += in EdgeQL)
-        new_session.players.append(elsa)
-        new_session.players.append(zoe)
+        new_session.players.add(elsa)
+        new_session.players += [zoe]
         # Still in write mode because we haven't reassigned the collection
         self.assertEqual(new_session.players._mode, Mode.Write)
         self.assertFalse(new_session.players.__gel_overwrite_data__)
 
         # Save the changes
-        self.client.save(new_session)
+        self.client.sync(new_session)
 
         # Verify the changes persisted - should have original player p
         # lus new ones
@@ -3126,7 +3314,7 @@ class TestModelGenerator(tb.ModelTestCase):
         # instance, pass id and players list to it. Test that save()
         # overrides the data.
         from gel._internal._tracked_list import Mode
-        from models import default
+        from models.orm import default
 
         # Get existing GameSession with players
         existing_session = self.client.get(
@@ -3150,10 +3338,10 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(new_session.players._mode, Mode.ReadWrite)
         self.assertTrue(new_session.players.__gel_overwrite_data__)
         self.assertEqual(len(new_session.players), 1)
-        self.assertEqual(new_session.players[0].name, "Elsa")
+        self.assertEqual(next(iter(new_session.players)).name, "Elsa")
 
         # Save the changes
-        self.client.save(new_session)
+        self.client.sync(new_session)
 
         # Verify the changes persisted - should only have Elsa
         final_session = self.client.get(
@@ -3164,16 +3352,16 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(final_session.num, 777)
         self.assertEqual(final_session.public, False)
         self.assertEqual(len(final_session.players), 1)
-        self.assertEqual(final_session.players[0].name, "Elsa")
+        self.assertEqual(next(iter(final_session.players)).name, "Elsa")
 
     def test_modelgen_save_39(self):
         # Test defaults
-        from models import default
+        from models.orm import default
 
         new_session_with_default_limit = default.GameSession(
             num=9000,
         )
-        self.client.save(new_session_with_default_limit)
+        self.client.sync(new_session_with_default_limit)
         session = self.client.get(default.GameSession.filter(num=9000))
         self.assertEqual(session.time_limit, 60)
 
@@ -3181,12 +3369,12 @@ class TestModelGenerator(tb.ModelTestCase):
             num=9001,
             time_limit=None,
         )
-        self.client.save(new_session_without_limit)
+        self.client.sync(new_session_without_limit)
         session = self.client.get(default.GameSession.filter(num=9001))
         self.assertEqual(session.time_limit, None)
 
     def test_modelgen_save_40(self):
-        from models import default
+        from models.orm import default
         from pydantic import BaseModel
 
         class MyGroup(BaseModel):
@@ -3221,7 +3409,7 @@ class TestModelGenerator(tb.ModelTestCase):
             ),
             deep=True,
         )
-        self.client.save(updated)
+        self.client.sync(updated)
 
         # Fetch and verify
         res = self.client.query("""
@@ -3232,7 +3420,7 @@ class TestModelGenerator(tb.ModelTestCase):
     def test_modelgen_save_41(self):
         """Create and save a model with random UUID"""
         import uuid
-        from models import default
+        from models.orm import default
         from gel import errors
 
         with self.assertRaisesRegex(
@@ -3242,27 +3430,27 @@ class TestModelGenerator(tb.ModelTestCase):
                 id=uuid.uuid4(),
                 name="Flora",
             )
-            self.client.save(obj)
+            self.client.sync(obj)
 
     def test_modelgen_save_42(self):
-        from models import default
+        from models.orm import default
 
         # regression test -- model_construct() had a bug where it set
         # __gel_new__ on a class, not on the instance it created.
         default.GameSession.model_construct(num=909, public=False)
-        self.client.save(default.GameSession(num=9000))
+        self.client.sync(default.GameSession(num=9000))
 
     def test_modelgen_save_43(self):
         """Test refetch"""
-        from models import default
+        from models.orm import default
 
         u1 = default.User(name="Al")
-        self.client.save(u1)
+        self.client.sync(u1)
         self.assertTrue(hasattr(u1, "name_len"))
         self.assertEqual(u1.name_len, 2)
 
         u2 = default.User(name="Al")
-        self.client.save(u2, refetch=False)
+        self.client.save(u2)
         self.assertFalse(hasattr(u2, "name_len"))
 
     def test_modelgen_save_44(self):
@@ -3278,7 +3466,7 @@ class TestModelGenerator(tb.ModelTestCase):
 
         import json
         from typing import Any
-        from models import default
+        from models.orm import default
 
         def check(expected: Any) -> None:
             res = self.client.query_required_single_json("""
@@ -3298,7 +3486,7 @@ class TestModelGenerator(tb.ModelTestCase):
         a = self.client.get(default.User.filter(name="Alice"))
         b = self.client.get(default.User.filter(name="Billie"))
 
-        self.client.save(default.Team(name="test team 8"))
+        self.client.sync(default.Team(name="test team 8"))
 
         ####################
 
@@ -3308,13 +3496,13 @@ class TestModelGenerator(tb.ModelTestCase):
             )
         )
 
-        team.members.extend(
+        team.members.update(
             [
                 default.Team.members.link(a, role="lead", rank=1),
                 default.Team.members.link(b, rank=2),
             ]
         )
-        self.client.save(team)
+        self.client.sync(team)
         check(
             {
                 "members": [
@@ -3332,8 +3520,8 @@ class TestModelGenerator(tb.ModelTestCase):
             ).filter(name="test team 8")
         )
 
-        team2.members.append(default.Team.members.link(a, rank=1000))
-        self.client.save(team2)
+        team2.members.add(default.Team.members.link(a, rank=1000))
+        self.client.sync(team2)
         check(
             {
                 "members": [
@@ -3351,8 +3539,8 @@ class TestModelGenerator(tb.ModelTestCase):
             ).filter(name="test team 8")
         )
 
-        team3.members.append(default.Team.members.link(a, rank=None))
-        self.client.save(team3)
+        team3.members.add(default.Team.members.link(a, rank=None))
+        self.client.sync(team3)
         check(
             {
                 "members": [
@@ -3371,7 +3559,7 @@ class TestModelGenerator(tb.ModelTestCase):
 
         import json
         from typing import Any
-        from models import default
+        from models.orm import default
 
         def check(expected: Any) -> None:
             res = self.client.query_required_single_json("""
@@ -3391,7 +3579,7 @@ class TestModelGenerator(tb.ModelTestCase):
 
         a = self.client.get(default.User.filter(name="Alice"))
 
-        self.client.save(
+        self.client.sync(
             default.StackableLoot(
                 name="bbb",
                 owner=default.StackableLoot.owner.link(a, count=123),
@@ -3410,7 +3598,7 @@ class TestModelGenerator(tb.ModelTestCase):
         )
         assert t.owner is not None
         t.owner.__linkprops__.bonus = True
-        self.client.save(t)
+        self.client.sync(t)
 
         check({"owner": {"name": "Alice", "@count": 123, "@bonus": True}})
 
@@ -3426,16 +3614,697 @@ class TestModelGenerator(tb.ModelTestCase):
         t.owner = default.StackableLoot.owner.link(
             a, count=424242, bonus=False
         )
-        self.client.save(t)
+        self.client.sync(t)
 
         check({"owner": {"name": "Alice", "@count": 424242, "@bonus": False}})
+
+    def test_modelgen_save_46(self):
+        # Test that sync() updates all objects with the same .id to have
+        # the same data in them.
+
+        from models.orm import default
+
+        elsa1 = self.client.get(
+            default.User.select(name=True).filter(lambda u: u.name == "Elsa"),
+        )
+
+        elsa2 = self.client.get(
+            default.User.select("*", groups=True).filter(
+                lambda u: u.name == "Elsa"
+            ),
+        )
+
+        self.assertNotIn("groups", elsa1.__dict__)
+
+        red = self.client.get(
+            default.UserGroup.select(
+                "*",
+                users=lambda ug: ug.users.select("*"),
+            ).filter(lambda u: u.name == "red"),
+        )
+
+        red.users.add(elsa1)
+        # Note that `elsa1.groups` still doesn't exist, it's a Gel computed
+
+        self.client.sync(elsa2, red)
+
+        # Now we test that *both* `elsa1` and `elsa2` have their
+        # *groups* computeds updated and pointing to `red`
+
+        self.assertEqual(elsa1.name_len, elsa2.name_len)
+        self.assertEqual(elsa1.name_len, 4)
+
+        self.assertEqual(elsa1.groups, elsa2.groups)
+        self.assertEqual(elsa1.groups, {red})
+
+    def test_modelgen_save_reload_props_01(self):
+        from models.orm import default
+
+        # Test that we can omit props with default values and then the values
+        # are populated after save.
+        gs = default.GameSession(num=1312)
+        self.client.sync(gs)
+        self.assertEqual(gs.num, 1312)
+        self.assertEqual(gs.time_limit, 60)
+        self.assertEqual(gs.public, False)
+
+        # Verify by fetching fresh from database
+        fresh = self.client.get(default.GameSession.filter(id=gs.id))
+        self.assertEqual(fresh.num, gs.num)
+        self.assertEqual(fresh.time_limit, gs.time_limit)
+        self.assertEqual(fresh.public, gs.public)
+
+    def test_modelgen_save_reload_props_02(self):
+        from models.orm import default
+
+        # Test that rewrite rules are executed and values are populated
+        # after save.
+        # We provide name_len=0 for two reasons:
+        # 1) it's required without a default, and we can't assume rewrites
+        #    guarantee a value
+        # 2) to verify the rewrite overwrites our initial value
+        tpr = default.TestPropRewrites(name="dancing banana", name_len=0)
+
+        self.client.sync(tpr)
+
+        self.assertEqual(tpr.name, "dancing banana")
+        self.assertEqual(tpr.name_len, 14)
+        self.assertEqual(tpr.toggle, None)
+
+        tpr.name = "woof"
+        self.client.sync(tpr)
+
+        self.assertEqual(tpr.name, "woof")
+        self.assertEqual(tpr.name_len, 4)
+        self.assertEqual(tpr.toggle, None)
+
+        tpr.name = "meow"
+        self.client.sync(tpr)
+
+        self.assertEqual(tpr.name, "meow")
+        self.assertEqual(tpr.name_len, 4)
+        self.assertEqual(tpr.toggle, None)
+
+        # Verify by fetching fresh from database
+        fresh = self.client.get(default.TestPropRewrites.filter(id=tpr.id))
+        self.assertEqual(fresh.name, tpr.name)
+        self.assertEqual(fresh.name_len, tpr.name_len)
+        self.assertEqual(fresh.toggle, tpr.toggle)
+
+    def test_modelgen_save_reload_props_03(self):
+        from models.orm import default
+
+        # Test toggle rewrite behavior: flipping, disabling, and re-enabling
+
+        # Start with toggle = True, should flip to False
+        tpr = default.TestPropRewrites(
+            name="pizza party", name_len=0, toggle=True
+        )
+        self.client.sync(tpr)
+
+        self.assertEqual(tpr.name, "pizza party")
+        self.assertEqual(tpr.name_len, 11)
+        self.assertEqual(tpr.toggle, False)
+
+        # Save again without changes - no updates means no rewrite execution
+        self.client.sync(tpr)
+        self.assertEqual(tpr.toggle, False)
+
+        # Save again without changes - still no updates, no rewrite execution
+        self.client.sync(tpr)
+        self.assertEqual(tpr.toggle, False)
+
+        # Set to False explicitly - marks object as modified, rewrite executes
+        tpr.toggle = False
+        self.client.sync(tpr)
+        self.assertEqual(tpr.toggle, True)
+
+        # Test "turning off" the toggle by setting to None
+        tpr.toggle = None
+        self.client.sync(tpr)
+        self.assertEqual(tpr.toggle, None)
+
+        # Change name to trigger update - toggle should remain None (inactive)
+        tpr.name = "sleepy koala"
+        self.client.sync(tpr)
+        self.assertEqual(tpr.name, "sleepy koala")
+        self.assertEqual(tpr.name_len, 12)
+        self.assertEqual(tpr.toggle, None)
+
+        # Test "turning on" the toggle by setting to a specific value
+        tpr.toggle = False
+        self.client.sync(tpr)
+        self.assertEqual(tpr.toggle, True)
+
+        # Change name_len - this should trigger update and flip toggle
+        tpr.name_len = 999
+        self.client.sync(tpr)
+        self.assertEqual(tpr.name_len, 12)
+        self.assertEqual(tpr.toggle, False)
+
+        # Verify by fetching fresh from database
+        fresh = self.client.get(default.TestPropRewrites.filter(id=tpr.id))
+        self.assertEqual(fresh.name, tpr.name)
+        self.assertEqual(fresh.name_len, tpr.name_len)
+        self.assertEqual(fresh.toggle, tpr.toggle)
+
+    def test_modelgen_save_reload_links_01(self):
+        from models.orm import default
+
+        # Test that default link values are populated correctly
+        alice = self.client.get(default.User.filter(name="Alice"))
+        tld = default.TestLinkDefault(name="magical wizard")
+        self.client.sync(tld)
+
+        self.assertEqual(tld.name, "magical wizard")
+
+        # Verify by fetching fresh from database
+        fresh = self.client.get(
+            default.TestLinkDefault.select("*", user=True).filter(id=tld.id)
+        )
+        self.assertEqual(fresh.name, tld.name)
+        assert fresh.user is not None
+        self.assertEqual(fresh.user.id, alice.id)
+
+    @tb.xfail
+    # See XXX comments
+    def test_modelgen_save_reload_links_02(self):
+        from models.orm import default
+
+        # Test that rewrite link rules are executed correctly
+        # The rewrite selects first User >= the object's name alphabetically
+
+        # "Barn Owl" should get user "Billie" (first user >= "Barn Owl")
+        tlr = default.TestLinkRewrite(name="Barn Owl")
+        self.client.sync(tlr)
+
+        self.assertEqual(tlr.name, "Barn Owl")
+
+        # Check what's actually in the database first
+        tlr2 = self.client.get(
+            default.TestLinkRewrite.select("*", user=True).filter(id=tlr.id)
+        )
+        self.assertEqual(tlr2.name, "Barn Owl")
+        assert tlr2.user is not None
+        self.assertEqual(tlr2.user.name, "Billie")
+
+        # XXX: Save might not load the entire "user", but it probably should
+        # update the link id.
+        assert tlr.user is not None
+        self.assertEqual(tlr.user.id, tlr2.user.id)
+
+        # Update the name - rewrite should execute again
+        # "Bugle" should get "Cameron" (first user >= "Bugle")
+        tlr2.name = "Bugle"
+        self.client.sync(tlr2)
+
+        self.assertEqual(tlr2.name, "Bugle")
+
+        # Check what's in the database after the update
+        tlr3 = self.client.get(
+            default.TestLinkRewrite.select("*", user=True).filter(id=tlr.id)
+        )
+        self.assertEqual(tlr3.name, "Bugle")
+        assert tlr3.user is not None
+        self.assertEqual(tlr3.user.name, "Cameron")
+
+        # XXX: "user" was loaded and modified in tlr2, so it might be
+        # reasonable to update it with auto-reload?
+        assert tlr2.user is not None
+        self.assertEqual(tlr2.user.name, "Cameron")
+
+    def test_modelgen_save_reload_links_03(self):
+        from models.orm import default
+
+        # Test that link trigger rules are executed correctly
+        # This trigger updates the linked user's nickname to match the
+        # object's name
+
+        # Get Alice and create a TestLinkTrigger linked to her
+        alice = self.client.get(default.User.filter(name="Alice"))
+        original_nickname = alice.nickname
+
+        tlt = default.TestLinkTrigger(name="magical unicorn", user=alice)
+        self.client.sync(tlt)
+
+        self.assertEqual(tlt.name, "magical unicorn")
+
+        # Check that the trigger updated Alice's nickname
+        assert tlt.user is not None
+        updated_alice = self.client.get(default.User.filter(id=tlt.user.id))
+        self.assertEqual(updated_alice.nickname, "magical unicorn")
+        self.assertNotEqual(updated_alice.nickname, original_nickname)
+
+        # tlt.user was modified and saved
+        self.assertEqual(tlt.user.name, "Alice")
+        self.assertEqual(tlt.user.nickname, "magical unicorn")
+
+        # Was alice reloaded? That's the object used in tlt.user
+        self.assertEqual(alice.nickname, "magical unicorn")
+
+    @tb.xfail
+    # error from saving tsl2
+    # more than one row returned by a subquery used as an expression
+    def test_modelgen_save_reload_links_04(self):
+        from models.orm import default
+
+        # Test that what happens to computed links after saving a new object
+        # TestSingleLinks has computed versions of all its links
+
+        alice = self.client.get(default.User.filter(name="Alice"))
+        tsl = default.TestSingleLinks(
+            req_wprop_friend=default.TestSingleLinks.req_wprop_friend.link(
+                alice, strength=100
+            ),
+            req_friend=alice,
+            opt_friend=alice,
+            opt_wprop_friend=default.TestSingleLinks.opt_wprop_friend.link(
+                alice, strength=50
+            ),
+        )
+
+        self.client.sync(tsl)
+
+        # Computed links should not be set after save
+        with self.assertRaisesRegex(
+            AttributeError, "'comp_req_wprop_friend' is not set"
+        ):
+            assert tsl.comp_req_wprop_friend is not None  # access field
+
+        with self.assertRaisesRegex(
+            AttributeError, "'comp_req_friend' is not set"
+        ):
+            assert tsl.comp_req_friend is not None  # access field
+
+        with self.assertRaisesRegex(
+            AttributeError, "'comp_opt_friend' is not set"
+        ):
+            assert tsl.comp_opt_friend is not None  # access field
+
+        with self.assertRaisesRegex(
+            AttributeError, "'comp_opt_wprop_friend' is not set"
+        ):
+            assert tsl.comp_opt_wprop_friend is not None  # access field
+
+        # Make mypy happy
+        assert tsl.opt_friend is not None
+        assert tsl.opt_wprop_friend is not None
+
+        # The links should still be there
+        self.assertEqual(tsl.req_wprop_friend.name, "Alice")
+        self.assertEqual(tsl.req_friend.name, "Alice")
+        self.assertEqual(tsl.opt_friend.name, "Alice")
+        self.assertEqual(tsl.opt_wprop_friend.name, "Alice")
+
+        # Now refetch the object with all links explicitly
+        billie = self.client.get(default.User.filter(name="Billie"))
+        tsl2 = self.client.get(
+            default.TestSingleLinks.select(
+                "*",
+                req_wprop_friend=True,
+                req_friend=True,
+                opt_friend=True,
+                opt_wprop_friend=True,
+                comp_req_wprop_friend=True,
+                comp_req_friend=True,
+                comp_opt_friend=True,
+                comp_opt_wprop_friend=True,
+            ).filter(id=tsl.id)
+        )
+
+        # Make mypy happy
+        assert tsl2.opt_wprop_friend is not None
+        assert tsl2.opt_friend is not None
+        assert tsl2.comp_opt_friend is not None
+        assert tsl2.comp_opt_wprop_friend is not None
+
+        self.assertEqual(tsl2.comp_req_wprop_friend.name, "Alice")
+        self.assertEqual(tsl2.comp_req_friend.name, "Alice")
+        self.assertEqual(tsl2.comp_opt_friend.name, "Alice")
+        self.assertEqual(tsl2.comp_opt_wprop_friend.name, "Alice")
+        # Check the ids as well
+        self.assertEqual(
+            tsl2.comp_req_wprop_friend.id, tsl.req_wprop_friend.id
+        )
+        self.assertEqual(tsl2.comp_req_friend.id, tsl.req_friend.id)
+        self.assertEqual(tsl2.comp_opt_friend.id, tsl.opt_friend.id)
+        self.assertEqual(
+            tsl2.comp_opt_wprop_friend.id, tsl.opt_wprop_friend.id
+        )
+
+        # Change all links to Billie
+        tsl2.req_wprop_friend = default.TestSingleLinks.req_wprop_friend.link(
+            billie
+        )
+        tsl2.req_friend = billie
+        tsl2.opt_friend = billie
+        tsl2.opt_wprop_friend = default.TestSingleLinks.opt_wprop_friend.link(
+            billie
+        )
+
+        # Save the changes
+        self.client.sync(tsl2)
+
+        # After save, the main links should be updated to Billie
+        self.assertEqual(tsl2.req_wprop_friend.name, "Billie")
+        self.assertEqual(tsl2.req_friend.name, "Billie")
+        self.assertEqual(tsl2.opt_friend.name, "Billie")
+        self.assertEqual(tsl2.opt_wprop_friend.name, "Billie")
+
+        # But computed links should no longer be set after the save
+        with self.assertRaisesRegex(
+            AttributeError, "'comp_req_wprop_friend' is not set"
+        ):
+            assert tsl2.comp_req_wprop_friend is not None  # access field
+
+        with self.assertRaisesRegex(
+            AttributeError, "'comp_req_friend' is not set"
+        ):
+            assert tsl2.comp_req_friend is not None  # access field
+
+        with self.assertRaisesRegex(
+            AttributeError, "'comp_opt_friend' is not set"
+        ):
+            assert tsl2.comp_opt_friend is not None  # access field
+
+        with self.assertRaisesRegex(
+            AttributeError, "'comp_opt_wprop_friend' is not set"
+        ):
+            assert tsl2.comp_opt_wprop_friend is not None  # access field
+
+    def test_modelgen_save_reload_links_05(self):
+        from models.orm import default
+
+        # Test that backlinks become unset after save operations
+        # User.groups is a computed backlink to UserGroup.users
+
+        # Fetch Alice with her groups backlink
+        alice = self.client.get(
+            default.User.select(
+                name=True,
+                groups=True,
+            ).filter(name="Alice")
+        )
+
+        # Alice should have her groups backlink available after fetch
+        # (even if empty, it should not be None)
+        self.assertIsNotNone(alice.groups)
+
+        # Create a new UserGroup with Alice as a member
+        gr = default.UserGroup(
+            name="Dancing Banana Enthusiasts", users=[alice]
+        )
+        self.client.sync(gr)
+
+        a = [u for u in gr.users if u.id == alice.id][0]
+        self.assertEqual(a.groups, alice.groups)
+
+        fresh_alice_groups = set(
+            self.client.query(
+                """
+                    with w := (select User{groups} filter .id=<uuid>$0)
+                    select w.groups.id
+                """,
+                alice.id,
+            )
+        )
+
+        self.assertEqual({g.id for g in a.groups}, fresh_alice_groups)
+
+        self.assertEqual(alice.name, "Alice")
+
+    def test_modelgen_save_reload_links_06(self):
+        from models.orm import default
+
+        # Test backlink invalidation when removing a user from existing group
+        # Fetch an existing group with users and their backlinks
+
+        red = self.client.get(
+            default.UserGroup.select(
+                name=True,
+                users=lambda g: g.users.select(
+                    name=True,
+                    groups=True,
+                ),
+            ).filter(name="red")
+        )
+
+        self.assertEqual(red.name, "red")
+        self.assertEqual(
+            {u.name for u in red.users},
+            {"Alice", "Billie", "Cameron", "Dana"},
+        )
+
+        orig_ids = {u.id for u in red.users}
+        # Find Alice in the group
+        alice = [u for u in red.users if u.name == "Alice"][0]
+        self.assertIn("red", {g.name for g in alice.groups})
+
+        # Modify and save the group
+        red.users.remove(alice)
+        self.client.sync(red)
+
+        fresh_alice_groups = set(
+            self.client.query(
+                """
+                    with w := (select User{groups} filter .id=<uuid>$0)
+                    select w.groups.id
+                """,
+                alice.id,
+            )
+        )
+
+        # We are traversing *removed* items too in sync()!
+        self.assertEqual(fresh_alice_groups, {g.id for g in alice.groups})
+
+        # # But we should still have some valid data
+        self.assertEqual(alice.name, "Alice")
+        self.assertEqual({u.id for u in red.users}, orig_ids - {alice.id})
+
+    def test_modelgen_save_reload_links_07(self):
+        from models.orm import default
+
+        # Test backlink invalidation when adding a user to a different group
+        # Fetch red and blue groups with nested user data and their groups
+
+        red = self.client.get(
+            default.UserGroup.select(
+                name=True,
+                users=lambda g: g.users.select(
+                    name=True,
+                    groups=True,
+                ),
+            ).filter(name="red")
+        )
+
+        blue = self.client.get(
+            default.UserGroup.select(
+                name=True,
+                users=lambda g: g.users.select(
+                    name=True,
+                    groups=True,
+                ),
+            ).filter(name="blue")
+        )
+
+        self.assertEqual(red.name, "red")
+        self.assertEqual(blue.name, "blue")
+        self.assertEqual(len(blue.users), 0)  # Should be empty initially
+
+        orig_ids = {u.id for u in red.users}
+        # Find Alice in the red group
+        alice = [u for u in red.users if u.name == "Alice"][0]
+        self.assertIn("red", {g.name for g in alice.groups})
+
+        # Add Alice to the blue group
+        blue.users.add(alice)
+        self.client.sync(blue)
+
+        # Check that the Alice's groups computed backlink is updated
+        # after sync()
+        self.assertEqual(
+            {g.id for g in alice.groups},
+            set(
+                self.client.query(
+                    """
+                        with w := (select User{groups} filter .id=<uuid>$0)
+                        select w.groups.id
+                    """,
+                    alice.id,
+                )
+            ),
+        )
+
+        # But we should still have some valid data
+        self.assertEqual(alice.name, "Alice")
+        self.assertEqual({u.id for u in red.users}, orig_ids)
+        self.assertEqual({u.id for u in blue.users}, {alice.id})
+
+    def test_modelgen_save_reload_links_08(self):
+        from models.orm import default
+
+        g = default.UserGroup(
+            name="Pickle Pirates",
+            users=[default.User(name=f"{i}") for i in range(3)],
+        )
+        self.client.sync(g)
+
+        self.assertEqual({u.name for u in g.users}, {"0", "1", "2"})
+
+        for u in g.users:
+            u.name += "aaa"
+
+        self.client.sync(g)
+
+        self.assertEqual({u.name for u in g.users}, {"0aaa", "1aaa", "2aaa"})
+
+        for u in g.users:
+            u.name += "bbb"
+
+        g.users.remove(u)
+        g.users.add(default.User(name="new"))
+
+        self.client.sync(g)
+
+        self.assertEqual(
+            {u.name for u in g.users}, {"0aaabbb", "1aaabbb", "new"}
+        )
+
+        alice = self.client.get(
+            default.User.select("*", groups=True).filter(name="Alice")
+        )
+        orig_groups = {gr.id for gr in alice.groups}
+        g.users.add(alice)
+        self.client.sync(g)
+        self.assertEqual(
+            {u.name for u in g.users},
+            {
+                "0aaabbb",
+                "1aaabbb",
+                "new",
+                "Alice",
+            },
+        )
+        self.assertEqual({gr.id for gr in alice.groups}, orig_groups | {g.id})
+
+    @tb.xfail
+    # link props aren't reloaded after save
+    def test_modelgen_save_reload_linkprops_01(self):
+        from models.orm import default
+
+        # Test that link property defaults are populated correctly after save
+        # StepPath.next has a link property "steps" with default value 1
+
+        # Create LinearPath targets
+        end = default.LinearPath(label="destination")
+        self.client.sync(end)
+
+        # Create StepPath with next link but omit steps property
+        # The steps should default to 1
+        path = default.StepPath(
+            label="journey", next=default.StepPath.next.link(end)
+        )
+        self.client.sync(path)
+
+        self.assertEqual(path.label, "journey")
+        assert path.next is not None
+        self.assertEqual(path.next.label, "destination")
+
+        # Check that the link property was populated with the default value
+        self.assertEqual(path.next.__linkprops__.steps, 1)
+
+        # Verify by fetching fresh from database
+        fresh = self.client.get(
+            default.StepPath.select("*", next=True).filter(id=path.id)
+        )
+        self.assertEqual(fresh.label, path.label)
+        assert fresh.next is not None
+        self.assertEqual(fresh.next.label, path.next.label)
+        self.assertEqual(
+            fresh.next.__linkprops__.steps, path.next.__linkprops__.steps
+        )
+
+    def test_modelgen_save_computed_multiprops_01(self):
+        from models.orm import default
+
+        alice = self.client.get(default.User.filter(name="Alice"))
+        billie = self.client.get(default.User.filter(name="Billie"))
+        team = default.ExtraTeam(
+            name="dancing bananas",
+            members=[
+                default.ExtraTeam.members.link(alice),
+                default.ExtraTeam.members.link(billie),
+            ],
+        )
+        # Test that ORM save works with computed multi properties
+        self.client.sync(team)
+
+    def test_modelgen_save_computed_multiprops_02(self):
+        from models.orm import default
+
+        # Create ExtraTeam using EdgeQL to avoid ORM save issues
+        t = self.client.query_required_single("""
+            insert ExtraTeam {
+                name := 'magical unicorns',
+                members := (select User filter .name in {'Alice', 'Billie'})
+            }
+        """)
+
+        # Fetch the ExtraTeam with computed multi property
+        team = self.client.get(default.ExtraTeam.filter(id=t.id))
+
+        # Reading computed multi property works
+        self.assertEqual(set(team.member_names), {"Alice", "Billie"})
+
+        # Cannot assign to computed multi property
+        with self.assertRaises(AssertionError):
+            team.member_names = ["Alice", "Billie", "Cameron"]  # type: ignore
+
+        # Cannot pass computed multi property to constructor
+        with self.assertRaisesRegex(
+            ValueError,
+            r"(?s)member_names\n\s*Extra inputs are not permitted",
+        ):
+            default.ExtraTeam(
+                name="flying elephants", member_names=["Alice", "Billie"]
+            )  # type: ignore
+
+        # Cannot modify computed multi property collection
+        with self.assertRaises(AssertionError):
+            team.member_names += ("Cameron",)  # type: ignore
+
+    def test_modelgen_save_computed_multiprops_03(self):
+        from models.orm import default
+
+        # Create ExtraTeam using EdgeQL to avoid ORM save issues
+        t = self.client.query_required_single("""
+            insert ExtraTeam {
+                name := 'cosmic penguins',
+                members := (select User filter .name in {'Alice', 'Cameron'})
+            }
+        """)
+
+        # Fetch ExtraTeam with partial selection (excluding computed multi
+        # property from select)
+        team = self.client.get(
+            default.ExtraTeam.select(name=True, members=True).filter(id=t.id)
+        )
+
+        self.assertEqual(team.name, "cosmic penguins")
+
+        # Cannot modify computed multi property collection in partial fetch
+        with self.assertRaisesRegex(
+            AttributeError,
+            r"'member_names' is not set",
+        ):
+            team.member_names.append("Billie")  # type: ignore
 
     @tb.skip_typecheck
     def test_modelgen_write_only_dlist_errors(self):
         # Test that reading operations on write-only dlists raise
         # RuntimeError
         from gel._internal._tracked_list import Mode
-        from models import default
+        from models.orm import default
 
         # Create a GameSession with a known ID but without fetching players
         # This puts the players dlist in write-only mode
@@ -3451,15 +4320,17 @@ class TestModelGenerator(tb.ModelTestCase):
         # Test all read methods that should raise RuntimeError
         read_methods = [
             ("__len__", lambda: len(session.players), "get the length of"),
-            ("__getitem__", lambda: session.players[0], "index items of"),
+            (
+                "__getitem__",
+                lambda: list(session.players)[0],
+                "index items of",
+            ),
             ("__iter__", lambda: list(session.players), "iterate over"),
             (
                 "__contains__",
                 lambda: None in session.players,
                 "use `in` operator on",
             ),
-            ("index", lambda: session.players.index(None), "index items of"),
-            ("count", lambda: session.players.count(None), "count items of"),
             (
                 "__bool__",
                 lambda: bool(session.players),
@@ -3479,11 +4350,11 @@ class TestModelGenerator(tb.ModelTestCase):
         user = self.client.get(default.User.filter(name="Elsa"))
 
         # Test append works
-        session.players.append(user)
+        session.players.add(user)
         self.assertEqual(session.players.unsafe_len(), 1)
 
         # Test extend works
-        session.players.extend([user])
+        session.players.update([user])
         self.assertEqual(session.players.unsafe_len(), 2)
 
         # Test += works
@@ -3504,7 +4375,7 @@ class TestModelGenerator(tb.ModelTestCase):
     def test_modelgen_scalars_01(self):
         import json
         import datetime as dt
-        from models import default
+        from models.orm import default
 
         # Get the object with non-trivial scalars
         s = self.client.get(default.AssortedScalars.filter(name="hello world"))
@@ -3547,7 +4418,7 @@ class TestModelGenerator(tb.ModelTestCase):
     def test_modelgen_scalars_02(self):
         import json
         import datetime as dt
-        from models import default
+        from models.orm import default
 
         # Create a new AssortedScalars object with all fields same as the
         # existing one, except the name. This makes it easy to verify the
@@ -3564,32 +4435,32 @@ class TestModelGenerator(tb.ModelTestCase):
                 False,
             ],
         )
-        self.client.save(s)
+        self.client.sync(s)
         self.assertScalarsEqual("AssortedScalars", "scalars test 1", "json")
 
         s.bstr = b"word\x00\x0b"
-        self.client.save(s)
+        self.client.sync(s)
         self.assertScalarsEqual("AssortedScalars", "scalars test 1", "bstr")
 
         s.time = dt.time(20, 13, 45, 678000)
         s.date = dt.date(2025, 1, 26)
         s.ts = dt.datetime(2025, 1, 26, 20, 13, 45, tzinfo=dt.timezone.utc)
         s.lts = dt.datetime(2025, 1, 26, 20, 13, 45)
-        self.client.save(s)
+        self.client.sync(s)
         self.assertScalarsEqual("AssortedScalars", "scalars test 1", "time")
         self.assertScalarsEqual("AssortedScalars", "scalars test 1", "date")
         self.assertScalarsEqual("AssortedScalars", "scalars test 1", "ts")
         self.assertScalarsEqual("AssortedScalars", "scalars test 1", "lts")
 
         s.positive = 123
-        self.client.save(s)
+        self.client.sync(s)
         self.assertScalarsEqual(
             "AssortedScalars", "scalars test 1", "positive"
         )
 
     def test_modelgen_scalars_03(self):
         import json
-        from models import default
+        from models.orm import default
 
         # Test deeply nested mixed collections.
         s = default.AssortedScalars(name="scalars test 2")
@@ -3607,13 +4478,13 @@ class TestModelGenerator(tb.ModelTestCase):
                 "null",
             ),
         ]
-        self.client.save(s)
+        self.client.sync(s)
         self.assertScalarsEqual(
             "AssortedScalars", "scalars test 2", "nested_mixed"
         )
 
     def test_modelgen_enum_01(self):
-        from models import default
+        from models.orm import default
 
         res = self.client.query(default.EnumTest.order_by(color=True))
 
@@ -3628,28 +4499,28 @@ class TestModelGenerator(tb.ModelTestCase):
         )
 
     def test_modelgen_enum_02(self):
-        from models import default
+        from models.orm import default
 
         e = default.EnumTest(name="color test 1", color="Orange")
-        self.client.save(e)
+        self.client.sync(e)
 
         e2 = self.client.get(default.EnumTest.filter(name="color test 1"))
         self.assertEqual(e2.color, default.Color.Orange)
 
         e.color = default.Color.Indigo
-        self.client.save(e)
+        self.client.sync(e)
 
         e2 = self.client.get(default.EnumTest.filter(name="color test 1"))
         self.assertEqual(e2.color, default.Color.Indigo)
 
         e.color = default.Color("Violet")
-        self.client.save(e)
+        self.client.sync(e)
 
         e2 = self.client.get(default.EnumTest.filter(name="color test 1"))
         self.assertEqual(e2.color, default.Color.Violet)
 
     def test_modelgen_save_collections_01(self):
-        from models import default
+        from models.orm import default
         # insert an object with an optional single: with link props
 
         ks = default.KitchenSink(
@@ -3662,7 +4533,7 @@ class TestModelGenerator(tb.ModelTestCase):
             p_tuparr=(["foo"],),
             p_multi_tuparr=[(["foo"],), (["foo"],)],
         )
-        self.client.save(ks)
+        self.client.sync(ks)
 
         # Re-fetch and verify
         ks = self.client.get(default.KitchenSink.filter(str="coll_test_1"))
@@ -3677,13 +4548,13 @@ class TestModelGenerator(tb.ModelTestCase):
         ks.p_multi_str.append("zzz")
         ks.p_multi_str.append("zzz")
         ks.p_multi_str.remove("1")
-        self.client.save(ks)
+        self.client.sync(ks)
 
         ks3 = self.client.get(default.KitchenSink.filter(str="coll_test_1"))
         self.assertEqual(sorted(ks3.p_multi_str), ["222", "zzz", "zzz"])
 
     def test_modelgen_save_collections_02(self):
-        from models import default
+        from models.orm import default
 
         ks = default.KitchenSink(
             str="coll_test_2",
@@ -3696,7 +4567,7 @@ class TestModelGenerator(tb.ModelTestCase):
             p_tuparr=([],),
             p_multi_tuparr=[([],)],
         )
-        self.client.save(ks)
+        self.client.sync(ks)
 
         # Re-fetch and verify
         ks2 = self.client.get(default.KitchenSink.filter(str="coll_test_2"))
@@ -3713,7 +4584,7 @@ class TestModelGenerator(tb.ModelTestCase):
         ks.p_opt_str = "hello world"
         ks.p_opt_multi_str.append("hello")
         ks.p_opt_multi_str.append("world")
-        self.client.save(ks)
+        self.client.sync(ks)
 
         ks3 = self.client.get(default.KitchenSink.filter(str="coll_test_2"))
         self.assertEqual(ks3.p_opt_str, "hello world")
@@ -3721,7 +4592,7 @@ class TestModelGenerator(tb.ModelTestCase):
 
         ks.p_opt_str = None
         ks.p_opt_multi_str.clear()
-        self.client.save(ks)
+        self.client.sync(ks)
 
         # partially fetch the object
         ks4 = self.client.get(
@@ -3738,7 +4609,7 @@ class TestModelGenerator(tb.ModelTestCase):
         # save the partially fetched object
         ks4.p_opt_str = "hello again"
         ks4.array.append("bye bye")
-        self.client.save(ks4)
+        self.client.sync(ks4)
 
         ks5 = self.client.get(
             default.KitchenSink.select(
@@ -3751,53 +4622,53 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(ks5.array, ["bye bye"])
 
     def test_modelgen_save_collections_03(self):
-        from models import default
+        from models.orm import default
 
         ks = self.client.get(default.KitchenSink.filter(str="hello world"))
         self.assertEqual(ks.array, ["foo"])
 
         ks.array.append("bar")
-        self.client.save(ks)
+        self.client.sync(ks)
 
         # Re-fetch and verify
         ks2 = self.client.get(default.KitchenSink.filter(str="hello world"))
         self.assertEqual(ks2.array, ["foo", "bar"])
 
         ks2.array.remove("foo")
-        self.client.save(ks2)
+        self.client.sync(ks2)
 
         # Re-fetch and verify
         ks3 = self.client.get(default.KitchenSink.filter(str="hello world"))
         self.assertEqual(ks3.array, ["bar"])
 
     def test_modelgen_save_collections_04(self):
-        from models import default
+        from models.orm import default
 
         ks = self.client.get(default.KitchenSink.filter(str="hello world"))
         self.assertEqual(sorted(ks.p_multi_arr), [["bar"], ["foo"]])
 
         ks.p_multi_arr.remove(["foo"])
-        self.client.save(ks)
+        self.client.sync(ks)
 
         # Re-fetch and verify
         ks2 = self.client.get(default.KitchenSink.filter(str="hello world"))
         self.assertEqual(sorted(ks2.p_multi_arr), [["bar"]])
 
     def test_modelgen_save_collections_05(self):
-        from models import default
+        from models.orm import default
 
         ks = self.client.get(default.KitchenSink.filter(str="hello world"))
         self.assertEqual(ks.p_opt_arr, None)
 
         ks.p_opt_arr = ["silly", "goose"]
-        self.client.save(ks)
+        self.client.sync(ks)
 
         # Re-fetch and verify
         ks2 = self.client.get(default.KitchenSink.filter(str="hello world"))
         self.assertEqual(ks2.p_opt_arr, ["silly", "goose"])
 
     def test_modelgen_save_collections_06(self):
-        from models import default
+        from models.orm import default
 
         ks = self.client.get(
             default.KitchenSink.select(
@@ -3805,16 +4676,30 @@ class TestModelGenerator(tb.ModelTestCase):
             ).filter(str="hello world")
         )
         ks.p_opt_str = "silly goose"
-        self.client.save(ks)
+        self.client.sync(ks)
 
         # Re-fetch and verify
         ks2 = self.client.get(default.KitchenSink.filter(str="hello world"))
         self.assertEqual(ks2.p_opt_str, "silly goose")
 
+    def test_modelgen_save_collections_07(self):
+        from models.orm import default
+
+        ks = self.client.get(default.KitchenSink.filter(str="hello world"))
+        self.assertEqual(ks.array, ["foo"])
+
+        ks.array.append("bar")
+
+        # here we test that save() will traverse the mutable prop `ks.array`
+        # and recursively call `__gel_commit__` on it.
+        # sync() does not do that, the data would be refetched, so we need
+        # a separate test for save() specifically.
+        self.client.save(ks)
+
     def test_modelgen_save_range_01(self):
         import datetime as dt
         from gel import Range
-        from models import default
+        from models.orm import default
 
         r = self.client.get(default.RangeTest.filter(name="test range"))
         self.assertEqual(r.name, "test range")
@@ -3833,7 +4718,7 @@ class TestModelGenerator(tb.ModelTestCase):
 
         r.int_range = Range(None, 10)
         r.float_range = Range(empty=True)
-        self.client.save(r)
+        self.client.sync(r)
 
         r2 = self.client.get(default.RangeTest.filter(name="test range"))
         self.assertEqual(r2.name, "test range")
@@ -3856,7 +4741,7 @@ class TestModelGenerator(tb.ModelTestCase):
     def test_modelgen_save_range_02(self):
         import datetime as dt
         from gel import Range
-        from models import default
+        from models.orm import default
 
         r = default.RangeTest(
             name="new range",
@@ -3864,7 +4749,7 @@ class TestModelGenerator(tb.ModelTestCase):
             float_range=Range(),  # everything
             date_range=Range(dt.date(2025, 3, 4), dt.date(2025, 11, 21)),
         )
-        self.client.save(r)
+        self.client.sync(r)
 
         r2 = self.client.get(default.RangeTest.filter(name="new range"))
         self.assertEqual(r2.name, "new range")
@@ -3884,7 +4769,7 @@ class TestModelGenerator(tb.ModelTestCase):
     def test_modelgen_save_multirange_01(self):
         import datetime as dt
         from gel import MultiRange, Range
-        from models import default
+        from models.orm import default
 
         r = self.client.get(
             default.MultiRangeTest.filter(name="test multirange")
@@ -3914,7 +4799,7 @@ class TestModelGenerator(tb.ModelTestCase):
 
         r.int_mrange = MultiRange()
         r.float_mrange = MultiRange()
-        self.client.save(r)
+        self.client.sync(r)
 
         r2 = self.client.get(
             default.MultiRangeTest.filter(name="test multirange")
@@ -3944,7 +4829,7 @@ class TestModelGenerator(tb.ModelTestCase):
     def test_modelgen_save_multirange_02(self):
         import datetime as dt
         from gel import MultiRange, Range
-        from models import default
+        from models.orm import default
 
         r = default.MultiRangeTest(
             name="new multirange",
@@ -3954,7 +4839,7 @@ class TestModelGenerator(tb.ModelTestCase):
                 [Range(dt.date(2025, 3, 4), dt.date(2025, 11, 21))]
             ),
         )
-        self.client.save(r)
+        self.client.sync(r)
 
         r2 = self.client.get(
             default.MultiRangeTest.filter(name="new multirange")
@@ -3973,8 +4858,8 @@ class TestModelGenerator(tb.ModelTestCase):
             MultiRange([Range(dt.date(2025, 3, 4), dt.date(2025, 11, 21))]),
         )
 
-    def test_modelgen_linkprops_1(self):
-        from models import default
+    def test_modelgen_linkprops_01(self):
+        from models.orm import default
 
         # Create a new GameSession and add a player
         u = self.client.get(default.User.filter(name="Zoe"))
@@ -3983,7 +4868,7 @@ class TestModelGenerator(tb.ModelTestCase):
             players=[default.GameSession.players.link(u, is_tall_enough=True)],
             public=True,
         )
-        self.client.save(gs)
+        self.client.sync(gs)
 
         # Now fetch it again
         res = self.client.get(
@@ -3994,19 +4879,19 @@ class TestModelGenerator(tb.ModelTestCase):
         )
         self.assertEqual(res.num, 1001)
         self.assertEqual(len(res.players), 1)
-        p = res.players[0]
+        p = next(iter(res.players))
 
         self.assertEqual(p.name, "Zoe")
         self.assertEqual(p.__linkprops__.is_tall_enough, True)
 
-    def test_modelgen_linkprops_2(self):
-        from models import default
+    def test_modelgen_linkprops_02(self):
+        from models.orm import default
 
         # Create a new GameSession and add a player
         u = self.client.get(default.User.filter(name="Elsa"))
         gs = default.GameSession(num=1002)
-        gs.players.append(u)
-        self.client.save(gs)
+        gs.players.add(u)
+        self.client.sync(gs)
 
         # Now fetch it again snd update
         gs = self.client.get(
@@ -4018,9 +4903,10 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(gs.num, 1002)
         self.assertEqual(gs.public, False)
         self.assertEqual(len(gs.players), 1)
-        self.assertEqual(gs.players[0].__linkprops__.is_tall_enough, None)
-        gs.players[0].__linkprops__.is_tall_enough = False
-        self.client.save(gs)
+        gs_players_0 = next(iter(gs.players))
+        self.assertEqual(gs_players_0.__linkprops__.is_tall_enough, None)
+        gs_players_0.__linkprops__.is_tall_enough = False
+        self.client.sync(gs)
 
         # Now fetch after update
         res = self.client.get(
@@ -4031,13 +4917,14 @@ class TestModelGenerator(tb.ModelTestCase):
         )
         self.assertEqual(res.num, 1002)
         self.assertEqual(len(res.players), 1)
-        p = res.players[0]
+        res_players_0 = next(iter(res.players))
+        p = res_players_0
 
         self.assertEqual(p.name, "Elsa")
         self.assertEqual(p.__linkprops__.is_tall_enough, False)
 
-    def test_modelgen_linkprops_3(self):
-        from models import default
+    def test_modelgen_linkprops_03(self):
+        from models.orm import default
 
         # This one only has a single player
         q = default.GameSession.select(
@@ -4048,7 +4935,7 @@ class TestModelGenerator(tb.ModelTestCase):
 
         self.assertEqual(res.num, 456)
         self.assertEqual(len(res.players), 1)
-        p0 = res.players[0]
+        p0 = next(iter(res.players))
 
         self.assertEqual(p0.name, "Dana")
         self.assertEqual(p0.nickname, None)
@@ -4058,25 +4945,183 @@ class TestModelGenerator(tb.ModelTestCase):
         p0.nickname = "HACKED"
         p0.__linkprops__.is_tall_enough = False
 
-        self.client.save(res)
+        self.client.sync(res)
 
         # Now fetch it again
         upd = self.client.get(q)
         self.assertEqual(upd.num, 456)
         self.assertEqual(len(upd.players), 1)
-        p1 = upd.players[0]
+        p1 = next(iter(upd.players))
 
         self.assertEqual(p1.name, "Dana?")
         self.assertEqual(p1.nickname, "HACKED")
         self.assertEqual(p1.__linkprops__.is_tall_enough, False)
 
+    def test_modelgen_linkprops_04(self):
+        from models.orm import default
+
+        # Test reusing the same anonymous link proxy for multiple objects
+
+        u = self.client.get(default.User.filter(name="Zoe"))
+        link = default.GameSession.players.link(u, is_tall_enough=True)
+
+        gs0 = default.GameSession(num=0)
+        gs1 = default.GameSession(num=1)
+
+        # Single use link, should copy all linkprops
+        gs0.players.add(link)
+        gs0_link = list(gs0.players)[0]
+
+        self.assertIsNot(gs0_link.__linkprops__, link.__linkprops__)
+        self.assertEqual(gs0_link.__linkprops__.is_tall_enough, True)
+        self.assertEqual(link.__linkprops__.is_tall_enough, True)
+
+        # Add it to another GameSession, should copy the linkprops again
+        link.__linkprops__.is_tall_enough = False
+        gs1.players.add(link)
+        gs1_link = list(gs1.players)[0]
+
+        self.assertIsNot(gs0_link.__linkprops__, link.__linkprops__)
+        self.assertIsNot(gs1_link.__linkprops__, link.__linkprops__)
+        self.assertIsNot(gs0_link.__linkprops__, gs1_link.__linkprops__)
+        self.assertEqual(gs0_link.__linkprops__.is_tall_enough, True)
+        self.assertEqual(gs1_link.__linkprops__.is_tall_enough, False)
+        self.assertEqual(link.__linkprops__.is_tall_enough, False)
+
+        link.__linkprops__.is_tall_enough = None
+        self.assertEqual(gs0_link.__linkprops__.is_tall_enough, True)
+        self.assertEqual(gs1_link.__linkprops__.is_tall_enough, False)
+        self.assertEqual(link.__linkprops__.is_tall_enough, None)
+
+    def test_modelgen_linkprops_05(self):
+        from models.orm import default
+
+        # Test reusing the same linked link proxy for multiple objects
+
+        u = self.client.get(default.User.filter(name="Zoe"))
+        gs0 = default.GameSession(num=0, players=[u])
+        gs1 = default.GameSession(num=1)
+
+        # Add it to another GameSession, should strip the linkprops
+        gs0_link = list(gs0.players)[0]
+        gs0_link.__linkprops__.is_tall_enough = True
+        gs1.players.add(gs0_link)
+        gs1_link = list(gs1.players)[0]
+
+        self.assertIsNot(gs0_link.__linkprops__, gs1_link.__linkprops__)
+        self.assertEqual(gs0_link.__linkprops__.is_tall_enough, True)
+        self.assertFalse(hasattr(gs1_link.__linkprops__, "is_tall_enough"))
+
+        gs1_link.__linkprops__.is_tall_enough = False
+        self.assertEqual(gs0_link.__linkprops__.is_tall_enough, True)
+        self.assertEqual(gs1_link.__linkprops__.is_tall_enough, False)
+
+    @tb.xfail
+    # victor: merge doesn't happen
+    # yury: this is probably OK -- we decided that the Gel server should
+    #       "merge things". When a ProxyModel is assigned to a single link
+    #       or added to a link set, it should just replace the existing one
+    #       there.  Whatever __linkprops__ are coming in after the assignment
+    #       will be sent to Gel in save() / sync() -- they both are only saving
+    #       the __gel_changed_fields__.
+    #       I'm keeping the test here, but I think we'll remove it later
+    #       once we discuss this one more time.
+    def test_modelgen_linkprops_06(self):
+        from models.orm import default
+
+        # Try to merge link props
+        u = self.client.get(default.User.filter(name="Zoe"))
+        team = default.Team(name="Pickle Pirates", members=[u])
+        member = list(team.members)[0]
+        member.__linkprops__.rank = 1
+        member.__linkprops__.role = "captain"
+        # Merge the existing and this new link (rank is "unset", so we don't
+        # expect it to change)
+        team.members.add(default.Team.members.link(u, role="first mate"))
+
+        self.assertEqual(member.name, "Zoe")
+        self.assertEqual(member.__linkprops__.rank, 1)
+        self.assertEqual(member.__linkprops__.role, "first mate")
+
+    def test_modelgen_linkprops_07(self):
+        from models.orm import default
+
+        # Try to merge link props
+        u = self.client.get(default.User.filter(name="Zoe"))
+        team0 = default.Team(
+            name="Taco Wizards",
+            members=[default.Team.members.link(u, rank=1, role="magister")],
+        )
+        self.client.save(team0)
+
+        # Fetch the team
+        team1 = self.client.get(default.Team.filter(name="Taco Wizards"))
+        # Merge this new link (rank is "unset", so we don't expect it to
+        # change)
+        team1.members.add(default.Team.members.link(u, role="sorceress"))
+        self.client.save(team1)
+
+        # Re-fetch the team
+        team2 = self.client.get(
+            default.Team.select("*", members=True).filter(name="Taco Wizards")
+        )
+
+        member = list(team2.members)[0]
+        self.assertEqual(member.name, "Zoe")
+        self.assertEqual(member.__linkprops__.rank, 1)
+        self.assertEqual(member.__linkprops__.role, "sorceress")
+
+    @tb.xfail
+    # victor: merge doesn't happen
+    # yury: read the comment in test_modelgen_linkprops_06
+    def test_modelgen_linkprops_08(self):
+        from models.orm import default
+
+        # Try to merge link props
+        u = self.client.get(default.User.filter(name="Zoe"))
+        team = default.Team(
+            name="Taco Wizards",
+            members=[default.Team.members.link(u, rank=1, role="magister")],
+        )
+        self.client.save(team)
+
+        # Fetch the team
+        team2 = self.client.get(
+            default.Team.select("*", members=True).filter(name="Taco Wizards")
+        )
+        # Merge the existing and this new link (rank is "unset", so we don't
+        # expect it to change)
+        team2.members.add(default.Team.members.link(u, role="sorceress"))
+
+        member = list(team2.members)[0]
+        self.assertEqual(member.name, "Zoe")
+        self.assertEqual(member.__linkprops__.rank, 1)
+        self.assertEqual(member.__linkprops__.role, "sorceress")
+
+    def test_modelgen_linkprops_09(self):
+        from models.orm import default
+
+        # Change a fetched link property (targeting __gel_has_changes__)
+
+        gs = self.client.get(
+            default.GameSession.select("*", players=True).filter(num=123)
+        )
+        for p in gs.players:
+            if p.name == "Alice":
+                alice = p
+                self.assertEqual(alice.__linkprops__.is_tall_enough, False)
+                alice.__linkprops__.is_tall_enough = True
+
+        self.client.sync(gs)
+        self.assertEqual(alice.__linkprops__.is_tall_enough, True)
+
     def test_modelgen_globals_01(self):
         """Test reflection of globals"""
-        from models import default
+        from models.orm import default
 
         self.assertEqual(
             reveal_type(default.current_game_session_num),
-            "type[models.__shapes__.std.int64]",
+            "type[models.orm.__shapes__.std.int64]",
         )
 
         sess_num = 988
@@ -4086,7 +5131,7 @@ class TestModelGenerator(tb.ModelTestCase):
             time_limit=sess_num + 10,
             players=[default.User(name="General Global")],
         )
-        self.client.save(sess)
+        self.client.sync(sess)
 
         sess_client = self.client.with_globals(
             {"default::current_game_session_num": sess_num}
@@ -4118,11 +5163,11 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(fetched_sess, sess)
         self.assertEqual(fetched_sess.num, sess_num)
         self.assertEqual(len(fetched_sess.players), 1)
-        self.assertEqual(fetched_sess.players[0].name, "General Global")
+        self.assertEqual(list(fetched_sess.players)[0].name, "General Global")
 
     @tb.skip_typecheck
     def test_modelgen_reflection_1(self):
-        from models import default
+        from models.orm import default
 
         from gel._internal._edgeql import Cardinality, PointerKind
 
@@ -4280,7 +5325,7 @@ class TestModelGenerator(tb.ModelTestCase):
         import textwrap
         import json
 
-        from models import default
+        from models.orm import default
         from gel._testbase_schema import render_schema_from_json
 
         schema = render_schema_from_json(
@@ -4331,9 +5376,97 @@ class TestModelGenerator(tb.ModelTestCase):
             ),
         )
 
+    def test_modelgen_json_schema_2(self):
+        # Test the behavior of id shapes
+
+        import textwrap
+        import json
+
+        from models.orm import default
+        from gel._testbase_schema import render_schema_from_json
+
+        class CreateUser(default.User.__shapes__.Create):
+            pass
+
+        schema = render_schema_from_json(
+            json.dumps(
+                CreateUser.model_json_schema(mode="validation"),
+                indent=2,
+            )
+        )
+
+        self.assertEqual(
+            schema.strip(),
+            textwrap.dedent(
+                """\
+                class CreateUser:
+                    name: str
+                    nickname: None | str = None"""
+            ),
+        )
+
+        schema = render_schema_from_json(
+            json.dumps(
+                CreateUser.model_json_schema(mode="serialization"),
+                indent=2,
+            )
+        )
+
+        self.assertEqual(
+            schema.strip(),
+            textwrap.dedent(
+                """\
+                class CreateUser:
+                    groups: list[UserGroup]  # readonly
+                    id: UUID  # readonly
+                    name: str
+                    name_len: Any  # readonly
+                    nickname: None | str = None
+                    nickname_len: None | int  # readonly
+
+                class User:
+                    groups: list[UserGroup]  # readonly
+                    id: UUID
+                    name: str
+                    name_len: Any  # readonly
+                    nickname: None | str = None
+                    nickname_len: None | int  # readonly
+
+                class UserGroup:
+                    id: UUID
+                    mascot: None | str = None
+                    name: str
+                    name_len: Any  # readonly
+                    nickname: None | str = None
+                    nickname_len: None | int  # readonly
+                    users: list[User] = ..."""
+            ),
+        )
+
+        class UpdateUser(default.User.__shapes__.Update):
+            pass
+
+        schema = render_schema_from_json(
+            json.dumps(
+                UpdateUser.model_json_schema(mode="validation"),
+                indent=2,
+            )
+        )
+
+        self.assertEqual(
+            schema.strip(),
+            textwrap.dedent(
+                """\
+                class UpdateUser:
+                    id: None | UUID = None
+                    name: None | str = None
+                    nickname: None | str = None"""
+            ),
+        )
+
     def test_modelgen_function_overloads_01(self):
         """Test basic function overloads with different parameter types"""
-        from models import default
+        from models.orm import default
 
         # Test integer addition
         result_int: int = self.client.query_required_single(
@@ -4355,7 +5488,7 @@ class TestModelGenerator(tb.ModelTestCase):
 
     def test_modelgen_function_overloads_02(self):
         """Test function overloads with optional parameters"""
-        from models import default
+        from models.orm import default
 
         # Test with default prefix
         result_1: str = self.client.query_required_single(
@@ -4378,7 +5511,7 @@ class TestModelGenerator(tb.ModelTestCase):
     @tb.to_be_fixed  # scalar/object overloads seem to be broken
     def test_modelgen_function_overloads_03(self):
         """Test function overloads with different return types"""
-        from models import default
+        from models.orm import default
 
         # Test string input
         result_str: str = self.client.query_required_single(
@@ -4402,7 +5535,7 @@ class TestModelGenerator(tb.ModelTestCase):
     @tb.to_be_fixed  # python value casting for arrays
     def test_modelgen_function_overloads_04(self):
         """Test function overloads with array parameters"""
-        from models import default
+        from models.orm import default
 
         # Test integer array
         result_int: int = self.client.query_required_single(
@@ -4419,7 +5552,7 @@ class TestModelGenerator(tb.ModelTestCase):
     @tb.to_be_fixed  # python value casting for tuples
     def test_modelgen_function_overloads_05(self):
         """Test function overloads with tuple parameters"""
-        from models import default
+        from models.orm import default
 
         # Test tuple with str, int64
         result_1: str = self.client.query_required_single(
@@ -4435,7 +5568,7 @@ class TestModelGenerator(tb.ModelTestCase):
 
     def test_modelgen_function_overloads_06(self):
         """Test complex function overloads with overlapping parameters"""
-        from models import default
+        from models.orm import default
 
         # Test single int parameter
         result_int: str = self.client.query_required_single(
@@ -4469,7 +5602,7 @@ class TestModelGenerator(tb.ModelTestCase):
 
     def test_modelgen_function_overloads_with_python_values(self):
         """Test that function overloads work with regular Python values"""
-        from models import default
+        from models.orm import default
 
         # Test with Python int (should work with int64 overload)
         python_int = 10
@@ -4505,7 +5638,7 @@ class TestModelGenerator(tb.ModelTestCase):
 
     def test_modelgen_function_simple_defaults_01(self):
         """Test functions with simple default parameters"""
-        from models import default
+        from models.orm import default
 
         # Test simple_add with default value
         result_int: int = self.client.query_required_single(
@@ -4533,7 +5666,7 @@ class TestModelGenerator(tb.ModelTestCase):
 
     def test_modelgen_function_optional_params(self):
         """Test functions with optional parameters"""
-        from models import default
+        from models.orm import default
 
         # Test with default (empty) multiplier
         result_float: float = self.client.query_required_single(
@@ -4552,7 +5685,7 @@ class TestModelGenerator(tb.ModelTestCase):
     @tb.to_be_fixed  # Python auto-cast for lists is missing
     def test_modelgen_function_array_params(self):
         """Test functions with array parameters and defaults"""
-        from models import default
+        from models.orm import default
 
         # Test with default separator
         result_join: str = self.client.query_required_single(
@@ -4568,7 +5701,7 @@ class TestModelGenerator(tb.ModelTestCase):
 
     def test_modelgen_function_multiple_defaults(self):
         """Test functions with multiple default parameters"""
-        from models import default
+        from models.orm import default
 
         # Test with all defaults
         result_fmt: str = self.client.query_required_single(
@@ -4605,7 +5738,7 @@ class TestModelGenerator(tb.ModelTestCase):
     def test_modelgen_function_defaults_with_python_values(self):
         """Test that default parameter functions work with regular
         Python values"""
-        from models import default
+        from models.orm import default
 
         # Test with Python int
         python_int = 25
@@ -4628,7 +5761,7 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(result_py_fmt, "Python  with defaults")
 
     def test_modelgen_function_variadic_01(self):
-        from models import default
+        from models.orm import default
 
         # Test basic variadic function with no variadic args
         result: str = self.client.query_required_single(
@@ -4637,7 +5770,7 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(result, "pref-hello0-suf")
 
     def test_modelgen_function_variadic_02(self):
-        from models import default
+        from models.orm import default
 
         # Test variadic function with single arg
         result: str = self.client.query_required_single(
@@ -4646,7 +5779,7 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(result, "pref-hello5-suf")
 
     def test_modelgen_function_variadic_03(self):
-        from models import default
+        from models.orm import default
 
         # Test variadic function with multiple args
         result: str = self.client.query_required_single(
@@ -4655,7 +5788,7 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(result, "pref-hello15-suf")
 
     def test_modelgen_function_variadic_04(self):
-        from models import default
+        from models.orm import default
 
         # Test variadic function with named-only parameters
         result: str = self.client.query_required_single(
@@ -4664,7 +5797,7 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(result, "pref-hello3-END")
 
     def test_modelgen_function_variadic_05(self):
-        from models import default
+        from models.orm import default
 
         # Test variadic function with both named-only parameters
         result: str = self.client.query_required_single(
@@ -4675,14 +5808,14 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(result, "START-hello30-DONE")
 
     def test_modelgen_function_variadic_06(self):
-        from models import default
+        from models.orm import default
 
         # Test simple variadic sum function
         result: int = self.client.query_required_single(default.sum_variadic())
         self.assertEqual(result, 0)
 
     def test_modelgen_function_variadic_07(self):
-        from models import default
+        from models.orm import default
 
         # Test variadic sum with multiple values
         result: int = self.client.query_required_single(
@@ -4691,7 +5824,7 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(result, 15)
 
     def test_modelgen_function_variadic_08(self):
-        from models import default
+        from models.orm import default
 
         # Test variadic join function
         result: str = self.client.query_required_single(
@@ -4700,7 +5833,7 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(result, "a-b-c-d")
 
     def test_modelgen_function_variadic_11(self):
-        from models import default
+        from models.orm import default
 
         # Test process_variadic with default multiplier
         result: str = self.client.query_required_single(
@@ -4709,7 +5842,7 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(result, "sum: 6")
 
     def test_modelgen_function_variadic_12(self):
-        from models import default
+        from models.orm import default
 
         # Test process_variadic with custom multiplier
         result: str = self.client.query_required_single(
@@ -4718,7 +5851,7 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(result, "sum: 60")
 
     def test_modelgen_function_named_only_01(self):
-        from models import default
+        from models.orm import default
 
         # Test named-only parameters with defaults
         result: str = self.client.query_required_single(
@@ -4727,7 +5860,7 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(result, "hello")
 
     def test_modelgen_function_named_only_02(self):
-        from models import default
+        from models.orm import default
 
         # Test named-only parameters with bold
         result: str = self.client.query_required_single(
@@ -4736,7 +5869,7 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(result, "[BOLD]hello[/BOLD]")
 
     def test_modelgen_function_named_only_03(self):
-        from models import default
+        from models.orm import default
 
         # Test named-only parameters with bold and italic
         result: str = self.client.query_required_single(
@@ -4745,7 +5878,7 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(result, "[BOLD][ITALIC]hello[/ITALIC][/BOLD]")
 
     def test_modelgen_function_named_only_04(self):
-        from models import default
+        from models.orm import default
 
         # Test named-only parameters with prefix and suffix
         result: str = self.client.query_required_single(
@@ -4754,7 +5887,7 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(result, ">>> hello <<<")
 
     def test_modelgen_function_named_only_05(self):
-        from models import default
+        from models.orm import default
 
         # Test named-only parameters with all options
         result: str = self.client.query_required_single(
@@ -4771,14 +5904,14 @@ class TestModelGenerator(tb.ModelTestCase):
         )
 
     def test_modelgen_function_optional_variadic_01(self):
-        from models import default
+        from models.orm import default
 
         # Test optional variadic with default base
         result: int = self.client.query_required_single(default.optional_sum())
         self.assertEqual(result, 0)
 
     def test_modelgen_function_optional_variadic_02(self):
-        from models import default
+        from models.orm import default
 
         # Test optional variadic with custom base
         result: int = self.client.query_required_single(
@@ -4787,7 +5920,7 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(result, 100)
 
     def test_modelgen_function_optional_variadic_03(self):
-        from models import default
+        from models.orm import default
 
         # Test optional variadic with base and variadic args
         result: int = self.client.query_required_single(
@@ -4796,7 +5929,7 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(result, 20)
 
     def test_modelgen_function_complex_variadic_01(self):
-        from models import default
+        from models.orm import default
 
         # Test complex variadic with minimal args
         result: str = self.client.query_required_single(
@@ -4805,7 +5938,7 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(result, "test (default) sum=0")
 
     def test_modelgen_function_complex_variadic_02(self):
-        from models import default
+        from models.orm import default
 
         # Test complex variadic with optional param
         result: str = self.client.query_required_single(
@@ -4814,7 +5947,7 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(result, "test (custom) sum=0")
 
     def test_modelgen_function_complex_variadic_03(self):
-        from models import default
+        from models.orm import default
 
         # Test complex variadic with variadic args
         result: str = self.client.query_required_single(
@@ -4823,7 +5956,7 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(result, "test (custom) sum=60")
 
     def test_modelgen_function_complex_variadic_04(self):
-        from models import default
+        from models.orm import default
 
         # Test complex variadic with named-only flag
         result: str = self.client.query_required_single(
@@ -4832,7 +5965,7 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(result, "test (custom) sum=30 [FLAG]")
 
     def test_modelgen_function_complex_variadic_05(self):
-        from models import default
+        from models.orm import default
 
         # Test complex variadic with multiplier
         result: str = self.client.query_required_single(
@@ -4841,7 +5974,7 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(result, "test (custom) sum=75")
 
     def test_modelgen_function_complex_variadic_06(self):
-        from models import default
+        from models.orm import default
 
         # Test complex variadic with all parameters
         result: str = self.client.query_required_single(
@@ -4852,7 +5985,7 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(result, "test (custom) sum=70 [FLAG]")
 
     def test_modelgen_function_variadic_with_python_values(self):
-        from models import default
+        from models.orm import default
 
         # Test variadic functions with Python values mixed with model calls
         python_str = "python_value"
@@ -4867,7 +6000,7 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(result, "PY-python_value6-suf")
 
     def test_modelgen_function_named_only_edge_cases(self):
-        from models import default
+        from models.orm import default
 
         # Test that named-only parameters cannot be passed positionally
         # This should work fine since we're using named parameters
@@ -4878,7 +6011,7 @@ class TestModelGenerator(tb.ModelTestCase):
 
     def test_modelgen_operators_string_comparison(self):
         """Test string comparison operators with mixed Python/Gel values"""
-        from models import default
+        from models.orm import default
 
         # Test equality operators
         alice = self.client.query_required_single(
@@ -4916,7 +6049,7 @@ class TestModelGenerator(tb.ModelTestCase):
 
     def test_modelgen_operators_string_arithmetic(self):
         """Test string concatenation and repetition operators"""
-        from models import default, std
+        from models.orm import default, std
 
         # Test string concatenation in computed field
         class UserWithFullName(default.User):
@@ -4953,7 +6086,7 @@ class TestModelGenerator(tb.ModelTestCase):
 
     def test_modelgen_operators_integer_arithmetic(self):
         """Test integer arithmetic operators with mixed Python/Gel values"""
-        from models import default, std
+        from models.orm import default, std
 
         # Test basic arithmetic operations
         class UserWithMath(default.User):
@@ -4979,7 +6112,7 @@ class TestModelGenerator(tb.ModelTestCase):
 
     def test_modelgen_operators_integer_comparison(self):
         """Test integer comparison operators"""
-        from models import default
+        from models.orm import default
 
         # Filter by computed length comparisons
         long_name_users = self.client.query(
@@ -5003,7 +6136,7 @@ class TestModelGenerator(tb.ModelTestCase):
     @tb.to_be_fixed  # comparisons with None are broken
     def test_modelgen_operators_boolean_logical(self):
         """Test boolean logical operators and functions"""
-        from models import default, std
+        from models.orm import default, std
 
         # Test std.and_ function
         users_std_and = self.client.query(
@@ -5026,7 +6159,7 @@ class TestModelGenerator(tb.ModelTestCase):
 
     def test_modelgen_operators_boolean_not(self):
         """Test boolean not operator and std.not_ function"""
-        from models import default, std
+        from models.orm import default, std
 
         # Test negation of comparison
         users_not_alice = self.client.query(
@@ -5037,7 +6170,7 @@ class TestModelGenerator(tb.ModelTestCase):
 
     def test_modelgen_operators_mixed_types_with_casting(self):
         """Test operators with mixed types requiring casting"""
-        from models import default, std
+        from models.orm import default, std
 
         class GameSessionWithMath(default.GameSession):
             num_as_str: std.str
@@ -5061,7 +6194,7 @@ class TestModelGenerator(tb.ModelTestCase):
     @tb.to_be_fixed  # comparisons with None are broken
     def test_modelgen_operators_complex_expressions(self):
         """Test complex operator expressions combining multiple types"""
-        from models import default, std
+        from models.orm import default, std
 
         # Complex filter combining multiple operator types
         complex_users = self.client.query(
@@ -5081,7 +6214,7 @@ class TestModelGenerator(tb.ModelTestCase):
 
     def test_modelgen_operators_with_python_values_in_computeds(self):
         """Test operators using Python values in computed expressions"""
-        from models import default, std
+        from models.orm import default, std
 
         class UserWithPythonOps(default.User):
             name_plus_suffix: std.str
@@ -5117,7 +6250,7 @@ class TestModelGenerator(tb.ModelTestCase):
 
     def test_modelgen_operators_string_contains_and_patterns(self):
         """Test string containment and pattern matching operators"""
-        from models import default, std
+        from models.orm import default, std
 
         # Test string contains-like operations
         users_with_a = self.client.query(
@@ -5138,7 +6271,7 @@ class TestModelGenerator(tb.ModelTestCase):
 
     def test_modelgen_operators_numeric(self):
         """Test numeric operators with edge cases and mixed precision"""
-        from models import default, std
+        from models.orm import default, std
 
         class GameSessionNumeric(default.GameSession):
             num_div_result: std.float64
@@ -5169,7 +6302,7 @@ class TestModelGenerator(tb.ModelTestCase):
 
     def test_modelgen_ad_hoc_computeds_are_frozen(self):
         """Test that ad-hoc computeds cannot be passed to init or mutated"""
-        from models import default, std
+        from models.orm import default, std
 
         class UserWithUpperName(default.User):
             upper_name: std.str
@@ -5227,67 +6360,23 @@ class TestModelGenerator(tb.ModelTestCase):
             users[0].upper_name = "foo"
 
     def test_modelgen_result_inference(self):
-        import models.std as std
-        from models import default
+        import models.orm.std as std
+        from models.orm import default
 
         c = self.client.get(std.count(default.User.filter(name="Alice")))
         self.assertEqual(reveal_type(c), "builtins.int")
         self.assertEqual(c, 1)
 
     def test_modelgen_abstract_type_no_init(self):
-        from models import default
+        from models.orm import default
 
         # Try instantiating an abstract type
         with self.assertRaisesRegex(TypeError, r"cannot instantiate abstract"):
             # (mypy will also error out if "type: ignore" is not used)
             default.Named(name="aaa")  # type: ignore
 
-
-@tb.typecheck
-class TestEmptyModelGenerator(tb.ModelTestCase):
-    DEFAULT_MODULE = "default"
-
-    def test_modelgen_empty_schema_1(self):
-        # This is it, we're just testing empty import.
-        from models import default, std  # noqa: F401
-
-
-@tb.typecheck
-class TestEmptyAiModelGenerator(tb.ModelTestCase):
-    DEFAULT_MODULE = "default"
-    SCHEMA = os.path.join(os.path.dirname(__file__), "dbsetup", "empty_ai.gel")
-
-    def test_modelgen_empty_ai_schema_1(self):
-        # This is it, we're just testing empty import.
-        import models
-
-        self.assertEqual(
-            models.sys.ExtensionPackage.__name__, "ExtensionPackage"
-        )
-
-    def test_modelgen_empty_ai_schema_2(self):
-        # This is it, we're just testing empty import.
-        from models.ext import ai  # noqa: F401
-
-
-# TODO: currently the schema and the tests here are broken in a way that makes
-# it hard to integrate them with the main tests suite without breaking many
-# tests in it as well. Presumably after fixing the issues, the schema and
-# tests can just be merged with the main suite.
-@tb.typecheck
-class TestModelGeneratorOther(tb.ModelTestCase):
-    SCHEMA = os.path.join(
-        os.path.dirname(__file__), "dbsetup", "orm_other.gel"
-    )
-
-    SETUP = os.path.join(
-        os.path.dirname(__file__), "dbsetup", "orm_other.edgeql"
-    )
-
-    ISOLATED_TEST_BRANCHES = True
-
     def test_modelgen_escape_01(self):
-        from models import default
+        from models.orm import default
         # insert an object that needs a lot of escaping
 
         a = self.client.get(default.User.filter(name="Alice"))
@@ -5297,7 +6386,7 @@ class TestModelGeneratorOther(tb.ModelTestCase):
             commit=a,
             configure=[default.limit.configure.link(a, create=True)],
         )
-        self.client.save(obj)
+        self.client.sync(obj)
 
         # Fetch and verify
         res = self.client.get(
@@ -5313,24 +6402,25 @@ class TestModelGeneratorOther(tb.ModelTestCase):
         assert res.commit is not None
         self.assertEqual(res.commit.name, "Alice")
         self.assertEqual(len(res.configure), 1)
-        self.assertEqual(res.configure[0].name, "Alice")
-        self.assertEqual(res.configure[0].__linkprops__.create, True)
+        conf = next(iter(res.configure))
+        self.assertEqual(conf.name, "Alice")
+        self.assertEqual(conf.__linkprops__.create, True)
 
     def test_modelgen_escape_02(self):
-        from models import default
+        from models.orm import default
         # insert and update an object that needs a lot of escaping
 
         a = self.client.get(default.User.filter(name="Alice"))
         obj = default.limit(
             alter=False,
         )
-        self.client.save(obj)
+        self.client.sync(obj)
         obj.like = "like this"
-        self.client.save(obj)
+        self.client.sync(obj)
         obj.commit = a
-        self.client.save(obj)
-        obj.configure.append(default.limit.configure.link(a, create=True))
-        self.client.save(obj)
+        self.client.sync(obj)
+        obj.configure.add(default.limit.configure.link(a, create=True))
+        self.client.sync(obj)
 
         # Fetch and verify
         res = self.client.get(
@@ -5346,8 +6436,61 @@ class TestModelGeneratorOther(tb.ModelTestCase):
         assert res.commit is not None
         self.assertEqual(res.commit.name, "Alice")
         self.assertEqual(len(res.configure), 1)
-        self.assertEqual(res.configure[0].name, "Alice")
-        self.assertEqual(res.configure[0].__linkprops__.create, True)
+        conf = next(iter(res.configure))
+        self.assertEqual(conf.name, "Alice")
+        self.assertEqual(conf.__linkprops__.create, True)
+
+    def test_modelgen_sync_warning(self):
+        from models.orm import default
+
+        g = default.UserGroup(
+            name="Pickle Pirates",
+            users=[default.User(name="{i}") for i in range(200)],
+        )
+
+        with self.assertWarns(msg_part="`sync()` is creating") as fn:
+            self.client.sync(g)
+            self.assertEqual(fn, __file__)  # just a sanity check
+
+        for u in g.users:
+            u.name += "aaa"
+
+        with self.assertWarns(msg_part="`sync()` is refetching"):
+            self.client.sync(g)
+
+        for u in g.users:
+            u.name += "bbb"
+
+        with self.assertNotWarns():
+            self.client.sync(g, warn_on_large_sync=False)
+
+
+@tb.typecheck
+class TestEmptyModelGenerator(tb.ModelTestCase):
+    DEFAULT_MODULE = "default"
+    SCHEMA = os.path.join(os.path.dirname(__file__), "dbsetup", "empty.gel")
+
+    def test_modelgen_empty_schema_1(self):
+        # This is it, we're just testing empty import.
+        from models.empty import default, std  # noqa: F401
+
+
+@tb.typecheck
+class TestEmptyAiModelGenerator(tb.ModelTestCase):
+    DEFAULT_MODULE = "default"
+    SCHEMA = os.path.join(os.path.dirname(__file__), "dbsetup", "empty_ai.gel")
+
+    def test_modelgen_empty_ai_schema_1(self):
+        # This is it, we're just testing empty import.
+        import models.empty_ai
+
+        self.assertEqual(
+            models.empty_ai.sys.ExtensionPackage.__name__, "ExtensionPackage"
+        )
+
+    def test_modelgen_empty_ai_schema_2(self):
+        # This is it, we're just testing empty import.
+        from models.empty_ai.ext import ai  # noqa: F401
 
 
 class TestModelGeneratorReproducibility(tb.ModelTestCase):

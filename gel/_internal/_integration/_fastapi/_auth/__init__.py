@@ -47,6 +47,7 @@ class GelAuth(client_mod.Extension):
     auth_cookie_description = utils.Config(
         "The cookie as the authentication token"
     )
+    auth_cookie_domain: utils.Config[Optional[str]] = utils.Config(None)
     verifier_cookie_name = utils.Config("gel_verifier")
     tags: utils.Config[list[str | enum.Enum]] = utils.Config(["Gel Auth"])
     secure_cookie = utils.Config(True)  # noqa: FBT003
@@ -88,6 +89,7 @@ class GelAuth(client_mod.Extension):
             secure=self.secure_cookie.value,
             samesite="lax",
             expires=exp,
+            domain=self.auth_cookie_domain.value,
         )
 
     def set_verifier_cookie(

@@ -193,6 +193,8 @@ class ParametricType:
     specific type arguments into designated class vars.
     """
 
+    __slots__ = ()
+
     __parametric_origin__: ClassVar[type | None] = None
     __parametric_type_args__: ClassVar[_TypeArgs | None] = None
     __parametric_forward_refs__: ClassVar[_ForwardRefs] = {}
@@ -735,3 +737,5 @@ _T = TypeVar("_T", covariant=True)
 
 class SingleParametricType(ParametricType, Generic[_T]):
     type: ClassVar[type[_T]]  # type: ignore [misc]
+
+    __slots__ = ()

@@ -1,41 +1,53 @@
 from __future__ import annotations
 
 import collections
+import copy
 import dataclasses
 import pathlib
+import warnings
 import weakref
 import uuid
 
 from typing import (
     TYPE_CHECKING,
     Any,
+    Literal,
     NamedTuple,
     TypeGuard,
     TypeVar,
     Generic,
     cast,
 )
-from typing_extensions import TypeAliasType, dataclass_transform
+from typing_extensions import TypeAliasType, dataclass_transform, Self
 
-from gel._internal._qbmodel._abstract import GelPrimitiveType
+from gel._internal._qbmodel._abstract import (
+    DEFAULT_VALUE,
+    AbstractLinkSet,
+    AbstractMutableLinkSet,
+    LinkSet,
+    LinkWithPropsSet,
+    AbstractGelSourceModel,
+    GelPrimitiveType,
+    get_proxy_linkprops,
+    reconcile_link,
+    reconcile_proxy_link,
+)
 from gel._internal._qbmodel._pydantic._models import (
     GelModel,
     GelSourceModel,
     ProxyModel,
 )
 from gel._internal._tracked_list import (
+    AbstractCollection,
     AbstractTrackedList,
     TrackedList,
     DowncastingTrackedList,
 )
-from gel._internal._qbmodel._abstract import (
-    AbstractDistinctList,
-    DistinctList,
-    ProxyDistinctList,
-)
 from gel._internal._edgeql import PointerKind, quote_ident
 
 if TYPE_CHECKING:
+    from types import TracebackType
+
     from collections.abc import (
         Iterable,
         Iterator,
@@ -46,11 +58,45 @@ if TYPE_CHECKING:
     from gel._internal._qb import GelPointerReflection
 
 
+# Yeah... don't use getattr() on GelModel in save() -- we can't
+# trigger GelModel.__setattr__() here as it will mess with
+# __pydantic_fields_set__ and we won't understand if the field
+# was set by the user or by Gel.
+# This will prevent us from using it by accident.
+if TYPE_CHECKING:
+    getattr: None = None  # noqa: A001
+else:
+
+    def getattr(*args: Any) -> Any:  # noqa: A001
+        raise RuntimeError(
+            "getattr() is not allowed on GelModel in save(), use model_attr()"
+        )
+
+
+# Warn if sync() is creating more than this many objects and suggest
+# using save() instead.
+SYNC_NEW_THRESHOLD = 50
+# Ditto for refetching.
+SYNC_REFETCH_THRESHOLD = 100
+# Base stacklevel for the above sync() warnings
+SYNC_BASE_STACKLEVEL = 6
+
+
 T = TypeVar("T")
 T_co = TypeVar("T_co", covariant=True)
 V = TypeVar("V")
 
+
+def _identity_func(x: T) -> T:
+    return x
+
+
 _unset = object()
+_missing_arg = object()
+
+_STOP_LINK_TRAVERSAL = (None, _unset, DEFAULT_VALUE)
+_STOP_FIELDS_NO_ID = ("__tid__", "__tname__")
+_STOP_FIELDS = ("id", *_STOP_FIELDS_NO_ID)
 
 _sorted_pointers_cache: weakref.WeakKeyDictionary[
     type[GelSourceModel], Iterable[GelPointerReflection]
@@ -77,7 +123,7 @@ def _struct(t: type[T]) -> type[T]:
 
 
 @_struct
-class BaseFieldChange:
+class BaseFieldInfo:
     name: str
     """Pointer name"""
     info: GelPointerReflection
@@ -85,7 +131,7 @@ class BaseFieldChange:
 
 
 @_struct
-class SingleLinkChange(BaseFieldChange):
+class SingleLinkChange(BaseFieldInfo):
     target: GelModel | None
 
     props_info: dict[str, GelPointerReflection] | None = None
@@ -100,12 +146,12 @@ class SingleLinkChange(BaseFieldChange):
 
 
 @_struct
-class MultiLinkReset(BaseFieldChange):
+class MultiLinkReset(BaseFieldInfo):
     pass
 
 
 @_struct
-class MultiLinkAdd(BaseFieldChange):
+class MultiLinkAdd(BaseFieldInfo):
     added: list[GelModel]
 
     added_props: list[LinkPropertiesValues] | None = None
@@ -124,7 +170,7 @@ class MultiLinkAdd(BaseFieldChange):
 
 
 @_struct
-class MultiLinkRemove(BaseFieldChange):
+class MultiLinkRemove(BaseFieldInfo):
     removed: Iterable[GelModel]
 
     def __post_init__(self) -> None:
@@ -133,7 +179,7 @@ class MultiLinkRemove(BaseFieldChange):
 
 
 @_struct
-class PropertyChange(BaseFieldChange):
+class PropertyChange(BaseFieldInfo):
     value: object | None
 
     def __post_init__(self) -> None:
@@ -141,7 +187,7 @@ class PropertyChange(BaseFieldChange):
 
 
 @_struct
-class MultiPropAdd(BaseFieldChange):
+class MultiPropAdd(BaseFieldInfo):
     added: Iterable[object]
 
     def __post_init__(self) -> None:
@@ -149,7 +195,7 @@ class MultiPropAdd(BaseFieldChange):
 
 
 @_struct
-class MultiPropRemove(BaseFieldChange):
+class MultiPropRemove(BaseFieldInfo):
     removed: Iterable[object]
 
     def __post_init__(self) -> None:
@@ -170,6 +216,19 @@ FieldChange = TypeAliasType(
 FieldChangeMap = TypeAliasType("FieldChangeMap", dict[str, FieldChange])
 FieldChangeLists = TypeAliasType(
     "FieldChangeLists", dict[str, list[FieldChange]]
+)
+
+
+@_struct
+class RefetchShape:
+    fields: dict[str, GelPointerReflection] = dataclasses.field(
+        default_factory=dict
+    )
+    models: list[GelModel] = dataclasses.field(default_factory=list)
+
+
+RefetchBatch = TypeAliasType(
+    "RefetchBatch", dict[type[GelModel], RefetchShape]
 )
 
 
@@ -196,6 +255,15 @@ class SavePlan(NamedTuple):
     # links between existing objects.
     update_batch: ChangeBatch
 
+    # When we sync() we refetch -- this field is the spec for that.
+    # Only non-empty when refetch is True.
+    refetch_batch: RefetchBatch
+
+    # When we refetch computed links we also need to know which
+    # objects were in the sync() graph that theoretically can end
+    # up in the computed link. So we track then in this dict.
+    existing_objects: dict[uuid.UUID, GelModel | IDTracker[GelModel, None]]
+
 
 class IDTracker(Generic[T, V]):
     _seen: dict[int, tuple[T, V | None]]
@@ -217,7 +285,7 @@ class IDTracker(Generic[T, V]):
     def track(self, obj: T, value: V | None = None, /) -> None:
         self._seen[id(obj)] = (obj, value)
 
-    def untrack(self, obj: T) -> None:
+    def untrack(self, obj: T, /) -> None:
         self._seen.pop(id(obj), None)
 
     def track_many(self, more: Iterable[T] | Iterable[tuple[T, V]], /) -> None:
@@ -229,13 +297,19 @@ class IDTracker(Generic[T, V]):
         for obj in more:
             self._seen.pop(id(obj), None)
 
+    def get_tracked_by_hash(self, hash: int, /) -> T:  # noqa: A002
+        obj_value = self._seen.get(hash, None)
+        if obj_value is None:
+            raise KeyError(hash)
+        return obj_value[0]
+
     def __getitem__(self, obj: T) -> V | None:
         try:
             return self._seen[id(obj)][1]
         except KeyError:
             raise KeyError((id(obj), obj)) from None
 
-    def get_not_none(self, obj: T) -> V:
+    def get_not_none(self, obj: T, /) -> V:
         try:
             v = self._seen[id(obj)][1]
         except KeyError:
@@ -263,24 +337,36 @@ def is_prop_list(val: object) -> TypeGuard[TrackedList[GelPrimitiveType]]:
     ) and issubclass(type(val).type, GelPrimitiveType)  # type: ignore [misc]
 
 
-def is_link_dlist(val: object) -> TypeGuard[DistinctList[GelModel]]:
-    return isinstance(val, DistinctList) and issubclass(
-        type(val).type, GelModel
-    )
+def is_link_set(val: object) -> TypeGuard[LinkSet[GelModel]]:
+    return isinstance(val, LinkSet) and issubclass(type(val).type, GelModel)
 
 
 def is_link_abstract_dlist(
     val: object,
-) -> TypeGuard[AbstractDistinctList[GelModel]]:
-    return isinstance(val, AbstractDistinctList) and issubclass(
+) -> TypeGuard[AbstractLinkSet[GelModel]]:
+    return isinstance(val, AbstractLinkSet) and issubclass(
         type(val).type, GelModel
     )
 
 
-def is_proxy_link_list(
+def is_link_abstract_mutable_dlist(
     val: object,
-) -> TypeGuard[ProxyDistinctList[ProxyModel[GelModel], GelModel]]:
-    return isinstance(val, ProxyDistinctList)
+) -> TypeGuard[AbstractMutableLinkSet[GelModel]]:
+    return isinstance(val, AbstractMutableLinkSet) and issubclass(
+        type(val).type, GelModel
+    )
+
+
+def is_link_wprops_set(
+    val: object,
+) -> TypeGuard[LinkWithPropsSet[ProxyModel[GelModel], GelModel]]:
+    return isinstance(val, LinkWithPropsSet)
+
+
+def is_proxy(
+    val: object,
+) -> TypeGuard[ProxyModel[GelModel]]:
+    return isinstance(val, ProxyModel)
 
 
 def unwrap_proxy(val: GelModel) -> GelModel:
@@ -296,8 +382,9 @@ def unwrap_proxy_no_check(val: ProxyModel[GelModel]) -> GelModel:
     return ll_attr(val, "_p__obj__")  # type: ignore [no-any-return]
 
 
-def unwrap_dlist(val: Iterable[GelModel]) -> list[GelModel]:
-    return [unwrap_proxy(o) for o in val]
+def unwrap_dlist(val: Iterable[GelModel]) -> Iterable[GelModel]:
+    for o in val:
+        yield unwrap_proxy(o)
 
 
 def get_pointers(tp: type[GelSourceModel]) -> Iterable[GelPointerReflection]:
@@ -316,16 +403,17 @@ def get_pointers(tp: type[GelSourceModel]) -> Iterable[GelPointerReflection]:
     return ret
 
 
-def iter_graph(objs: Iterable[GelModel]) -> Iterable[GelModel]:
+def iter_graph(
+    objs: Iterable[GelModel],
+    id_tracker: IDTracker[GelModel, None],
+) -> Iterable[GelModel]:
     # Simple recursive traverse of a model
 
-    visited: IDTracker[GelModel, None] = IDTracker()
-
     def _traverse(obj: GelModel) -> Iterable[GelModel]:
-        if obj in visited:
+        if obj in id_tracker:
             return
 
-        visited.track(obj)
+        id_tracker.track(obj)
         yield obj
 
         for prop in get_pointers(type(obj)):
@@ -334,8 +422,8 @@ def iter_graph(objs: Iterable[GelModel]) -> Iterable[GelModel]:
                 # actual dependency graph, real links do)
                 continue
 
-            linked = getattr(obj, prop.name, _unset)
-            if linked is _unset or linked is None:
+            linked = model_attr(obj, prop.name, _unset)
+            if linked in _STOP_LINK_TRAVERSAL:
                 # If users mess-up with user-defined types and smoe
                 # of the data isn't fetched, we don't want to crash
                 # with an AttributeErorr, it's not critical here.
@@ -343,11 +431,11 @@ def iter_graph(objs: Iterable[GelModel]) -> Iterable[GelModel]:
                 continue
 
             if prop.cardinality.is_multi():
-                if is_proxy_link_list(linked):
+                if is_link_wprops_set(linked):
                     for proxy in linked._items:
                         yield from _traverse(unwrap_proxy_no_check(proxy))
                 else:
-                    assert is_link_dlist(linked)
+                    assert is_link_set(linked)
                     for lobj in linked._items:
                         yield from _traverse(lobj)
             else:
@@ -372,20 +460,19 @@ def get_linked_new_objects(obj: GelModel) -> Iterable[GelModel]:
             # optional links will be created via update operations later
             continue
 
-        linked = getattr(obj, prop.name, _unset)
-        if linked is _unset:
-            # See _get_all_deps for explanation.
+        linked = model_attr(obj, prop.name, _unset)
+        if linked in _STOP_LINK_TRAVERSAL:
             continue
 
         if prop.cardinality.is_multi():
-            if is_proxy_link_list(linked):
+            if is_link_wprops_set(linked):
                 for pmod in linked._items:
                     unwrapped = unwrap_proxy_no_check(pmod)
                     if unwrapped.__gel_new__ and unwrapped not in visited:
                         visited.track(unwrapped)
                         yield unwrapped
             else:
-                assert is_link_dlist(linked)
+                assert is_link_set(linked)
                 for mod in linked._items:
                     if mod.__gel_new__ and mod not in visited:
                         visited.track(mod)
@@ -445,37 +532,127 @@ def push_change(
     sched[change.name].append(change)
 
 
-def has_changes_recursive(
-    val: list[Any] | tuple[Any, ...] | AbstractTrackedList[Any],
+def multi_prop_has_changes_recursive(
+    val: list[Any] | tuple[Any, ...] | AbstractCollection[Any],
 ) -> bool:
     # We have to traverse the entire collection graph to check if
     # there are any changes in it. We can't just check the topmost
     # collection; e.g. consider you have a tuple of arrays -- the tuple
     # can't have changes on it's own, but one of the nested arrays can.
 
-    def walk(collection: Sequence[Any]) -> bool:
-        if isinstance(collection, AbstractTrackedList):
+    def walk(collection: Iterable[Any]) -> bool:
+        if isinstance(collection, AbstractCollection):
             if collection.__gel_has_changes__():
                 return True
+            iter_over = collection.unsafe_iter()
+        else:
+            iter_over = iter(collection)
 
-        for item in collection:
-            if isinstance(item, AbstractTrackedList):
+        for item in iter_over:
+            if isinstance(item, AbstractCollection):
                 if item.__gel_has_changes__():
                     return True
-            elif isinstance(item, (list, tuple)):
+
+            if isinstance(item, (list, tuple, AbstractCollection)):
                 if walk(item):
                     return True
+
         return False
 
     return walk(val)
 
 
-def make_plan(objs: Iterable[GelModel]) -> SavePlan:
+def multi_prop_commit_recursive(
+    val: list[Any] | tuple[Any, ...] | AbstractCollection[Any],
+    **commit_kwargs: Any,
+) -> None:
+    # Exists for the same reason as `multi_prop_has_changes_recursive`
+
+    def walk(collection: Iterable[Any]) -> None:
+        if isinstance(collection, AbstractCollection):
+            collection.__gel_commit__(**commit_kwargs)
+            iter_over = collection.unsafe_iter()
+        else:
+            iter_over = iter(collection)
+
+        for item in iter_over:
+            if isinstance(item, AbstractCollection):
+                item.__gel_commit__(**commit_kwargs)
+
+            if isinstance(item, (list, tuple, AbstractCollection)):
+                walk(item)
+
+    walk(val)
+
+
+def model_attr(
+    obj: AbstractGelSourceModel, name: str, default: Any = _missing_arg
+) -> Any:
+    dct = obj.__dict__
+    if default is _missing_arg:
+        return dct[name]
+    else:
+        return dct.get(name, default)
+
+
+def push_refetch(
+    obj: GelModel,
+    existing_objects: dict[uuid.UUID, GelModel | IDTracker[GelModel, None]],
+    refetch_ops: RefetchBatch,
+) -> None:
+    tp_obj: type[GelModel] = type(obj)
+    tp_pointers = tp_obj.__gel_reflection__.pointers
+    ref_shape = refetch_ops[tp_obj]
+    ref_shape.models.append(obj)
+    for field_name in obj.__pydantic_fields_set__:
+        if field_name in ref_shape.fields or field_name in _STOP_FIELDS_NO_ID:
+            continue
+
+        try:
+            ptr_info = tp_pointers[field_name]
+        except KeyError:
+            # ad-hoc computed
+            pass
+        else:
+            ref_shape.fields[field_name] = ptr_info
+
+    try:
+        elst = existing_objects[obj.id]
+    except KeyError:
+        existing_objects[obj.id] = obj
+    else:
+        if isinstance(elst, IDTracker):
+            elst.track(obj)
+        else:
+            # We'll have to track multiple GelModel instances with the same
+            # `.id` and thus equal to each other. We still don't want to have
+            # duplicates, so in (hopefully) rare cases when we have multiple
+            # objects with the same `.id`, we'll have to tell them apart by
+            # their Python address.
+            existing_objects[obj.id] = IDTracker([elst, obj])
+
+
+def make_plan(
+    objs: Iterable[GelModel],
+    /,
+    *,
+    refetch: bool,
+    warn_on_large_sync_set: bool,
+) -> SavePlan:
     insert_ops: ChangeBatch = []
     update_ops: ChangeBatch = []
+    refetch_ops: RefetchBatch = collections.defaultdict(RefetchShape)
+    removed_objects: list[Iterable[GelModel]] = []
 
-    for obj in iter_graph(objs):
-        pointers = get_pointers(type(obj))
+    iter_graph_tracker: IDTracker[GelModel, None] = IDTracker()
+    existing_objects: dict[
+        uuid.UUID, GelModel | IDTracker[GelModel, None]
+    ] = {}
+
+    for obj in iter_graph(objs, iter_graph_tracker):
+        tp_obj: type[GelModel] = type(obj)
+
+        pointers = get_pointers(tp_obj)
         is_new = obj.__gel_new__
 
         # Capture changes in *properties* and *single links*
@@ -483,6 +660,9 @@ def make_plan(objs: Iterable[GelModel]) -> SavePlan:
 
         requireds: FieldChangeMap = {}
         sched: FieldChangeLists = collections.defaultdict(list)
+
+        if refetch and not obj.__gel_new__:
+            push_refetch(obj, existing_objects, refetch_ops)
 
         for prop in pointers:
             # Skip computeds, we can't update them.
@@ -495,7 +675,7 @@ def make_plan(objs: Iterable[GelModel]) -> SavePlan:
                 # Since there was a change and we don't implement `del`,
                 # the attribute must be set
 
-                val = getattr(obj, prop.name)
+                val = model_attr(obj, prop.name)
                 if (
                     prop.kind is PointerKind.Property
                     and not prop.cardinality.is_multi()
@@ -534,8 +714,8 @@ def make_plan(objs: Iterable[GelModel]) -> SavePlan:
                     if prop.properties:
                         assert isinstance(val, ProxyModel)
                         link_prop_variant = bool(
-                            ll_attr(
-                                val, "__linkprops__"
+                            get_proxy_linkprops(
+                                val
                             ).__gel_get_changed_fields__()
                         )
 
@@ -544,10 +724,9 @@ def make_plan(objs: Iterable[GelModel]) -> SavePlan:
                         # Link with link properties
                         ptrs = get_pointers(type(val).__linkprops__)
 
+                        val_lp = get_proxy_linkprops(val)
                         props = {
-                            p.name: getattr(
-                                ll_attr(val, "__linkprops__"), p.name, None
-                            )
+                            p.name: model_attr(val_lp, p.name, None)
                             for p in ptrs
                         }
 
@@ -573,8 +752,8 @@ def make_plan(objs: Iterable[GelModel]) -> SavePlan:
                 prop.kind is PointerKind.Property
                 and prop.cardinality.is_multi()
             ):
-                val = getattr(obj, prop.name, _unset)
-                if val is None or val is _unset:
+                val = model_attr(obj, prop.name, _unset)
+                if val in _STOP_LINK_TRAVERSAL:
                     continue
 
                 assert is_prop_list(val)
@@ -608,10 +787,15 @@ def make_plan(objs: Iterable[GelModel]) -> SavePlan:
                 # will not be picked up by `__gel_get_changed_fields__()`
                 # as modifying them does not require touching their host
                 # GelModel instance. Check them for changes manually.
-                val = getattr(obj, prop.name, _unset)
-                if isinstance(
-                    val, (tuple, list, AbstractTrackedList)
-                ) and has_changes_recursive(val):
+                val = model_attr(obj, prop.name, _unset)
+                if val in _STOP_LINK_TRAVERSAL:
+                    continue
+
+                if (
+                    prop.mutable
+                    and isinstance(val, (tuple, list, AbstractTrackedList))
+                    and multi_prop_has_changes_recursive(val)
+                ):
                     push_change(
                         requireds,
                         sched,
@@ -628,11 +812,11 @@ def make_plan(objs: Iterable[GelModel]) -> SavePlan:
                 and not prop.cardinality.is_multi()
                 and prop.properties
             ):
-                val = getattr(obj, prop.name, _unset)
-                if val is _unset:
+                val = model_attr(obj, prop.name, _unset)
+                if val in _STOP_LINK_TRAVERSAL:
                     continue
                 assert isinstance(val, ProxyModel)
-                lprops = val.__linkprops__
+                lprops = get_proxy_linkprops(val)
                 if not lprops.__gel_changed_fields__:
                     continue
 
@@ -640,7 +824,7 @@ def make_plan(objs: Iterable[GelModel]) -> SavePlan:
 
                 ptrs = get_pointers(type(val).__linkprops__)
                 props = {
-                    p: getattr(lprops, p, None)
+                    p: model_attr(lprops, p, None)
                     for p in lprops.__gel_get_changed_fields__()
                 }
 
@@ -666,16 +850,16 @@ def make_plan(objs: Iterable[GelModel]) -> SavePlan:
 
             # Let's unwind multi link changes.
 
-            linked = getattr(obj, prop.name, _unset)
-            if linked is _unset:
+            linked = model_attr(obj, prop.name, _unset)
+            if linked is _unset or linked is DEFAULT_VALUE:
                 # The link wasn't fetched at all
                 continue
 
-            # `linked` should be either an empty DistinctList or
+            # `linked` should be either an empty LinkSet or
             # a non-empty one
             assert linked is not None
-            assert is_link_abstract_dlist(linked), (
-                f"`linked` is not dlist, it is {type(linked)}"
+            assert is_link_abstract_mutable_dlist(linked), (
+                f"{prop.name!r} is not dlist, it is {type(linked)}"
             )
 
             replace = linked.__gel_overwrite_data__
@@ -685,8 +869,8 @@ def make_plan(objs: Iterable[GelModel]) -> SavePlan:
                 # 'replace' is set for new collections only
                 assert not replace
 
-                # TODO: this should probably be handled in the DistinctList
-                # itself (GelModel and DistinctList are tightly coupled anyway)
+                # TODO: this should probably be handled in the LinkSet
+                # itself (GelModel and LinkSet are tightly coupled anyway)
                 removed = [
                     m
                     for m in unwrap_dlist(removed)
@@ -700,6 +884,9 @@ def make_plan(objs: Iterable[GelModel]) -> SavePlan:
                     )
 
                     push_change(requireds, sched, m_rem)
+
+                    if refetch:
+                        removed_objects.append(removed)
 
             # __gel_get_added__() will return *new* links, but we also
             # have to take care about link property updates on *existing*
@@ -727,7 +914,7 @@ def make_plan(objs: Iterable[GelModel]) -> SavePlan:
                     if el in added_index:
                         continue
 
-                    lp = ll_attr(el, "__linkprops__")
+                    lp = get_proxy_linkprops(el)
                     if lp.__gel_get_changed_fields__():
                         added.append(el)
 
@@ -751,13 +938,13 @@ def make_plan(objs: Iterable[GelModel]) -> SavePlan:
 
             # Simple case -- no link props!
             if not prop.properties or all(
-                not ll_attr(link, "__linkprops__").__gel_get_changed_fields__()
+                not get_proxy_linkprops(link).__gel_get_changed_fields__()
                 for link in added_proxies
             ):
                 mch = MultiLinkAdd(
                     name=prop.name,
                     info=prop,
-                    added=unwrap_dlist(added),
+                    added=list(unwrap_dlist(added)),
                     replace=replace,
                 )
                 push_change(requireds, sched, mch)
@@ -767,7 +954,7 @@ def make_plan(objs: Iterable[GelModel]) -> SavePlan:
             #
             # First, we iterate through the list of added new objects
             # to the list. All of them should be ProxyModels
-            # (as we use ProxyDistinctList for links with props.)
+            # (as we use LinkWithPropsSet for links with props.)
             # Our goal is to segregate different combinations of
             # set link properties into separate groups.
             link_tp = type(added_proxies[0])
@@ -777,17 +964,16 @@ def make_plan(objs: Iterable[GelModel]) -> SavePlan:
             mch = MultiLinkAdd(
                 name=prop.name,
                 info=prop,
-                added=unwrap_dlist(added),
+                added=list(unwrap_dlist(added)),
                 added_props=[
                     {
-                        p: getattr(ll_attr(link, "__linkprops__"), p, None)
-                        for p in (
-                            ll_attr(
-                                link, "__linkprops__"
-                            ).__gel_get_changed_fields__()
-                        )
+                        p: model_attr(link_lp, p, None)
+                        for p in (link_lp.__gel_get_changed_fields__())
                     }
-                    for link in cast("list[ProxyModel[GelModel]]", added)
+                    for link_lp in (
+                        get_proxy_linkprops(link)
+                        for link in cast("list[ProxyModel[GelModel]]", added)
+                    )
                 ],
                 props_info={p.name: p for p in props_info},
                 replace=replace,
@@ -824,6 +1010,19 @@ def make_plan(objs: Iterable[GelModel]) -> SavePlan:
             change = ModelChange(model=obj, fields=shift_dict_list(sched))
             update_ops.append(change)
 
+    if refetch:
+        # If we are refetching, we also want to traverse objects in
+        # the sync() graph that are on the way out of the graph, but
+        # are still part of this sync() call.
+        for removed in removed_objects:
+            for m in removed:
+                if m not in iter_graph_tracker:
+                    # `iter_graph_tracker` was used in the big loop above;
+                    # now we're using it to make sure we don't submit
+                    # removed objects to refetch more than once.
+                    iter_graph_tracker.track(m)
+                    push_refetch(m, existing_objects, refetch_ops)
+
     # Plan batch inserts of new objects -- we have to insert objects
     # in batches respecting their required cross-dependencies.
 
@@ -854,22 +1053,47 @@ def make_plan(objs: Iterable[GelModel]) -> SavePlan:
         inserted.track_many(ready)
         remaining_to_make.untrack_many(ready)
 
-    return SavePlan(insert_batches, update_ops)
+    if (
+        refetch
+        and warn_on_large_sync_set
+        and len(inserted) > SYNC_NEW_THRESHOLD
+    ):
+        _warn_on_large_sync("new", stacklevel=0, num_objects=len(inserted))
+
+    return SavePlan(
+        insert_batches,
+        update_ops,
+        refetch_ops,
+        existing_objects,
+    )
 
 
 def make_save_executor_constructor(
     objs: tuple[GelModel, ...],
     *,
     refetch: bool,
+    warn_on_large_sync_set: bool = False,
     save_postcheck: bool = False,
 ) -> Callable[[], SaveExecutor]:
-    create_batches, updates = make_plan(objs)
+    (
+        create_batches,
+        updates,
+        refetch_batch,
+        existing_objects,
+    ) = make_plan(
+        objs,
+        refetch=refetch,
+        warn_on_large_sync_set=warn_on_large_sync_set,
+    )
     return lambda: SaveExecutor(
         objs=objs,
         create_batches=create_batches,
         updates=updates,
+        refetch_batch=refetch_batch,
+        existing_objects=existing_objects,
         refetch=refetch,
         save_postcheck=save_postcheck,
+        warn_on_large_sync_set=warn_on_large_sync_set,
     )
 
 
@@ -904,24 +1128,154 @@ class QueryBatch:
     insert: bool
 
     def feed_db_data(self, obj_data: Iterable[Any]) -> None:
-        if not self.executor.refetch:
-            # in this case `obj_data` is a list of UUIDs
-            if not self.insert:
-                return
-            for obj_upd, change in zip(obj_data, self.changes, strict=True):
-                self.executor.object_ids[id(change.model)] = obj_upd
-            return
+        match self.executor.refetch, self.insert:
+            case False, True:
+                # in this case `obj_data` is a list of UUIDs
+                for obj_upd, change in zip(
+                    obj_data, self.changes, strict=True
+                ):
+                    self.executor.new_object_ids[id(change.model)] = obj_upd
 
-        # In this case `obj_data` is a list of GelModel instances
-        # unpacked from `update` and `insert` queries generated by `save()`,
-        # as they're wrapped in `select {*}` to refetch the data.
-        for obj_upd, change in zip(obj_data, self.changes, strict=True):
-            for field in obj_upd.__dict__:
-                if field in {"id", "__tid__"}:
+            case True, True:
+                # in this case `obj_data` is a list of GelModel instances
+                for obj_upd, change in zip(
+                    obj_data, self.changes, strict=True
+                ):
+                    for field in obj_upd.__dict__:
+                        if field == "id":
+                            continue
+                        change.model.__dict__[field] = obj_upd.__dict__[field]
+                        change.model.__pydantic_fields_set__.add(field)
+
+                    self.executor.new_object_ids[id(change.model)] = obj_upd.id
+                    self.executor.new_objects[obj_upd.id] = obj_upd
+
+            case _, _:
+                # TODO: Implement a check that ids from updates
+                # match 'changes'?
+                pass
+
+
+# Refetching links will only refetch linked objects which are already in the
+# link, or are in the sync objects.
+#
+# A refetched object will therefore need, per link:
+# - whether that link is being being refetched, and if so,
+# - the objects already in the link.
+#
+# The order of links is kept consistent with the refetch shape.
+RefetchSpecEntry = TypeAliasType(
+    "RefetchSpecEntry",
+    tuple[
+        uuid.UUID,  # Refetched obj id
+        list[
+            tuple[
+                bool,  # Whether the link is being refetched
+                list[uuid.UUID],  # Objects in the link
+            ]
+        ],
+    ],
+)
+
+
+@dataclasses.dataclass(kw_only=True, frozen=True)
+class QueryRefetchArgs:
+    spec: list[RefetchSpecEntry]
+    new: list[uuid.UUID]
+    existing: list[uuid.UUID]
+
+
+@_struct
+class QueryRefetch:
+    executor: SaveExecutor
+    query: TypeWrapper[type[GelModel]]
+    args: QueryRefetchArgs
+    shape: RefetchShape
+
+    def feed_db_data(self, obj_data: Iterable[Any]) -> None:
+        for obj in obj_data:
+            obj_dict = obj.__dict__
+            gel_id: uuid.UUID = obj.id
+
+            model_or_models = self.executor.existing_objects[gel_id]
+            models: Iterable[GelModel]
+            if isinstance(model_or_models, IDTracker):
+                # In some situations we might have multiple objects with
+                # the same `.id` - in this case we want to deeep copy mutable
+                # `multi prop` and arrays in `single props`.
+                models = model_or_models
+                deepcopy = copy.deepcopy
+            else:
+                models = (model_or_models,)
+                # But when we have a single object for the given UUID
+                # (the most common case) we don't need to copy anything
+                # and can just use the collection returned by the codec.
+                # `obj` is essentially a throwaway object that will be
+                # GCed after sync().
+                deepcopy = _identity_func  # type: ignore [assignment]
+
+            for field, new_value in obj_dict.items():
+                if field in _STOP_FIELDS:
                     continue
-                change.model.__dict__[field] = obj_upd.__dict__[field]
-            if self.insert:
-                self.executor.object_ids[id(change.model)] = obj_upd.id
+
+                shape_field = self.shape.fields[field]
+                is_multi = shape_field.cardinality.is_multi()
+                is_link = shape_field.kind.is_link()
+
+                for model in models:
+                    assert model.id == gel_id
+                    model_dict = model.__dict__
+
+                    model.__pydantic_fields_set__.add(field)
+
+                    if is_link and is_multi:
+                        link = model_dict.get(field)
+                        if link is None:
+                            # This instance never had this link, but
+                            # now it will.
+                            # TODO: this needs to be optimized.
+                            link = copy.copy(new_value)
+                            model_dict[field] = link
+                            link.__gel_replace_with_empty__()
+
+                        assert is_link_abstract_dlist(link)
+                        assert type(new_value) is type(link)
+                        model_dict[field] = link.__gel_reconcile__(
+                            # no need to copy `new_value`,
+                            # it will only be iterated over
+                            new_value,
+                            self.executor.existing_objects,  # type: ignore [arg-type]
+                            self.executor.new_objects,  # type: ignore [arg-type]
+                        )
+
+                    elif is_link:
+                        if shape_field.properties:
+                            model_dict[field] = reconcile_proxy_link(
+                                existing=model_dict.get(field),
+                                refetched=new_value,  # pyright: ignore [reportArgumentType]
+                                existing_objects=self.executor.existing_objects,  # type: ignore [arg-type]
+                                new_objects=self.executor.new_objects,
+                            )
+                        else:
+                            model_dict[field] = reconcile_link(
+                                existing=model_dict.get(field),
+                                refetched=new_value,
+                                existing_objects=self.executor.existing_objects,  # type: ignore [arg-type]
+                                new_objects=self.executor.new_objects,
+                            )
+
+                    elif not is_link:
+                        # could be a multi prop, could be a single prop
+                        # with an array value
+                        if shape_field.mutable:
+                            model_dict[field] = deepcopy(new_value)
+                        else:
+                            model_dict[field] = new_value
+
+            # Let's be extra cautious and help GC a bit here. `obj` can
+            # have recursive references to other objects via links and
+            # computed backlinks.
+            obj.__dict__.clear()
 
 
 @_struct
@@ -938,13 +1292,221 @@ class SaveExecutor:
     objs: tuple[GelModel, ...]
     create_batches: list[ChangeBatch]
     updates: ChangeBatch
+    refetch_batch: RefetchBatch
+    existing_objects: dict[uuid.UUID, GelModel | IDTracker[GelModel, None]]
     refetch: bool
     save_postcheck: bool
+    warn_on_large_sync_set: bool
 
-    object_ids: dict[int, uuid.UUID] = dataclasses.field(init=False)
+    new_object_ids: dict[int, uuid.UUID] = dataclasses.field(init=False)
+    new_objects: dict[uuid.UUID, GelModel] = dataclasses.field(init=False)
 
     def __post_init__(self) -> None:
-        self.object_ids = {}
+        self.new_object_ids = {}
+        if self.refetch:
+            # Let it crash with AttributeError if we try to access this
+            # without refetch -- that should be caught by tests.
+            self.new_objects = {}
+
+    def __enter__(self) -> Self:
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_value: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> None:
+        try:
+            self._commit()
+        finally:
+            # Make things GC faster
+            self.objs = None  # type: ignore [assignment]
+            self.create_batches = None  # type: ignore [assignment]
+            self.updates = None  # type: ignore [assignment]
+            self.refetch_batch = None  # type: ignore [assignment]
+            self.new_object_ids = None  # type: ignore [assignment]
+            self.new_objects = None  # type: ignore [assignment]
+
+    def _compile_refetch(
+        self,
+    ) -> list[
+        tuple[
+            type[GelModel],
+            TypeWrapper[type[GelModel]],
+            list[RefetchSpecEntry],
+            RefetchShape,
+        ]
+    ]:
+        ret = []
+
+        total_refetch_obj_count = 0
+
+        for tp, shape in self.refetch_batch.items():
+            select_shape: list[str] = []
+
+            link_arg_order: list[str] = []
+
+            total_refetch_obj_count += len(shape.models)
+
+            for ptr in shape.fields.values():
+                if ptr.kind.is_link():
+                    link_arg_order.append(ptr.name)
+                    link_num = len(link_arg_order) - 1
+
+                    if ptr.properties:
+                        props = ",".join(
+                            f"@{quote_ident(p)}" for p in ptr.properties
+                        )
+                        props = f"{{ {props} }}"
+                    else:
+                        props = ""
+
+                    maybe_assert = maybe_assert_end = ""
+
+                    if not ptr.cardinality.is_optional():
+                        maybe_assert = "(select assert_exists("
+                        maybe_assert_end = "))"
+
+                    computed_filter = ""
+                    if ptr.computed:
+                        computed_filter = "or .id in __existing"
+
+                    # The logic of the `filter` clause is:
+                    # - first test if the link was fetched for this object
+                    #   at all - if not - we don't need to update it
+                    # - if the link was fetched for this particular GelModel --
+                    #   filter it by all existing objects prior to sync() in
+                    #   this link PLUS all new objects that were inserted
+                    #   during sync().
+                    select_shape.append(f"""
+                        {quote_ident(ptr.name)} := {maybe_assert}(
+                            with
+                                __link := __obj_data.1[{link_num}]
+                            select .{quote_ident(ptr.name)} {props}
+                            filter __link.0 and (
+                                .id in array_unpack(__link.1)
+                                or .id in __new
+                                {computed_filter}
+                            )
+                        ){maybe_assert_end}
+                    """)
+
+                else:
+                    select_shape.append(quote_ident(ptr.name))
+
+            obj_links_all: dict[uuid.UUID, dict[str, list[uuid.UUID]]] = (
+                collections.defaultdict(dict)
+            )
+            for obj in shape.models:
+                link_ids = obj_links_all[obj.id]
+                for lname in link_arg_order:
+                    if lname not in obj.__pydantic_fields_set__:
+                        # `model_attr` below this 'if' will always succeed
+                        continue
+
+                    obj_link_ids = link_ids.get(lname)
+                    if obj_link_ids is None:
+                        link_ids[lname] = obj_link_ids = []
+
+                    ptr = shape.fields[lname]
+                    if ptr.cardinality.is_multi():
+                        m_link: AbstractCollection[GelModel] = model_attr(
+                            obj, lname
+                        )
+                        if ptr.computed:
+                            # m_link will be a tuple.
+                            m_iter = iter(m_link)
+                        else:
+                            # m_link will be an AbstractCollection.
+                            m_iter = m_link.unsafe_iter()
+
+                        if ptr.properties:
+                            obj_link_ids.extend(
+                                self._get_id(unwrap_proxy(sub))
+                                for sub in m_iter
+                            )
+                        else:
+                            obj_link_ids.extend(
+                                self._get_id(unwrap_proxy(sub))
+                                for sub in m_iter
+                            )
+                    else:
+                        s_link: GelModel = model_attr(obj, lname)
+                        if ptr.properties:
+                            obj_link_ids.append(
+                                self._get_id(unwrap_proxy(s_link))
+                            )
+                        else:
+                            obj_link_ids.append(self._get_id(s_link))
+
+            spec_arg: list[RefetchSpecEntry] = [
+                (
+                    obj_id,
+                    [
+                        (False, [])
+                        if (li := link_ids.get(lname)) is None
+                        else (True, li)
+                        for lname in link_arg_order
+                    ],
+                )
+                for obj_id, link_ids in obj_links_all.items()
+            ]
+
+            tp_ql_name = tp.__gel_reflection__.name.as_quoted_schema_name()
+
+            query = f"""
+                with
+                    __new := std::array_unpack(<array<std::uuid>>$new),
+                    __spec := <array<tuple<
+                        std::uuid,
+                        array<tuple<std::bool,array<std::uuid>>>
+                    >>>$spec,
+                    __existing := std::array_unpack(
+                        <array<std::uuid>>$existing
+                    )
+
+                for __obj_data in std::array_unpack(__spec) union (
+                    select {tp_ql_name} {{
+                        {",".join(select_shape)}
+                    }}
+                    filter .id = __obj_data.0
+                )
+            """
+
+            ret.append((tp, TypeWrapper(tp, query), spec_arg, shape))
+
+        if (
+            self.refetch
+            and self.warn_on_large_sync_set
+            and total_refetch_obj_count > SYNC_REFETCH_THRESHOLD
+        ):
+            _warn_on_large_sync(
+                "refetch",
+                stacklevel=0,
+                num_objects=total_refetch_obj_count,
+            )
+
+        return ret  # type: ignore [return-value]
+
+    def get_refetch_queries(
+        self,
+    ) -> list[QueryRefetch]:
+        new_ids = list(self.new_object_ids.values())
+
+        return [
+            QueryRefetch(
+                executor=self,
+                query=q[1],
+                args=QueryRefetchArgs(
+                    spec=q[2],
+                    new=new_ids,
+                    existing=list(self.existing_objects),
+                ),
+                shape=q[3],
+            )
+            for q in self._compile_refetch()
+        ]
 
     def _compile_batch(
         self, batch: ChangeBatch, /, *, for_insert: bool
@@ -960,7 +1522,7 @@ class SaveExecutor:
         # Queries must be independent of each other within the same
         # ChangeBatch, so we can sort them to group queries.
         compiled.sort(
-            key=lambda x: (x[0].__gel_reflection__.id, x[1].single_query)
+            key=lambda x: (x[0].__gel_reflection__.name, x[1].single_query)
         )
 
         icomp = iter(compiled)
@@ -997,7 +1559,7 @@ class SaveExecutor:
         if self.updates:
             yield self._compile_batch(self.updates, for_insert=False)
 
-    def commit(self) -> None:
+    def _commit(self) -> None:
         visited: IDTracker[GelModel, None] = IDTracker()
 
         def _traverse(obj: GelModel) -> None:
@@ -1007,7 +1569,7 @@ class SaveExecutor:
             assert not isinstance(obj, ProxyModel)
 
             visited.track(obj)
-            obj.__gel_commit__(self.object_ids.get(id(obj)))
+            obj.__gel_commit__(new_id=self.new_object_ids.get(id(obj)))
 
             for prop in get_pointers(type(obj)):
                 if prop.computed:
@@ -1018,8 +1580,8 @@ class SaveExecutor:
                     #     multi links
                     continue
 
-                linked = getattr(obj, prop.name, _unset)
-                if linked is _unset or linked is None:
+                linked = model_attr(obj, prop.name, _unset)
+                if linked in _STOP_LINK_TRAVERSAL:
                     # If users mess-up with user-defined types and some
                     # of the data isn't fetched, we don't want to crash
                     # with an AttributeErorr, it's not critical here.
@@ -1028,20 +1590,18 @@ class SaveExecutor:
 
                 if prop.kind is PointerKind.Link:
                     if prop.cardinality.is_multi():
-                        if is_proxy_link_list(linked):
+                        if is_link_wprops_set(linked):
                             for proxy in linked._items:
-                                ll_attr(
-                                    proxy, "__linkprops__"
-                                ).__gel_commit__()
+                                get_proxy_linkprops(proxy).__gel_commit__()
                                 _traverse(unwrap_proxy_no_check(proxy))
                         else:
-                            assert is_link_dlist(linked)
+                            assert is_link_set(linked)
                             for model in linked._items:
                                 _traverse(model)
                         linked.__gel_commit__()
                     else:
                         if isinstance(linked, ProxyModel):
-                            ll_attr(linked, "__linkprops__").__gel_commit__()
+                            get_proxy_linkprops(linked).__gel_commit__()
                             _traverse(unwrap_proxy_no_check(linked))
                         else:
                             _traverse(cast("GelModel", linked))
@@ -1050,7 +1610,20 @@ class SaveExecutor:
                     assert prop.kind is PointerKind.Property
                     if prop.cardinality.is_multi():
                         assert is_prop_list(linked)
-                        linked.__gel_commit__()
+
+                        if prop.mutable and not self.refetch:
+                            # If we're not refetching, we can't use
+                            # nested tracked lists will not get "committed"
+                            # (nothing will call "__gel_commit__" on them),
+                            # so we have to commit them manually.
+                            multi_prop_commit_recursive(linked)
+                        else:
+                            linked.__gel_commit__()
+                    elif prop.mutable and not self.refetch:
+                        # Single property can be an array -- in this case
+                        # we still need to commit it recursively;
+                        # see the above comment.
+                        multi_prop_commit_recursive(linked)
 
         for o in self.objs:
             _traverse(o)
@@ -1089,19 +1662,19 @@ class SaveExecutor:
                 raise ValueError(f"{path} has __gel_new__ set")
 
             for prop in get_pointers(type(obj)):
-                val = getattr(obj, prop.name, _unset)
-                if val is _unset or val is None:
+                val = model_attr(obj, prop.name, _unset)
+                if val in _STOP_LINK_TRAVERSAL:
                     continue
 
                 link_path = path / prop.name
 
                 if prop.kind is PointerKind.Link:
                     if prop.cardinality.is_multi():
-                        if is_proxy_link_list(val):
+                        if is_link_wprops_set(val):
                             val.__gel_post_commit_check__(link_path)
                             for i, proxy in enumerate(val._items):
                                 list_path = link_path / str(i)
-                                lps = proxy.__linkprops__
+                                lps = get_proxy_linkprops(proxy)
                                 if lps.__gel_get_changed_fields__():
                                     raise ValueError(
                                         f"{list_path} has changed link props "
@@ -1109,15 +1682,17 @@ class SaveExecutor:
                                     )
                                 unwrapped = unwrap_proxy_no_check(proxy)
                                 _check_recursive(unwrapped, list_path)
-                        else:
-                            assert is_link_dlist(val)
+                        elif not prop.computed:
+                            assert is_link_set(val)
                             val.__gel_post_commit_check__(link_path)
                             for i, model in enumerate(val._items):
                                 list_path = link_path / str(i)
                                 _check_recursive(model, list_path)
                     else:
                         if isinstance(val, ProxyModel):
-                            if val.__linkprops__.__gel_get_changed_fields__():
+                            if get_proxy_linkprops(
+                                val
+                            ).__gel_get_changed_fields__():
                                 raise ValueError(
                                     f"{link_path} has changed link props "
                                     f"after save"
@@ -1130,7 +1705,7 @@ class SaveExecutor:
 
                 else:
                     assert prop.kind is PointerKind.Property
-                    if prop.cardinality.is_multi():
+                    if prop.cardinality.is_multi() and not prop.computed:
                         assert is_prop_list(val)
                         val.__gel_post_commit_check__(link_path)
 
@@ -1139,18 +1714,26 @@ class SaveExecutor:
 
         # Final check: make sure that the save plan is empty
         # in case we've missed something in `_check_recursive()`.
-        create_batches, updates = make_plan(self.objs)
+        create_batches, updates, _, _ = make_plan(
+            self.objs,
+            refetch=self.refetch,
+            warn_on_large_sync_set=False,
+        )
         if create_batches or updates:
             raise ValueError("non-empty save plan after save()")
 
     def _get_id(self, obj: GelModel) -> uuid.UUID:
         if obj.__gel_new__:
-            return self.object_ids[id(obj)]
+            return self.new_object_ids[id(obj)]
         else:
-            return obj.id
+            return obj.id  # type: ignore [no-any-return]
 
     def _compile_change(
-        self, change: ModelChange, /, *, for_insert: bool
+        self,
+        change: ModelChange,
+        /,
+        *,
+        for_insert: bool,
     ) -> CompiledQuery:
         shape_parts: list[str] = []
 
@@ -1532,7 +2115,7 @@ class SaveExecutor:
         shape = ", ".join(shape_parts)
         query: str
 
-        select_shape = "{*}" if self.refetch else ".id"
+        select_shape = "{*}" if self.refetch and for_insert else ".id"
 
         if for_insert:
             if shape:
@@ -1606,3 +2189,43 @@ class SaveExecutor:
             arg=ret_args,
             change=change,
         )
+
+
+def _warn_on_large_sync(
+    case: Literal["new", "refetch"],
+    *,
+    stacklevel: int,
+    num_objects: int,
+) -> None:
+    warning_body = (
+        "* `save()` is much faster than `sync()` if you do not need "
+        "to re-fetch all objects from the database\n\n"
+        "* in application code you usually want to use `sync()` to make "
+        "sure your objects are up to date\n\n"
+        "* for data loading scripts `save()` is often preferrable "
+        "over `sync()`\n\n"
+        "This warning can be silenced by passing "
+        "`warn_on_large_sync=False` to `sync()`"
+    )
+
+    match case:
+        case "new":
+            warnings.warn(
+                f"`sync()` is creating {num_objects} objects (the threshold "
+                f"for this warning is {SYNC_NEW_THRESHOLD}), "
+                f"consider the following:\n\n"
+                f"{warning_body}",
+                UserWarning,
+                stacklevel=stacklevel + SYNC_BASE_STACKLEVEL,
+            )
+        case "refetch":
+            warnings.warn(
+                f"`sync()` is refetching {num_objects} objects (the threshold "
+                f"for this warning is {SYNC_REFETCH_THRESHOLD}), "
+                f"consider the following:\n\n"
+                f"{warning_body}",
+                UserWarning,
+                stacklevel=stacklevel + SYNC_BASE_STACKLEVEL,
+            )
+        case _:
+            raise AssertionError("unreachable")

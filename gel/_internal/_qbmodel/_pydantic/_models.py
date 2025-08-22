@@ -50,11 +50,7 @@ from . import _utils as _pydantic_utils
 from . import _fields
 
 if TYPE_CHECKING:
-    from collections.abc import (
-        Iterator,
-        Mapping,
-        Set as AbstractSet,
-    )
+    from collections.abc import Mapping
     from gel._internal._qbmodel._abstract import GelType
 
 
@@ -78,31 +74,30 @@ class GelModelMeta(
         bases: tuple[type[Any], ...],
         namespace: dict[str, Any],
         *,
-        __gel_type_id__: uuid.UUID | None = None,
-        __gel_variant__: str | None = None,
+        __gel_shape__: str | None = None,
         __gel_root_class__: bool = False,
         **kwargs: Any,
     ) -> GelModelMeta:
-        if __gel_variant__ is None:
+        if __gel_shape__ is None:
             # This is to make the top-level reflection of user-defined
-            # types look less noisy. `__gel_variant__` is inferred from
-            # the top-level __gel_default_variant__ attribute of the module
+            # types look less noisy. `__gel_shape__` is inferred from
+            # the top-level __gel_default_shape__ attribute of the module
             # where the class is defined.
             #
             # This adds a negligible overhead to class creation, but:
             # we only do this for user-defined schema (std has explicit
-            # __gel_variant__ class argument everywhere), and there shouldn't
+            # __gel_shape__ class argument everywhere), and there shouldn't
             # be so many of user-defined Python subclasses for this to become
             # an issue.
             module = namespace.get("__module__")
             if (
                 module
                 and (mod := sys.modules.get(module))
-                and (v := getattr(mod, "__gel_default_variant__", _unset))
+                and (v := getattr(mod, "__gel_default_shape__", _unset))
                 is not _unset
             ):
                 assert isinstance(v, str)
-                __gel_variant__ = v
+                __gel_shape__ = v
 
         with warnings.catch_warnings():
             # Make pydantic shut up about attribute redefinition.
@@ -116,7 +111,7 @@ class GelModelMeta(
                     mcls,
                     name,
                     bases,
-                    namespace | {"__gel_variant__": __gel_variant__},
+                    namespace | {"__gel_shape__": __gel_shape__},
                     **kwargs,
                 ),
             )
@@ -126,6 +121,10 @@ class GelModelMeta(
         cls.__pydantic_decorators__.computed_fields = {
             **cls.__gel_cached_decorator_fields__,
             **cls.__pydantic_decorators__.computed_fields,
+        }
+        cls.__pydantic_computed_fields__ = {
+            k: v.info
+            for k, v in cls.__pydantic_decorators__.computed_fields.items()
         }
         del cls.__gel_cached_decorator_fields__
 
@@ -173,10 +172,16 @@ class GelModelMeta(
                 )
                 setattr(cls, fname, desc)
 
-        if __gel_type_id__ is not None:
-            mcls.register_class(__gel_type_id__, cls)
+        reflection = cls.__gel_reflection__
+        if (tname := getattr(reflection, "name", None)) is not None:
+            mcls.__gel_class_registry__[tname] = cls
 
-        cls.__gel_variant__ = __gel_variant__
+        cls.__gel_shape__ = __gel_shape__
+
+        if not __gel_root_class__:
+            cls.__gel_id_shape__ = _determine_gel_id_shape(cls)
+        else:
+            cls.__gel_id_shape__ = None
 
         return cls
 
@@ -254,20 +259,19 @@ class GelModelMeta(
             # the metaclass, right after the call to
             # `super().__new__()`.
             assert isinstance(value, _decorators.DecoratorInfos)
-            ll_type_setattr(
-                cls, "__gel_cached_decorator_fields__", value.computed_fields
-            )
+            # Pydantic sets __pydantic_decorators__ at least twice
+            # in __new__ (to the same value).
+            if not hasattr(cls, "__gel_cached_decorator_fields__"):
+                ll_type_setattr(
+                    cls,
+                    "__gel_cached_decorator_fields__",
+                    value.computed_fields,
+                )
             value.computed_fields = {}
             ll_type_setattr(cls, name, value)
 
         else:
             super().__setattr__(name, value)
-
-    # Splat qb protocol
-    def __iter__(cls) -> Iterator[_qb.ShapeElement]:  # noqa: N805
-        cls = cast("type[GelModel]", cls)
-        shape = _qb.get_object_type_splat(cls)
-        return iter(shape.elements)
 
     def __gel_pointers__(cls) -> Mapping[str, type[GelType]]:  # noqa: N805
         cls = cast("type[GelModel]", cls)
@@ -305,9 +309,8 @@ def _resolve_pointers(cls: type[GelSourceModel]) -> dict[str, type[GelType]]:
     ):
         descriptor = inspect.getattr_static(cls, ptr_name)
         if not isinstance(descriptor, _abstract.ModelFieldDescriptor):
-            raise AssertionError(
-                f"'{cls}.{ptr_name}' is not a ModelFieldDescriptor"
-            )
+            # This is a regular Pydantic computed_field
+            continue
         t = descriptor.get_resolved_type()
         if t is None:
             raise TypeError(
@@ -333,6 +336,36 @@ def _resolve_pointers(cls: type[GelSourceModel]) -> dict[str, type[GelType]]:
         pointers[ptr_name] = t
 
     return pointers
+
+
+_ID_SHAPES = frozenset(("NoId", "OptionalId", "RequiredId"))
+
+
+def _determine_gel_id_shape(cls: type[GelModel]) -> str | None:
+    if cls.__gel_shape__ == "Base":
+        return None
+    elif cls.__gel_shape__ in _ID_SHAPES:
+        return cls.__gel_shape__
+    else:
+        id_shape: tuple[str, str] | None = None
+        for base in cls.__bases__:
+            base_id_shape = getattr(base, "__gel_id_shape__", None)
+            if base_id_shape is not None:
+                if id_shape is None:
+                    id_shape = (base_id_shape, base.__qualname__)
+                elif id_shape[0] != base_id_shape:
+                    raise TypeError(
+                        f"cannot inherit from {id_shape[1]} and "
+                        f"{base.__qualname__} simultaneously: "
+                        f"{id_shape[1]} is a {id_shape[0]} shape while "
+                        f"{base.__qualname__} is a {base_id_shape} shape "
+                        f"which are mutually incompatible"
+                    )
+
+        if id_shape is None:
+            return None
+        else:
+            return id_shape[0]
 
 
 _NO_DEFAULT = frozenset({pydantic_core.PydanticUndefined, None})
@@ -429,51 +462,62 @@ def _process_pydantic_fields(
             unpack_type_aliases="lenient",
         )
 
+        pointer_info: _fields.PointerInfo | None = None
         if _typing_inspect.is_generic_type_alias(field_anno):
-            field_infos = [
-                a
-                for a in anno.metadata
-                if isinstance(a, pydantic.fields.FieldInfo)
-            ]
-            if field_infos:
-                overrides["annotation"] = field_anno
-        else:
-            field_infos = []
+            for metadata in anno.metadata:
+                if isinstance(metadata, _fields.PointerInfo):
+                    if pointer_info is not None:
+                        raise TypeError(
+                            f"found multiple instances of PointerInfo in "
+                            f"{cls.__qualname__}.{fn} annotation"
+                        )
+                    pointer_info = metadata
+
+        if pointer_info is None:
+            # This is not a Gel model pointer field
+            new_fields[fn] = field
+            continue
 
         fdef_is_desc = _qb.is_pointer_descriptor(fdef)
         if (
             ptr is not None
             and ptr.has_default
             and fn != "id"
-            and (fdef_is_desc or fdef in _NO_DEFAULT)
-            and all(
-                fi.default in _NO_DEFAULT and fi.default_factory is None
-                for fi in field_infos
+            and (
+                fdef_is_desc
+                or fdef in _NO_DEFAULT
+                or fdef is _abstract.DEFAULT_VALUE
             )
+            and pointer_info.default in _NO_DEFAULT
+            and pointer_info.default_factory is None
         ):
             # This field's default must come from the database --
             # `db.save()` must not set it to pydantic's default:
             # it must not include the field in the INSERT statement
             # if the field was not initialized with a value explicitly.
             overrides["default"] = _abstract.DEFAULT_VALUE
-        elif fdef_is_desc:
+        else:
             # ... is a special Pydantic marker meaning "the field is required
             # but has no default"
-            has_factory = any(
-                fi.default_factory is not None for fi in field_infos
-            )
-            is_ptr_optional = ptr is not None and ptr.cardinality.is_optional()
-            overrides["default"] = (
-                None if is_ptr_optional and not has_factory else ...
-            )
+            if pointer_info.default is not pydantic_core.PydanticUndefined:
+                overrides["default"] = pointer_info.default
+            else:
+                has_factory = (
+                    field.default_factory is not None
+                    or pointer_info.default_factory is not None
+                )
+                is_ptr_optional = (
+                    ptr is not None and ptr.cardinality.is_optional()
+                )
+                overrides["default"] = (
+                    None if is_ptr_optional and not has_factory else ...
+                )
 
-        if (
-            cls.__gel_variant__ is None
-            and ptr is None
-            and fn != "__linkprops__"
+        # This is a schema computed or an ad-hoc computed pointer in a
+        # user-defined variant.
+        if pointer_info.computed or (
+            cls.__gel_shape__ is None and ptr is None and fn != "__linkprops__"
         ):
-            # This is an ad-hoc computed pointer in a user-defined variant.
-
             # Regarding `fn != "__linkprops__"`: see MergedModelMeta --
             # it renames `linkprops____` to `__linkprops__` to circumvent
             # Pydantic's restriction on fields starting with `_`.
@@ -483,23 +527,21 @@ def _process_pydantic_fields(
             overrides["init"] = False
             overrides["frozen"] = True
 
+        if pointer_info.default_factory is not None:
+            overrides["default_factory"] = pointer_info.default_factory
+
+        if pointer_info.validate_default is not None:
+            overrides["validate_default"] = pointer_info.validate_default
+
         if overrides:
             field_attrs = dict(field._attributes_set)
             for override in overrides:
                 field_attrs.pop(override, None)
 
-            if field_infos:
-                merged = pydantic.fields.FieldInfo.merge_field_infos(
-                    field,
-                    *field_infos,
-                    **overrides,
-                )
-            else:
-                merged = pydantic.fields.FieldInfo(
-                    **field_attrs,  # type: ignore [arg-type]
-                    **overrides,
-                )
-            new_fields[fn] = merged
+            new_fields[fn] = pydantic.fields.FieldInfo(
+                **field_attrs,  # type: ignore [arg-type]
+                **overrides,
+            )
         else:
             new_fields[fn] = field
 
@@ -570,12 +612,15 @@ class GelSourceModel(
     __gel_has_id_field__: ClassVar[bool] = False
 
     if TYPE_CHECKING:
-        # Set of fields that have been changed since the last commit;
-        # used by `client.save()`.
-        __gel_changed_fields__: set[str] | None
-
         # Whether the model uses DEFAULT_MODEL_CONFIG or not.
         __gel_default_model_config__: ClassVar[bool]
+
+        # Explicitly declared shape for this model
+        __gel_shape__: ClassVar[str | None]
+
+        # Which Id shape this model inherits from.  Determines handling of
+        # the id property.
+        __gel_id_shape__: ClassVar[str | None]
 
     @classmethod
     def __gel_model_construct__(cls, __dict__: dict[str, Any] | None) -> Self:
@@ -652,10 +697,10 @@ class GelSourceModel(
             if not ptr.cardinality.is_multi():
                 continue
 
-            wrapped: _tracked_list.AbstractTrackedList[Any]
-            if not isinstance(val, _tracked_list.AbstractTrackedList):
+            wrapped: _tracked_list.AbstractCollection[Any]
+            if not isinstance(val, _tracked_list.AbstractCollection):
                 dlist_ctr = pointer_ctrs[name]
-                assert issubclass(dlist_ctr, _tracked_list.AbstractTrackedList)
+                assert issubclass(dlist_ctr, _tracked_list.AbstractCollection)
                 wrapped = dlist_ctr(
                     val,
                     __wrap_list__=True,
@@ -755,10 +800,10 @@ class GelSourceModel(
             self, "__gel_changed_fields__", set(self.__pydantic_fields_set__)
         )
 
-    def __gel_get_changed_fields__(self) -> AbstractSet[str]:
+    def __gel_get_changed_fields__(self) -> set[str]:
         dirty: set[str] | None = ll_getattr(self, "__gel_changed_fields__")
         if dirty is None:
-            return _empty_str_set
+            return _empty_str_set  # type: ignore [return-value]
         return dirty
 
     def __gel_commit__(self) -> None:
@@ -804,13 +849,12 @@ class GelSourceModel(
                     f"to {type(self).__name__}.{name}; an iterable is expected"
                 )
 
-            assert isinstance(current_value, _tracked_list.AbstractTrackedList)
-            current_value.clear()
-            current_value.__gel_reset_snapshot__()
+            assert isinstance(current_value, _tracked_list.AbstractCollection)
+            current_value.__gel_replace_with_empty__()
             if value:
-                current_value.extend(
+                current_value.__gel_extend__(
                     value.__gel_basetype_iter__()
-                    if isinstance(value, _tracked_list.AbstractTrackedList)
+                    if isinstance(value, _tracked_list.AbstractCollection)
                     else value
                 )
 
@@ -859,7 +903,6 @@ class GelModel(
     __gel_has_id_field__: ClassVar[bool] = True
 
     if TYPE_CHECKING:
-        id: uuid.UUID
         __gel_new__: bool
         __gel_custom_serializer__: ClassVar[pydantic_core.SchemaSerializer]
 
@@ -921,22 +964,34 @@ class GelModel(
         id: uuid.UUID = UNSET_UUID,  # noqa: A002
         **kwargs: Any,
     ) -> None:
-        if id is not UNSET_UUID:
-            if self.__dict__.get("id", _unset) is _unset:
+        has_id_field = "id" in type(self).__pydantic_fields__
+        if has_id_field:
+            if id is not UNSET_UUID:
+                if self.__dict__.get("id", _unset) is _unset:
+                    raise ValueError(
+                        "models do not support setting `id` on construction; "
+                        "`id` is set automatically by the `client.save()` "
+                        "method"
+                    )
+                else:
+                    # The object was created and initialized by __new__,
+                    # nothing to do in `__init__`.
+                    return
+
+            super().__init__(id=id, **kwargs)
+
+            # UNSET_UUID is a transient value, it must not leak to user code.
+            marker = self.__dict__.pop("id")
+            assert marker is UNSET_UUID
+        else:
+            if id is not UNSET_UUID:
                 raise ValueError(
-                    "models do not support setting `id` on construction; "
-                    "`id` is set automatically by the `client.save()` method"
+                    f"unexpecged `id` argument to constructor of "
+                    f"{type(self).__qualname__}, which is a "
+                    f"{type(self).__gel_id_shape__} shape"
                 )
-            else:
-                # The object was created and initialized by __new__,
-                # nothing to do in `__init__`.
-                return
 
-        super().__init__(id=id, **kwargs)
-
-        # UNSET_UUID is a transient value, it must not leak to user code.
-        marker = self.__dict__.pop("id")
-        assert marker is UNSET_UUID
+            super().__init__(**kwargs)
 
         self.__gel_new__ = True
 
@@ -976,8 +1031,8 @@ class GelModel(
                     self, name, field.get_default(call_default_factory=True)
                 )
                 # Fetch the validated/coerced value (`list` will be converted
-                # to a variant of TrackedList.)
-                lst: _tracked_list.AbstractTrackedList[Any] = getattr(
+                # to a variant of AbstractCollection.)
+                lst: _tracked_list.AbstractCollection[Any] = getattr(
                     self, name
                 )
                 lst._mode = _tracked_list.Mode.Write
@@ -989,16 +1044,20 @@ class GelModel(
                 return lst
 
         # Delegate to the descriptor.
-        return object.__getattribute__(self, name)
+        return ll_getattr(self, name)
 
-    def __gel_commit__(self, new_id: uuid.UUID | None = None) -> None:
+    def __gel_commit__(
+        self,
+        *,
+        new_id: uuid.UUID | None = None,
+    ) -> None:
         if new_id is not None:
             if not self.__gel_new__:
                 raise ValueError(
                     f"cannot set id on {self!r} after it has been set"
                 )
             self.__gel_new__ = False
-            ll_setattr(self, "id", new_id)
+            self.__dict__["id"] = new_id
 
         assert not self.__gel_new__
         super().__gel_commit__()
@@ -1054,7 +1113,10 @@ class GelModel(
         if self.__gel_new__ or other_obj.__gel_new__:
             return False
 
-        return self.id == other_obj.id
+        if not self.__gel_id_shape__ or not other_obj.__gel_id_shape__:
+            return False
+
+        return self.id == other_obj.id  # type: ignore [no-any-return]
 
     def __hash__(self) -> int:
         if self.__gel_new__:
@@ -1235,7 +1297,18 @@ class GelLinkModel(
     __gel_root_class__=True,
 ):
     # Base class for __linkprops__ classes.
-    __slots__ = ()
+    __slots__ = ("__gel_copied_by_ref__",)
+
+    def __getstate__(self) -> dict[Any, Any]:
+        state = super().__getstate__()
+        state["__gel_copied_by_ref__"] = getattr(
+            self, "__gel_copied_by_ref__", False
+        )
+        return state
+
+    def __setstate__(self, state: dict[Any, Any]) -> None:
+        super().__setstate__(state)
+        self.__gel_copied_by_ref__ = state["__gel_copied_by_ref__"]
 
 
 _MT_co = TypeVar("_MT_co", bound=GelModel, covariant=True)
@@ -1259,7 +1332,11 @@ class _MergedModelMeta(GelModelMeta):
         super().__setattr__(name, value)
 
 
-class _MergedModelBase(GelModel, metaclass=_MergedModelMeta):
+class _MergedModelBase(
+    GelModel,
+    metaclass=_MergedModelMeta,
+    __gel_root_class__=True,
+):
     # Used exclusively by ProxyModel.__gel_proxy_make_merged_model__.
     if TYPE_CHECKING:
         __gel_new__: bool
@@ -1299,7 +1376,7 @@ class ProxyModel(
     # NB: __linkprops__ is not in slots because it is managed by
     #     GelLinkModelDescriptor.
 
-    __slots__ = ("_p__obj__",)
+    __slots__ = ("__gel_linked__", "_p__obj__")
 
     __gel_proxied_dunders__: ClassVar[frozenset[str]] = frozenset(
         {
@@ -1311,12 +1388,13 @@ class ProxyModel(
         __linkprops__: _abstract.GelLinkModelDescriptor[GelLinkModel]
 
     def __new__(cls, *args: Any, **kwargs: Any) -> Self:
-        return cls.__gel_model_construct__(None)
+        self = cls.__gel_model_construct__(None)
+        ll_setattr(self, "__gel_linked__", False)  # noqa: FBT003
+        return self
 
     def __init__(
         self,
         /,
-        id: uuid.UUID = UNSET_UUID,  # noqa: A002
         *,
         __linkprops__: Any = _unset,
         **kwargs: Any,
@@ -1327,7 +1405,7 @@ class ProxyModel(
 
         # We want ProxyModel to be a trasparent wrapper, so we
         # forward the constructor arguments to the wrapped object.
-        wrapped = self.__proxy_of__(id, **kwargs)
+        wrapped = self.__proxy_of__(**kwargs)
         ll_setattr(self, "_p__obj__", wrapped)
         # __linkprops__ is written into __dict__ by GelLinkModelDescriptor
 
@@ -1364,26 +1442,45 @@ class ProxyModel(
         self = cls.__new__(cls)
         lprops = cls.__linkprops__(**link_props)
         ll_setattr(self, "__linkprops__", lprops)
-
         ll_setattr(self, "_p__obj__", obj)
-
         return self
 
     def __getattribute__(self, name: str) -> Any:
         if name in {
             "_p__obj__",
-            "__linkprops__",
             "__proxy_of__",
             "__class__",
+            "__gel_linked__",
+            "without_linkprops",
         }:
             # Fast path for the wrapped object itself / linkprops model
             # (this optimization is informed by profiling model
             # instantiation and save() operation)
             return ll_getattr(self, name)
 
-        if name == "id" or not name.startswith(("_", "model_")):
+        if (
+            name == "id"
+            or not name.startswith(("_", "model_"))
+            or name in {"__gel_new__", "__gel_changed_fields__"}
+        ):
             # Faster path for "public-like" attributes
             return ll_getattr(ll_getattr(self, "_p__obj__"), name)
+
+        if name == "__linkprops__":
+            lp = _abstract.get_proxy_linkprops(self)
+            if getattr(lp, "__gel_copied_by_ref__", False):
+                # save() and other internal machinery can use
+                # `object.__getattribute__` to request __linkprops__ without
+                # triggering this code.
+                # But when it is triggered - it's called by the user, and in
+                # this case, if __linkprops__ object is copied by ref we want
+                # to do an actual hard copy of it.
+                # No need to do deep copy, as copying by ref can only happen
+                # when __linkprops__ only has immutable properties in it.
+                lp = lp.model_copy()
+                # __gel_copied_by_ref__ won't be copied by model_copy()
+                ll_setattr(self, "__linkprops__", lp)
+                return lp
 
         model_fields = type(self).__proxy_of__.model_fields
         if name in model_fields:
@@ -1524,16 +1621,56 @@ class ProxyModel(
     def __gel_proxy_construct__(
         cls,
         obj: _MT_co,  # type: ignore [misc]
-        lprops: dict[str, Any],
+        lprops: dict[str, Any] | GelLinkModel,
+        *,
+        linked: bool = False,
     ) -> Self:
         pnv = cls.__gel_model_construct__(None)
-        object.__setattr__(pnv, "_p__obj__", obj)
-        object.__setattr__(
+        ll_setattr(pnv, "_p__obj__", obj)
+
+        if type(lprops) is dict:
+            lp_obj = cls.__linkprops__.__gel_model_construct__(lprops)
+        else:
+            lp_obj = lprops  # type: ignore [assignment]
+
+        ll_setattr(
             pnv,
             "__linkprops__",
-            cls.__linkprops__.__gel_model_construct__(lprops),
+            lp_obj,
         )
+        ll_setattr(pnv, "__gel_linked__", linked)
         return pnv
+
+    def __gel_merge_other_proxy__(  # pyright: ignore [reportIncompatibleMethodOverride]
+        self,
+        other: Self,
+    ) -> None:
+        cls = type(self)
+        assert type(other) is cls
+
+        if not _abstract.is_proxy_linked(other):
+            # `other` isn't link, so it must be a new proxy created
+            # by instantiating the model or calling the `ProxyModel.link()`
+            # classmethod.
+            lp = _abstract.copy_or_ref_lprops(other.__linkprops__)
+        else:
+            lp = cls.__linkprops__.__gel_model_construct__({})
+
+        ll_setattr(self, "__linkprops__", lp)
+        ll_setattr(self, "_p__obj__", ll_getattr(other, "_p__obj__"))
+
+    def __gel_replace_wrapped_model__(
+        self,
+        new: _MT_co,  # type: ignore [misc]
+    ) -> None:
+        assert isinstance(new, self.__proxy_of__)
+        ll_setattr(self, "_p__obj__", new)
+
+    def __gel_replace_linkprops__(
+        self,
+        new: GelLinkModel,
+    ) -> None:
+        ll_setattr(self, "__linkprops__", new)
 
     def __eq__(self, other: object) -> bool:
         if self is other:
@@ -1555,7 +1692,10 @@ class ProxyModel(
         if self_obj.__gel_new__ or other_obj.__gel_new__:
             return False
 
-        return self_obj.id == other_obj.id
+        if not self.__gel_id_shape__ or not other_obj.__gel_id_shape__:
+            return False
+
+        return self_obj.id == other_obj.id  # type: ignore [no-any-return]
 
     def __hash__(self) -> int:
         wrapped = ll_getattr(self, "_p__obj__")
@@ -1636,7 +1776,7 @@ class ProxyModel(
             ll_setattr(merged, attr, ll_getattr(wrapped, attr))
 
         assert "__linkprops__" not in merged.__dict__
-        merged.__dict__["__linkprops__"] = ll_getattr(self, "__linkprops__")
+        merged.__dict__["__linkprops__"] = _abstract.get_proxy_linkprops(self)
         try:
             if to_json:
                 return merged.model_dump_json(context=context, **kwargs)
@@ -1685,14 +1825,16 @@ class ProxyModel(
         return {
             "obj": ll_getattr(self, "_p__obj__"),
             "linkprops": ll_getattr(self, "__linkprops__"),
+            "linked": ll_getattr(self, "__gel_linked__"),
         }
 
     def __setstate__(self, state: dict[Any, Any]) -> None:
         ll_setattr(self, "_p__obj__", state["obj"])
         ll_setattr(self, "__linkprops__", state["linkprops"])
+        ll_setattr(self, "__gel_linked__", state["linked"])
 
     def without_linkprops(self) -> _MT_co:
-        return self._p__obj__
+        return ll_getattr(self, "_p__obj__")  # type: ignore [no-any-return]
 
 
 #

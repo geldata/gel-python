@@ -121,8 +121,13 @@ class BuiltinUI(Installable):
                 content={"error": "not implemented", "method": method},
             )
 
-    def _redirect_error(self, message: str) -> fastapi.Response:
-        result = self._core.start_sign_in(error=message)
+    def _redirect_error(
+        self,
+        message: str,
+        *,
+        verifier: Optional[str] = None,
+    ) -> fastapi.Response:
+        result = self._core.start_sign_in(error=message, verifier=verifier)
         response = self.callback_default_response_class.value(
             url=str(result.redirect_url),
             status_code=self.callback_default_status_code.value,
@@ -171,7 +176,10 @@ class BuiltinUI(Installable):
                         request, verification_email_sent_at
                     )
                 else:
-                    return self._redirect_error("Email verification required")
+                    return self._redirect_error(
+                        "Email verification required",
+                        verifier=verifier,
+                    )
 
             else:
                 token_data = await self._core.get_token(

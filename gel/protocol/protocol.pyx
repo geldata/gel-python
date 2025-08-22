@@ -319,9 +319,6 @@ cdef class SansIOProtocol:
 
         compilation_flags = enums.CompilationFlag.INJECT_OUTPUT_OBJECT_IDS
 
-        # XXX
-        compilation_flags |= enums.CompilationFlag.INJECT_OUTPUT_TYPE_IDS
-
         if ctx.inline_typenames:
             compilation_flags |= enums.CompilationFlag.INJECT_OUTPUT_TYPE_NAMES
         if ctx.inline_typeids:

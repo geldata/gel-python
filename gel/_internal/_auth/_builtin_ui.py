@@ -34,13 +34,22 @@ C = TypeVar("C", bound=httpx.Client | httpx.AsyncClient)
 
 class BaseBuiltinUI(base.BaseClient[C]):
     def start_sign_in(
-        self, *, error: Optional[str] = None
+        self,
+        *,
+        error: Optional[str] = None,
+        verifier: Optional[str] = None,
     ) -> BuiltinUIResponse:
         logger.info("starting sign-in flow")
-        pkce = self._generate_pkce()
+
+        if verifier is None:
+            pkce = self._generate_pkce()
+        else:
+            pkce = self._pkce_from_verifier(verifier)
+
         redirect_url = self._client.base_url.join("ui/signin").copy_set_param(
             "challenge", pkce.challenge
         )
+
         if error is not None:
             redirect_url = redirect_url.copy_set_param("error", error)
 

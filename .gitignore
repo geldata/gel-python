@@ -34,3 +34,4 @@ docs/_build
 /env*
 /.venv
 /uv.lock
+.dir-locals.el

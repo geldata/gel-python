@@ -12,9 +12,11 @@ from typing import (
     Generic,
     TypeVar,
     overload,
+    cast,
 )
 from typing_extensions import Self, Never
 
+import copy
 import dataclasses
 import typing
 
@@ -39,8 +41,17 @@ from ._base import (
 
 if TYPE_CHECKING:
     import types
-    from collections.abc import Sequence
-    from ._distinct_list import AbstractDistinctList, ProxyDistinctList
+    import uuid
+
+    from collections.abc import Sequence, Set as AbstractSet, Iterable
+
+    from ._link_set import (
+        AbstractLinkSet,
+        ComputedLinkSet,
+        ComputedLinkWithPropsSet,
+        LinkSet,
+        LinkWithPropsSet,
+    )
 
 
 class ModelFieldDescriptor(_qb.AbstractFieldDescriptor):
@@ -445,19 +456,21 @@ class MultiLinkDescriptor(AnyLinkDescriptor[_MT_co, _BMT_co]):
             instance: Any,
             owner: type[Any] | None = None,
             /,
-        ) -> AbstractDistinctList[_MT_co]: ...
+        ) -> LinkSet[_MT_co]: ...
 
         def __get__(
             self,
             instance: Any,
             owner: type[Any] | None = None,
             /,
-        ) -> type[_MT_co] | AbstractDistinctList[_MT_co]: ...
+        ) -> type[_MT_co] | LinkSet[_MT_co]: ...
 
         def __set__(
             self,
             instance: Any,
-            value: Sequence[_MT_co | _BMT_co],
+            value: Sequence[_MT_co | _BMT_co]
+            | AbstractSet[_MT_co | _BMT_co]
+            | AbstractLinkSet[_MT_co],
             /,
         ) -> None: ...
 
@@ -479,13 +492,13 @@ class ComputedMultiLinkDescriptor(
             instance: Any,
             owner: type[Any] | None = None,
             /,
-        ) -> tuple[_MT_co, ...]: ...
+        ) -> ComputedLinkSet[_MT_co]: ...
 
         def __get__(
             self,
             instance: Any,
             owner: type[Any] | None = None,
-        ) -> type[_MT_co] | tuple[_MT_co, ...]: ...
+        ) -> type[_MT_co] | ComputedLinkSet[_MT_co]: ...
 
 
 class OptionalLinkDescriptor(
@@ -594,11 +607,25 @@ class AbstractGelProxyModel(AbstractGelModel, Generic[_MT_co, _LM_co]):
     def __gel_proxy_construct__(
         cls,
         obj: _MT_co,  # type: ignore [misc]
-        lprops: dict[str, Any],
+        lprops: dict[str, Any] | _LM_co,
+        *,
+        linked: bool = False,
     ) -> Self:
         raise NotImplementedError
 
     def without_linkprops(self) -> _MT_co:
+        raise NotImplementedError
+
+    def __gel_merge_other_proxy__(self, other: Self) -> None:
+        raise NotImplementedError
+
+    def __gel_replace_wrapped_model__(
+        self,
+        new: _MT_co,  # type: ignore [misc]
+    ) -> None:
+        raise NotImplementedError
+
+    def __gel_replace_linkprops__(self, new: _LM_co) -> None:  # type: ignore [misc]
         raise NotImplementedError
 
 
@@ -610,7 +637,33 @@ _PT_co = TypeVar(
 """Proxy model"""
 
 
-class MultiLinkWithPropsDescriptor(MultiLinkDescriptor[_PT_co, _BMT_co]):
+class ComputedMultiLinkWithPropsDescriptor(
+    ComputedPointerDescriptor[_PT_co, _BMT_co],
+    AnyLinkDescriptor[_PT_co, _BMT_co],
+):
+    if TYPE_CHECKING:
+
+        @overload
+        def __get__(
+            self, instance: None, owner: type[Any], /
+        ) -> type[_PT_co]: ...
+
+        @overload
+        def __get__(
+            self,
+            instance: Any,
+            owner: type[Any] | None = None,
+            /,
+        ) -> ComputedLinkWithPropsSet[_PT_co, _BMT_co]: ...
+
+        def __get__(
+            self,
+            instance: Any,
+            owner: type[Any] | None = None,
+        ) -> type[_PT_co] | ComputedLinkWithPropsSet[_PT_co, _BMT_co]: ...
+
+
+class MultiLinkWithPropsDescriptor(AnyLinkDescriptor[_PT_co, _BMT_co]):
     if TYPE_CHECKING:
 
         @overload
@@ -627,18 +680,190 @@ class MultiLinkWithPropsDescriptor(MultiLinkDescriptor[_PT_co, _BMT_co]):
             instance: Any,
             owner: type[Any] | None = None,
             /,
-        ) -> ProxyDistinctList[_PT_co, _BMT_co]: ...
+        ) -> LinkWithPropsSet[_PT_co, _BMT_co]: ...
 
         def __get__(
             self,
             instance: Any,
             owner: type[Any] | None = None,
             /,
-        ) -> type[_PT_co] | ProxyDistinctList[_PT_co, _BMT_co]: ...
+        ) -> type[_PT_co] | LinkWithPropsSet[_PT_co, _BMT_co]: ...
 
-        def __set__(
+        def __set__(  # pyright: ignore [reportIncompatibleMethodOverride]
             self,
             instance: Any,
-            value: Sequence[_PT_co | _BMT_co],
+            value: Sequence[_PT_co | _BMT_co]
+            | AbstractSet[_PT_co | _BMT_co]
+            | AbstractLinkSet[_BMT_co]
+            | LinkWithPropsSet[_PT_co, _BMT_co],
             /,
         ) -> None: ...
+
+
+ll_getattr = object.__getattribute__
+
+
+def get_proxy_linkprops(
+    obj: AbstractGelProxyModel[_MT_co, _LM_co],
+) -> _LM_co:
+    """Return obj.__linkprops__ without triggering copy of __linkprops__"""
+    try:
+        # Try fast access first (bypass ProxyModel.__getattribute__)
+        lp = ll_getattr(
+            obj,
+            "__linkprops__",
+        )
+    except AttributeError:
+        # Slow path in case __linkprops__ needs to be constructed by
+        # the descriptor
+        return obj.__linkprops__
+    else:
+        return lp  # type: ignore [no-any-return]
+
+
+def is_proxy_linked(
+    obj: AbstractGelProxyModel[_MT_co, _LM_co],
+) -> bool:
+    try:
+        gl = ll_getattr(
+            obj,
+            "__gel_linked__",
+        )
+    except AttributeError:
+        return False
+    else:
+        return gl  # type: ignore [no-any-return]
+
+
+def copy_or_ref_lprops(lp: _LM_co) -> _LM_co:  # type: ignore [misc]
+    if lp.__gel_has_mutable_props__:
+        return copy.deepcopy(lp)
+    else:
+        lp.__gel_copied_by_ref__ = True
+        return lp
+
+
+def reconcile_link(
+    *,
+    existing: _MT_co | None,
+    refetched: _MT_co,  # type: ignore [misc]
+    existing_objects: dict[uuid.UUID, _MT_co | Iterable[_MT_co]],
+    new_objects: dict[uuid.UUID, _MT_co],
+) -> _MT_co:
+    if existing is not None:
+        return existing
+
+    obj_id: uuid.UUID = ll_getattr(refetched, "id")
+
+    if (link_to := existing_objects.get(obj_id)) is not None:
+        if isinstance(link_to, AbstractGelModel):
+            return link_to
+        else:
+            return next(iter(link_to))
+
+    return new_objects[obj_id]
+
+
+def reconcile_proxy_link(
+    *,
+    existing: AbstractGelProxyModel[_MT_co, _LM_co] | None,
+    refetched: AbstractGelProxyModel[_MT_co, _LM_co],
+    existing_objects: dict[uuid.UUID, _MT_co | Iterable[_MT_co]],
+    new_objects: dict[uuid.UUID, _MT_co],
+) -> AbstractGelProxyModel[_MT_co, _LM_co]:
+    if existing is not None:
+        # `refetched` will have newly refetched __linkprops__,
+        # so copy them
+        existing.__gel_replace_linkprops__(
+            copy_or_ref_lprops(refetched.__linkprops__)
+        )
+        return existing
+
+    obj_id: uuid.UUID = ll_getattr(refetched.without_linkprops(), "id")
+
+    if (_link_to := existing_objects.get(obj_id)) is not None:
+        if isinstance(_link_to, AbstractGelModel):
+            link_to = _link_to
+        else:
+            link_to = next(iter(_link_to))
+    else:
+        link_to = new_objects[obj_id]
+
+    # Make sure we create a new proxy model that
+    # would wrap either an object that already exists
+    # or a new one just inserted by sync(); copy linkprops
+    # efficiently.
+    return refetched.__gel_proxy_construct__(
+        link_to,  # pyright: ignore [reportArgumentType]
+        copy_or_ref_lprops(refetched.__linkprops__),
+        linked=True,
+    )
+
+
+def proxy_link(
+    *,
+    existing: AbstractGelProxyModel[_MT_co, _LM_co] | None,
+    new: AbstractGelProxyModel[_MT_co, _LM_co] | _MT_co,
+    proxy_type: type[AbstractGelProxyModel[_MT_co, _LM_co]],
+) -> AbstractGelProxyModel[_MT_co, _LM_co]:
+    tp_new = type(new)
+
+    if tp_new is proxy_type:
+        # Fast path for the same proxy type.
+
+        new_proxy = cast("AbstractGelProxyModel[_MT_co, _LM_co]", new)
+
+        if existing is not None:
+            existing.__gel_merge_other_proxy__(new_proxy)
+            return existing
+        else:
+            if is_proxy_linked(new_proxy):
+                return proxy_type.__gel_proxy_construct__(
+                    new_proxy.without_linkprops(),
+                    {},
+                    linked=True,
+                )
+            else:
+                return proxy_type.__gel_proxy_construct__(
+                    new_proxy.without_linkprops(),
+                    copy_or_ref_lprops(get_proxy_linkprops(new_proxy)),
+                    linked=True,
+                )
+
+    model_type = proxy_type.__proxy_of__
+
+    if tp_new is model_type or (
+        not isinstance(new, AbstractGelProxyModel)
+        and isinstance(new, model_type)
+    ):
+        # It's not a proxy, but the object is of the correct type --
+        # re-wrap it in a correct proxy.
+
+        new_base = cast("_MT_co", new)
+
+        if existing is not None:
+            existing.__gel_replace_wrapped_model__(new_base)
+            return existing
+        else:
+            return proxy_type.__gel_proxy_construct__(
+                new_base,
+                {},
+                linked=True,
+            )
+
+    if isinstance(new, AbstractGelProxyModel):
+        # We unwrap different kinds of proxies - we can't inherit their
+        # linkprops
+        return proxy_link(
+            existing=existing,
+            new=new.without_linkprops(),
+            proxy_type=proxy_type,
+        )
+
+    # Theoretically `new` can be a dict (that's pydantic's semantics),
+    # so let's attempt to validate it and repeat the process.
+    return proxy_link(
+        existing=existing,
+        new=proxy_type.__gel_validate__(new),
+        proxy_type=proxy_type,
+    )
