@@ -1,0 +1,34 @@
+module default {
+    type Named {
+        required property name: std::str;
+    };
+
+    type House extending Named {
+        # Computed multi
+        multi members := .<house[is Person];
+    };
+
+    type Person extending Named {
+        # Single with prop
+        house: House {
+            rank: std::str;
+        };
+        # Multi with prop
+        multi friends: Person {
+            opinion: std::str;
+        };
+        # Single
+        pet: Pet {
+            constraint exclusive;
+        };
+        # Multi
+        multi classes: Class;
+    };
+
+    type Pet extending Named {
+        # Computed single
+        owner := .<pet[is Person];
+    };
+
+    type Class extending Named;
+}
