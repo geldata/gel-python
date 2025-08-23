@@ -6251,6 +6251,23 @@ class TestModelGenerator(tb.ModelTestCase):
         for user in users_with_char:
             self.assertTrue(search_char in user.name.lower())
 
+    @tb.xfail
+    def test_modelgen_operators_range_contains(self):
+        """Test string containment and pattern matching operators"""
+        from models.orm import default, std
+        from gel import Range
+
+        res = self.client.query(
+            default.RangeTest.filter(
+                lambda u: std.contains(u.int_range, u.int_range))
+        )
+        # This one doesn't typecheck
+        # res = self.client.query(
+        #     default.RangeTest.filter(
+        #         lambda u: std.contains(u.int_range, Range(30, 31)))
+        # )
+        self.assertEqual(len(res), 1)
+
     def test_modelgen_operators_numeric(self):
         """Test numeric operators with edge cases and mixed precision"""
         from models.orm import default, std

@@ -3158,7 +3158,17 @@ class GeneratedSchemaModule(BaseGeneratedModule):
 
         # Sort overloads by generality from least generic to most
         # generic, which is needed for typing correctness, and then by
-        # their edgeql signature, to ensure determisim.
+        # their edgeql signature, to ensure determinism.
+
+        # TEMPORARY (I HOPE) HACK: We sort the edgeql signatures first
+        # in reverse order, because it keeps certain standard library
+        # operations from breaking. (contains on a range in particular)
+        overloads = sorted(
+            overloads,
+            key=lambda o: o.edgeql_signature,
+            reverse=True,
+        )
+
         generality_key = functools.cmp_to_key(
             functools.partial(
                 reflection.compare_callable_generality,
@@ -3167,7 +3177,9 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         )
         overloads = sorted(
             overloads,
-            key=lambda o: (generality_key(o), o.edgeql_signature),
+            key=generality_key,
+            # SEE ABOVE: This is what we actually want.
+            # key=lambda o: (generality_key(o), o.edgeql_signature),
         )
 
         for overload in overloads:
