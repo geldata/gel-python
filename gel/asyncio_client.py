@@ -37,7 +37,7 @@ from . import transaction
 from .protocol import asyncio_proto  # type: ignore [attr-defined, unused-ignore]
 from .protocol.protocol import InputLanguage, OutputFormat
 
-from ._internal._save import make_save_executor_constructor
+from ._internal._save import make_save_executor_constructor, SaveExecutor
 
 if typing.TYPE_CHECKING:
     from ._internal._qbmodel._pydantic import GelModel
@@ -600,6 +600,7 @@ class AsyncIOClient(
 
     __slots__ = ()
     _impl_class = _AsyncIOPoolImpl
+    _save_executor_type = SaveExecutor
 
     async def check_connection(self) -> base_client.ConnectionInfo:
         return await self._impl.ensure_connected()
@@ -647,6 +648,7 @@ class AsyncIOClient(
             refetch=refetch,
             save_postcheck=opts.save_postcheck,
             warn_on_large_sync_set=warn_on_large_sync_set,
+            executor_type=self._save_executor_type,
         )
 
         async for tx in self._batch():
