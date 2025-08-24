@@ -18,7 +18,7 @@ from typing import (
     Generic,
     cast,
 )
-from typing_extensions import TypeAliasType, dataclass_transform, Self
+from typing_extensions import TypeAliasType, dataclass_transform
 
 from gel._internal._qbmodel._abstract import (
     DEFAULT_VALUE,
@@ -46,8 +46,6 @@ from gel._internal._tracked_list import (
 from gel._internal._edgeql import PointerKind, quote_ident
 
 if TYPE_CHECKING:
-    from types import TracebackType
-
     from collections.abc import (
         Iterable,
         Iterator,
@@ -303,11 +301,21 @@ class IDTracker(Generic[T, V]):
             raise KeyError(hash)
         return obj_value[0]
 
+    def __setitem__(self, obj: T, value: V, /) -> None:
+        self._seen[id(obj)] = (obj, value)
+
     def __getitem__(self, obj: T) -> V | None:
         try:
             return self._seen[id(obj)][1]
         except KeyError:
             raise KeyError((id(obj), obj)) from None
+
+    def get(self, obj: T, /) -> V | None:
+        try:
+            v = self._seen[id(obj)][1]
+        except KeyError:
+            raise KeyError((id(obj), obj)) from None
+        return v
 
     def get_not_none(self, obj: T, /) -> V:
         try:
@@ -316,6 +324,20 @@ class IDTracker(Generic[T, V]):
             raise KeyError((id(obj), obj)) from None
         assert v is not None
         return v
+
+    def values(self) -> Iterable[V | None]:
+        return (v[1] for v in self._seen.values())
+
+    def values_not_none(self) -> Iterable[V]:
+        for _, v in self._seen.values():
+            assert v is not None
+            yield v
+
+    def keys(self) -> Iterable[T]:
+        return (v[0] for v in self._seen.values())
+
+    def items(self) -> Iterable[tuple[T, V | None]]:
+        return self._seen.values()
 
     def __contains__(self, obj: T) -> bool:
         return id(obj) in self._seen
@@ -1127,27 +1149,21 @@ class QueryBatch:
     changes: list[ModelChange]
     insert: bool
 
-    def feed_db_data(self, obj_data: Iterable[Any]) -> None:
+    def record_inserted_data(self, obj_data: Iterable[Any]) -> None:
         match self.executor.refetch, self.insert:
             case False, True:
                 # in this case `obj_data` is a list of UUIDs
                 for obj_upd, change in zip(
                     obj_data, self.changes, strict=True
                 ):
-                    self.executor.new_object_ids[id(change.model)] = obj_upd
+                    self.executor.new_object_ids[change.model] = obj_upd
 
             case True, True:
                 # in this case `obj_data` is a list of GelModel instances
                 for obj_upd, change in zip(
                     obj_data, self.changes, strict=True
                 ):
-                    for field in obj_upd.__dict__:
-                        if field == "id":
-                            continue
-                        change.model.__dict__[field] = obj_upd.__dict__[field]
-                        change.model.__pydantic_fields_set__.add(field)
-
-                    self.executor.new_object_ids[id(change.model)] = obj_upd.id
+                    self.executor.new_object_ids[change.model] = obj_upd.id
                     self.executor.new_objects[obj_upd.id] = obj_upd
 
             case _, _:
@@ -1192,90 +1208,8 @@ class QueryRefetch:
     args: QueryRefetchArgs
     shape: RefetchShape
 
-    def feed_db_data(self, obj_data: Iterable[Any]) -> None:
-        for obj in obj_data:
-            obj_dict = obj.__dict__
-            gel_id: uuid.UUID = obj.id
-
-            model_or_models = self.executor.existing_objects[gel_id]
-            models: Iterable[GelModel]
-            if isinstance(model_or_models, IDTracker):
-                # In some situations we might have multiple objects with
-                # the same `.id` - in this case we want to deeep copy mutable
-                # `multi prop` and arrays in `single props`.
-                models = model_or_models
-                deepcopy = copy.deepcopy
-            else:
-                models = (model_or_models,)
-                # But when we have a single object for the given UUID
-                # (the most common case) we don't need to copy anything
-                # and can just use the collection returned by the codec.
-                # `obj` is essentially a throwaway object that will be
-                # GCed after sync().
-                deepcopy = _identity_func  # type: ignore [assignment]
-
-            for field, new_value in obj_dict.items():
-                if field in _STOP_FIELDS:
-                    continue
-
-                shape_field = self.shape.fields[field]
-                is_multi = shape_field.cardinality.is_multi()
-                is_link = shape_field.kind.is_link()
-
-                for model in models:
-                    assert model.id == gel_id
-                    model_dict = model.__dict__
-
-                    model.__pydantic_fields_set__.add(field)
-
-                    if is_link and is_multi:
-                        link = model_dict.get(field)
-                        if link is None:
-                            # This instance never had this link, but
-                            # now it will.
-                            # TODO: this needs to be optimized.
-                            link = copy.copy(new_value)
-                            model_dict[field] = link
-                            link.__gel_replace_with_empty__()
-
-                        assert is_link_abstract_dlist(link)
-                        assert type(new_value) is type(link)
-                        model_dict[field] = link.__gel_reconcile__(
-                            # no need to copy `new_value`,
-                            # it will only be iterated over
-                            new_value,
-                            self.executor.existing_objects,  # type: ignore [arg-type]
-                            self.executor.new_objects,  # type: ignore [arg-type]
-                        )
-
-                    elif is_link:
-                        if shape_field.properties:
-                            model_dict[field] = reconcile_proxy_link(
-                                existing=model_dict.get(field),
-                                refetched=new_value,  # pyright: ignore [reportArgumentType]
-                                existing_objects=self.executor.existing_objects,  # type: ignore [arg-type]
-                                new_objects=self.executor.new_objects,
-                            )
-                        else:
-                            model_dict[field] = reconcile_link(
-                                existing=model_dict.get(field),
-                                refetched=new_value,
-                                existing_objects=self.executor.existing_objects,  # type: ignore [arg-type]
-                                new_objects=self.executor.new_objects,
-                            )
-
-                    elif not is_link:
-                        # could be a multi prop, could be a single prop
-                        # with an array value
-                        if shape_field.mutable:
-                            model_dict[field] = deepcopy(new_value)
-                        else:
-                            model_dict[field] = new_value
-
-            # Let's be extra cautious and help GC a bit here. `obj` can
-            # have recursive references to other objects via links and
-            # computed backlinks.
-            obj.__dict__.clear()
+    def record_refetched_data(self, obj_data: Iterable[GelModel]) -> None:
+        self.executor.refetched_data.append((self.shape, obj_data))
 
 
 @_struct
@@ -1298,25 +1232,25 @@ class SaveExecutor:
     save_postcheck: bool
     warn_on_large_sync_set: bool
 
-    new_object_ids: dict[int, uuid.UUID] = dataclasses.field(init=False)
+    refetched_data: list[tuple[RefetchShape, Iterable[GelModel]]] = (
+        dataclasses.field(init=False)
+    )
+
+    new_object_ids: IDTracker[GelModel, uuid.UUID] = dataclasses.field(
+        init=False
+    )
+
     new_objects: dict[uuid.UUID, GelModel] = dataclasses.field(init=False)
 
     def __post_init__(self) -> None:
-        self.new_object_ids = {}
+        self.new_object_ids = IDTracker()
         if self.refetch:
             # Let it crash with AttributeError if we try to access this
             # without refetch -- that should be caught by tests.
             self.new_objects = {}
+            self.refetched_data = []
 
-    def __enter__(self) -> Self:
-        return self
-
-    def __exit__(
-        self,
-        exc_type: type[BaseException] | None,
-        exc_value: BaseException | None,
-        traceback: TracebackType | None,
-    ) -> None:
+    def commit(self) -> None:
         try:
             self._commit()
         finally:
@@ -1327,6 +1261,7 @@ class SaveExecutor:
             self.refetch_batch = None  # type: ignore [assignment]
             self.new_object_ids = None  # type: ignore [assignment]
             self.new_objects = None  # type: ignore [assignment]
+            self.refetched_data = None  # type: ignore [assignment]
 
     def _compile_refetch(
         self,
@@ -1492,7 +1427,7 @@ class SaveExecutor:
     def get_refetch_queries(
         self,
     ) -> list[QueryRefetch]:
-        new_ids = list(self.new_object_ids.values())
+        new_ids = list(self.new_object_ids.values_not_none())
 
         return [
             QueryRefetch(
@@ -1559,7 +1494,118 @@ class SaveExecutor:
         if self.updates:
             yield self._compile_batch(self.updates, for_insert=False)
 
+    def _apply_refetched_data(self) -> None:
+        for shape, obj_data in self.refetched_data:
+            self._apply_refetched_data_shape(shape, obj_data)
+
+    def _apply_refetched_data_shape(
+        self, shape: RefetchShape, obj_data: Iterable[GelModel]
+    ) -> None:
+        for obj in obj_data:
+            obj_dict = obj.__dict__
+            gel_id: uuid.UUID = obj.id
+
+            model_or_models = self.existing_objects[gel_id]
+            models: Iterable[GelModel]
+            if isinstance(model_or_models, IDTracker):
+                # In some situations we might have multiple objects with
+                # the same `.id` - in this case we want to deeep copy mutable
+                # `multi prop` and arrays in `single props`.
+                models = model_or_models
+                deepcopy = copy.deepcopy
+            else:
+                models = (model_or_models,)
+                # But when we have a single object for the given UUID
+                # (the most common case) we don't need to copy anything
+                # and can just use the collection returned by the codec.
+                # `obj` is essentially a throwaway object that will be
+                # GCed after sync().
+                deepcopy = _identity_func  # type: ignore [assignment]
+
+            for field, new_value in obj_dict.items():
+                if field in _STOP_FIELDS:
+                    continue
+
+                shape_field = shape.fields[field]
+                is_multi = shape_field.cardinality.is_multi()
+                is_link = shape_field.kind.is_link()
+
+                for model in models:
+                    assert model.id == gel_id
+                    model_dict = model.__dict__
+
+                    model.__pydantic_fields_set__.add(field)
+
+                    if is_link and is_multi:
+                        link = model_dict.get(field)
+                        if link is None:
+                            # This instance never had this link, but
+                            # now it will.
+                            # TODO: this needs to be optimized.
+                            link = copy.copy(new_value)
+                            model_dict[field] = link
+                            link.__gel_replace_with_empty__()
+
+                        assert is_link_abstract_dlist(link)
+                        assert type(new_value) is type(link)
+                        model_dict[field] = link.__gel_reconcile__(
+                            # no need to copy `new_value`,
+                            # it will only be iterated over
+                            new_value,
+                            self.existing_objects,  # type: ignore [arg-type]
+                            self.new_objects,  # type: ignore [arg-type]
+                        )
+
+                    elif is_link:
+                        if shape_field.properties:
+                            model_dict[field] = reconcile_proxy_link(
+                                existing=model_dict.get(field),
+                                refetched=new_value,  # pyright: ignore [reportArgumentType]
+                                existing_objects=self.existing_objects,  # type: ignore [arg-type]
+                                new_objects=self.new_objects,
+                            )
+                        else:
+                            model_dict[field] = reconcile_link(
+                                existing=model_dict.get(field),
+                                refetched=new_value,
+                                existing_objects=self.existing_objects,  # type: ignore [arg-type]
+                                new_objects=self.new_objects,
+                            )
+
+                    elif not is_link:
+                        # could be a multi prop, could be a single prop
+                        # with an array value
+                        if shape_field.mutable:
+                            model_dict[field] = deepcopy(new_value)
+                        else:
+                            model_dict[field] = new_value
+
+            # Let's be extra cautious and help GC a bit here. `obj` can
+            # have recursive references to other objects via links and
+            # computed backlinks.
+            obj.__dict__.clear()
+
     def _commit(self) -> None:
+        for obj, new_id in self.new_object_ids.items():
+            assert new_id is not None
+
+            if self.refetch:
+                updated = self.new_objects[new_id]
+                pydantic_set_fields = obj.__pydantic_fields_set__
+                for field in updated.__dict__:
+                    if field == "id":
+                        continue
+                    obj.__dict__[field] = updated.__dict__[field]
+                    pydantic_set_fields.add(field)
+
+            obj.__gel_commit__(new_id=new_id)
+
+        if self.refetch:
+            self._apply_refetched_data()
+
+        self._commit_recursive()
+
+    def _commit_recursive(self) -> None:
         visited: IDTracker[GelModel, None] = IDTracker()
 
         def _traverse(obj: GelModel) -> None:
@@ -1569,7 +1615,7 @@ class SaveExecutor:
             assert not isinstance(obj, ProxyModel)
 
             visited.track(obj)
-            obj.__gel_commit__(new_id=self.new_object_ids.get(id(obj)))
+            obj.__gel_commit__()
 
             for prop in get_pointers(type(obj)):
                 if prop.computed:
@@ -1724,7 +1770,7 @@ class SaveExecutor:
 
     def _get_id(self, obj: GelModel) -> uuid.UUID:
         if obj.__gel_new__:
-            return self.new_object_ids[id(obj)]
+            return self.new_object_ids.get_not_none(obj)
         else:
             return obj.id  # type: ignore [no-any-return]
 

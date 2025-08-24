@@ -3862,9 +3862,6 @@ class TestModelGenerator(tb.ModelTestCase):
         # Was alice reloaded? That's the object used in tlt.user
         self.assertEqual(alice.nickname, "magical unicorn")
 
-    @tb.xfail
-    # error from saving tsl2
-    # more than one row returned by a subquery used as an expression
     def test_modelgen_save_reload_links_04(self):
         from models.orm import default
 
@@ -3885,7 +3882,7 @@ class TestModelGenerator(tb.ModelTestCase):
 
         self.client.sync(tsl)
 
-        # Computed links should not be set after save
+        # Computed links should not be set -- we never fetched them
         with self.assertRaisesRegex(
             AttributeError, "'comp_req_wprop_friend' is not set"
         ):
@@ -3971,26 +3968,11 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(tsl2.opt_friend.name, "Billie")
         self.assertEqual(tsl2.opt_wprop_friend.name, "Billie")
 
-        # But computed links should no longer be set after the save
-        with self.assertRaisesRegex(
-            AttributeError, "'comp_req_wprop_friend' is not set"
-        ):
-            assert tsl2.comp_req_wprop_friend is not None  # access field
-
-        with self.assertRaisesRegex(
-            AttributeError, "'comp_req_friend' is not set"
-        ):
-            assert tsl2.comp_req_friend is not None  # access field
-
-        with self.assertRaisesRegex(
-            AttributeError, "'comp_opt_friend' is not set"
-        ):
-            assert tsl2.comp_opt_friend is not None  # access field
-
-        with self.assertRaisesRegex(
-            AttributeError, "'comp_opt_wprop_friend' is not set"
-        ):
-            assert tsl2.comp_opt_wprop_friend is not None  # access field
+        # Computed links should be up to date after the sync
+        self.assertEqual(tsl2.comp_req_wprop_friend.name, "Billie")
+        self.assertEqual(tsl2.comp_req_friend.name, "Billie")
+        self.assertEqual(tsl2.comp_opt_friend.name, "Billie")
+        self.assertEqual(tsl2.comp_opt_wprop_friend.name, "Billie")
 
     def test_modelgen_save_reload_links_05(self):
         from models.orm import default

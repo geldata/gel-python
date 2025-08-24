@@ -750,10 +750,12 @@ def reconcile_link(
     existing_objects: dict[uuid.UUID, _MT_co | Iterable[_MT_co]],
     new_objects: dict[uuid.UUID, _MT_co],
 ) -> _MT_co:
-    if existing is not None:
-        return existing
-
     obj_id: uuid.UUID = ll_getattr(refetched, "id")
+
+    if existing is not None:
+        existing_id = ll_getattr(existing, "id")
+        if existing_id == obj_id:
+            return existing
 
     if (link_to := existing_objects.get(obj_id)) is not None:
         if isinstance(link_to, AbstractGelModel):
@@ -771,15 +773,18 @@ def reconcile_proxy_link(
     existing_objects: dict[uuid.UUID, _MT_co | Iterable[_MT_co]],
     new_objects: dict[uuid.UUID, _MT_co],
 ) -> AbstractGelProxyModel[_MT_co, _LM_co]:
-    if existing is not None:
-        # `refetched` will have newly refetched __linkprops__,
-        # so copy them
-        existing.__gel_replace_linkprops__(
-            copy_or_ref_lprops(refetched.__linkprops__)
-        )
-        return existing
-
     obj_id: uuid.UUID = ll_getattr(refetched.without_linkprops(), "id")
+
+    if existing is not None:
+        existing_id: uuid.UUID = ll_getattr(existing.without_linkprops(), "id")
+
+        if existing_id == obj_id:
+            # `refetched` will have newly refetched __linkprops__,
+            # so copy them
+            existing.__gel_replace_linkprops__(
+                copy_or_ref_lprops(refetched.__linkprops__)
+            )
+            return existing
 
     if (_link_to := existing_objects.get(obj_id)) is not None:
         if isinstance(_link_to, AbstractGelModel):
