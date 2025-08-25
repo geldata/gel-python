@@ -600,7 +600,7 @@ class ReadOnlyExecutor(BaseReadOnlyExecutor):
 
     def query_graphql_json(
         self,
-        query: str | Queryable[_T_ql],
+        query: str,
         /,
         *args: Any,
         **kwargs: Any,
