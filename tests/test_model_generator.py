@@ -1546,7 +1546,7 @@ class TestModelGenerator(tb.ModelTestCase):
         )
         self.assertEqual(
             g.model_dump_json(context={"gel_allow_unsaved": True}),
-            '{"num":1,"public":true,"players":[]}',
+            '{"num":1,"players":[],"public":true}',
         )
 
     def test_modelgen_pydantic_apis_20(self):
@@ -6251,6 +6251,22 @@ class TestModelGenerator(tb.ModelTestCase):
         for user in users_with_char:
             self.assertTrue(search_char in user.name.lower())
 
+    @tb.xfail
+    def test_modelgen_operators_range_contains(self):
+        """Test string containment and pattern matching operators"""
+        from models.orm import default, std
+
+        res = self.client.query(
+            default.RangeTest.filter(
+                lambda u: std.contains(u.int_range, u.int_range))
+        )
+        # This one doesn't typecheck
+        # res = self.client.query(
+        #     default.RangeTest.filter(
+        #         lambda u: std.contains(u.int_range, Range(30, 31)))
+        # )
+        self.assertEqual(len(res), 1)
+
     def test_modelgen_operators_numeric(self):
         """Test numeric operators with edge cases and mixed precision"""
         from models.orm import default, std
@@ -6475,13 +6491,15 @@ class TestEmptyAiModelGenerator(tb.ModelTestCase):
         from models.empty_ai.ext import ai  # noqa: F401
 
 
-class TestModelGeneratorReproducibility(tb.ModelTestCase):
+class TestModelGeneratorReproducibility(tb.SyncQueryTestCase):
+    DEFAULT_MODULE = "default"
     SCHEMA = os.path.join(os.path.dirname(__file__), "dbsetup", "orm.gel")
 
     def test_modelgen_reproducibility(self):
         conn_env = {}
         for k, v in self.get_connect_args().items():
             conn_env[f"EDGEDB_{k.upper()}"] = str(v)
+        conn_env['EDGEDB_DATABASE'] = self.get_database_name()
 
         env = os.environ | conn_env
 
@@ -6502,6 +6520,12 @@ class TestModelGeneratorReproducibility(tb.ModelTestCase):
                     if prev_models.exists():
                         shutil.rmtree(prev_models)
                     os.rename(td / "models", prev_models)
+
+                if i == 1:
+                    # Drop the database and recreate it, to test that
+                    # we are reproducible across that.
+                    self.tearDownClass()
+                    self.setUpClass()
 
                 env["PYTHONHASHSEED"] = str(hashseed)
                 subprocess.run(
