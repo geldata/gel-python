@@ -16,11 +16,11 @@ from typing import (
 )
 from typing_extensions import TypeAliasType
 
-import base64
 import contextlib
 import dataclasses
 import enum
 import functools
+import hashlib
 import itertools
 import json
 import graphlib
@@ -1278,12 +1278,10 @@ class BaseGeneratedModule:
         t: reflection.NamedTupleType,
     ) -> str:
         names = [elem.name.capitalize() for elem in t.tuple_elements]
-        # Base64ing the name is pretty horrific but it avoids needing
+        # SHAing the name is pretty horrific but it avoids needing
         # to escape it into Python safely.
-        digest = base64.b64encode(
-            t.name.encode("utf-8"), altchars=b"__"
-        ).decode()
-        return "".join(names) + "_Tuple_" + digest.rstrip("=")
+        digest = hashlib.sha256(t.name.encode("utf-8")).hexdigest()[:10]
+        return "".join(names) + "_Tuple_" + digest
 
     def _resolve_rel_import(
         self,
