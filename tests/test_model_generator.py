@@ -6255,7 +6255,6 @@ class TestModelGenerator(tb.ModelTestCase):
     def test_modelgen_operators_range_contains(self):
         """Test string containment and pattern matching operators"""
         from models.orm import default, std
-        from gel import Range
 
         res = self.client.query(
             default.RangeTest.filter(

@@ -1023,7 +1023,7 @@ class BaseGeneratedModule:
                 )
                 self.write(f"return {objtype_mod}.ObjectType(")
                 with self.indented():
-                    self.write(f"# Dummy id, for stability/portability")
+                    self.write("# Dummy id, for stability/portability")
                     self.write(f"id={uuid_}(int=0),")
                     self.write(f"name={objtype.name!r},")
                     self.write(f"builtin={objtype.builtin!r},")
@@ -3179,7 +3179,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             overloads,
             key=generality_key,
             # SEE ABOVE: This is what we actually want.
-            # key=lambda o: (generality_key(o), o.edgeql_signature),
+            # key=lambda o: (generality_key(o), o.edgeql_signature),  # noqa: ERA001, E501
         )
 
         for overload in overloads:
