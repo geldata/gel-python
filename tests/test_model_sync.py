@@ -36,6 +36,9 @@ from gel import _testbase as tb
 
 
 class TestModelSync(tb.ModelTestCase):
+
+    ISOLATED_TEST_BRANCHES = True
+
     SCHEMA = os.path.join(
         os.path.dirname(__file__), "dbsetup", "chemistry.gel"
     )
