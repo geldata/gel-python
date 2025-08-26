@@ -1248,130 +1248,223 @@ class TestAsyncQuery(tb.AsyncQueryTestCase):
         self.assertEqual(val, 'foo')
 
     async def test_batch_01(self):
-        async for bx in self.client._batch():
-            async with bx:
-                await bx.send_query_single('SELECT 1')
-                await bx.send_query_single('SELECT 2')
-                await bx.send_query_single('SELECT 3')
+        async def test(bx):
+            await bx.send_query_single('SELECT 1')
+            await bx.send_query_single('SELECT 2')
+            await bx.send_query_single('SELECT 3')
 
-                self.assertEqual(await bx.wait(), [1, 2, 3])
+            self.assertEqual(await bx.wait(), [1, 2, 3])
 
-                await bx.send_query_single('SELECT 4')
-                await bx.send_query_single('SELECT 5')
-                await bx.send_query_single('SELECT 6')
+            await bx.send_query_single('SELECT 4')
+            await bx.send_query_single('SELECT 5')
+            await bx.send_query_single('SELECT 6')
 
-                self.assertEqual(await bx.wait(), [4, 5, 6])
+            self.assertEqual(await bx.wait(), [4, 5, 6])
+
+        async for batch in self.client._batch():
+            async with batch:
+                await test(batch)
+
+        async for tx in self.client.transaction():
+            async with tx:
+                async with tx._batch() as batch:
+                    await test(batch)
 
     async def test_batch_02(self):
-        async for bx in self.client._batch():
-            async with bx:
-                await bx.send_query_required_single('''
-                    INSERT test::Tmp {
-                        tmp := 'Test Batch'
-                    };
-                ''')
-                await bx.send_query('''
-                    SELECT
-                        test::Tmp
-                    FILTER
-                        .tmp = 'Test Batch';
-                ''')
-                inserted, selected = await bx.wait()
+        async def test(bx, tag):
+            await bx.send_query_required_single('''
+                INSERT test::Tmp {
+                    tmp := <str>$0
+                };
+            ''', tag)
+            await bx.send_query('''
+                SELECT
+                    test::Tmp
+                FILTER
+                    .tmp = <str>$0;
+            ''', tag)
+            return await bx.wait()
+
+        async for batch in self.client._batch():
+            async with batch:
+                inserted, selected = await test(batch, 'Test Batch 1')
+
+        self.assertEqual([inserted.id], [o.id for o in selected])
+
+        async for tx in self.client.transaction():
+            async with tx:
+                async with tx._batch() as batch:
+                    inserted, selected = await test(batch, 'Test Batch 2')
 
         self.assertEqual([inserted.id], [o.id for o in selected])
 
     async def test_batch_03(self):
-        async for bx in self.client._batch():
-            async with bx:
-                await bx.send_execute('''
-                    INSERT test::Tmp {
-                        tmp := 'Test Auto Wait'
-                    };
-                ''')
-                # No explicit wait() - should auto-wait on scope exit
+        async def test(bx):
+            nonlocal tag
+            await bx.send_execute('''
+                INSERT test::Tmp {
+                    tmp := <str>$0
+                };
+            ''', tag)
+            # No explicit wait() - should auto-wait on scope exit
 
-        rv = await self.client.query('''
+        query = '''
             SELECT
                 test::Tmp
             FILTER
-                .tmp = 'Test Auto Wait';
-        ''')
+                .tmp = <str>$0;
+        '''
+
+        tag = 'Test Auto Wait 1'
+
+        async for batch in self.client._batch():
+            async with batch:
+                await test(batch)
+
+        rv = await self.client.query(query, tag)
+        self.assertEqual(len(rv), 1)
+
+        tag = 'Test Auto Wait 2'
+
+        async for tx in self.client.transaction():
+            async with tx:
+                async with tx._batch() as batch:
+                    await test(batch)
+
+        rv = await self.client.query(query, tag)
         self.assertEqual(len(rv), 1)
 
     async def test_batch_04(self):
-        with self.assertRaises(gel.TransactionError):
-            async for bx in self.client._batch():
-                async with bx:
-                    await bx.send_execute('''
-                        INSERT test::Tmp {
-                            tmp := 'Test Atomic'
-                        };
-                    ''')
-                    await bx.send_query_single('SELECT 1/0')
-                    await bx.send_execute('''
-                        INSERT test::Tmp {
-                            tmp := 'Test Atomic'
-                        };
-                    ''')
+        async def test(bx):
+            nonlocal tag
+            await bx.send_execute('''
+                INSERT test::Tmp {
+                    tmp := <str>$0
+                };
+            ''', tag)
+            await bx.send_query_single('SELECT 1/0')
+            await bx.send_execute('''
+                INSERT test::Tmp {
+                    tmp := <str>$0
+                };
+            ''', tag)
 
-                    with self.assertRaises(gel.DivisionByZeroError):
-                        await bx.wait()
+            with self.assertRaises(gel.DivisionByZeroError):
+                await bx.wait()
 
-        rv = await self.client.query('''
+        query = '''
             SELECT
                 test::Tmp
             FILTER
-                .tmp = 'Test Atomic';
-        ''')
+                .tmp = <str>$0;
+        '''
+
+        tag = 'Test Atomic 1'
+
+        with self.assertRaises(gel.TransactionError):
+            async for batch in self.client._batch():
+                async with batch:
+                    await test(batch)
+
+        rv = await self.client.query(query, tag)
+        self.assertEqual(len(rv), 0)
+
+        tag = 'Test Atomic 2'
+
+        with self.assertRaises(gel.TransactionError):
+            async for tx in self.client.transaction():
+                async with tx:
+                    async with tx._batch() as batch:
+                        await test(batch)
+
+        rv = await self.client.query(query, tag)
         self.assertEqual(len(rv), 0)
 
     async def test_batch_05(self):
-        async for bx in self.client._batch():
-            async with bx:
-                # Test alternating queries that need Parse
-                await bx.send_query_single('SELECT 1')
-                await bx.send_query_single('SELECT <int16>$0', 2)
-                await bx.send_query_single('SELECT 3')
-                await bx.send_query_single('SELECT <int32>$0', 4)
-                await bx.send_query_single('SELECT 5')
-                await bx.send_query_single('SELECT <int64>$0', 6)
-                await bx.send_query_single('SELECT 7')
-                self.assertEqual(await bx.wait(), [1, 2, 3, 4, 5, 6, 7])
+        async def test(bx):
+            # Test alternating queries that need Parse
+            await bx.send_query_single('SELECT 1')
+            await bx.send_query_single('SELECT <int16>$0', 2)
+            await bx.send_query_single('SELECT 3')
+            await bx.send_query_single('SELECT <int32>$0', 4)
+            await bx.send_query_single('SELECT 5')
+            await bx.send_query_single('SELECT <int64>$0', 6)
+            await bx.send_query_single('SELECT 7')
+            self.assertEqual(await bx.wait(), [1, 2, 3, 4, 5, 6, 7])
+
+        async for batch in self.client._batch():
+            async with batch:
+                await test(batch)
+
+        async for tx in self.client.transaction():
+            async with tx:
+                async with tx._batch() as batch:
+                    await test(batch)
 
     async def test_batch_06(self):
-        # Cache the input type descriptors first
-        val = await self.client.query_single("SELECT <test::MyType>$0", 42)
-        self.assertEqual(val, 42)
-        val = await self.client.query_single("SELECT <test::MyType2>$0", 42)
-        self.assertEqual(val, 42)
-        val = await self.client.query_single("SELECT <test::MyType3>$0", 42)
-        self.assertEqual(val, 42)
+        async def setup():
+            # Cache the input type descriptors first
+            val = await self.client.query_single("SELECT <test::MyType>$0", 42)
+            self.assertEqual(val, 42)
+            val = await self.client.query_single(
+                "SELECT <test::MyType2>$0", 42
+            )
+            self.assertEqual(val, 42)
+            val = await self.client.query_single(
+                "SELECT <test::MyType3>$0", 42
+            )
+            self.assertEqual(val, 42)
 
-        # Modify the schema to outdate the previous type descriptors
-        await self.client.execute("""
-            DROP SCALAR TYPE test::MyType;
-            DROP SCALAR TYPE test::MyType2;
-            DROP SCALAR TYPE test::MyType3;
-            CREATE SCALAR TYPE test::MyType EXTENDING std::int64;
-            CREATE SCALAR TYPE test::MyType2 EXTENDING std::int16;
-            CREATE SCALAR TYPE test::MyType3 EXTENDING std::int32;
-        """)
+            # Modify the schema to outdate the previous type descriptors
+            await self.client.execute("""
+                DROP SCALAR TYPE test::MyType;
+                DROP SCALAR TYPE test::MyType2;
+                DROP SCALAR TYPE test::MyType3;
+                CREATE SCALAR TYPE test::MyType EXTENDING std::int64;
+                CREATE SCALAR TYPE test::MyType2 EXTENDING std::int16;
+                CREATE SCALAR TYPE test::MyType3 EXTENDING std::int32;
+            """)
+
+        async def test(bx):
+            await bx.send_query_single('SELECT <test::MyType>$0', 42)
+            await bx.send_query_single('SELECT <test::MyType2>$0', 42)
+            await bx.send_query_single('SELECT <test::MyType3>$0', 42)
+            self.assertEqual(await bx.wait(), [42, 42, 42])
 
         # We should retry only once and succeed here
+        await setup()
         c = self.client.with_retry_options(gel.RetryOptions(attempts=2))
-        async for bx in c._batch():
-            async with bx:
-                await bx.send_query_single('SELECT <test::MyType>$0', 42)
-                await bx.send_query_single('SELECT <test::MyType2>$0', 42)
-                await bx.send_query_single('SELECT <test::MyType3>$0', 42)
-                self.assertEqual(await bx.wait(), [42, 42, 42])
+        async for batch in c._batch():
+            async with batch:
+                await test(batch)
+
+        # We should retry only once and succeed here too
+        await setup()
+        async for tx in c.transaction():
+            async with tx:
+                async with tx._batch() as batch:
+                    await test(batch)
 
     async def test_batch_07(self):
-        c = self.client.with_config(session_idle_transaction_timeout=0.2)
-        async for bx in c._batch():
-            async with bx:
-                await bx.send_query_single("select 42")
-                self.assertEqual(await bx.wait(), [42])
-                await asyncio.sleep(0.6)
-                await bx.send_query_single("select 42")
-                self.assertEqual(await bx.wait(), [42])
+        async def test(bx):
+            await bx.send_query_single("select 42")
+            self.assertEqual(await bx.wait(), [42])
+            await asyncio.sleep(0.6)
+            await bx.send_query_single("select 42")
+            self.assertEqual(await bx.wait(), [42])
+
+        c = self.client.with_config(
+            session_idle_transaction_timeout=datetime.timedelta(seconds=0.2)
+        )
+
+        # c._batch() disables idle transaction timeout, so this should work
+        async for batch in c._batch():
+            async with batch:
+                await test(batch)
+
+        # But inside an explicit transaction, the timeout is active
+        with self.assertRaises(gel.ClientConnectionClosedError):
+            async for tx in c.transaction():
+                async with tx:
+                    async with tx._batch() as batch:
+                        await test(batch)

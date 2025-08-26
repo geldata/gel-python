@@ -622,7 +622,7 @@ class Batch(transaction.BaseRetry):
 
     def __next__(self) -> BatchIteration:
         # Note: when changing this code consider also
-        # updating AsyncIOBatch.__anext__.
+        # updating AsyncIOBatchRetry.__anext__.
         if self._done:
             raise StopIteration
         if self._next_backoff:

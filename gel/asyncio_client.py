@@ -398,6 +398,9 @@ class AsyncIOIteration(transaction.BaseTransaction, abstract.AsyncIOExecutor):
         finally:
             self._locked = False
 
+    def _batch(self) -> AsyncIOBatch:
+        return AsyncIOBatch(self)
+
 
 class AsyncIORetry(transaction.BaseRetry):
     def __aiter__(self) -> AsyncIORetry:
@@ -417,20 +420,17 @@ class AsyncIORetry(transaction.BaseRetry):
 
 
 class AsyncIOBatchIteration(transaction.BaseTransaction):
-    __slots__ = ("_managed", "_locked", "_batched_ops")
+    __slots__ = ("_managed", "_batch")
 
     def __init__(
         self,
-        retry: AsyncIOBatch,
+        retry: AsyncIOBatchRetry,
         client: AsyncIOClient,
         iteration: int,
     ) -> None:
         super().__init__(retry, client, iteration)
+        self._batch = AsyncIOBatch(self)
         self._managed = False
-        self._locked = False
-        self._batched_ops: list[
-            abstract.BaseQueryContext[Any] | abstract.ExecuteContext[Any]
-        ] = []
 
     async def __aenter__(self) -> Self:
         if self._managed:
@@ -450,12 +450,12 @@ class AsyncIOBatchIteration(transaction.BaseTransaction):
             # Normal exit, wait for the remaining batched operations
             # to complete, discarding any results.
             try:
-                await self.wait()
+                await self._batch.wait()
             except Exception as inner_ex:
                 # If an exception occurs while waiting, we need to
                 # ensure that the transaction is exited properly,
                 # including to consider that exception for retry.
-                with self._exclusive():
+                with self._batch._exclusive():
                     self._managed = False
                     if await self._exit(type(inner_ex), inner_ex):
                         # Shall retry, mute the exception
@@ -465,7 +465,7 @@ class AsyncIOBatchIteration(transaction.BaseTransaction):
                         # Note: we cannot simply return False here,
                         # because the outer `extype` and `ex` are all None.
                         raise
-        with self._exclusive():
+        with self._batch._exclusive():
             self._managed = False
             return await self._exit(extype, ex)  # type: ignore [no-any-return]
 
@@ -476,6 +476,35 @@ class AsyncIOBatchIteration(transaction.BaseTransaction):
                 "Use `async with transaction:`"
             )
         await super()._ensure_transaction()
+
+    def __getattr__(self, item: str) -> Any:
+        return getattr(self._batch, item)
+
+
+class AsyncIOBatch:
+    __slots__ = ("_tx", "_locked", "_batched_ops")
+
+    def __init__(self, tx: transaction.BaseTransaction) -> None:
+        self._tx = tx
+
+        self._locked = False
+        self._batched_ops: list[
+            abstract.BaseQueryContext[Any] | abstract.ExecuteContext[Any]
+        ] = []
+
+    async def __aenter__(self) -> Self:
+        return self
+
+    async def __aexit__(
+        self,
+        extype: type[BaseException] | None,
+        ex: BaseException | None,
+        tb: Any,
+    ) -> None:
+        if extype is None:
+            # Normal exit, wait for the remaining batched operations
+            # to complete, discarding any results.
+            await self.wait()
 
     @contextlib.contextmanager
     def _exclusive(self) -> typing.Iterator[None]:
@@ -499,12 +528,12 @@ class AsyncIOBatchIteration(transaction.BaseTransaction):
         self._batched_ops.append(
             abstract.QueryContext(
                 query=abstract.QueryWithArgs.from_query(query, args, kwargs),
-                cache=self._client._get_query_cache(),
+                cache=self._tx._get_query_cache(),
                 retry_options=None,
-                state=self._client._get_state(),
+                state=self._tx._get_state(),
                 transaction_options=None,
-                warning_handler=self._client._get_warning_handler(),
-                annotations=self._client._get_annotations(),
+                warning_handler=self._tx._get_warning_handler(),
+                annotations=self._tx._get_annotations(),
             )
         )
 
@@ -517,12 +546,12 @@ class AsyncIOBatchIteration(transaction.BaseTransaction):
         self._batched_ops.append(
             abstract.QuerySingleContext(
                 query=abstract.QueryWithArgs.from_query(query, args, kwargs),
-                cache=self._client._get_query_cache(),
+                cache=self._tx._get_query_cache(),
                 retry_options=None,
-                state=self._client._get_state(),
+                state=self._tx._get_state(),
                 transaction_options=None,
-                warning_handler=self._client._get_warning_handler(),
-                annotations=self._client._get_annotations(),
+                warning_handler=self._tx._get_warning_handler(),
+                annotations=self._tx._get_annotations(),
             )
         )
 
@@ -535,12 +564,12 @@ class AsyncIOBatchIteration(transaction.BaseTransaction):
         self._batched_ops.append(
             abstract.QueryRequiredSingleContext(
                 query=abstract.QueryWithArgs.from_query(query, args, kwargs),
-                cache=self._client._get_query_cache(),
+                cache=self._tx._get_query_cache(),
                 retry_options=None,
-                state=self._client._get_state(),
+                state=self._tx._get_state(),
                 transaction_options=None,
-                warning_handler=self._client._get_warning_handler(),
-                annotations=self._client._get_annotations(),
+                warning_handler=self._tx._get_warning_handler(),
+                annotations=self._tx._get_annotations(),
             )
         )
 
@@ -550,24 +579,23 @@ class AsyncIOBatchIteration(transaction.BaseTransaction):
         self._batched_ops.append(
             abstract.ExecuteContext(
                 query=abstract.QueryWithArgs(commands, None, args, kwargs),
-                cache=self._client._get_query_cache(),
+                cache=self._tx._get_query_cache(),
                 retry_options=None,
-                state=self._client._get_state(),
+                state=self._tx._get_state(),
                 transaction_options=None,
-                warning_handler=self._client._get_warning_handler(),
-                annotations=self._client._get_annotations(),
+                warning_handler=self._tx._get_warning_handler(),
+                annotations=self._tx._get_annotations(),
             )
         )
 
     async def wait(self) -> list[Any]:
         with self._exclusive():
-            await self._ensure_transaction()
             ops, self._batched_ops[:] = self._batched_ops[:], []
-            return await self._connection.batch_query(ops)  # type: ignore [no-any-return, union-attr]
+            return await self._tx._batch_query(ops)
 
 
-class AsyncIOBatch(transaction.BaseRetry):
-    def __aiter__(self) -> AsyncIOBatch:
+class AsyncIOBatchRetry(transaction.BaseRetry):
+    def __aiter__(self) -> AsyncIOBatchRetry:
         return self
 
     async def __anext__(self) -> AsyncIOBatchIteration:
@@ -624,8 +652,8 @@ class AsyncIOClient(
     def transaction(self) -> AsyncIORetry:
         return AsyncIORetry(self)
 
-    def _batch(self) -> AsyncIOBatch:
-        return AsyncIOBatch(
+    def _batch(self) -> AsyncIOBatchRetry:
+        return AsyncIOBatchRetry(
             self.with_config(
                 # We only need to disable transaction idle timeout;
                 # session idle timeouts can't interrupt transactions.

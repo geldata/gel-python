@@ -197,7 +197,8 @@ class BaseTransaction:
             and issubclass(extype, errors.EdgeDBError)
             and ex.has_tag(errors.SHOULD_RETRY)
         ):
-            return self.__retry._retry(ex)
+            rv = self.__retry._retry(ex)
+            return rv
 
     def _get_query_cache(self) -> abstract.QueryCache:
         return self._client._get_query_cache()
@@ -242,6 +243,16 @@ class BaseTransaction:
                 annotations=self._get_annotations(),
             )
         )
+
+    async def _batch_query(
+        self,
+        ops: list[
+            abstract.BaseQueryContext[typing.Any]
+            | abstract.ExecuteContext[typing.Any]
+        ],
+    ) -> list[typing.Any]:
+        await self._ensure_transaction()
+        return await self._connection.batch_query(ops)
 
 
 class BaseRetry:
