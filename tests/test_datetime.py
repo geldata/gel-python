@@ -20,7 +20,7 @@
 import random
 from datetime import timedelta
 
-from gel import _testbase as tb
+from gel._internal import _testbase as tb
 from gel import errors
 from gel.datatypes.datatypes import RelativeDuration, DateDuration
 

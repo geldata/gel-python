@@ -24,7 +24,7 @@ import unittest.mock
 import gel
 from gel import errors
 from gel import RetryOptions
-from gel import _testbase as tb
+from gel._internal import _testbase as tb
 
 log = logging.getLogger(__name__)
 

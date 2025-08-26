@@ -28,7 +28,7 @@ except ImportError:
 else:
     NO_ORM = False
 
-from gel import _testbase as tb
+from gel._internal._testbase import _thirdpartyorm as tb
 from gel.orm import sqlmodel as sqlm
 
 

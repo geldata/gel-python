@@ -21,7 +21,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 import gel
 
-from gel import _testbase as tb
+from gel._internal import _testbase as tb
 from gel import TransactionOptions
 
 

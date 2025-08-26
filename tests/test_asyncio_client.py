@@ -21,7 +21,7 @@ import random
 
 import gel
 
-from gel import _testbase as tb
+from gel._internal import _testbase as tb
 from gel import errors
 from gel import asyncio_client
 

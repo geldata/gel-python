@@ -28,7 +28,7 @@ import uuid
 import gel
 
 from gel import abstract
-from gel import _testbase as tb
+from gel._internal import _testbase as tb
 from gel import blocking_client
 from gel.protocol import protocol
 

@@ -7,7 +7,7 @@ import typing
 if typing.TYPE_CHECKING:
     from typing import reveal_type
 
-from gel import _testbase as tb
+from gel._internal._testbase import _models as tb
 
 
 @tb.typecheck

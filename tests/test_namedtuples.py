@@ -20,7 +20,7 @@
 from collections import namedtuple, UserDict
 
 import gel
-from gel import _testbase as tb
+from gel._internal import _testbase as tb
 
 
 class TestNamedTupleTypes(tb.SyncQueryTestCase):

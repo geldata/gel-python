@@ -24,7 +24,7 @@ import subprocess
 import os
 import tempfile
 
-from gel import _testbase as tb
+from gel._internal import _testbase as tb
 
 
 class TestCodegen(tb.AsyncQueryTestCase):

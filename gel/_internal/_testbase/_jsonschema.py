@@ -1,3 +1,7 @@
+# SPDX-PackageName: gel-python
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright Gel Data Inc. and the contributors.
+
 """
 Simple JSON schema renderer for Pydantic model schemas.
 Renders JSON schemas as Python-like class declarations for testing purposes.
@@ -8,8 +12,9 @@ from typing import Any
 
 
 class SchemaRenderer:
-    def __init__(self):
-        self.inline_types = set()  # Will be populated during analysis
+    def __init__(self) -> None:
+        # Will be populated during analysis
+        self.inline_types: set[str] = set()
 
     def render(self, schema: dict[str, Any]) -> str:
         """Render a JSON schema as Python-like class declarations."""
@@ -21,15 +26,14 @@ class SchemaRenderer:
         # Analyze which types should be inlined
         self._analyze_inline_types(defs)
 
-        output_lines = []
+        output_lines: list[str] = []
 
         # Handle root object if it has properties
         if "properties" in schema:
             root_class = self._render_object_type(
                 schema, schema.get("title", "Root"), defs
             )
-            output_lines.append(root_class)
-            output_lines.append("")
+            output_lines.extend([root_class, ""])
 
         # Process $defs in sorted order
         if defs:
@@ -42,12 +46,11 @@ class SchemaRenderer:
                 type_def = defs[type_name]
                 rendered = self._render_type_def(type_name, type_def, defs)
                 if rendered:
-                    output_lines.append(rendered)
-                    output_lines.append("")
+                    output_lines.extend([rendered, ""])
 
         return "\n".join(output_lines).rstrip()
 
-    def _analyze_inline_types(self, defs: dict[str, Any]):
+    def _analyze_inline_types(self, defs: dict[str, Any]) -> None:
         """Analyze which types should be inlined based on simple heuristics."""
         self.inline_types = set()
 
@@ -71,7 +74,7 @@ class SchemaRenderer:
             return True
 
         # 3. Simple primitive types with just metadata (default, format, etc.)
-        if type_def.get("type") in ("string", "integer", "number", "boolean"):
+        if type_def.get("type") in {"string", "integer", "number", "boolean"}:
             return True
 
         # 4. Types with only a default value (like ComputedProperty)
@@ -103,7 +106,7 @@ class SchemaRenderer:
         self,
         obj_def: dict[str, Any],
         class_name: str,
-        defs: dict[str, Any] = None,
+        defs: dict[str, Any] | None = None,
     ) -> str:
         """Render an object type as a class."""
         lines = [f"class {class_name}:"]
@@ -135,13 +138,13 @@ class SchemaRenderer:
                 field_annotation = " = None"
             elif not is_required and has_default:
                 # Case: optional with non-None default
-                field_annotation = f" = {repr(default_val)}"
+                field_annotation = f" = {default_val!r}"
             elif not is_required:
                 # Case: optional without default -> " = ..."
                 field_annotation = " = ..."
             elif has_default:
                 # Case: required with default (unusual but possible)
-                field_annotation = f" = {repr(default_val)}"
+                field_annotation = f" = {default_val!r}"
             else:
                 # Case: simple required field
                 field_annotation = ""
@@ -169,13 +172,18 @@ class SchemaRenderer:
         """Extract discriminator property name if present."""
         # Check direct discriminator
         if "discriminator" in prop_def:
-            return prop_def["discriminator"].get("propertyName", "")
+            res = prop_def["discriminator"].get("propertyName", "")
+            assert isinstance(res, str)
+            return res
 
         # Check discriminator in array items
         if prop_def.get("type") == "array":
             items = prop_def.get("items", {})
+            assert isinstance(items, dict)
             if "discriminator" in items:
-                return items["discriminator"].get("propertyName", "")
+                res = items["discriminator"].get("propertyName", "")
+                assert isinstance(res, str)
+                return res
 
         return ""
 
@@ -192,11 +200,9 @@ class SchemaRenderer:
     ) -> str:
         """Render a union type (anyOf)."""
         any_of = union_def.get("anyOf", [])
-        union_types = []
-
-        for option in any_of:
-            union_types.append(self._get_type_annotation(option, defs))
-
+        union_types = [
+            self._get_type_annotation(option, defs) for option in any_of
+        ]
         union_str = " | ".join(sorted(set(union_types)))
         return f"{type_name} = {union_str}"
 
@@ -206,6 +212,7 @@ class SchemaRenderer:
         """Get the type annotation for a type definition."""
         if "$ref" in type_def:
             ref = type_def["$ref"]
+            assert isinstance(ref, str)
             if ref.startswith("#/$defs/"):
                 ref_name = ref[8:]  # Remove '#/$defs/'
                 return self._resolve_ref_type(ref_name, defs)
@@ -213,9 +220,9 @@ class SchemaRenderer:
 
         if "oneOf" in type_def:
             one_of = type_def["oneOf"]
-            union_types = []
-            for option in one_of:
-                union_types.append(self._get_type_annotation(option, defs))
+            union_types = [
+                self._get_type_annotation(option, defs) for option in one_of
+            ]
             return " | ".join(sorted(set(union_types)))
 
         if "anyOf" in type_def:
@@ -228,7 +235,7 @@ class SchemaRenderer:
         type_name = type_def.get("type")
         if type_name == "string":
             if "const" in type_def:
-                return f"Literal[{repr(type_def['const'])}]"
+                return f"Literal[{type_def['const']!r}]"
             elif type_def.get("format") == "uuid":
                 return "UUID"
             return "str"
@@ -278,6 +285,6 @@ def render_schema_from_json(json_str: str) -> str:
 
 def render_schema_from_file(file_path: str) -> str:
     """Render a JSON schema file as Python-like class declarations."""
-    with open(file_path, "r") as f:
+    with open(file_path, encoding="utf8") as f:
         schema_dict = json.load(f)
     return render_schema(schema_dict)
