@@ -643,18 +643,12 @@ def _add_refetch_shape(
                 ref_shape.fields[field_name] = ptr_info
 
     else:
-        # New objects only need computeds refetched
-        for field_name in obj.__pydantic_computed_fields__:
-            if field_name in ref_shape.fields:
+        # New objects only need computed properties refetched
+        for ptr_name, ptr_info in tp_pointers.items():
+            if not ptr_info.computed or ptr_info.kind != PointerKind.Property:
                 continue
 
-            try:
-                ptr_info = tp_pointers[field_name]
-            except KeyError:
-                # ad-hoc computed
-                pass
-            else:
-                ref_shape.fields[field_name] = ptr_info
+            ref_shape.fields[ptr_name] = ptr_info
 
 
 def push_refetch_new(
