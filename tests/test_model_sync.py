@@ -40,7 +40,7 @@ from gel import _testbase as tb
 from gel._internal import _tracked_list
 from gel._internal._qbmodel._pydantic._models import GelModel
 
-from . import nested_collections
+from tests import nested_collections
 
 
 _T = typing.TypeVar("_T")
