@@ -53,6 +53,13 @@ class TestSyncQuery(tb.SyncQueryTestCase):
         CREATE SCALAR TYPE test::MyType EXTENDING int32;
         CREATE SCALAR TYPE test::MyType2 EXTENDING int64;
         CREATE SCALAR TYPE test::MyType3 EXTENDING int16;
+
+        CREATE TYPE test::Obj {
+            CREATE REQUIRED PROPERTY name -> std::str;
+            CREATE REQUIRED PROPERTY val -> std::int64;
+        };
+        INSERT test::Obj { name := "foo", val := 0 };
+        INSERT test::Obj { name := "bar", val := 1 };
     '''
 
     TEARDOWN = '''
@@ -62,6 +69,7 @@ class TestSyncQuery(tb.SyncQueryTestCase):
         DROP TYPE test::Tmp;
         DROP TYPE test::TmpConflictChild;
         DROP TYPE test::TmpConflict;
+        DROP TYPE test::Obj;
     '''
 
     def test_sync_parse_error_recover_01(self):
@@ -1181,3 +1189,27 @@ class TestSyncQuery(tb.SyncQueryTestCase):
                 time.sleep(0.6)
                 bx.send_query_single("select 42")
                 self.assertEqual(bx.wait(), [42])
+
+    def test_sync_query_graphql_01(self):
+        if self.server_version.major < 7:
+            self.skipTest("GraphQL added in 7.0")
+
+        res = json.loads(self.client.query_graphql_json('''
+            query($name: String!) {
+                test__Obj(filter: {name: {eq: $name}}) {
+                    name
+                    val
+                }
+            }
+        ''', name='foo'))
+        self.assertEqual(
+            res,
+            dict(
+                test__Obj=[
+                    dict(
+                        name='foo',
+                        val=0,
+                    ),
+                ]
+            ),
+        )

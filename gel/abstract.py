@@ -598,6 +598,31 @@ class ReadOnlyExecutor(BaseReadOnlyExecutor):
             )
         )
 
+    def query_graphql_json(
+        self,
+        query: str,
+        /,
+        *args: Any,
+        **kwargs: Any,
+    ) -> str:
+        return self._query(
+            QuerySingleJsonContext(
+                query=QueryWithArgs(
+                    query,
+                    None,
+                    args,
+                    kwargs,
+                    input_language=protocol.InputLanguage.GRAPHQL,
+                ),
+                cache=self._get_query_cache(),
+                retry_options=self._get_retry_options(),
+                state=self._get_state(),
+                transaction_options=self._get_active_tx_options(),
+                warning_handler=self._get_warning_handler(),
+                annotations=self._get_annotations(),
+            )
+        )
+
     @abc.abstractmethod
     def _execute(self, execute_context: ExecuteContext[_T_ql]) -> None: ...
 
@@ -921,6 +946,31 @@ class AsyncIOReadOnlyExecutor(BaseReadOnlyExecutor):
                     args,
                     kwargs,
                     input_language=protocol.InputLanguage.SQL,
+                ),
+                cache=self._get_query_cache(),
+                retry_options=self._get_retry_options(),
+                state=self._get_state(),
+                transaction_options=self._get_active_tx_options(),
+                warning_handler=self._get_warning_handler(),
+                annotations=self._get_annotations(),
+            )
+        )
+
+    async def query_graphql_json(
+        self,
+        query: str | Queryable[_T_ql],
+        /,
+        *args: Any,
+        **kwargs: Any,
+    ) -> str:
+        return await self._query(
+            QuerySingleJsonContext(
+                query=QueryWithArgs(
+                    query,
+                    None,
+                    args,
+                    kwargs,
+                    input_language=protocol.InputLanguage.GRAPHQL,
                 ),
                 cache=self._get_query_cache(),
                 retry_options=self._get_retry_options(),
