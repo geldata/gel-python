@@ -27,6 +27,9 @@ module default {
 
         # Computed single link
         compound := .<atoms[is Compound];
+
+        # Computed single prop
+        compound_name := .<atoms[is Compound].name;
     };
 
     type Compound extending Named {

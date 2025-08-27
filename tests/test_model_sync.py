@@ -36,6 +36,9 @@ from gel import _testbase as tb
 
 
 class TestModelSync(tb.ModelTestCase):
+
+    ISOLATED_TEST_BRANCHES = True
+
     SCHEMA = os.path.join(
         os.path.dirname(__file__), "dbsetup", "chemistry.gel"
     )
@@ -76,7 +79,6 @@ class TestModelSync(tb.ModelTestCase):
         # Check that computed values are fetched
         self.assertEqual(ref_atom.weight, 1.008)
 
-    @tb.xfail
     def test_model_sync_new_obj_computed_03(self):
         # Computed from links to existing and new items
 
@@ -98,10 +100,9 @@ class TestModelSync(tb.ModelTestCase):
         self.assertEqual(new_atom.weight, 4.0026)
         self.assertEqual(new_atom.total_bond_count, 0)
         self.assertEqual(new_atom.total_bond_weight, 0)
-        self.assertEqual(reactor.total_weight, 4.0026)  # Failing
-        self.assertEqual(reactor.atom_weights, [4.0026])  # Failing
+        self.assertEqual(reactor.total_weight, 4.0026)
+        self.assertEqual(reactor.atom_weights, (4.0026,))
 
-    @tb.xfail
     def test_model_sync_new_obj_computed_04(self):
         # Computed from links to existing and new items
 
@@ -129,7 +130,7 @@ class TestModelSync(tb.ModelTestCase):
         h_2.bonds = [default.Atom.bonds.link(o_1, count=1)]
 
         hydrogen_atoms = [h_1, h_2]
-        oxygen_atoms = [h_1, h_2]
+        oxygen_atoms = [o_1]
 
         # Sync
         self.client.sync(*hydrogen_atoms, *oxygen_atoms)
@@ -139,11 +140,11 @@ class TestModelSync(tb.ModelTestCase):
             [atom.weight for atom in hydrogen_atoms],
             [1.008, 1.008],
         )
-        self.assertEqual(  # Failing
+        self.assertEqual(
             [atom.total_bond_count for atom in hydrogen_atoms],
             [1, 1],
         )
-        self.assertEqual(  # Failing
+        self.assertEqual(
             [atom.total_bond_weight for atom in hydrogen_atoms],
             [15.999, 15.999],
         )
@@ -152,20 +153,20 @@ class TestModelSync(tb.ModelTestCase):
             [atom.weight for atom in oxygen_atoms],
             [15.999],
         )
-        self.assertEqual(  # Failing
+        self.assertEqual(
             [atom.total_bond_count for atom in oxygen_atoms],
             [2],
         )
-        self.assertEqual(  # Failing
+        self.assertEqual(
             [atom.total_bond_weight for atom in oxygen_atoms],
             [1.008 * 2],
         )
 
-        self.assertEqual(  # Failing
+        self.assertEqual(
             reactor.total_weight,
             1.008 * 2 + 15.999,
         )
-        self.assertEqual(  # Failing
-            list(sorted(reactor.atom_weights)),
+        self.assertEqual(
+            tuple(sorted(reactor.atom_weights)),
             (1.008, 1.008, 15.999),
         )
