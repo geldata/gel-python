@@ -282,9 +282,7 @@ class AbstractTrackedList(
             self._removed_items = []
 
     def __gel_replace_with_empty__(self) -> None:
-        self._items.clear()
-        self._added_items = None
-        self._removed_items = None
+        self.clear()
 
     def __gel_get_added__(self) -> list[_T_co]:
         return [] if self._added_items is None else list(self._added_items)

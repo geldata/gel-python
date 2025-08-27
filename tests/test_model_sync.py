@@ -590,7 +590,6 @@ class TestModelSyncMultiProp(tb.ModelTestCase):
         _testcase(default.B, [[1], [2, 2], [3, 3, 3]])
         _testcase(default.C, [("a", 1), ("b", 2), ("c", 3)])
 
-    @tb.xfail
     def test_model_sync_multi_prop_02(self):
         # Updating existing objects with multi props
         # Set prop to new value
