@@ -439,6 +439,9 @@ class Iteration(transaction.BaseTransaction, abstract.Executor):
         with self._exclusive():
             iter_coroutine(super()._execute(execute_context))
 
+    def _batch(self) -> Batch:
+        return Batch(self)
+
     @contextlib.contextmanager
     def _exclusive(self) -> typing.Generator[None, None, None]:
         if not self._lock.acquire(blocking=False):
@@ -470,18 +473,20 @@ class Retry(transaction.BaseRetry):
 
 
 class BatchIteration(transaction.BaseTransaction):
-    __slots__ = ("_managed", "_lock", "_batched_ops")
+    __slots__ = ("_managed", "_batch")
 
-    def __init__(self, retry: Batch, client: Client, iteration: int) -> None:
+    def __init__(
+        self,
+        retry: BatchRetry,
+        client: Client,
+        iteration: int,
+    ) -> None:
         super().__init__(retry, client, iteration)
+        self._batch = Batch(self)
         self._managed = False
-        self._lock = threading.Lock()
-        self._batched_ops: list[
-            abstract.BaseQueryContext[Any] | abstract.ExecuteContext[Any]
-        ] = []
 
     def __enter__(self) -> BatchIteration:
-        with self._exclusive():
+        with self._batch._exclusive():
             if self._managed:
                 raise errors.InterfaceError(
                     "cannot enter context: already in a `with` block"
@@ -495,12 +500,12 @@ class BatchIteration(transaction.BaseTransaction):
         ex: BaseException | None,
         tb: Any | None,
     ) -> bool | None:
-        with self._exclusive():
+        with self._batch._exclusive():
             if extype is None:
                 # Normal exit, wait for the remaining batched operations
                 # to complete, discarding any results.
                 try:
-                    iter_coroutine(self._wait())
+                    iter_coroutine(self._batch._wait())
                 except Exception as inner_ex:
                     # If an exception occurs while waiting, we need to
                     # ensure that the transaction is exited properly,
@@ -514,6 +519,7 @@ class BatchIteration(transaction.BaseTransaction):
                         # Note: we cannot simply return False here,
                         # because the outer `extype` and `ex` are all None.
                         raise
+        with self._batch._exclusive():
             self._managed = False
             return iter_coroutine(self._exit(extype, ex))  # type: ignore [no-any-return]
 
@@ -524,6 +530,34 @@ class BatchIteration(transaction.BaseTransaction):
                 "Use `with transaction:`"
             )
         await super()._ensure_transaction()
+
+    def __getattr__(self, item: str) -> Any:
+        return getattr(self._batch, item)
+
+
+class Batch:
+    __slots__ = ("_tx", "_lock", "_batched_ops")
+
+    def __init__(self, tx: transaction.BaseTransaction) -> None:
+        self._tx = tx
+        self._lock = threading.Lock()
+        self._batched_ops: list[
+            abstract.BaseQueryContext[Any] | abstract.ExecuteContext[Any]
+        ] = []
+
+    def __enter__(self) -> Batch:
+        return self
+
+    def __exit__(
+        self,
+        extype: type[BaseException] | None,
+        ex: BaseException | None,
+        tb: Any | None,
+    ) -> None:
+        if extype is None:
+            # Normal exit, wait for the remaining batched operations
+            # to complete, discarding any results.
+            self.wait()
 
     @contextlib.contextmanager
     def _exclusive(self) -> typing.Generator[None, None, None]:
@@ -546,12 +580,12 @@ class BatchIteration(transaction.BaseTransaction):
         self._batched_ops.append(
             abstract.QueryContext(
                 query=abstract.QueryWithArgs.from_query(query, args, kwargs),
-                cache=self._client._get_query_cache(),
+                cache=self._tx._get_query_cache(),
                 retry_options=None,
-                state=self._client._get_state(),
+                state=self._tx._get_state(),
                 transaction_options=None,
-                warning_handler=self._client._get_warning_handler(),
-                annotations=self._client._get_annotations(),
+                warning_handler=self._tx._get_warning_handler(),
+                annotations=self._tx._get_annotations(),
             )
         )
 
@@ -564,12 +598,12 @@ class BatchIteration(transaction.BaseTransaction):
         self._batched_ops.append(
             abstract.QuerySingleContext(
                 query=abstract.QueryWithArgs.from_query(query, args, kwargs),
-                cache=self._client._get_query_cache(),
+                cache=self._tx._get_query_cache(),
                 retry_options=None,
-                state=self._client._get_state(),
+                state=self._tx._get_state(),
                 transaction_options=None,
-                warning_handler=self._client._get_warning_handler(),
-                annotations=self._client._get_annotations(),
+                warning_handler=self._tx._get_warning_handler(),
+                annotations=self._tx._get_annotations(),
             )
         )
 
@@ -582,12 +616,12 @@ class BatchIteration(transaction.BaseTransaction):
         self._batched_ops.append(
             abstract.QueryRequiredSingleContext(
                 query=abstract.QueryWithArgs.from_query(query, args, kwargs),
-                cache=self._client._get_query_cache(),
+                cache=self._tx._get_query_cache(),
                 retry_options=None,
-                state=self._client._get_state(),
+                state=self._tx._get_state(),
                 transaction_options=None,
-                warning_handler=self._client._get_warning_handler(),
-                annotations=self._client._get_annotations(),
+                warning_handler=self._tx._get_warning_handler(),
+                annotations=self._tx._get_annotations(),
             )
         )
 
@@ -595,12 +629,12 @@ class BatchIteration(transaction.BaseTransaction):
         self._batched_ops.append(
             abstract.ExecuteContext(
                 query=abstract.QueryWithArgs(commands, None, args, kwargs),
-                cache=self._client._get_query_cache(),
+                cache=self._tx._get_query_cache(),
                 retry_options=None,
-                state=self._client._get_state(),
+                state=self._tx._get_state(),
                 transaction_options=None,
-                warning_handler=self._client._get_warning_handler(),
-                annotations=self._client._get_annotations(),
+                warning_handler=self._tx._get_warning_handler(),
+                annotations=self._tx._get_annotations(),
             )
         )
 
@@ -609,15 +643,12 @@ class BatchIteration(transaction.BaseTransaction):
             return iter_coroutine(self._wait())
 
     async def _wait(self) -> list[Any]:
-        await self._ensure_transaction()
         ops, self._batched_ops[:] = self._batched_ops[:], []
-        if self._connection is not None:
-            return await self._connection.batch_query(ops)  # type: ignore [no-any-return]
-        return []
+        return await self._tx._batch_query(ops)
 
 
-class Batch(transaction.BaseRetry):
-    def __iter__(self) -> Batch:
+class BatchRetry(transaction.BaseRetry):
+    def __iter__(self) -> BatchRetry:
         return self
 
     def __next__(self) -> BatchIteration:
@@ -737,8 +768,8 @@ class Client(
     def transaction(self) -> Retry:
         return Retry(self)
 
-    def _batch(self) -> Batch:
-        return Batch(
+    def _batch(self) -> BatchRetry:
+        return BatchRetry(
             self.with_config(
                 # We only need to disable transaction idle timeout;
                 # session idle timeouts can't interrupt transactions.

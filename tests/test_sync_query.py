@@ -1062,133 +1062,222 @@ class TestSyncQuery(tb.SyncQueryTestCase):
         self.assertEqual(val, 'foo')
 
     def test_batch_01(self):
-        for bx in self.client._batch():
-            with bx:
-                bx.send_query_single('SELECT 1')
-                bx.send_query_single('SELECT 2')
-                bx.send_query_single('SELECT 3')
+        def test(bx):
+            bx.send_query_single('SELECT 1')
+            bx.send_query_single('SELECT 2')
+            bx.send_query_single('SELECT 3')
 
-                self.assertEqual(bx.wait(), [1, 2, 3])
+            self.assertEqual(bx.wait(), [1, 2, 3])
 
-                bx.send_query_single('SELECT 4')
-                bx.send_query_single('SELECT 5')
-                bx.send_query_single('SELECT 6')
+            bx.send_query_single('SELECT 4')
+            bx.send_query_single('SELECT 5')
+            bx.send_query_single('SELECT 6')
 
-                self.assertEqual(bx.wait(), [4, 5, 6])
+            self.assertEqual(bx.wait(), [4, 5, 6])
+
+        for batch in self.client._batch():
+            with batch:
+                test(batch)
+
+        for tx in self.client.transaction():
+            with tx:
+                with tx._batch() as batch:
+                    test(batch)
 
     def test_batch_02(self):
-        for bx in self.client._batch():
-            with bx:
-                bx.send_query_required_single('''
-                    INSERT test::Tmp {
-                        tmp := 'Test Batch'
-                    };
-                ''')
-                bx.send_query('''
-                    SELECT
-                        test::Tmp
-                    FILTER
-                        .tmp = 'Test Batch';
-                ''')
-                inserted, selected = bx.wait()
+        def test(bx, tag):
+            bx.send_query_required_single('''
+                INSERT test::Tmp {
+                    tmp := <str>$0
+                };
+            ''', tag)
+            bx.send_query('''
+                SELECT
+                    test::Tmp
+                FILTER
+                    .tmp = <str>$0;
+            ''', tag)
+            return bx.wait()
+
+        for batch in self.client._batch():
+            with batch:
+                inserted, selected = test(batch, 'Test Batch 1')
+
+        self.assertEqual([inserted.id], [o.id for o in selected])
+
+        for tx in self.client.transaction():
+            with tx:
+                with tx._batch() as batch:
+                    inserted, selected = test(batch, 'Test Batch 2')
 
         self.assertEqual([inserted.id], [o.id for o in selected])
 
     def test_batch_03(self):
-        for bx in self.client._batch():
-            with bx:
-                bx.send_execute('''
-                    INSERT test::Tmp {
-                        tmp := 'Test Auto Wait'
-                    };
-                ''')
-                # No explicit wait() - should auto-wait on scope exit
+        def test(bx):
+            nonlocal tag
+            bx.send_execute('''
+                INSERT test::Tmp {
+                    tmp := <str>$0
+                };
+            ''', tag)
+            # No explicit wait() - should auto-wait on scope exit
 
-        rv = self.client.query('''
+        query = '''
             SELECT
                 test::Tmp
             FILTER
-                .tmp = 'Test Auto Wait';
-        ''')
+                .tmp = <str>$0;
+        '''
+
+        tag = 'Test Auto Wait 1'
+
+        for batch in self.client._batch():
+            with batch:
+                test(batch)
+
+        rv = self.client.query(query, tag)
+        self.assertEqual(len(rv), 1)
+
+        tag = 'Test Auto Wait 2'
+
+        for tx in self.client.transaction():
+            with tx:
+                with tx._batch() as batch:
+                    test(batch)
+
+        rv = self.client.query(query, tag)
         self.assertEqual(len(rv), 1)
 
     def test_batch_04(self):
-        with self.assertRaises(gel.TransactionError):
-            for bx in self.client._batch():
-                with bx:
-                    bx.send_execute('''
-                        INSERT test::Tmp {
-                            tmp := 'Test Atomic'
-                        };
-                    ''')
-                    bx.send_query_single('SELECT 1/0')
-                    bx.send_execute('''
-                        INSERT test::Tmp {
-                            tmp := 'Test Atomic'
-                        };
-                    ''')
+        def test(bx):
+            nonlocal tag
+            bx.send_execute('''
+                INSERT test::Tmp {
+                    tmp := <str>$0
+                };
+            ''', tag)
+            bx.send_query_single('SELECT 1/0')
+            bx.send_execute('''
+                INSERT test::Tmp {
+                    tmp := <str>$0
+                };
+            ''', tag)
 
-                    with self.assertRaises(gel.DivisionByZeroError):
-                        bx.wait()
+            with self.assertRaises(gel.DivisionByZeroError):
+                bx.wait()
 
-        rv = self.client.query('''
+        query = '''
             SELECT
                 test::Tmp
             FILTER
-                .tmp = 'Test Atomic';
-        ''')
+                .tmp = <str>$0;
+        '''
+
+        tag = 'Test Atomic 1'
+
+        with self.assertRaises(gel.TransactionError):
+            for batch in self.client._batch():
+                with batch:
+                    test(batch)
+
+        rv = self.client.query(query, tag)
+        self.assertEqual(len(rv), 0)
+
+        tag = 'Test Atomic 2'
+
+        with self.assertRaises(gel.TransactionError):
+            for tx in self.client.transaction():
+                with tx:
+                    with tx._batch() as batch:
+                        test(batch)
+
+        rv = self.client.query(query, tag)
         self.assertEqual(len(rv), 0)
 
     def test_batch_05(self):
-        for bx in self.client._batch():
-            with bx:
-                # Test alternating queries that need Parse
-                bx.send_query_single('SELECT 1')
-                bx.send_query_single('SELECT <int16>$0', 2)
-                bx.send_query_single('SELECT 3')
-                bx.send_query_single('SELECT <int32>$0', 4)
-                bx.send_query_single('SELECT 5')
-                bx.send_query_single('SELECT <int64>$0', 6)
-                bx.send_query_single('SELECT 7')
-                self.assertEqual(bx.wait(), [1, 2, 3, 4, 5, 6, 7])
+        def test(bx):
+            # Test alternating queries that need Parse
+            bx.send_query_single('SELECT 1')
+            bx.send_query_single('SELECT <int16>$0', 2)
+            bx.send_query_single('SELECT 3')
+            bx.send_query_single('SELECT <int32>$0', 4)
+            bx.send_query_single('SELECT 5')
+            bx.send_query_single('SELECT <int64>$0', 6)
+            bx.send_query_single('SELECT 7')
+            self.assertEqual(bx.wait(), [1, 2, 3, 4, 5, 6, 7])
+
+        for batch in self.client._batch():
+            with batch:
+                test(batch)
+
+        for tx in self.client.transaction():
+            with tx:
+                with tx._batch() as batch:
+                    test(batch)
 
     def test_batch_06(self):
-        # Cache the input type descriptors first
-        val = self.client.query_single("SELECT <test::MyType>$0", 42)
-        self.assertEqual(val, 42)
-        val = self.client.query_single("SELECT <test::MyType2>$0", 42)
-        self.assertEqual(val, 42)
-        val = self.client.query_single("SELECT <test::MyType3>$0", 42)
-        self.assertEqual(val, 42)
+        def setup():
+            # Cache the input type descriptors first
+            val = self.client.query_single("SELECT <test::MyType>$0", 42)
+            self.assertEqual(val, 42)
+            val = self.client.query_single("SELECT <test::MyType2>$0", 42)
+            self.assertEqual(val, 42)
+            val = self.client.query_single("SELECT <test::MyType3>$0", 42)
+            self.assertEqual(val, 42)
 
-        # Modify the schema to outdate the previous type descriptors
-        self.client.execute("""
-            DROP SCALAR TYPE test::MyType;
-            DROP SCALAR TYPE test::MyType2;
-            DROP SCALAR TYPE test::MyType3;
-            CREATE SCALAR TYPE test::MyType EXTENDING std::int64;
-            CREATE SCALAR TYPE test::MyType2 EXTENDING std::int16;
-            CREATE SCALAR TYPE test::MyType3 EXTENDING std::int32;
-        """)
+            # Modify the schema to outdate the previous type descriptors
+            self.client.execute("""
+                DROP SCALAR TYPE test::MyType;
+                DROP SCALAR TYPE test::MyType2;
+                DROP SCALAR TYPE test::MyType3;
+                CREATE SCALAR TYPE test::MyType EXTENDING std::int64;
+                CREATE SCALAR TYPE test::MyType2 EXTENDING std::int16;
+                CREATE SCALAR TYPE test::MyType3 EXTENDING std::int32;
+            """)
+
+        def test(bx):
+            bx.send_query_single('SELECT <test::MyType>$0', 42)
+            bx.send_query_single('SELECT <test::MyType2>$0', 42)
+            bx.send_query_single('SELECT <test::MyType3>$0', 42)
+            self.assertEqual(bx.wait(), [42, 42, 42])
 
         # We should retry only once and succeed here
+        setup()
         c = self.client.with_retry_options(gel.RetryOptions(attempts=2))
-        for bx in c._batch():
-            with bx:
-                bx.send_query_single('SELECT <test::MyType>$0', 42)
-                bx.send_query_single('SELECT <test::MyType2>$0', 42)
-                bx.send_query_single('SELECT <test::MyType3>$0', 42)
-                self.assertEqual(bx.wait(), [42, 42, 42])
+        for batch in c._batch():
+            with batch:
+                test(batch)
+
+        # We should retry only once and succeed here too
+        setup()
+        for tx in c.transaction():
+            with tx:
+                with tx._batch() as batch:
+                    test(batch)
 
     def test_batch_07(self):
-        c = self.client.with_config(session_idle_transaction_timeout=0.2)
-        for bx in c._batch():
-            with bx:
-                bx.send_query_single("select 42")
-                self.assertEqual(bx.wait(), [42])
-                time.sleep(0.6)
-                bx.send_query_single("select 42")
-                self.assertEqual(bx.wait(), [42])
+        def test(bx):
+            bx.send_query_single("select 42")
+            self.assertEqual(bx.wait(), [42])
+            time.sleep(0.6)
+            bx.send_query_single("select 42")
+            self.assertEqual(bx.wait(), [42])
+
+        c = self.client.with_config(
+            session_idle_transaction_timeout=datetime.timedelta(seconds=0.2)
+        )
+
+        # c._batch() disables idle transaction timeout, so this should work
+        for batch in c._batch():
+            with batch:
+                test(batch)
+
+        # But inside an explicit transaction, the timeout is active
+        with self.assertRaises(gel.ClientConnectionClosedError):
+            for tx in c.transaction():
+                with tx:
+                    with tx._batch() as batch:
+                        test(batch)
 
     def test_sync_query_graphql_01(self):
         if self.server_version.major < 7:

@@ -197,8 +197,7 @@ class BaseTransaction:
             and issubclass(extype, errors.EdgeDBError)
             and ex.has_tag(errors.SHOULD_RETRY)
         ):
-            rv = self.__retry._retry(ex)
-            return rv
+            return self.__retry._retry(ex)
 
     def _get_query_cache(self) -> abstract.QueryCache:
         return self._client._get_query_cache()
