@@ -328,7 +328,6 @@ class TestModelSyncSingleProp(tb.ModelTestCase):
         def _testcase(
             model_type: typing.Type[GelModel],
             initial_val: typing.Any,
-            changed_val: typing.Any,
         ) -> None:
             original = model_type(val=initial_val)
             self.client.save(original)
@@ -360,14 +359,14 @@ class TestModelSyncSingleProp(tb.ModelTestCase):
             self.assertEqual(mirror_2.val, initial_val)
             # self.assertFalse(hasattr(mirror_3, 'val'))  # Fail
 
-        _testcase(default.A, 1, 2)
-        _testcase(default.B, [1], [2])
-        _testcase(default.C, ("a", 1), ("b", 2))
-        _testcase(default.E, [("a", 1)], [("b", 2)])
-        _testcase(default.F, ("a", [1]), ("b", [2]))
-        _testcase(default.G, ("a", ("a", 1)), ("b", ("b", 2)))
-        _testcase(default.H, [("a", [1])], [("b", [2])])
-        _testcase(default.I, ("a", [("a", 1)]), ("b", [("b", 2)]))
+        _testcase(default.A, 1)
+        _testcase(default.B, [1])
+        _testcase(default.C, ("a", 1))
+        _testcase(default.E, [("a", 1)])
+        _testcase(default.F, ("a", [1]))
+        _testcase(default.G, ("a", ("a", 1)))
+        _testcase(default.H, [("a", [1])])
+        _testcase(default.I, ("a", [("a", 1)]))
 
     def test_model_sync_single_prop_04(self):
         # Reconciling different changes to single props
