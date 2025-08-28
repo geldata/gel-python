@@ -3,7 +3,7 @@
 # SPDX-FileCopyrightText: Copyright Gel Data Inc. and the contributors.
 
 from __future__ import annotations
-from typing import Generic, TypeVar
+from typing import Generic, TypeVar, overload
 
 import base64
 import dataclasses
@@ -20,6 +20,7 @@ from . import _token_data as token_data
 
 logger = logging.getLogger("gel.auth")
 C = TypeVar("C", bound=httpx.Client | httpx.AsyncClient)
+TokenData_T = TypeVar("TokenData_T", bound=token_data.TokenData)
 
 
 class BasePKCE(Generic[C]):
@@ -47,8 +48,25 @@ class BasePKCE(Generic[C]):
     ) -> httpx.Response:
         raise NotImplementedError
 
+    @overload
     async def internal_exchange_code_for_token(
-        self, code: str
+        self,
+        code: str,
+        *,
+        cls: type[TokenData_T],
+    ) -> TokenData_T: ...
+
+    @overload
+    async def internal_exchange_code_for_token(
+        self,
+        code: str,
+    ) -> token_data.TokenData: ...
+
+    async def internal_exchange_code_for_token(
+        self,
+        code: str,
+        *,
+        cls: type[token_data.TokenData] = token_data.TokenData,
     ) -> token_data.TokenData:
         request = self._http_client.build_request(
             "GET",
@@ -70,9 +88,9 @@ class BasePKCE(Generic[C]):
         token_json = token_response.json()
         args = {
             field.name: token_json[field.name]
-            for field in dataclasses.fields(token_data.TokenData)
+            for field in dataclasses.fields(cls)
         }
-        return token_data.TokenData(**args)
+        return cls(**args)
 
 
 class PKCE(BasePKCE[httpx.Client]):
