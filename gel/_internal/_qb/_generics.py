@@ -29,12 +29,7 @@ from gel._internal import _namespace
 from gel._internal import _typing_inspect
 from gel._internal import _utils
 
-from ._abstract import (
-    AbstractDescriptor,
-    AbstractFieldDescriptor,
-    ExprPackage,
-)
-
+from ._abstract import AbstractDescriptor, AbstractFieldDescriptor
 from ._expressions import (
     BinaryOp,
     Global,
@@ -371,7 +366,7 @@ class BaseAlias(
 
         return expr
 
-    def __edgeql__(self) -> tuple[type, ExprPackage]:
+    def __edgeql__(self) -> tuple[type, str]:
         type_ = self.__gel_origin__
         if issubclass(type_, GelTypeMetadata):
             splat_cb = functools.partial(get_object_type_splat, type_)

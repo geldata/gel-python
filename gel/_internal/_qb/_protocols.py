@@ -7,7 +7,6 @@
 from __future__ import annotations
 
 from typing import (
-    cast,
     Any,
     ClassVar,
     ParamSpec,
@@ -21,7 +20,7 @@ from collections.abc import Callable
 from gel._internal import _utils
 from gel._internal import _is_overload
 
-from ._abstract import Expr, ScopeContext, ExprPackage
+from ._abstract import Expr, ScopeContext
 
 
 class TypeClassProto(Protocol):
@@ -29,12 +28,12 @@ class TypeClassProto(Protocol):
 
 
 class InstanceSupportsEdgeQLExpr(Protocol):
-    def __edgeql_expr__(self, *, ctx: ScopeContext) -> ExprPackage: ...
+    def __edgeql_expr__(self, *, ctx: ScopeContext | None) -> str: ...
 
 
 class TypeSupportsEdgeQLExpr(Protocol):
     @classmethod
-    def __edgeql_expr__(cls, *, ctx: ScopeContext) -> ExprPackage: ...
+    def __edgeql_expr__(cls, *, ctx: ScopeContext | None) -> str: ...
 
 
 SupportsEdgeQLExpr = TypeAliasType(
@@ -98,8 +97,8 @@ def is_exprmethod(obj: Any) -> TypeGuard[Callable[..., Any]]:
 def edgeql(
     source: SupportsEdgeQLExpr | ExprCompatible,
     *,
-    ctx: ScopeContext,
-) -> ExprPackage:
+    ctx: ScopeContext | None,
+) -> str:
     try:
         __edgeql_expr__ = source.__edgeql_expr__  # type: ignore [union-attr]
     except AttributeError:
@@ -117,19 +116,9 @@ def edgeql(
         raise TypeError(f"{type(source)}.__edgeql_expr__ is not callable")
 
     value = __edgeql_expr__(ctx=ctx)
-    match value:
-        case (str(), dict() | None):
-            pass
-        case _:
-            raise ValueError(
-                f"{type(source)}.__edgeql_expr__() must return "
-                f"tuple[str, dict[str, object] | None]"
-            )
-
-    # pyright doesn't understand what is happening here and infers a
-    # Sequence type from the match? mypy doesn't mind but maybe
-    # because it doesn't understand the match at all?
-    return cast("ExprPackage", value)
+    if not isinstance(value, str):
+        raise ValueError("{type(source)}.__edgeql_expr__()")
+    return value
 
 
 def edgeql_qb_expr(

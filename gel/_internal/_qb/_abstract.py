@@ -103,9 +103,7 @@ class Expr(Node):
     def type(self) -> SchemaPath: ...
 
     @abc.abstractmethod
-    def __edgeql_expr__(
-        self, *, ctx: ScopeContext
-    ) -> tuple[str, dict[str, object] | None]: ...
+    def __edgeql_expr__(self, *, ctx: ScopeContext | None) -> str: ...
 
     def __edgeql_qb_expr__(self) -> Self:
         return self
@@ -131,10 +129,8 @@ class QueryText(TypedExpr):
     def subnodes(self) -> Iterable[Node | None]:
         return ()
 
-    def __edgeql_expr__(
-        self, *, ctx: ScopeContext
-    ) -> tuple[str, dict[str, object] | None]:
-        return self.text, None
+    def __edgeql_expr__(self, *, ctx: ScopeContext | None) -> str:
+        return self.text
 
 
 class AtomicExpr(TypedExpr):
@@ -254,7 +250,6 @@ class ScopeContext:
         self._scope = scope
         self._path_scope: Scope | None = None
         self._path_prefix_must_bind: bool = False
-        self._arg_counter = 0
 
     def has_scope(self, scope: Scope) -> bool:
         return scope in self._scopes
@@ -383,15 +378,18 @@ class ScopedExpr(Expr):
     @contextlib.contextmanager
     def context(
         self,
-        parent: ScopeContext,
+        parent: ScopeContext | None = None,
     ) -> Iterator[ScopeContext]:
-        with parent.push(self.scope) as ctx:
-            yield ctx
+        if parent is None:
+            yield ScopeContext(self.scope)
+        else:
+            with parent.push(self.scope) as ctx:
+                yield ctx
 
     @abc.abstractmethod
     def _edgeql(self, ctx: ScopeContext) -> ExprPackage: ...
 
-    def __edgeql_expr__(self, *, ctx: ScopeContext) -> ExprPackage:
+    def __edgeql_expr__(self, *, ctx: ScopeContext | None) -> str:
         with self.context(parent=ctx) as myctx:
             return self._edgeql(myctx)
 
@@ -442,15 +440,13 @@ class IteratorExpr(ScopedExpr):
             for ref in node.outside_refs
         )
 
-    def _edgeql_parts(
-        self, ctx: ScopeContext
-    ) -> tuple[str, str, ExprBindings]:
-        iterable, ibindings = self._iteration_edgeql(ctx)
+    def _edgeql_parts(self, ctx: ScopeContext) -> tuple[str, str]:
+        iterable = self._iteration_edgeql(ctx)
 
         if ctx.has_scope(self.body_scope):
             # SELECTs share scope with shapes, so make sure we don't
             # try to re-enter the same scope twice.
-            body, bbindings = self._body_edgeql(ctx)
+            body = self._body_edgeql(ctx)
         else:
             with ctx.push(
                 self.body_scope,
@@ -459,19 +455,19 @@ class IteratorExpr(ScopedExpr):
             ) as body_ctx:
                 if self.self_ref is not None:
                     body_ctx.bind(self.self_ref)
-                body, bbindings = self._body_edgeql(body_ctx)
+                body = self._body_edgeql(body_ctx)
 
-        return (iterable, body, _merge_bindings(ibindings, bbindings))
+        return (iterable, body)
 
-    def _edgeql(self, ctx: ScopeContext) -> ExprPackage:
-        iterable, body, bindings = self._edgeql_parts(ctx)
-        return f"{iterable} {body}", bindings
-
-    @abc.abstractmethod
-    def _iteration_edgeql(self, ctx: ScopeContext) -> ExprPackage: ...
+    def _edgeql(self, ctx: ScopeContext) -> str:
+        iterable, body = self._edgeql_parts(ctx)
+        return f"{iterable} {body}"
 
     @abc.abstractmethod
-    def _body_edgeql(self, ctx: ScopeContext) -> ExprPackage: ...
+    def _iteration_edgeql(self, ctx: ScopeContext) -> str: ...
+
+    @abc.abstractmethod
+    def _body_edgeql(self, ctx: ScopeContext) -> str: ...
 
 
 @dataclass(kw_only=True, frozen=True)
@@ -489,17 +485,15 @@ class PathPrefix(Symbol):
     source_link: str | None = None
     lprop_pivot: bool = False
 
-    def __edgeql_expr__(
-        self, *, ctx: ScopeContext
-    ) -> tuple[str, dict[str, object] | None]:
+    def __edgeql_expr__(self, *, ctx: ScopeContext | None) -> str:
         if (
             ctx is not None
             and (ctx.path_scope is not self.scope or ctx.path_prefix_must_bind)
             and (var := ctx.bindings.get(self)) is not None
         ):
-            return var, None
+            return var
         else:
-            return "", None
+            return ""
 
     def compute_must_bind_refs(
         self, subnodes: Iterable[Node | None]
