@@ -35,3 +35,5 @@ docs/_build
 /.venv
 /uv.lock
 .dir-locals.el
+/.direnv
+/.envrc
