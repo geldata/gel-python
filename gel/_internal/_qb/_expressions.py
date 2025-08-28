@@ -9,6 +9,7 @@ from __future__ import annotations
 from typing import (
     TYPE_CHECKING,
     TypeVar,
+    Sequence,
 )
 from typing_extensions import Self
 
@@ -357,6 +358,25 @@ class InfixOp(BinaryOp):
         if _need_right_parens(self.precedence, self.rexpr):
             right = f"({right})"
         return f"{left} {self.op} {right}"
+
+
+def construct_infix_op_chain(
+    op_name: str, exprs: Sequence[ExprCompatible], type_: SchemaPath
+) -> ExprCompatible:
+    """
+    Converts a sequence of n expressions into a chain of n-1 infix
+    operations. Requires at least one expression.
+
+    For example, `'AND', (a, b, c)` is converted into `a AND (b AND c)`.
+    """
+    rev = reversed(exprs)
+    result = next(rev)
+    while True:
+        e = next(rev, None)
+        if e is None:
+            break
+        result = InfixOp(lexpr=e, op=op_name, rexpr=result, type_=type_)
+    return result
 
 
 @dataclass(kw_only=True, frozen=True)

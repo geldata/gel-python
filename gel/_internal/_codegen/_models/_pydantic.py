@@ -2747,6 +2747,17 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         expr_compat = self.import_name(BASE_IMPL, "ExprCompatible")
         cast_ = self.import_name("typing", "cast")
 
+        if op_name in {"AND", "OR"}:
+            # special case: binary op that supports variadic arg
+
+            op_chain = self.import_name(BASE_IMPL, "construct_infix_op_chain")
+            self.write(f"{op_chain}(")
+            self.write(f'    "{op_name}",')
+            self.write("    __args__,")
+            self.write("    __rtype__.__gel_reflection__.name,")
+            self.write(")")
+            return
+
         if not swapped:
             this_idx = 0
             other_idx = 1
@@ -3187,8 +3198,8 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                 param_type = param.get_type(self._types)
                 # Unwrap the variadic type (it is reflected as an array of T)
                 if param.kind is reflection.CallableParamKind.Variadic:
-                    assert reflection.is_array_type(param_type)
-                    param_type = param_type.get_element_type(self._types)
+                    if reflection.is_array_type(param_type):
+                        param_type = param_type.get_element_type(self._types)
                 # Start with the base parameter type
                 overload_signatures[overload][param.key] = [param_type]
 
@@ -3315,8 +3326,8 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                 param_type = param.get_type(self._types)
                 # Unwrap the variadic type (it is reflected as an array of T)
                 if param.kind is reflection.CallableParamKind.Variadic:
-                    assert reflection.is_array_type(param_type)
-                    param_type = param_type.get_element_type(self._types)
+                    if reflection.is_array_type(param_type):
+                        param_type = param_type.get_element_type(self._types)
                 param_type_usages[param.key].add(param_type)
 
         # Add implicit casts to each overload where they don't cause conflicts
