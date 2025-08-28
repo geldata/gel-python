@@ -9,7 +9,6 @@ from __future__ import annotations
 from typing import (
     TYPE_CHECKING,
     TypeVar,
-    Sequence,
 )
 from typing_extensions import Self
 
@@ -45,7 +44,7 @@ from ._protocols import (
 
 if TYPE_CHECKING:
     import decimal
-    from collections.abc import Callable, Iterable
+    from collections.abc import Callable, Iterable, Sequence
 
     from ._reflection import GelTypeMetadata
 
@@ -362,7 +361,7 @@ class InfixOp(BinaryOp):
 
 def construct_infix_op_chain(
     op_name: str, exprs: Sequence[ExprCompatible], type_: SchemaPath
-) -> ExprCompatible:
+) -> Expr:
     """
     Converts a sequence of n expressions into a chain of n-1 infix
     operations. Requires at least one expression.
@@ -370,7 +369,7 @@ def construct_infix_op_chain(
     For example, `'AND', (a, b, c)` is converted into `a AND (b AND c)`.
     """
     rev = reversed(exprs)
-    result = next(rev)
+    result: Expr = edgeql_qb_expr(next(rev))
     while True:
         e = next(rev, None)
         if e is None:

@@ -6141,7 +6141,7 @@ class TestModelGenerator(tb.ModelTestCase):
 
     def test_modelgen_operators_boolean_logical_02(self):
         """Test boolean logical operators and functions"""
-        from models import default, std
+        from models.orm import default, std
 
         # Test std.and_ function
         users_std_and = self.client.query(
@@ -6157,6 +6157,17 @@ class TestModelGenerator(tb.ModelTestCase):
         for user in users_std_and:
             self.assertTrue(user.name not in ("Alice", "Dana", "Elsa", "Zoe"))
 
+        # Test std.and_ function, with a single arg
+        users_std_and = self.client.query(
+            default.User.filter(
+                lambda u: std.and_(
+                    u.name != "Alice",
+                )
+            ).limit(5)
+        )
+        for user in users_std_and:
+            self.assertTrue(user.name not in ("Alice"))
+
         # Test std.or_ function
         users_std_or = self.client.query(
             default.User.filter(
@@ -6170,6 +6181,17 @@ class TestModelGenerator(tb.ModelTestCase):
         )
         for user in users_std_or:
             self.assertTrue(user.name in ("Alice", "Dana", "Elsa", "Zoe"))
+
+        # Test std.or_ function, with a single arg
+        users_std_or = self.client.query(
+            default.User.filter(
+                lambda u: std.or_(
+                    u.name == "Alice"
+                )
+            )
+        )
+        for user in users_std_or:
+            self.assertTrue(user.name in ("Alice"))
 
     def test_modelgen_operators_boolean_not(self):
         """Test boolean not operator and std.not_ function"""
