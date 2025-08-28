@@ -62,13 +62,21 @@ _T_get = typing.TypeVar("_T_get")
 
 
 if typing.TYPE_CHECKING:
+    ExprBindings = typing_extensions.TypeAliasType(
+        "ExprBindings",
+        dict[str, object] | None,
+    )
+    ExprPackage = typing_extensions.TypeAliasType(
+        "ExprPackage",
+        tuple[str, ExprBindings],
+    )
 
     class QueryableObject(typing_extensions.Protocol, typing.Generic[_T_ql]):
-        def __edgeql__(self) -> tuple[type[_T_ql], str]: ...
+        def __edgeql__(self) -> tuple[type[_T_ql], str | ExprPackage]: ...
 
     class QueryableType(typing_extensions.Protocol, typing.Generic[_T_ql]):
         @classmethod
-        def __edgeql__(cls) -> tuple[type[_T_ql], str]: ...
+        def __edgeql__(cls) -> tuple[type[_T_ql], str | ExprPackage]: ...
 
     Queryable = typing_extensions.TypeAliasType(
         "Queryable",
@@ -152,7 +160,13 @@ class QueryWithArgs(Generic[_T_ql]):
         except AttributeError:
             pass
         else:
-            return_type, query = eql()
+            return_type, pkg = eql()
+            if isinstance(pkg, str):
+                query = pkg
+            else:
+                query, xkwargs = pkg
+                if xkwargs:
+                    kwargs = {**kwargs, **xkwargs}
             return cls(query, return_type, args, kwargs)
 
         raise ValueError("unsupported query type")
