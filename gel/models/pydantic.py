@@ -37,6 +37,7 @@ from gel._internal._qb import (
     FuncCall,
     PathAlias,
     SetLiteral,
+    construct_infix_op_chain,
 )
 
 from gel._internal._qbmodel._abstract import (
@@ -187,6 +188,7 @@ __all__ = (
     "UnspecifiedType",
     "classonlymethod",
     "computed_field",
+    "construct_infix_op_chain",
     "dispatch_overload",
     "empty_set_if_none",
 )
