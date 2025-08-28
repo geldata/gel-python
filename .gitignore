@@ -37,3 +37,4 @@ docs/_build
 .dir-locals.el
 .envrc
 .gen_models_cache
+/.direnv
