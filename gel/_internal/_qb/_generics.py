@@ -366,7 +366,7 @@ class BaseAlias(
 
         return expr
 
-    def __edgeql__(self) -> tuple[type, str]:
+    def __edgeql__(self) -> tuple[type, tuple[str, dict[str, object]]]:
         type_ = self.__gel_origin__
         if issubclass(type_, GelTypeMetadata):
             splat_cb = functools.partial(get_object_type_splat, type_)
