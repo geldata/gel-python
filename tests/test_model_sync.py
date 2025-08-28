@@ -189,6 +189,14 @@ class TestModelSyncBasic(tb.ModelTestCase):
 
     SCHEMA = """
         type O;
+
+        type A;
+        type B {
+            a: A;
+        };
+        type C {
+            b: B;
+        };
     """
 
     def test_model_sync_basic_01(self):
@@ -203,6 +211,66 @@ class TestModelSyncBasic(tb.ModelTestCase):
 
         self.assertTrue(hasattr(synced, "id"))
         self.assertFalse(hasattr(unsynced, "id"))
+
+    def test_model_sync_basic_02(self):
+        # Sync applies ids to new objects in graph
+
+        from models.TestModelSyncBasic import default
+
+        # C(new) -> B(new) -> A(new)
+        # sync all
+        # all objects get ids
+        a = default.A()
+        b = default.B(a=a)
+        c = default.C(b=b)
+
+        self.client.sync(a, b, c)
+
+        self.assertTrue(hasattr(a, "id"))
+        self.assertTrue(hasattr(b, "id"))
+        self.assertTrue(hasattr(c, "id"))
+
+        # C(new) -> B(new) -> A(new)
+        # sync only C
+        # all objects get ids
+        a = default.A()
+        b = default.B(a=a)
+        c = default.C(b=b)
+
+        self.client.sync(c)
+
+        self.assertTrue(hasattr(a, "id"))
+        self.assertTrue(hasattr(b, "id"))
+        self.assertTrue(hasattr(c, "id"))
+
+        # C(new) -> B(new) -> A(new)
+        # sync only A
+        # only A gets id
+        a = default.A()
+        b = default.B(a=a)
+        c = default.C(b=b)
+
+        self.client.sync(a)
+
+        self.assertTrue(hasattr(a, "id"))
+        self.assertFalse(hasattr(b, "id"))
+        self.assertFalse(hasattr(c, "id"))
+
+        # C(new) -> B(existing) -> A(new)
+        # sync only C
+        # A and C get ids
+        b = default.B()
+        self.client.save(b)
+        self.assertTrue(hasattr(b, "id"))
+
+        a = default.A()
+        b.a = a
+        c = default.C(b=b)
+
+        self.client.sync(c)
+
+        self.assertTrue(hasattr(a, "id"))
+        self.assertTrue(hasattr(c, "id"))
 
 
 class TestModelSyncSingleProp(tb.ModelTestCase):
@@ -643,10 +711,11 @@ class TestModelSyncMultiProp(tb.ModelTestCase):
         # Set prop to new value
 
         def _get_assign_val_func(
-            changed_val: typing.Collection[typing.Any]
+            changed_val: typing.Collection[typing.Any],
         ) -> typing.Callable[[GelModel], None]:
             def change(original: GelModel):
                 original.val = changed_val
+
             return change
 
         def _testcase(
@@ -709,6 +778,7 @@ class TestModelSyncMultiProp(tb.ModelTestCase):
         ) -> typing.Callable[[GelModel], None]:
             def change(original: GelModel):
                 original.val.insert(insert_pos, insert_val)
+
             return change
 
         def _testcase(
@@ -765,6 +835,7 @@ class TestModelSyncMultiProp(tb.ModelTestCase):
         ) -> typing.Callable[[GelModel], None]:
             def change(original: GelModel):
                 original.val.extend(extend_vals)
+
             return change
 
         def _testcase(
@@ -859,6 +930,7 @@ class TestModelSyncMultiProp(tb.ModelTestCase):
         ) -> typing.Callable[[GelModel], None]:
             def change(original: GelModel):
                 original.val.append(append_val)
+
             return change
 
         def _testcase(
@@ -937,6 +1009,7 @@ class TestModelSyncMultiProp(tb.ModelTestCase):
         def _get_pop_val_func() -> typing.Callable[[GelModel], None]:
             def change(original: GelModel):
                 original.val.pop()
+
             return change
 
         def _testcase(
@@ -970,6 +1043,7 @@ class TestModelSyncMultiProp(tb.ModelTestCase):
         def _get_clear_val_func() -> typing.Callable[[GelModel], None]:
             def change(original: GelModel):
                 original.val.clear()
+
             return change
 
         def _testcase(
@@ -1045,3 +1119,407 @@ class TestModelSyncMultiProp(tb.ModelTestCase):
         _testcase(default.A, [1], [2], [3], [4])
         _testcase(default.B, [[1]], [[2, 2]], [[3, 3, 3]], [[4, 4, 4, 4]])
         _testcase(default.C, [("a", 1)], [("b", 2)], [("c", 3)], [("d", 4)])
+
+
+class TestModelSyncSingleLink(tb.ModelTestCase):
+    ISOLATED_TEST_BRANCHES = True
+
+    SCHEMA = """
+        type Target;
+        type Source {
+            target: Target;
+        };
+        type SourceWithProp {
+            target: Target {
+                lprop: int64;
+            };
+        };
+    """
+
+    def _check_links_equal(
+        self, actual: typing.Any, expected: typing.Any
+    ) -> None:
+        self.assertEqual(actual, expected)
+
+        # Also check linkprops
+        actual_has_lprop = hasattr(actual, '__linkprops__')
+        expected_has_lprop = hasattr(expected, '__linkprops__')
+        self.assertEqual(actual_has_lprop, expected_has_lprop)
+        if actual_has_lprop and expected_has_lprop:
+            self.assertEqual(
+                actual.__linkprops__.lprop,
+                expected.__linkprops__.lprop,
+            )
+
+    def test_model_sync_single_link_01(self):
+        # Insert new object with single link
+
+        from models.TestModelSyncSingleLink import default
+
+        target = default.Target()
+        self.client.save(target)
+
+        def _testcase(
+            model_type: typing.Type[GelModel],
+            initial_target: typing.Any,
+        ) -> None:
+            with_target = model_type(target=initial_target)
+            without_target = model_type()
+
+            self.client.sync(with_target, without_target)
+
+            self._check_links_equal(with_target.target, initial_target)
+            self._check_links_equal(without_target.target, None)
+
+            # cleanup
+            self.client.query(model_type.delete())
+
+        _testcase(default.Source, None)
+        _testcase(default.Source, target)
+
+        _testcase(
+            default.SourceWithProp,
+            default.SourceWithProp.target.link(target),
+        )
+        _testcase(
+            default.SourceWithProp,
+            default.SourceWithProp.target.link(target, lprop=1),
+        )
+
+    @tb.xfail
+    def test_model_sync_single_link_01a(self):
+        # Asserting error in _save
+        from models.TestModelSyncSingleLink import default
+
+        with_none = default.SourceWithProp(target=None)
+        self.client.sync(with_none)
+
+    def test_model_sync_single_link_02(self):
+        # Updating existing objects with single link
+
+        from models.TestModelSyncSingleLink import default
+
+        target_a = default.Target()
+        target_b = default.Target()
+        self.client.save(target_a, target_b)
+
+        def _testcase(
+            model_type: typing.Type[GelModel],
+            initial_target: typing.Any,
+            changed_target: typing.Any,
+        ) -> None:
+            original = model_type(target=initial_target)
+            self.client.save(original)
+
+            mirror_1 = self.client.query_required_single(
+                model_type.select(target=True).limit(1)
+            )
+            mirror_2 = self.client.query_required_single(
+                model_type.select(target=True).limit(1)
+            )
+            mirror_3 = self.client.query_required_single(
+                model_type.select(target=False).limit(1)
+            )
+
+            self._check_links_equal(original.target, initial_target)
+            self._check_links_equal(mirror_1.target, initial_target)
+            self._check_links_equal(mirror_2.target, initial_target)
+            self.assertFalse(hasattr(mirror_3, "val"))
+
+            # change a value
+            original.target = changed_target
+
+            # sync some of the objects
+            self.client.sync(original, mirror_1, mirror_3)
+
+            # only synced objects with value set get update
+            self._check_links_equal(original.target, changed_target)
+            self._check_links_equal(mirror_1.target, changed_target)
+            self._check_links_equal(mirror_2.target, initial_target)
+            self.assertFalse(hasattr(mirror_3, 'val'))
+
+            # cleanup
+            self.client.query(model_type.delete())
+
+        # Change to a new value
+        _testcase(default.Source, target_a, target_b)
+        _testcase(
+            default.SourceWithProp,
+            default.SourceWithProp.target.link(target_a),
+            default.SourceWithProp.target.link(target_b),
+        )
+        _testcase(
+            default.SourceWithProp,
+            default.SourceWithProp.target.link(target_a, lprop=1),
+            default.SourceWithProp.target.link(target_b),
+        )
+        _testcase(
+            default.SourceWithProp,
+            default.SourceWithProp.target.link(target_a),
+            default.SourceWithProp.target.link(target_b, lprop=1),
+        )
+        _testcase(
+            default.SourceWithProp,
+            default.SourceWithProp.target.link(target_a, lprop=1),
+            default.SourceWithProp.target.link(target_b, lprop=1),
+        )
+
+        # only changing lprop
+        _testcase(
+            default.SourceWithProp,
+            default.SourceWithProp.target.link(target_a),
+            default.SourceWithProp.target.link(target_a, lprop=2),
+        )
+        _testcase(
+            default.SourceWithProp,
+            default.SourceWithProp.target.link(target_a, lprop=1),
+            default.SourceWithProp.target.link(target_a),
+        )
+        _testcase(
+            default.SourceWithProp,
+            default.SourceWithProp.target.link(target_a, lprop=1),
+            default.SourceWithProp.target.link(target_a, lprop=2),
+        )
+
+        # Change to the same value
+        _testcase(default.Source, target_a, target_a)
+        _testcase(
+            default.SourceWithProp,
+            default.SourceWithProp.target.link(target_a),
+            default.SourceWithProp.target.link(target_a),
+        )
+        _testcase(
+            default.SourceWithProp,
+            default.SourceWithProp.target.link(target_a, lprop=1),
+            default.SourceWithProp.target.link(target_a, lprop=1),
+        )
+
+    @tb.xfail
+    def test_model_sync_single_link_02a(self):
+        # Updating existing objects with single link
+        # Change from None to value
+
+        from models.TestModelSyncSingleLink import default
+
+        changed_target = default.Target()
+        self.client.save(changed_target)
+
+        original = default.Source()
+        self.client.save(original)
+
+        mirror_1 = self.client.query_required_single(
+            default.Source.select(target=True).limit(1)
+        )
+        mirror_2 = self.client.query_required_single(
+            default.Source.select(target=True).limit(1)
+        )
+        mirror_3 = self.client.query_required_single(
+            default.Source.select(target=False).limit(1)
+        )
+
+        self.assertIsNone(original.target, None)
+        self.assertIsNone(mirror_1.target, None)
+        self.assertIsNone(mirror_2.target, None)
+        self.assertFalse(hasattr(mirror_3, "val"))
+
+        # change a value
+        original.target = changed_target
+
+        # sync some of the objects
+        self.client.sync(original, mirror_1, mirror_3)  # Error here
+
+        # only synced objects with value set get update
+        self._check_links_equal(original.target, changed_target)
+        self._check_links_equal(mirror_1.target, changed_target)
+        self.assertIsNone(mirror_2.target)
+        self.assertFalse(hasattr(mirror_3, 'val'))
+
+    @tb.xfail
+    def test_model_sync_single_link_02b(self):
+        # Updating existing objects with single link
+        # Change from value to None
+
+        from models.TestModelSyncSingleLink import default
+
+        initial_target = default.Target()
+        self.client.save(initial_target)
+
+        original = default.Source(target=initial_target)
+        self.client.save(original)
+
+        mirror_1 = self.client.query_required_single(
+            default.Source.select(target=True).limit(1)
+        )
+        mirror_2 = self.client.query_required_single(
+            default.Source.select(target=True).limit(1)
+        )
+        mirror_3 = self.client.query_required_single(
+            default.Source.select(target=False).limit(1)
+        )
+
+        self._check_links_equal(original.target, initial_target)
+        self._check_links_equal(mirror_1.target, initial_target)
+        self._check_links_equal(mirror_2.target, initial_target)
+        self.assertFalse(hasattr(mirror_3, "val"))
+
+        # change a value
+        original.target = None
+
+        # sync some of the objects
+        self.client.sync(original, mirror_1, mirror_3)  # Error here
+
+        # only synced objects with value set get update
+        self.assertIsNone(original.target)
+        self.assertIsNone(mirror_1.target)
+        self._check_links_equal(mirror_2.target, initial_target)
+        self.assertFalse(hasattr(mirror_3, 'val'))
+
+    def _testcase_03(
+        self,
+        model_type: typing.Type[GelModel],
+        initial_target: typing.Any,
+        changed_target_0: typing.Any,
+        changed_target_1: typing.Any,
+        changed_target_2: typing.Any,
+    ) -> None:
+        original = model_type(target=initial_target)
+        self.client.save(original)
+
+        mirror_1 = self.client.query_required_single(
+            model_type.select(target=True).limit(1)
+        )
+        mirror_2 = self.client.query_required_single(
+            model_type.select(target=True).limit(1)
+        )
+        mirror_3 = self.client.query_required_single(
+            model_type.select(target=False).limit(1)
+        )
+
+        self._check_links_equal(original.target, initial_target)
+        self._check_links_equal(mirror_1.target, initial_target)
+        self._check_links_equal(mirror_2.target, initial_target)
+        self.assertFalse(hasattr(mirror_3, "val"))
+
+        # change a value
+        original.target = changed_target_0
+        mirror_1.target = changed_target_1
+        mirror_2.target = changed_target_2
+
+        # sync some of the objects
+        self.client.sync(original, mirror_1, mirror_3)
+
+        # only synced objects are updated
+        self._check_links_equal(original.target, changed_target_0)
+        self._check_links_equal(mirror_1.target, changed_target_0)
+        self._check_links_equal(mirror_2.target, changed_target_2)
+        self.assertFalse(hasattr(mirror_3, 'val'))
+
+        # cleanup
+        self.client.query(model_type.delete())
+
+    def test_model_sync_single_link_03(self):
+        # Reconciling different changes to single link
+
+        from models.TestModelSyncSingleLink import default
+
+        target_a = default.Target()
+        target_b = default.Target()
+        target_c = default.Target()
+        target_d = default.Target()
+        self.client.save(target_a, target_b, target_c, target_d)
+
+        self._testcase_03(
+            default.Source,
+            target_a,
+            target_b,
+            target_c,
+            target_d,
+        )
+
+    @tb.xfail
+    def test_model_sync_single_link_03a(self):
+        # ISE on sync()
+        # gel.errors.InternalServerError: more than one row returned by a
+        # subquery used as an expression
+        from models.TestModelSyncSingleLink import default
+
+        target_a = default.Target()
+        target_b = default.Target()
+        target_c = default.Target()
+        target_d = default.Target()
+        self.client.save(target_a, target_b, target_c, target_d)
+
+        self._testcase_03(
+            default.SourceWithProp,
+            default.SourceWithProp.target.link(target_a),
+            default.SourceWithProp.target.link(target_b),
+            default.SourceWithProp.target.link(target_c),
+            default.SourceWithProp.target.link(target_d),
+        )
+
+    @tb.xfail
+    def test_model_sync_single_link_03b(self):
+        # ISE on sync()
+        # gel.errors.InternalServerError: more than one row returned by a
+        # subquery used as an expression
+        from models.TestModelSyncSingleLink import default
+
+        target_a = default.Target()
+        target_b = default.Target()
+        target_c = default.Target()
+        target_d = default.Target()
+        self.client.save(target_a, target_b, target_c, target_d)
+
+        self._testcase_03(
+            default.SourceWithProp,
+            default.SourceWithProp.target.link(target_a, lprop=1),
+            default.SourceWithProp.target.link(target_a, lprop=2),
+            default.SourceWithProp.target.link(target_a, lprop=3),
+            default.SourceWithProp.target.link(target_a, lprop=4),
+        )
+
+    @tb.xfail
+    def test_model_sync_single_link_04(self):
+        # Existing object without link should not have it fetched
+
+        from models.TestModelSyncSingleLink import default
+
+        initial_target = default.Target()
+        changed_target_0 = default.Target()
+        changed_target_1 = default.Target()
+        changed_target_2 = default.Target()
+        self.client.save(
+            initial_target,
+            changed_target_0,
+            changed_target_1,
+            changed_target_2,
+        )
+
+        original = default.Source(target=initial_target)
+        self.client.save(original)
+
+        mirror_1 = self.client.query_required_single(
+            default.Source.select(target=False).limit(1)
+        )
+        original.target = changed_target_0
+        self.client.save(original)
+        self.client.sync(mirror_1)
+        self.assertFalse(hasattr(mirror_1, "target"))
+
+        # Sync alongside another object with the prop set
+        mirror_2 = self.client.query_required_single(
+            default.Source.select(target=True).limit(1)
+        )
+        original.target = changed_target_1
+        self.client.save(original)
+        self.client.sync(mirror_1, mirror_2)  # Error here
+        self.assertFalse(hasattr(mirror_1, "target"))
+
+        # Sync alongside another object with the prop changed
+        mirror_2 = self.client.query_required_single(
+            default.Source.select(targets=True).limit(1)
+        )
+        mirror_2.target = changed_target_2
+        self.client.sync(mirror_1, mirror_2)
+        self.assertEqual(mirror_1.targets._mode, _tracked_list.Mode.Write)
+        self.assertEqual(mirror_1.targets._items, [])
