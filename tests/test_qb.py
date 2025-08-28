@@ -846,3 +846,26 @@ class TestQueryBuilderModify(tb.ModelTestCase):
 
         self.assertEqual(e.color, default.Color.Violet)
         self.assertEqual(e.name, "red")
+
+    def test_qb_for_01(self):
+        from models.orm import std
+
+        res = self.client.query(
+            std.foreach(
+                std.range_unpack(std.range(std.int64(1), std.int64(10))),
+                lambda x: x * 2,
+            )
+        )
+        self.assertEqual(set(res), {i * 2 for i in range(1, 10)})
+
+        res = self.client.query(
+            std.foreach(
+                std.range_unpack(std.range(std.int64(1), std.int64(3))),
+                lambda x: std.foreach(
+                    std.range_unpack(std.range(std.int64(1), std.int64(3))),
+                    lambda y: x * 10 + y,
+                )
+            )
+        )
+
+        self.assertEqual(set(res), {11, 12, 21, 22})

@@ -726,7 +726,7 @@ class DeleteStmt(IteratorStmt):
 
 
 @dataclass(kw_only=True, frozen=True)
-class ForStmt(IteratorExpr):
+class ForStmt(IteratorExpr, Stmt):
     stmt: _edgeql.Token = _edgeql.Token.FOR
     iter_expr: Expr
     body: Expr
@@ -745,11 +745,18 @@ class ForStmt(IteratorExpr):
         return (self.iter_expr, self.body)
 
     def _edgeql(self, ctx: ScopeContext) -> str:
+        ctx.bind(self.var)
         return (
             f"{self.stmt} {edgeql(self.var, ctx=ctx)} IN "
             f"({edgeql(self.iter_expr, ctx=ctx)})\n"
             f"UNION ({edgeql(self.body, ctx=ctx)})"
         )
+
+    def _iteration_edgeql(self, ctx: ScopeContext) -> str:
+        raise AssertionError('...')
+
+    def _body_edgeql(self, ctx: ScopeContext) -> str:
+        raise AssertionError('...')
 
 
 class Splat(_strenum.StrEnum):
