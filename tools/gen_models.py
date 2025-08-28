@@ -142,6 +142,8 @@ def main() -> None:  # noqa: D401 – simple script entry-point
                     ],
                     cwd=tmpdir,
                 )
+                with open(Path(tmpdir) / "models" / "py.typed", "w") as f:
+                    pass
 
                 # 4. Install models into *site-packages*.
                 if (
