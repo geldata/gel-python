@@ -596,39 +596,46 @@ class TestModelSyncMultiProp(tb.ModelTestCase):
 
         from models.TestModelSyncMultiProp import default
 
-        initial_val = [1, 2, 3]
-        changed_val = [4, 5, 6]
+        def _testcase(
+            model_type: typing.Type[GelModel],
+            initial_val: typing.Collection[typing.Any],
+            changed_val: typing.Collection[typing.Any],
+        ) -> None:
+            expected_val = set(changed_val)
 
-        original = default.A(val=initial_val)
-        self.client.save(original)
+            original = model_type(val=initial_val)
+            self.client.save(original)
 
-        mirror_1 = self.client.query_required_single(
-            default.A.select(val=True).limit(1)
-        )
-        mirror_2 = self.client.query_required_single(
-            default.A.select(val=True).limit(1)
-        )
-        mirror_3 = self.client.query_required_single(
-            default.A.select(val=False).limit(1)
-        )
+            mirror_1 = self.client.query_required_single(
+                model_type.select(val=True).limit(1)
+            )
+            mirror_2 = self.client.query_required_single(
+                model_type.select(val=True).limit(1)
+            )
+            mirror_3 = self.client.query_required_single(
+                model_type.select(val=False).limit(1)
+            )
 
-        self.assertEqual(original.val, initial_val)
-        self.assertEqual(mirror_1.val, initial_val)
-        self.assertEqual(mirror_2.val, initial_val)
-        self.assertEqual(mirror_3.val._mode, _tracked_list.Mode.Write)
-        self.assertEqual(mirror_3.val._items, [])
+            self.assertEqual(original.val, initial_val)
+            self.assertEqual(mirror_1.val, initial_val)
+            self.assertEqual(mirror_2.val, initial_val)
+            self.assertEqual(mirror_3.val._mode, _tracked_list.Mode.Write)
+            self.assertEqual(mirror_3.val._items, [])
 
-        # change a value
-        original.val = changed_val
+            # change a value
+            original.val = changed_val
 
-        # sync some of the objects
-        self.client.sync(original, mirror_1, mirror_3)
+            # sync some of the objects
+            self.client.sync(original, mirror_1, mirror_3)
 
-        # only synced objects with value set get update
-        self.assertEqual(original.val, changed_val)
-        self.assertEqual(mirror_1.val, changed_val)
-        self.assertEqual(mirror_2.val, initial_val)
-        # self.assertEqual(mirror_3.val, [])
+            # only synced objects with value set get update
+            self.assertEqual(original.val, expected_val)
+            self.assertEqual(mirror_1.val, expected_val)
+            self.assertEqual(mirror_2.val, initial_val)
+            # self.assertEqual(mirror_3.val, [])
+
+        _testcase(default.A, [], [])
+        _testcase(default.A, [1, 2, 3], [4, 5, 6])
 
     def test_model_sync_multi_prop_03(self):
         # Updating existing objects with multi props
