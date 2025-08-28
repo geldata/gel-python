@@ -161,6 +161,12 @@ def fetch_operators(
                 py_magic = (py_magic,)
             if py_magic is not None:
                 opv = dataclasses.replace(opv, py_magic=py_magic)
+
+            if op.name in {"std::AND", "std::OR"}:
+                opv.params[1] = dataclasses.replace(
+                    opv.params[1], kind=_enums.CallableParamKind.Variadic
+                )
+
             binary_ops[opv.params[0].type.id].append(opv)
             assert opv.schemapath.name, opv.schemapath
 

@@ -36,7 +36,7 @@
             typos-lsp
 
             # for gel-python model tests
-            gel_pkgs.gel-server-nightly
+            # gel_pkgs.gel-server-nightly
           ];
         };
       }
