@@ -253,6 +253,9 @@ class TestModelSyncSingleProp(tb.ModelTestCase):
             self.assertEqual(with_val.val, val)
             self.assertIsNone(without_val.val)
 
+            # cleanup
+            self.client.query(model_type.delete())
+
         _testcase(default.A, None)
         _testcase(default.A, 1)
         _testcase(default.B, [1, 2, 3])
@@ -271,7 +274,6 @@ class TestModelSyncSingleProp(tb.ModelTestCase):
 
     def test_model_sync_single_prop_02(self):
         # Updating existing objects with single props
-        # Set prop to new value
 
         from models.TestModelSyncSingleProp import default
 
@@ -310,6 +312,10 @@ class TestModelSyncSingleProp(tb.ModelTestCase):
             self.assertEqual(mirror_2.val, initial_val)
             # self.assertFalse(hasattr(mirror_3, 'val'))  # Fail
 
+            # cleanup
+            self.client.query(model_type.delete())
+
+        # Change to a new value
         _testcase(default.A, 1, 2)
         _testcase(default.B, [1], [2])
         _testcase(default.C, ("a", 1), ("b", 2))
@@ -319,56 +325,47 @@ class TestModelSyncSingleProp(tb.ModelTestCase):
         _testcase(default.H, [("a", [1])], [("b", [2])])
         _testcase(default.I, ("a", [("a", 1)]), ("b", [("b", 2)]))
 
+        # Change to the same value
+        _testcase(default.A, 1, 1)
+        _testcase(default.B, [1], [1])
+        _testcase(default.C, ("a", 1), ("a", 1))
+        _testcase(default.E, [("a", 1)], [("a", 1)])
+        _testcase(default.F, ("a", [1]), ("a", [1]))
+        _testcase(default.G, ("a", ("a", 1)), ("a", ("a", 1)))
+        _testcase(default.H, [("a", [1])], [("a", [1])])
+        _testcase(default.I, ("a", [("a", 1)]), ("a", [("a", 1)]))
+
+        # Change from None to value
+        _testcase(default.A, None, 1)
+        _testcase(default.B, None, [1])
+        _testcase(default.C, None, ("a", 1))
+        _testcase(default.E, None, [("a", 1)])
+        _testcase(default.F, None, ("a", [1]))
+        _testcase(default.G, None, ("a", ("a", 1)))
+        _testcase(default.H, None, [("a", [1])])
+        _testcase(default.I, None, ("a", [("a", 1)]))
+
+        # Change from value to None
+        _testcase(default.A, 1, None)
+        _testcase(default.B, [1], None)
+        _testcase(default.C, ("a", 1), None)
+        _testcase(default.E, [("a", 1)], None)
+        _testcase(default.F, ("a", [1]), None)
+        _testcase(default.G, ("a", ("a", 1)), None)
+        _testcase(default.H, [("a", [1])], None)
+        _testcase(default.I, ("a", [("a", 1)]), None)
+
+        # Change from None to None
+        _testcase(default.A, None, None)
+        _testcase(default.B, None, None)
+        _testcase(default.C, None, None)
+        _testcase(default.E, None, None)
+        _testcase(default.F, None, None)
+        _testcase(default.G, None, None)
+        _testcase(default.H, None, None)
+        _testcase(default.I, None, None)
+
     def test_model_sync_single_prop_03(self):
-        # Updating existing objects with single props
-        # Set prop to None
-
-        from models.TestModelSyncSingleProp import default
-
-        def _testcase(
-            model_type: typing.Type[GelModel],
-            initial_val: typing.Any,
-        ) -> None:
-            original = model_type(val=initial_val)
-            self.client.save(original)
-
-            mirror_1 = self.client.query_required_single(
-                model_type.select(val=True).limit(1)
-            )
-            mirror_2 = self.client.query_required_single(
-                model_type.select(val=True).limit(1)
-            )
-            mirror_3 = self.client.query_required_single(
-                model_type.select(val=False).limit(1)
-            )
-
-            self.assertEqual(original.val, initial_val)
-            self.assertEqual(mirror_1.val, initial_val)
-            self.assertEqual(mirror_2.val, initial_val)
-            self.assertFalse(hasattr(mirror_3, "val"))
-
-            # change a value
-            original.val = None
-
-            # sync some of the objects
-            self.client.sync(original, mirror_1, mirror_3)
-
-            # only synced objects with value set get update
-            self.assertIsNone(original.val)
-            self.assertIsNone(mirror_1.val)
-            self.assertEqual(mirror_2.val, initial_val)
-            # self.assertFalse(hasattr(mirror_3, 'val'))  # Fail
-
-        _testcase(default.A, 1)
-        _testcase(default.B, [1])
-        _testcase(default.C, ("a", 1))
-        _testcase(default.E, [("a", 1)])
-        _testcase(default.F, ("a", [1]))
-        _testcase(default.G, ("a", ("a", 1)))
-        _testcase(default.H, [("a", [1])])
-        _testcase(default.I, ("a", [("a", 1)]))
-
-    def test_model_sync_single_prop_04(self):
         # Reconciling different changes to single props
 
         from models.TestModelSyncSingleProp import default
@@ -412,6 +409,9 @@ class TestModelSyncSingleProp(tb.ModelTestCase):
             self.assertEqual(mirror_2.val, changed_val_2)
             # self.assertFalse(hasattr(mirror_3, 'val'))  # Fail
 
+            # cleanup
+            self.client.query(model_type.delete())
+
         _testcase(default.A, 1, 2, 3, 4)
         _testcase(default.B, [1], [2], [3], [4])
         _testcase(default.C, ("a", 1), ("b", 2), ("c", 3), ("d", 4))
@@ -440,7 +440,7 @@ class TestModelSyncSingleProp(tb.ModelTestCase):
         )
 
     @tb.xfail
-    def test_model_sync_single_prop_05(self):
+    def test_model_sync_single_prop_04(self):
         # Changing elements of collection single props
         # Checks deeply nested collections as well
 
@@ -507,6 +507,9 @@ class TestModelSyncSingleProp(tb.ModelTestCase):
                     expected_val, visiting_indexes
                 )
 
+            # cleanup
+            self.client.query(model_type.delete())
+
         _testcase(default.B, [1, 2, 3])
         _testcase(default.C, ("x", 1))
         _testcase(default.E, [("x", 1), ("y", 2), ("z", 3)])
@@ -522,7 +525,7 @@ class TestModelSyncSingleProp(tb.ModelTestCase):
         )  # Fail
 
     @tb.xfail
-    def test_model_sync_single_prop_06(self):
+    def test_model_sync_single_prop_05(self):
         # Existing object without prop should not have it fetched
 
         from models.TestModelSyncSingleProp import default
@@ -579,6 +582,9 @@ class TestModelSyncMultiProp(tb.ModelTestCase):
 
             self.assertEqual(with_val.val, val)
             self.assertEqual(without_val.val, [])
+
+            # cleanup
+            self.client.query(model_type.delete())
 
         _testcase(default.A, [1, 2, 3])
         _testcase(default.B, [[1], [2, 2], [3, 3, 3]])
@@ -837,6 +843,9 @@ class TestModelSyncMultiProp(tb.ModelTestCase):
             self.assertEqual(mirror_1.val, [])
             self.assertEqual(mirror_2.val, initial_val)
             self.assertEqual(mirror_3.val, [])  # Fail
+
+            # cleanup
+            self.client.query(model_type.delete())
 
         _testcase(default.A, [1, 2, 3])
         _testcase(default.B, [[1], [2, 2], [3, 3, 3]])
