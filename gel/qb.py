@@ -24,19 +24,18 @@ def foreach(iter: type[_T], body: Callable[[type[_T]], type[_X]]) -> type[_X]:
 
     iter_expr = _qb.edgeql_qb_expr(iter)
     scope = _qb.Scope()
-    var = _qb.Variable(name="x", type_=iter_expr.type, scope=scope)
-    type_ = body(_qb.AnnotatedVar(iter, var))  # type: ignore [arg-type]
-    return _qb.AnnotatedExpr(  # type: ignore [return-type]
-        type_,
+    var = _qb.Variable(type_=iter_expr.type, scope=scope)
+    body_ = body(_qb.AnnotatedVar(iter.__gel_origin__, var))  # type: ignore [arg-type, attr-defined]
+    return _qb.AnnotatedExpr(  # type: ignore [return-value]
+        body_.__gel_origin__,  # type: ignore [attr-defined]
         _qb.ForStmt(
             iter_expr=iter_expr,
-            body=_qb.edgeql_qb_expr(type_),
+            body=_qb.edgeql_qb_expr(body_),
             scope=scope,
         ),
     )
 
 
 __all__ = (
-    "edgeql",
     "foreach",
 )
