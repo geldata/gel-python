@@ -6554,3 +6554,36 @@ class TestModelGeneratorReproducibility(tb.SyncQueryTestCase):
                             "Generated model output is nondeterministic:\n\n"
                             + "\n".join(diff)
                         )
+
+
+@tb.typecheck
+class TestModelGenDirect(tb.ModelTestCase):
+    SCHEMA = """
+        type Foo {
+            required x: int64;
+            squared := .x * .x;
+        };
+    """
+
+    SETUP = """
+        create type Bar {
+            create required property x: int64;
+            create property squared := .x * .x;
+        };
+    """
+
+    def test_model_gen_direct_01(self):
+        from models.TestModelGenDirect import default
+
+        foo = default.Foo(x=11)
+        self.client.sync(foo)
+
+        self.assertEqual(foo.squared, 121)
+
+    def test_model_gen_direct_02(self):
+        from models.TestModelGenDirect import default
+
+        bar = default.Bar(x=12)
+        self.client.sync(bar)
+
+        self.assertEqual(bar.squared, 144)
