@@ -243,6 +243,16 @@ class BaseTransaction:
             )
         )
 
+    async def _batch_query(
+        self,
+        ops: list[
+            abstract.BaseQueryContext[typing.Any]
+            | abstract.ExecuteContext[typing.Any]
+        ],
+    ) -> list[typing.Any]:
+        await self._ensure_transaction()
+        return await self._connection.batch_query(ops)
+
 
 class BaseRetry:
     def __init__(self, owner):
