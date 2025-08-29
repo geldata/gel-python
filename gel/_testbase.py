@@ -1282,6 +1282,8 @@ class TestModel(_testbase.{base_class_name}):
                 "--no-strict-equality",
                 "--config-file",
                 inifn,
+                "--cache-dir",
+                str(pathlib.Path(__file__).parent.parent / ".mypy_cache"),
                 testfn,
             ]
 

@@ -223,6 +223,9 @@ extend-ignore = [
     "F541", # f-string-missing-placeholders
 ]
 
+[tool.ruff.format]
+quote-style = "preserve"
+
 # ========================
 #          PYTEST
 # ========================
