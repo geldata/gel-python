@@ -9,7 +9,6 @@ from typing import TypeVar
 from collections.abc import Callable
 
 from gel._internal import _qb
-from gel._internal._qb import edgeql
 from gel._internal._qbmodel import _abstract
 
 
