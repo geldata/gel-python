@@ -35,7 +35,6 @@ import pathlib
 import pickle
 import re
 import shutil
-import site
 import subprocess
 import sys
 import tempfile
@@ -63,12 +62,6 @@ from gel.orm.django.generator import ModelGenerator as DjangoModGen
 log = logging.getLogger(__name__)
 
 _unset = object()
-
-
-SITE_PACKAGES: typing.Final[pathlib.Path] = pathlib.Path(
-    site.getsitepackages()[0]
-)
-MODELS_DEST: typing.Final[pathlib.Path] = SITE_PACKAGES / "models"
 
 
 @contextlib.contextmanager
@@ -790,7 +783,7 @@ class BaseModelTestCase(DatabaseTestCase):
 
         cls.tmp_model_dir = tempfile.TemporaryDirectory(**td_kwargs)
 
-        model_from_file, model_name = cls._model_info()
+        _, model_name = cls._model_info()
 
         if cls.orm_debug:
             print(cls.tmp_model_dir.name)
@@ -829,15 +822,6 @@ class BaseModelTestCase(DatabaseTestCase):
                 ) from e
         finally:
             gen_client.terminate()
-
-        if not model_from_file:
-            # This is a direct schema, let's copy it to the site paths
-            site_model_dir = MODELS_DEST / model_name
-            if site_model_dir.exists():
-                shutil.rmtree(site_model_dir)
-            shutil.copytree(
-                model_output_dir, site_model_dir, dirs_exist_ok=True
-            )
 
         sys.path.insert(0, cls.tmp_model_dir.name)
 
