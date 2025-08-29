@@ -31,6 +31,7 @@ from ._abstract import (
     Node,
     PathExpr,
     PathPrefix,
+    Scope,
     ScopeContext,
     Stmt,
     Symbol,
@@ -64,7 +65,7 @@ class ExprPlaceholder(Expr):
     def type(self) -> SchemaPath:
         raise TypeError("unreplaced ExprPlaceholder")
 
-    def __edgeql_expr__(self, *, ctx: ScopeContext | None) -> str:
+    def __edgeql_expr__(self, *, ctx: ScopeContext) -> str:
         raise TypeError("unreplaced ExprPlaceholder")
 
 
@@ -72,13 +73,13 @@ class ExprPlaceholder(Expr):
 class Ident(IdentLikeExpr):
     name: str
 
-    def __edgeql_expr__(self, *, ctx: ScopeContext | None) -> str:
+    def __edgeql_expr__(self, *, ctx: ScopeContext) -> str:
         return _edgeql.quote_ident(self.name)
 
 
 @dataclass(kw_only=True, frozen=True)
 class Variable(Symbol):
-    def __edgeql_expr__(self, *, ctx: ScopeContext | None) -> str:
+    def __edgeql_expr__(self, *, ctx: ScopeContext) -> str:
         name = ctx.bindings.get(self) if ctx is not None else None
         if name is None:
             raise RuntimeError(f"unbound {self}")
@@ -89,7 +90,7 @@ class Variable(Symbol):
 class SchemaSet(IdentLikeExpr):
     type_: SchemaPath
 
-    def __edgeql_expr__(self, *, ctx: ScopeContext | None) -> str:
+    def __edgeql_expr__(self, *, ctx: ScopeContext) -> str:
         return "::".join(self.type.parts)
 
 
@@ -105,12 +106,17 @@ class Global(TypedExpr):
     def subnodes(self) -> Iterable[Node]:
         return ()
 
-    def __edgeql_expr__(self, *, ctx: ScopeContext | None) -> str:
+    def __edgeql_expr__(self, *, ctx: ScopeContext) -> str:
         return f"global {self.name.as_quoted_schema_name()}"
 
 
+@dataclass(kw_only=True, frozen=True)
 class Literal(IdentLikeExpr):
-    pass
+    val: object
+
+    def __edgeql_expr__(self, *, ctx: ScopeContext) -> str:
+        var = ctx.bind_argument(self.val)
+        return f"(<{self.type_}>${var})"
 
 
 @dataclass(kw_only=True, frozen=True)
@@ -118,8 +124,10 @@ class BoolLiteral(Literal):
     val: bool
     type_: SchemaPath = field(default=SchemaPath("std", "bool"))
 
-    def __edgeql_expr__(self, *, ctx: ScopeContext | None) -> str:
-        return "true" if self.val else "false"
+    def __edgeql_expr__(self, *, ctx: ScopeContext) -> str:
+        # XXX: BoolLiteral uses our custom bool subtype??
+        var = ctx.bind_argument(bool(self.val))
+        return f"(<{self.type_}>${var})"
 
 
 @dataclass(kw_only=True, frozen=True)
@@ -127,17 +135,11 @@ class IntLiteral(Literal):
     val: int
     type_: SchemaPath = field(default=SchemaPath("std", "int64"))
 
-    def __edgeql_expr__(self, *, ctx: ScopeContext | None) -> str:
-        return str(self.val)
-
 
 @dataclass(kw_only=True, frozen=True)
 class FloatLiteral(Literal):
     val: float
     type_: SchemaPath = field(default=SchemaPath("std", "float64"))
-
-    def __edgeql_expr__(self, *, ctx: ScopeContext | None) -> str:
-        return str(self.val)
 
 
 @dataclass(kw_only=True, frozen=True)
@@ -145,17 +147,11 @@ class BigIntLiteral(Literal):
     val: int
     type_: SchemaPath = field(default=SchemaPath("std", "bigint"))
 
-    def __edgeql_expr__(self, *, ctx: ScopeContext | None) -> str:
-        return f"n{self.val}"
-
 
 @dataclass(kw_only=True, frozen=True)
 class DecimalLiteral(Literal):
     val: decimal.Decimal
     type_: SchemaPath = field(default=SchemaPath("std", "decimal"))
-
-    def __edgeql_expr__(self, *, ctx: ScopeContext | None) -> str:
-        return f"n{self.val}"
 
 
 @dataclass(kw_only=True, frozen=True)
@@ -163,18 +159,11 @@ class BytesLiteral(Literal):
     val: bytes
     type_: SchemaPath = field(default=SchemaPath("std", "bytes"))
 
-    def __edgeql_expr__(self, *, ctx: ScopeContext | None) -> str:
-        v = _edgeql.quote_literal(repr(self.val)[2:-1])
-        return f"b{v}"
-
 
 @dataclass(kw_only=True, frozen=True)
 class StringLiteral(Literal):
     val: str
     type_: SchemaPath = field(default=SchemaPath("std", "str"))
-
-    def __edgeql_expr__(self, *, ctx: ScopeContext | None) -> str:
-        return _edgeql.quote_literal(self.val)
 
 
 @dataclass(kw_only=True, frozen=True)
@@ -202,7 +191,7 @@ class SetLiteral(AtomicExpr):
     def precedence(self) -> _edgeql.Precedence:
         return _edgeql.PRECEDENCE[_edgeql.Token.LBRACE]
 
-    def __edgeql_expr__(self, *, ctx: ScopeContext | None) -> str:
+    def __edgeql_expr__(self, *, ctx: ScopeContext) -> str:
         exprs = []
         for item in self.items:
             item_edgeql = edgeql(item, ctx=ctx)
@@ -221,7 +210,7 @@ class SetLiteral(AtomicExpr):
 
 @dataclass(kw_only=True, frozen=True)
 class Path(PathExpr):
-    def __edgeql_expr__(self, *, ctx: ScopeContext | None) -> str:
+    def __edgeql_expr__(self, *, ctx: ScopeContext) -> str:
         steps = []
         current: Expr = self
         while isinstance(current, Path):
@@ -276,7 +265,7 @@ class PrefixOp(Op):
     def subnodes(self) -> Iterable[Node]:
         return (self.expr,)
 
-    def __edgeql_expr__(self, *, ctx: ScopeContext | None) -> str:
+    def __edgeql_expr__(self, *, ctx: ScopeContext) -> str:
         left = edgeql(self.expr, ctx=ctx)
         if _need_right_parens(self.precedence, self.expr):
             left = f"({left})"
@@ -301,7 +290,7 @@ class CastOp(PrefixOp):
     def subnodes(self) -> Iterable[Node]:
         return (self.expr,)
 
-    def __edgeql_expr__(self, *, ctx: ScopeContext | None) -> str:
+    def __edgeql_expr__(self, *, ctx: ScopeContext) -> str:
         expr = edgeql(self.expr, ctx=ctx)
         if _need_right_parens(self.precedence, self.expr):
             expr = f"({expr})"
@@ -349,7 +338,7 @@ class InfixOp(BinaryOp):
     ) -> None:
         super().__init__(lexpr=lexpr, rexpr=rexpr, op=op, type_=type_)
 
-    def __edgeql_expr__(self, *, ctx: ScopeContext | None) -> str:
+    def __edgeql_expr__(self, *, ctx: ScopeContext) -> str:
         left = edgeql(self.lexpr, ctx=ctx)
         if _need_left_parens(self.precedence, self.lexpr):
             left = f"({left})"
@@ -373,7 +362,7 @@ class IndexOp(BinaryOp):
             lexpr=lexpr, rexpr=rexpr, op=_edgeql.Token.LBRACKET, type_=type_
         )
 
-    def __edgeql_expr__(self, *, ctx: ScopeContext | None) -> str:
+    def __edgeql_expr__(self, *, ctx: ScopeContext) -> str:
         left = edgeql(self.lexpr, ctx=ctx)
         if _need_left_parens(self.precedence, self.lexpr):
             left = f"({left})"
@@ -422,7 +411,7 @@ class FuncCall(TypedExpr):
     def precedence(self) -> _edgeql.Precedence:
         return _edgeql.PRECEDENCE[_edgeql.Operation.CALL]
 
-    def __edgeql_expr__(self, *, ctx: ScopeContext | None) -> str:
+    def __edgeql_expr__(self, *, ctx: ScopeContext) -> str:
         args = []
         comma_prec = _edgeql.PRECEDENCE[_edgeql.Token.COMMA]
         if self.args is not None:
@@ -456,7 +445,7 @@ class Filter(Clause):
     def precedence(self) -> _edgeql.Precedence:
         return _edgeql.PRECEDENCE[_edgeql.Token.FILTER]
 
-    def __edgeql_expr__(self, *, ctx: ScopeContext | None) -> str:
+    def __edgeql_expr__(self, *, ctx: ScopeContext) -> str:
         fexpr = self.filters[0]
         for item in self.filters[1:]:
             fexpr = InfixOp(
@@ -507,7 +496,7 @@ class OrderByElem(Expr):
         else:
             return _edgeql.PRECEDENCE[_edgeql.Token.ASC]
 
-    def __edgeql_expr__(self, *, ctx: ScopeContext | None) -> str:
+    def __edgeql_expr__(self, *, ctx: ScopeContext) -> str:
         text = f"{edgeql(self.expr, ctx=ctx)}"
         if self.direction is not None:
             text += f" {self.direction.upper()}"
@@ -527,7 +516,7 @@ class OrderBy(Clause):
     def precedence(self) -> _edgeql.Precedence:
         return _edgeql.PRECEDENCE[_edgeql.Token.ORDER_BY]
 
-    def __edgeql_expr__(self, *, ctx: ScopeContext | None) -> str:
+    def __edgeql_expr__(self, *, ctx: ScopeContext) -> str:
         dexpr: Expr = self.directions[0]
         for item in self.directions[1:]:
             dexpr = InfixOp(
@@ -551,8 +540,13 @@ class Limit(Clause):
     def precedence(self) -> _edgeql.Precedence:
         return _edgeql.PRECEDENCE[_edgeql.Token.LIMIT]
 
-    def __edgeql_expr__(self, *, ctx: ScopeContext | None) -> str:
-        return f"LIMIT {edgeql(self.limit, ctx=ctx)}"
+    def __edgeql_expr__(self, *, ctx: ScopeContext) -> str:
+        # Can't do constant extraction for LIMIT 1, it has semantic meaning.
+        if isinstance(self.limit, IntLiteral) and self.limit.val == 1:
+            return "LIMIT 1"
+        else:
+            clause = edgeql(self.limit, ctx=ctx)
+            return f"LIMIT {clause}"
 
 
 @dataclass(kw_only=True, frozen=True)
@@ -566,7 +560,7 @@ class Offset(Clause):
     def precedence(self) -> _edgeql.Precedence:
         return _edgeql.PRECEDENCE[_edgeql.Token.OFFSET]
 
-    def __edgeql_expr__(self, *, ctx: ScopeContext | None) -> str:
+    def __edgeql_expr__(self, *, ctx: ScopeContext) -> str:
         return f"OFFSET {edgeql(self.offset, ctx=ctx)}"
 
 
@@ -747,7 +741,7 @@ class ForStmt(IteratorExpr):
     def subnodes(self) -> Iterable[Node]:
         return (self.iter_expr, self.body)
 
-    def _edgeql(self, ctx: ScopeContext | None) -> str:
+    def _edgeql(self, ctx: ScopeContext) -> str:
         return (
             f"{self.stmt} {edgeql(self.var, ctx=ctx)} IN "
             f"({edgeql(self.iter_expr, ctx=ctx)})\n"
@@ -803,7 +797,7 @@ class Shape(Node):
 def _render_shape(
     shape: Shape,
     source: Expr,
-    ctx: ScopeContext | None,
+    ctx: ScopeContext,
 ) -> str:
     els = []
     for el in shape.elements:
@@ -907,8 +901,9 @@ def toplevel_edgeql(
     x: ExprCompatible,
     *,
     splat_cb: Callable[[], Shape] | None = None,
-) -> str:
+) -> tuple[str, dict[str, object]]:
     expr = edgeql_qb_expr(x)
     if not isinstance(expr, Stmt):
         expr = SelectStmt.wrap(expr, splat_cb=splat_cb)
-    return edgeql(expr, ctx=None)
+    ctx = ScopeContext(Scope(expr))
+    return edgeql(expr, ctx=ctx), ctx.get_arguments()

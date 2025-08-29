@@ -28,12 +28,12 @@ class TypeClassProto(Protocol):
 
 
 class InstanceSupportsEdgeQLExpr(Protocol):
-    def __edgeql_expr__(self, *, ctx: ScopeContext | None) -> str: ...
+    def __edgeql_expr__(self, *, ctx: ScopeContext) -> str: ...
 
 
 class TypeSupportsEdgeQLExpr(Protocol):
     @classmethod
-    def __edgeql_expr__(cls, *, ctx: ScopeContext | None) -> str: ...
+    def __edgeql_expr__(cls, *, ctx: ScopeContext) -> str: ...
 
 
 SupportsEdgeQLExpr = TypeAliasType(
@@ -97,7 +97,7 @@ def is_exprmethod(obj: Any) -> TypeGuard[Callable[..., Any]]:
 def edgeql(
     source: SupportsEdgeQLExpr | ExprCompatible,
     *,
-    ctx: ScopeContext | None,
+    ctx: ScopeContext,
 ) -> str:
     try:
         __edgeql_expr__ = source.__edgeql_expr__  # type: ignore [union-attr]
