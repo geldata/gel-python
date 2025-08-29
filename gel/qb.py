@@ -16,7 +16,7 @@ _T = TypeVar("_T", bound=_abstract.GelType)
 _X = TypeVar("_X", bound=_abstract.GelType)
 
 
-def for_in(iter: type[_T], body: Callable[[type[_T]], type[_X]]) -> type[_X]:
+def for_(iter: type[_T], body: Callable[[type[_T]], type[_X]]) -> type[_X]:
     """Evaluate the expression returned by *body* for each element in *iter*.
 
     This is the Pythonic representation of the EdgeQL FOR expression."""
@@ -35,4 +35,4 @@ def for_in(iter: type[_T], body: Callable[[type[_T]], type[_X]]) -> type[_X]:
     )
 
 
-__all__ = ("for_in",)
+__all__ = ("for_",)

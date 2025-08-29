@@ -636,7 +636,7 @@ class TestQueryBuilder(tb.ModelTestCase):
         from models.orm import std
 
         res = self.client.query(
-            std.for_in(
+            std.for_(
                 std.range_unpack(std.range(std.int64(1), std.int64(10))),
                 lambda x: x * 2,
             )
@@ -644,9 +644,9 @@ class TestQueryBuilder(tb.ModelTestCase):
         self.assertEqual(set(res), {i * 2 for i in range(1, 10)})
 
         res = self.client.query(
-            std.for_in(
+            std.for_(
                 std.range_unpack(std.range(std.int64(1), std.int64(3))),
-                lambda x: std.for_in(
+                lambda x: std.for_(
                     std.range_unpack(std.range(std.int64(1), std.int64(3))),
                     lambda y: x * 10 + y,
                 )
