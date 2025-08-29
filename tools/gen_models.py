@@ -64,7 +64,8 @@ if not SCHEMAS_ROOT.exists():
 
 
 def _run(cmd: list[str] | tuple[str, ...], *, cwd: Path | None = None) -> None:
-    """Run *cmd* via :pyfunc:`subprocess.run` with *check=True* and TTY-friendly I/O."""
+    """Run *cmd* via :pyfunc:`subprocess.run` with *check=True* and
+    TTY-friendly I/O."""
     try:
         env = os.environ.copy()
         env['GEL_AUTO_BACKUP_MODE'] = 'disabled'
@@ -119,17 +120,19 @@ def main() -> None:  # noqa: D401 – simple script entry-point
                 shutil.copy2(schema_file, dbschema_dir / 'schema.gel')
 
                 _run(
-                    ["gel", "branch", "create", "--empty", schema_file.stem], cwd=tmpdir,
+                    ["gel", "branch", "create", "--empty", schema_file.stem],
+                    cwd=tmpdir,
                 )
 
                 _run(
-                    ["gel", "branch", "switch", schema_file.stem], cwd=tmpdir,
+                    ["gel", "branch", "switch", schema_file.stem],
+                    cwd=tmpdir,
                 )
-
 
                 # 3. Create & apply migration, then generate models.
                 _run(
-                    ["gel", "migration", "create", "--non-interactive"], cwd=tmpdir
+                    ["gel", "migration", "create", "--non-interactive"],
+                    cwd=tmpdir,
                 )
                 _run(["gel", "migrate"], cwd=tmpdir)
                 _run(
@@ -142,7 +145,7 @@ def main() -> None:  # noqa: D401 – simple script entry-point
                     ],
                     cwd=tmpdir,
                 )
-                with open(Path(tmpdir) / "models" / "py.typed", "w") as f:
+                with open(Path(tmpdir) / "models" / "py.typed", "w") as _:
                     pass
 
                 # 4. Install models into *site-packages*.
@@ -154,19 +157,20 @@ def main() -> None:  # noqa: D401 – simple script entry-point
                     )
                     raise SystemExit(1)
 
-                shutil.copytree(generated_models, MODELS_DEST, dirs_exist_ok=True)
-
-                print(
-                    f"✅  {schema_file.name} has been reflected"
+                shutil.copytree(
+                    generated_models, MODELS_DEST, dirs_exist_ok=True
                 )
 
+                print(f"✅  {schema_file.name} has been reflected")
 
             print(
-                f"✅  Models have been generated and installed into {MODELS_DEST}"
+                f"✅  Models have been generated and installed into "
+                f"{MODELS_DEST}"
             )
 
         finally:
-            # Always attempt cleanup of project & instance so we don't leak them
+            # Always attempt cleanup of project & instance so we don't leak
+            # them
             if instance_created:
                 try:
                     subprocess.run(
