@@ -1936,7 +1936,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
     def process(self, mod: IntrospectedModule) -> None:
         if str(self.canonical_modpath) == 'std':
             self.write("# Re-export top-level query-builder functions")
-            self.write("from gel.qb import *")
+            self.write("from gel._internal._qbmodel._abstract._syntax import *")
 
         self.prepare_namespace(mod)
         self.write_generic_types(mod)

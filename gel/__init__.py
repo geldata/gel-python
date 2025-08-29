@@ -51,8 +51,6 @@ from .options import State
 
 from .errors._base import EdgeDBError, EdgeDBMessage
 
-from . import qb
-
 __all__ = [
     "Array",
     "AsyncIOClient",
@@ -86,7 +84,6 @@ __all__ = [
     "create_client",
     "default_backoff",
     "expr",
-    "qb",
 ]
 
 
