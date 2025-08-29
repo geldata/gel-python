@@ -25,6 +25,7 @@ Requirements
 """
 
 import click
+import filecmp
 import os
 import shutil
 import site
@@ -60,6 +61,8 @@ if not SCHEMAS_ROOT.exists():
     else:
         sys.stderr.write(f"error: schema file not found: {SCHEMAS_ROOT}\n")
         raise SystemExit(1)
+CACHE_DIR = REPO_ROOT / ".gen_models_cache"
+
 
 _T = typing.TypeVar('_T')
 
@@ -221,6 +224,41 @@ def find_test_classes(
     }
 
 
+def copy_schema_to(
+    schema: str | Path,
+    target_file: Path,
+) -> None:
+    if isinstance(schema, Path):
+        shutil.copy2(schema, target_file)
+
+    elif isinstance(schema, str):
+        with open(target_file, "w") as f:
+            f.write(schema)
+
+    else:
+        raise RuntimeError
+
+
+def has_schema_changed(
+    schema: str | Path,
+    cached_schema_path: Path,
+) -> bool:
+    if not cached_schema_path.exists():
+        return True
+
+    if isinstance(schema, Path):
+        return not filecmp.cmp(schema, cached_schema_path, shallow=False)
+
+    elif isinstance(schema, str):
+        with open(cached_schema_path, 'r') as f:
+            cached_content = f.read()
+
+        return cached_content != schema
+
+    else:
+        raise RuntimeError
+
+
 # ---------------------------------------------------------------------------
 # Main workflow
 # ---------------------------------------------------------------------------
@@ -228,9 +266,14 @@ def find_test_classes(
 
 @click.command()
 @click.option('-k', multiple=True)
-def main(k: typing.Sequence[str]) -> None:  # noqa: D401 – simple script entry-point
+@click.option('--cache/--no-cache', default=True)
+def main(
+    k: typing.Sequence[str],
+    cache: bool,
+) -> None:  # noqa: D401 – simple script entry-point
     # Gather schemas
     all_schemas: typing.Sequence[tuple[str, Path | str]]
+
     if k:
         model_tests = find_test_classes(
             TESTS_ROOT,
@@ -255,6 +298,32 @@ def main(k: typing.Sequence[str]) -> None:  # noqa: D401 – simple script entry
                 all_schemas.append((schema_file.stem, schema_file))
                 test_schema_paths.add(schema_file)
 
+    # If we are using the cache, filter out any schemas which have not changed
+    unchanged_count = 0
+
+    if cache:
+        changed_schemas: list[tuple[str, Path | str]] = []
+        for schema_name, schema in all_schemas:
+            if not CACHE_DIR.exists():
+                os.mkdir(CACHE_DIR)
+
+            cached_schema_path = CACHE_DIR / schema_name
+
+            if has_schema_changed(schema, cached_schema_path):
+                changed_schemas.append((schema_name, schema))
+
+        if not changed_schemas:
+            print(f"✅  No schemas have changed!")
+            return
+
+        unchanged_count = len(all_schemas) - len(changed_schemas)
+        all_schemas = changed_schemas
+
+    # Generate models for the schemas
+    print(f"ℹ️  Reflecting {len(all_schemas)} models")
+    if unchanged_count:
+        print(f"ℹ️  Skipping {unchanged_count} unchanged models")
+
     with tempfile.TemporaryDirectory(
         prefix="gel_codegen_",
         suffix="_tmp",
@@ -263,8 +332,8 @@ def main(k: typing.Sequence[str]) -> None:  # noqa: D401 – simple script entry
         instance_name = tmpdir.name  # gel derives instance name from dir name
 
         if MODELS_DEST.exists():
-            if k:
-                # We have a model filter
+            if k or unchanged_count:
+                # We are not regenerating all models
                 # Only remove the models we are regenerating
                 for schema_name, _ in all_schemas:
                     schema_model_dir = MODELS_DEST / schema_name
@@ -285,7 +354,7 @@ def main(k: typing.Sequence[str]) -> None:  # noqa: D401 – simple script entry
             dbschema_dir = tmpdir / "dbschema"
             dbschema_dir.mkdir(exist_ok=True)
 
-            for schema_name, schema_file in all_schemas:
+            for schema_name, schema in all_schemas:
                 generated_models = tmpdir / "models"
                 if generated_models.exists():
                     shutil.rmtree(generated_models)
@@ -294,13 +363,7 @@ def main(k: typing.Sequence[str]) -> None:  # noqa: D401 – simple script entry
                 if migrations_dir.exists():
                     shutil.rmtree(migrations_dir)
 
-                if isinstance(schema_file, Path):
-                    shutil.copy2(schema_file, dbschema_dir / 'schema.gel')
-                elif isinstance(schema_file, str):
-                    with open(dbschema_dir / 'schema.gel', "w") as f:
-                        f.write(schema_file)
-                else:
-                    raise RuntimeError
+                copy_schema_to(schema, dbschema_dir / 'schema.gel')
 
                 _run(
                     ["gel", "branch", "create", "--empty", schema_name],
@@ -344,11 +407,18 @@ def main(k: typing.Sequence[str]) -> None:  # noqa: D401 – simple script entry
                     generated_models, MODELS_DEST, dirs_exist_ok=True
                 )
 
+                # 5. If we are caching, copy schema to cache
+                if cache:
+                    cached_schema_path = CACHE_DIR / schema_name
+                    if cached_schema_path.exists():
+                        os.remove(cached_schema_path)
+                    copy_schema_to(schema, cached_schema_path)
+
                 print(f"✅  {schema_name} has been reflected")
 
             print(
-                f"✅  Models have been generated and installed into "
-                f"{MODELS_DEST}"
+                f"✅  {len(all_schemas)} models have been generated and "
+                f"installed into {MODELS_DEST}"
             )
 
         finally:
