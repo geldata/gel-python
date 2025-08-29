@@ -24,6 +24,7 @@ Requirements
   ``gel-generate-py`` can connect and introspect the schema.
 """
 
+import click
 import os
 import shutil
 import site
@@ -31,6 +32,8 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
+
+from gel._testbase import DatabaseTestCase, BaseModelTestCase
 
 # ---------------------------------------------------------------------------
 # Safety checks & constants
@@ -108,13 +111,17 @@ def find_classes_of_type(
 
         module_name = file.stem
 
-        spec = importlib.util.spec_from_file_location(module_name, file)
-        if not spec or not spec.loader:
-            raise RuntimeError
+        if module_name in sys.modules:
+            module = sys.modules[module_name]
 
-        module = importlib.util.module_from_spec(spec)
-        sys.modules[module_name] = module
-        spec.loader.exec_module(module)
+        else:
+            spec = importlib.util.spec_from_file_location(module_name, file)
+            if not spec or not spec.loader:
+                raise RuntimeError
+
+            module = importlib.util.module_from_spec(spec)
+            sys.modules[module_name] = module
+            spec.loader.exec_module(module)
 
         for _, obj in inspect.getmembers(module, inspect.isclass):
             if obj.__module__ == module_name and issubclass(obj, base_type):
@@ -123,29 +130,95 @@ def find_classes_of_type(
     return matching_classes
 
 
-def find_direct_schemas() -> list[tuple[str, str]]:
+def get_schema_info(
+    model_tests: typing.Collection[typing.Type[DatabaseTestCase]],
+) -> dict[str, str | Path]:
     """Find the schemas which are directly defined in a test's SCHEMA.
 
     ie. those not defined in tests/dbsetup/*.gel
     """
-    from gel._testbase import BaseModelTestCase
+    schema_infos: dict[str, str | Path] = {}
+    for model_test in model_tests:
+        if (
+            issubclass(model_test, BaseModelTestCase)
+            and (model_info := model_test._model_info())
+            and not model_info[0]  # model not from file
+        ):
+            model_name = model_info[1]
 
+            schema_infos[model_name] = model_test.get_combined_schemas()
+
+        else:
+            for name, val in model_test.__dict__.items():
+                if not model_test.is_schema_field(name):
+                    continue
+
+                schema_path = Path(val)
+                schema_infos[schema_path.stem] = schema_path
+
+    return schema_infos
+
+
+def find_test_classes(
+    directory: Path,
+    base_type: typing.Type[_T],
+    include_tests: typing.Sequence[str],
+) -> set[typing.Type[_T]]:
+    import unittest
+
+    # Use unittest to find tests that would run
+    def get_test_class_names(tests: list[unittest.TestSuite]) -> list[str]:
+        result: list[str] = []
+
+        for test in tests:
+            for test_entry in test._tests:
+                if isinstance(test_entry, unittest.TestSuite):
+                    result.extend(get_test_class_names([test_entry]))
+                    continue
+
+                if getattr(test_entry, '__unittest_skip__', False):
+                    continue
+
+                result.append(type(test_entry).__name__)
+
+        return result
+
+    class TestResult:
+        def wasSuccessful(self):
+            return True
+
+    class TestRunner:
+        test_class_names: set[str]
+
+        def __init__(self):
+            self.test_class_names = set()
+
+        def run(self, test):
+            self.test_class_names.update(get_test_class_names([test]))
+            return TestResult()
+
+    runner = TestRunner()
+    include_tests = [x for pat in include_tests for x in ['-k', pat]]
+    unittest.main(
+        module=None,
+        argv=['unittest', 'discover', '-s', str(directory), *include_tests],
+        testRunner=runner,
+        exit=False,
+    )
+
+    # Find model tests
     model_tests = find_classes_of_type(
         TESTS_ROOT,
-        BaseModelTestCase,
+        base_type,
         file_filter=lambda f: f.name.startswith('test_'),
     )
 
-    direct_schemas: list[tuple[str, str]] = []
-    for model_test in model_tests:
-        model_from_file, model_name = model_test._model_info()
-
-        if model_from_file:
-            continue
-
-        direct_schemas.append((model_name, model_test.get_combined_schemas()))
-
-    return direct_schemas
+    # Return a filtered set
+    return {
+        model_test
+        for model_test in model_tests
+        if model_test.__name__ in runner.test_class_names
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -153,16 +226,34 @@ def find_direct_schemas() -> list[tuple[str, str]]:
 # ---------------------------------------------------------------------------
 
 
-def main() -> None:  # noqa: D401 – simple script entry-point
-    # Gather all schemas
-    file_schemas = list(
-        (schema_file.stem, schema_file)
-        for schema_file in SCHEMAS_ROOT.glob('*.gel')
-    )
-    direct_schemas = find_direct_schemas()
-    all_schemas: typing.Sequence[tuple[str, Path | str]] = (
-        file_schemas + direct_schemas
-    )
+@click.command()
+@click.option('-k', multiple=True)
+def main(k: typing.Sequence[str]) -> None:  # noqa: D401 – simple script entry-point
+    # Gather schemas
+    all_schemas: typing.Sequence[tuple[str, Path | str]]
+    if k:
+        model_tests = find_test_classes(
+            TESTS_ROOT,
+            DatabaseTestCase,
+            k,
+        )
+        all_schemas = list(get_schema_info(model_tests).items())
+
+    else:
+        model_tests = find_classes_of_type(
+            TESTS_ROOT,
+            BaseModelTestCase,
+            file_filter=lambda f: f.name.startswith('test_'),
+        )
+        all_schemas = list(get_schema_info(model_tests).items())
+
+        # If we are not filtering, additionally look through schemas root for
+        # any other schema files
+        test_schema_paths = {s[1] for s in all_schemas}
+        for schema_file in list(SCHEMAS_ROOT.glob('*.gel')):
+            if schema_file not in test_schema_paths:
+                all_schemas.append((schema_file.stem, schema_file))
+                test_schema_paths.add(schema_file)
 
     with tempfile.TemporaryDirectory(
         prefix="gel_codegen_",
@@ -172,7 +263,17 @@ def main() -> None:  # noqa: D401 – simple script entry-point
         instance_name = tmpdir.name  # gel derives instance name from dir name
 
         if MODELS_DEST.exists():
-            shutil.rmtree(MODELS_DEST)
+            if k:
+                # We have a model filter
+                # Only remove the models we are regenerating
+                for schema_name, _ in all_schemas:
+                    schema_model_dir = MODELS_DEST / schema_name
+                    if schema_model_dir.exists():
+                        shutil.rmtree(schema_model_dir)
+
+            else:
+                # Remove all models
+                shutil.rmtree(MODELS_DEST)
 
         instance_created = False
         try:

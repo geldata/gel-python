@@ -643,6 +643,10 @@ class DatabaseTestCase(ClusterTestCase, ConnectedTestCaseMixin):
         return "\n\n".join(st for st in schema_texts)
 
     @classmethod
+    def is_schema_field(cls, field: str) -> bool:
+        return bool(re.match(r"^SCHEMA(?:_(\w+))?", field))
+
+    @classmethod
     def get_schema_text(cls, field: str) -> str | None:
         m = re.match(r"^SCHEMA(?:_(\w+))?", field)
         if not m:
