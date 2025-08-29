@@ -1,4 +1,5 @@
 from __future__ import annotations
+import typing
 
 """Generate Gel models using the *gel* command-line tool.
 
@@ -30,7 +31,6 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
-from typing import Final
 
 # ---------------------------------------------------------------------------
 # Safety checks & constants
@@ -43,10 +43,11 @@ if sys.prefix == sys.base_prefix and not os.environ.get("VIRTUAL_ENV"):
     )
     raise SystemExit(1)
 
-SITE_PACKAGES: Final[Path] = Path(site.getsitepackages()[0])
-MODELS_DEST: Final[Path] = SITE_PACKAGES / "models"
+SITE_PACKAGES: typing.Final[Path] = Path(site.getsitepackages()[0])
+MODELS_DEST: typing.Final[Path] = SITE_PACKAGES / "models"
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+TESTS_ROOT = REPO_ROOT / "tests"
 SCHEMAS_ROOT = REPO_ROOT / "tests" / "dbsetup"
 if not SCHEMAS_ROOT.exists():
     # Try fallback when executed from repository root.
@@ -56,6 +57,8 @@ if not SCHEMAS_ROOT.exists():
     else:
         sys.stderr.write(f"error: schema file not found: {SCHEMAS_ROOT}\n")
         raise SystemExit(1)
+
+_T = typing.TypeVar('_T')
 
 
 # ---------------------------------------------------------------------------
@@ -82,12 +85,85 @@ def _run(cmd: list[str] | tuple[str, ...], *, cwd: Path | None = None) -> None:
         raise
 
 
+def find_classes_of_type(
+    directory: Path,
+    base_type: typing.Type[_T],
+    *,
+    file_filter: typing.Callable[[Path], bool] | None = None,
+) -> list[typing.Type[_T]]:
+    """Find all classes in a directory which inherit from a base type.
+
+    If file_filter is specified, only looks at files which pass the filter.
+    """
+    import importlib.util
+    import inspect
+
+    matching_classes = []
+
+    for file in directory.glob("*.py"):
+        if file.name == "__init__.py" or not file.name.startswith('test_'):
+            continue
+        if file_filter and not file_filter(file):
+            continue
+
+        module_name = file.stem
+
+        spec = importlib.util.spec_from_file_location(module_name, file)
+        if not spec or not spec.loader:
+            raise RuntimeError
+
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[module_name] = module
+        spec.loader.exec_module(module)
+
+        for _, obj in inspect.getmembers(module, inspect.isclass):
+            if obj.__module__ == module_name and issubclass(obj, base_type):
+                matching_classes.append(obj)
+
+    return matching_classes
+
+
+def find_direct_schemas() -> list[tuple[str, str]]:
+    """Find the schemas which are directly defined in a test's SCHEMA.
+
+    ie. those not defined in tests/dbsetup/*.gel
+    """
+    from gel._testbase import BaseModelTestCase
+
+    model_tests = find_classes_of_type(
+        TESTS_ROOT,
+        BaseModelTestCase,
+        file_filter=lambda f: f.name.startswith('test_'),
+    )
+
+    direct_schemas: list[tuple[str, str]] = []
+    for model_test in model_tests:
+        model_from_file, model_name = model_test._model_info()
+
+        if model_from_file:
+            continue
+
+        direct_schemas.append((model_name, model_test.get_combined_schemas()))
+
+    return direct_schemas
+
+
 # ---------------------------------------------------------------------------
 # Main workflow
 # ---------------------------------------------------------------------------
 
 
 def main() -> None:  # noqa: D401 – simple script entry-point
+    # Gather all schemas
+    file_schemas = list(
+        (schema_file.stem, schema_file)
+        for schema_file in SCHEMAS_ROOT.glob('*.gel')
+    )
+    direct_schemas = find_direct_schemas()
+    all_schemas: typing.Sequence[tuple[str, Path | str]] = (
+        file_schemas + direct_schemas
+    )
+
     with tempfile.TemporaryDirectory(
         prefix="gel_codegen_",
         suffix="_tmp",
@@ -108,7 +184,7 @@ def main() -> None:  # noqa: D401 – simple script entry-point
             dbschema_dir = tmpdir / "dbschema"
             dbschema_dir.mkdir(exist_ok=True)
 
-            for schema_file in SCHEMAS_ROOT.glob('*.gel'):
+            for schema_name, schema_file in all_schemas:
                 generated_models = tmpdir / "models"
                 if generated_models.exists():
                     shutil.rmtree(generated_models)
@@ -117,15 +193,21 @@ def main() -> None:  # noqa: D401 – simple script entry-point
                 if migrations_dir.exists():
                     shutil.rmtree(migrations_dir)
 
-                shutil.copy2(schema_file, dbschema_dir / 'schema.gel')
+                if isinstance(schema_file, Path):
+                    shutil.copy2(schema_file, dbschema_dir / 'schema.gel')
+                elif isinstance(schema_file, str):
+                    with open(dbschema_dir / 'schema.gel', "w") as f:
+                        f.write(schema_file)
+                else:
+                    raise RuntimeError
 
                 _run(
-                    ["gel", "branch", "create", "--empty", schema_file.stem],
+                    ["gel", "branch", "create", "--empty", schema_name],
                     cwd=tmpdir,
                 )
 
                 _run(
-                    ["gel", "branch", "switch", schema_file.stem],
+                    ["gel", "branch", "switch", schema_name],
                     cwd=tmpdir,
                 )
 
@@ -141,7 +223,7 @@ def main() -> None:  # noqa: D401 – simple script entry-point
                         "--no-cache",
                         "models",
                         "--output",
-                        f"models/{schema_file.stem}",
+                        f"models/{schema_name}",
                     ],
                     cwd=tmpdir,
                 )
@@ -161,7 +243,7 @@ def main() -> None:  # noqa: D401 – simple script entry-point
                     generated_models, MODELS_DEST, dirs_exist_ok=True
                 )
 
-                print(f"✅  {schema_file.name} has been reflected")
+                print(f"✅  {schema_name} has been reflected")
 
             print(
                 f"✅  Models have been generated and installed into "

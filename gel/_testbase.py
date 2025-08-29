@@ -635,7 +635,7 @@ class DatabaseTestCase(ClusterTestCase, ConnectedTestCaseMixin):
         return dbname.lower()
 
     @classmethod
-    def get_schema_texts(cls) -> list[str]:
+    def get_combined_schemas(cls) -> str:
         schema_texts: list[str] = []
 
         # Look at all SCHEMA entries and potentially create multiple
@@ -647,7 +647,7 @@ class DatabaseTestCase(ClusterTestCase, ConnectedTestCaseMixin):
             if schema_text := cls.get_schema_text(name):
                 schema_texts.append(schema_text)
 
-        return schema_texts
+        return "\n\n".join(st for st in schema_texts)
 
     @classmethod
     def get_schema_text(cls, field: str) -> str | None:
@@ -678,12 +678,11 @@ class DatabaseTestCase(ClusterTestCase, ConnectedTestCaseMixin):
     @classmethod
     def get_setup_script(cls):
         script = ""
-        schema = "\n\n".join(st for st in cls.get_schema_texts())
 
         # Don't wrap the script into a transaction here, so that
         # potentially it's easier to stitch multiple such scripts
         # together in a fashion similar to what `edb inittestdb` does.
-        script += f"\nSTART MIGRATION TO {{ {schema} }};"
+        script += f"\nSTART MIGRATION TO {{ {cls.get_combined_schemas()} }};"
         script += f"\nPOPULATE MIGRATION; \nCOMMIT MIGRATION;"
 
         if cls.SETUP:
@@ -763,6 +762,7 @@ class SyncQueryTestCase(DatabaseTestCase):
 
 
 class BaseModelTestCase(DatabaseTestCase):
+    SCHEMA: str
     DEFAULT_MODULE = "default"
 
     client: typing.ClassVar[gel.Client]
