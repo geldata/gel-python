@@ -81,7 +81,7 @@ class Expr(Node):
     def type(self) -> SchemaPath: ...
 
     @abc.abstractmethod
-    def __edgeql_expr__(self, *, ctx: ScopeContext | None) -> str: ...
+    def __edgeql_expr__(self, *, ctx: ScopeContext) -> str: ...
 
     def __edgeql_qb_expr__(self) -> Self:
         return self
@@ -107,7 +107,7 @@ class QueryText(TypedExpr):
     def subnodes(self) -> Iterable[Node | None]:
         return ()
 
-    def __edgeql_expr__(self, *, ctx: ScopeContext | None) -> str:
+    def __edgeql_expr__(self, *, ctx: ScopeContext) -> str:
         return self.text
 
 
@@ -228,6 +228,7 @@ class ScopeContext:
         self._scope = scope
         self._path_scope: Scope | None = None
         self._path_prefix_must_bind: bool = False
+        self._bindings: dict[str, object] = {}
 
     def has_scope(self, scope: Scope) -> bool:
         return scope in self._scopes
@@ -243,6 +244,14 @@ class ScopeContext:
             stem = sym.binding_stem
 
         return ns.bind(sym, stem)
+
+    def bind_argument(self, val: object) -> str:
+        k = f"_qb_arg_{len(self._bindings)}"
+        self._bindings[k] = val
+        return k
+
+    def get_arguments(self) -> dict[str, object]:
+        return self._bindings
 
     @contextlib.contextmanager
     def push(
@@ -362,7 +371,7 @@ class ScopedExpr(Expr):
     @abc.abstractmethod
     def _edgeql(self, ctx: ScopeContext) -> str: ...
 
-    def __edgeql_expr__(self, *, ctx: ScopeContext | None) -> str:
+    def __edgeql_expr__(self, *, ctx: ScopeContext) -> str:
         with self.context(parent=ctx) as myctx:
             return self._edgeql(myctx)
 
@@ -458,7 +467,7 @@ class PathPrefix(Symbol):
     source_link: str | None = None
     lprop_pivot: bool = False
 
-    def __edgeql_expr__(self, *, ctx: ScopeContext | None) -> str:
+    def __edgeql_expr__(self, *, ctx: ScopeContext) -> str:
         if (
             ctx is not None
             and (ctx.path_scope is not self.scope or ctx.path_prefix_must_bind)
