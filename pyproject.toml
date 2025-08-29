@@ -222,6 +222,7 @@ extend-ignore = [
     "E402", # module-import-not-at-top-of-file
     "E252", # missing-whitespace-around-parameter-equals
     "F541", # f-string-missing-placeholders
+    "Q000", # prefer double quotes
 ]
 
 [tool.ruff.format]
