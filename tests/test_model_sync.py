@@ -38,6 +38,7 @@ import os
 
 from gel import _testbase as tb
 from gel._internal import _tracked_list
+from gel._internal._qbmodel._abstract import _link_set
 from gel._internal._qbmodel._pydantic._models import GelModel
 
 from tests import nested_collections
@@ -189,6 +190,14 @@ class TestModelSyncBasic(tb.ModelTestCase):
 
     SCHEMA = """
         type O;
+
+        type A;
+        type B {
+            a: A;
+        };
+        type C {
+            b: B;
+        };
     """
 
     def test_model_sync_basic_01(self):
@@ -203,6 +212,66 @@ class TestModelSyncBasic(tb.ModelTestCase):
 
         self.assertTrue(hasattr(synced, "id"))
         self.assertFalse(hasattr(unsynced, "id"))
+
+    def test_model_sync_basic_02(self):
+        # Sync applies ids to new objects in graph
+
+        from models.TestModelSyncBasic import default
+
+        # C(new) -> B(new) -> A(new)
+        # sync all
+        # all objects get ids
+        a = default.A()
+        b = default.B(a=a)
+        c = default.C(b=b)
+
+        self.client.sync(a, b, c)
+
+        self.assertTrue(hasattr(a, "id"))
+        self.assertTrue(hasattr(b, "id"))
+        self.assertTrue(hasattr(c, "id"))
+
+        # C(new) -> B(new) -> A(new)
+        # sync only C
+        # all objects get ids
+        a = default.A()
+        b = default.B(a=a)
+        c = default.C(b=b)
+
+        self.client.sync(c)
+
+        self.assertTrue(hasattr(a, "id"))
+        self.assertTrue(hasattr(b, "id"))
+        self.assertTrue(hasattr(c, "id"))
+
+        # C(new) -> B(new) -> A(new)
+        # sync only A
+        # only A gets id
+        a = default.A()
+        b = default.B(a=a)
+        c = default.C(b=b)
+
+        self.client.sync(a)
+
+        self.assertTrue(hasattr(a, "id"))
+        self.assertFalse(hasattr(b, "id"))
+        self.assertFalse(hasattr(c, "id"))
+
+        # C(new) -> B(existing) -> A(new)
+        # sync only C
+        # A and C get ids
+        b = default.B()
+        self.client.save(b)
+        self.assertTrue(hasattr(b, "id"))
+
+        a = default.A()
+        b.a = a
+        c = default.C(b=b)
+
+        self.client.sync(c)
+
+        self.assertTrue(hasattr(a, "id"))
+        self.assertTrue(hasattr(c, "id"))
 
 
 class TestModelSyncSingleProp(tb.ModelTestCase):
@@ -643,10 +712,11 @@ class TestModelSyncMultiProp(tb.ModelTestCase):
         # Set prop to new value
 
         def _get_assign_val_func(
-            changed_val: typing.Collection[typing.Any]
+            changed_val: typing.Collection[typing.Any],
         ) -> typing.Callable[[GelModel], None]:
             def change(original: GelModel):
                 original.val = changed_val
+
             return change
 
         def _testcase(
@@ -709,6 +779,7 @@ class TestModelSyncMultiProp(tb.ModelTestCase):
         ) -> typing.Callable[[GelModel], None]:
             def change(original: GelModel):
                 original.val.insert(insert_pos, insert_val)
+
             return change
 
         def _testcase(
@@ -765,6 +836,7 @@ class TestModelSyncMultiProp(tb.ModelTestCase):
         ) -> typing.Callable[[GelModel], None]:
             def change(original: GelModel):
                 original.val.extend(extend_vals)
+
             return change
 
         def _testcase(
@@ -859,6 +931,7 @@ class TestModelSyncMultiProp(tb.ModelTestCase):
         ) -> typing.Callable[[GelModel], None]:
             def change(original: GelModel):
                 original.val.append(append_val)
+
             return change
 
         def _testcase(
@@ -937,6 +1010,7 @@ class TestModelSyncMultiProp(tb.ModelTestCase):
         def _get_pop_val_func() -> typing.Callable[[GelModel], None]:
             def change(original: GelModel):
                 original.val.pop()
+
             return change
 
         def _testcase(
@@ -970,6 +1044,7 @@ class TestModelSyncMultiProp(tb.ModelTestCase):
         def _get_clear_val_func() -> typing.Callable[[GelModel], None]:
             def change(original: GelModel):
                 original.val.clear()
+
             return change
 
         def _testcase(
@@ -1045,3 +1120,2401 @@ class TestModelSyncMultiProp(tb.ModelTestCase):
         _testcase(default.A, [1], [2], [3], [4])
         _testcase(default.B, [[1]], [[2, 2]], [[3, 3, 3]], [[4, 4, 4, 4]])
         _testcase(default.C, [("a", 1)], [("b", 2)], [("c", 3)], [("d", 4)])
+
+
+class TestModelSyncSingleLink(tb.ModelTestCase):
+    ISOLATED_TEST_BRANCHES = True
+
+    SCHEMA = """
+        type Target;
+        type Source {
+            target: Target;
+        };
+        type SourceWithProp {
+            target: Target {
+                lprop: int64;
+            };
+        };
+    """
+
+    def _check_links_equal(
+        self, actual: typing.Any, expected: typing.Any
+    ) -> None:
+        self.assertEqual(actual, expected)
+
+        # Also check linkprops
+        actual_has_lprop = hasattr(actual, '__linkprops__')
+        expected_has_lprop = hasattr(expected, '__linkprops__')
+        self.assertEqual(actual_has_lprop, expected_has_lprop)
+        if actual_has_lprop and expected_has_lprop:
+            self.assertEqual(
+                actual.__linkprops__.lprop,
+                expected.__linkprops__.lprop,
+            )
+
+    def test_model_sync_single_link_01(self):
+        # Insert new object with single link
+
+        from models.TestModelSyncSingleLink import default
+
+        target = default.Target()
+        self.client.save(target)
+
+        def _testcase(
+            model_type: typing.Type[GelModel],
+            initial_target: typing.Any,
+        ) -> None:
+            with_target = model_type(target=initial_target)
+            without_target = model_type()
+
+            self.client.sync(with_target, without_target)
+
+            self._check_links_equal(with_target.target, initial_target)
+            self._check_links_equal(without_target.target, None)
+
+            # cleanup
+            self.client.query(model_type.delete())
+
+        _testcase(default.Source, None)
+        _testcase(default.Source, target)
+
+        _testcase(
+            default.SourceWithProp,
+            default.SourceWithProp.target.link(target),
+        )
+        _testcase(
+            default.SourceWithProp,
+            default.SourceWithProp.target.link(target, lprop=1),
+        )
+
+    @tb.xfail
+    def test_model_sync_single_link_01a(self):
+        # Asserting error in _save
+        from models.TestModelSyncSingleLink import default
+
+        with_none = default.SourceWithProp(target=None)
+        self.client.sync(with_none)
+
+    def test_model_sync_single_link_02(self):
+        # Updating existing objects with single link
+
+        from models.TestModelSyncSingleLink import default
+
+        target_a = default.Target()
+        target_b = default.Target()
+        self.client.save(target_a, target_b)
+
+        def _testcase(
+            model_type: typing.Type[GelModel],
+            initial_target: typing.Any,
+            changed_target: typing.Any,
+        ) -> None:
+            original = model_type(target=initial_target)
+            self.client.save(original)
+
+            mirror_1 = self.client.query_required_single(
+                model_type.select(target=True).limit(1)
+            )
+            mirror_2 = self.client.query_required_single(
+                model_type.select(target=True).limit(1)
+            )
+            mirror_3 = self.client.query_required_single(
+                model_type.select(target=False).limit(1)
+            )
+
+            self._check_links_equal(original.target, initial_target)
+            self._check_links_equal(mirror_1.target, initial_target)
+            self._check_links_equal(mirror_2.target, initial_target)
+            self.assertFalse(hasattr(mirror_3, "val"))
+
+            # change a value
+            original.target = changed_target
+
+            # sync some of the objects
+            self.client.sync(original, mirror_1, mirror_3)
+
+            # only synced objects with value set get update
+            self._check_links_equal(original.target, changed_target)
+            self._check_links_equal(mirror_1.target, changed_target)
+            self._check_links_equal(mirror_2.target, initial_target)
+            self.assertFalse(hasattr(mirror_3, 'val'))
+
+            # cleanup
+            self.client.query(model_type.delete())
+
+        # Change to a new value
+        _testcase(default.Source, target_a, target_b)
+        _testcase(
+            default.SourceWithProp,
+            default.SourceWithProp.target.link(target_a),
+            default.SourceWithProp.target.link(target_b),
+        )
+        _testcase(
+            default.SourceWithProp,
+            default.SourceWithProp.target.link(target_a, lprop=1),
+            default.SourceWithProp.target.link(target_b),
+        )
+        _testcase(
+            default.SourceWithProp,
+            default.SourceWithProp.target.link(target_a),
+            default.SourceWithProp.target.link(target_b, lprop=1),
+        )
+        _testcase(
+            default.SourceWithProp,
+            default.SourceWithProp.target.link(target_a, lprop=1),
+            default.SourceWithProp.target.link(target_b, lprop=1),
+        )
+
+        # only changing lprop
+        _testcase(
+            default.SourceWithProp,
+            default.SourceWithProp.target.link(target_a),
+            default.SourceWithProp.target.link(target_a, lprop=2),
+        )
+        _testcase(
+            default.SourceWithProp,
+            default.SourceWithProp.target.link(target_a, lprop=1),
+            default.SourceWithProp.target.link(target_a),
+        )
+        _testcase(
+            default.SourceWithProp,
+            default.SourceWithProp.target.link(target_a, lprop=1),
+            default.SourceWithProp.target.link(target_a, lprop=2),
+        )
+
+        # Change to the same value
+        _testcase(default.Source, target_a, target_a)
+        _testcase(
+            default.SourceWithProp,
+            default.SourceWithProp.target.link(target_a),
+            default.SourceWithProp.target.link(target_a),
+        )
+        _testcase(
+            default.SourceWithProp,
+            default.SourceWithProp.target.link(target_a, lprop=1),
+            default.SourceWithProp.target.link(target_a, lprop=1),
+        )
+
+    @tb.xfail
+    def test_model_sync_single_link_02a(self):
+        # Updating existing objects with single link
+        # Change from None to value
+
+        from models.TestModelSyncSingleLink import default
+
+        changed_target = default.Target()
+        self.client.save(changed_target)
+
+        original = default.Source()
+        self.client.save(original)
+
+        mirror_1 = self.client.query_required_single(
+            default.Source.select(target=True).limit(1)
+        )
+        mirror_2 = self.client.query_required_single(
+            default.Source.select(target=True).limit(1)
+        )
+        mirror_3 = self.client.query_required_single(
+            default.Source.select(target=False).limit(1)
+        )
+
+        self.assertIsNone(original.target, None)
+        self.assertIsNone(mirror_1.target, None)
+        self.assertIsNone(mirror_2.target, None)
+        self.assertFalse(hasattr(mirror_3, "val"))
+
+        # change a value
+        original.target = changed_target
+
+        # sync some of the objects
+        self.client.sync(original, mirror_1, mirror_3)  # Error here
+
+        # only synced objects with value set get update
+        self._check_links_equal(original.target, changed_target)
+        self._check_links_equal(mirror_1.target, changed_target)
+        self.assertIsNone(mirror_2.target)
+        self.assertFalse(hasattr(mirror_3, 'val'))
+
+    @tb.xfail
+    def test_model_sync_single_link_02b(self):
+        # Updating existing objects with single link
+        # Change from value to None
+
+        from models.TestModelSyncSingleLink import default
+
+        initial_target = default.Target()
+        self.client.save(initial_target)
+
+        original = default.Source(target=initial_target)
+        self.client.save(original)
+
+        mirror_1 = self.client.query_required_single(
+            default.Source.select(target=True).limit(1)
+        )
+        mirror_2 = self.client.query_required_single(
+            default.Source.select(target=True).limit(1)
+        )
+        mirror_3 = self.client.query_required_single(
+            default.Source.select(target=False).limit(1)
+        )
+
+        self._check_links_equal(original.target, initial_target)
+        self._check_links_equal(mirror_1.target, initial_target)
+        self._check_links_equal(mirror_2.target, initial_target)
+        self.assertFalse(hasattr(mirror_3, "val"))
+
+        # change a value
+        original.target = None
+
+        # sync some of the objects
+        self.client.sync(original, mirror_1, mirror_3)  # Error here
+
+        # only synced objects with value set get update
+        self.assertIsNone(original.target)
+        self.assertIsNone(mirror_1.target)
+        self._check_links_equal(mirror_2.target, initial_target)
+        self.assertFalse(hasattr(mirror_3, 'val'))
+
+    def _testcase_03(
+        self,
+        model_type: typing.Type[GelModel],
+        initial_target: typing.Any,
+        changed_target_0: typing.Any,
+        changed_target_1: typing.Any,
+        changed_target_2: typing.Any,
+    ) -> None:
+        original = model_type(target=initial_target)
+        self.client.save(original)
+
+        mirror_1 = self.client.query_required_single(
+            model_type.select(target=True).limit(1)
+        )
+        mirror_2 = self.client.query_required_single(
+            model_type.select(target=True).limit(1)
+        )
+        mirror_3 = self.client.query_required_single(
+            model_type.select(target=False).limit(1)
+        )
+
+        self._check_links_equal(original.target, initial_target)
+        self._check_links_equal(mirror_1.target, initial_target)
+        self._check_links_equal(mirror_2.target, initial_target)
+        self.assertFalse(hasattr(mirror_3, "val"))
+
+        # change a value
+        original.target = changed_target_0
+        mirror_1.target = changed_target_1
+        mirror_2.target = changed_target_2
+
+        # sync some of the objects
+        self.client.sync(original, mirror_1, mirror_3)
+
+        # only synced objects are updated
+        self._check_links_equal(original.target, changed_target_0)
+        self._check_links_equal(mirror_1.target, changed_target_0)
+        self._check_links_equal(mirror_2.target, changed_target_2)
+        self.assertFalse(hasattr(mirror_3, 'val'))
+
+        # cleanup
+        self.client.query(model_type.delete())
+
+    def test_model_sync_single_link_03(self):
+        # Reconciling different changes to single link
+
+        from models.TestModelSyncSingleLink import default
+
+        target_a = default.Target()
+        target_b = default.Target()
+        target_c = default.Target()
+        target_d = default.Target()
+        self.client.save(target_a, target_b, target_c, target_d)
+
+        self._testcase_03(
+            default.Source,
+            target_a,
+            target_b,
+            target_c,
+            target_d,
+        )
+
+    @tb.xfail
+    def test_model_sync_single_link_03a(self):
+        # ISE on sync()
+        # gel.errors.InternalServerError: more than one row returned by a
+        # subquery used as an expression
+        from models.TestModelSyncSingleLink import default
+
+        target_a = default.Target()
+        target_b = default.Target()
+        target_c = default.Target()
+        target_d = default.Target()
+        self.client.save(target_a, target_b, target_c, target_d)
+
+        self._testcase_03(
+            default.SourceWithProp,
+            default.SourceWithProp.target.link(target_a),
+            default.SourceWithProp.target.link(target_b),
+            default.SourceWithProp.target.link(target_c),
+            default.SourceWithProp.target.link(target_d),
+        )
+
+    @tb.xfail
+    def test_model_sync_single_link_03b(self):
+        # ISE on sync()
+        # gel.errors.InternalServerError: more than one row returned by a
+        # subquery used as an expression
+        from models.TestModelSyncSingleLink import default
+
+        target_a = default.Target()
+        target_b = default.Target()
+        target_c = default.Target()
+        target_d = default.Target()
+        self.client.save(target_a, target_b, target_c, target_d)
+
+        self._testcase_03(
+            default.SourceWithProp,
+            default.SourceWithProp.target.link(target_a, lprop=1),
+            default.SourceWithProp.target.link(target_a, lprop=2),
+            default.SourceWithProp.target.link(target_a, lprop=3),
+            default.SourceWithProp.target.link(target_a, lprop=4),
+        )
+
+    @tb.xfail
+    def test_model_sync_single_link_04(self):
+        # Existing object without link should not have it fetched
+
+        from models.TestModelSyncSingleLink import default
+
+        initial_target = default.Target()
+        changed_target_0 = default.Target()
+        changed_target_1 = default.Target()
+        changed_target_2 = default.Target()
+        self.client.save(
+            initial_target,
+            changed_target_0,
+            changed_target_1,
+            changed_target_2,
+        )
+
+        original = default.Source(target=initial_target)
+        self.client.save(original)
+
+        mirror_1 = self.client.query_required_single(
+            default.Source.select(target=False).limit(1)
+        )
+        original.target = changed_target_0
+        self.client.save(original)
+        self.client.sync(mirror_1)
+        self.assertFalse(hasattr(mirror_1, "target"))
+
+        # Sync alongside another object with the prop set
+        mirror_2 = self.client.query_required_single(
+            default.Source.select(target=True).limit(1)
+        )
+        original.target = changed_target_1
+        self.client.save(original)
+        self.client.sync(mirror_1, mirror_2)  # Error here
+        self.assertFalse(hasattr(mirror_1, "target"))
+
+        # Sync alongside another object with the prop changed
+        mirror_2 = self.client.query_required_single(
+            default.Source.select(targets=True).limit(1)
+        )
+        mirror_2.target = changed_target_2
+        self.client.sync(mirror_1, mirror_2)
+        self.assertEqual(mirror_1.targets._mode, _tracked_list.Mode.Write)
+        self.assertEqual(mirror_1.targets._items, [])
+
+
+class TestModelSyncMultiLink(tb.ModelTestCase):
+    ISOLATED_TEST_BRANCHES = True
+
+    SCHEMA = """
+        type Target;
+        type Source {
+            multi targets: Target;
+        };
+        type SourceWithProp {
+            multi targets: Target {
+                lprop: int64;
+            };
+        };
+    """
+
+    def _check_multilinks_equal(
+        self,
+        actual: typing.Collection[typing.Any],
+        expected: typing.Collection[typing.Any],
+    ) -> None:
+        self.assertEqual(actual, expected)
+
+        # Also check linkprops
+        if isinstance(actual, _link_set.LinkWithPropsSet):
+            expected_lprops = {e.id: e.__linkprops__.lprop for e in expected}
+            for a in actual:
+                self.assertEqual(a.__linkprops__.lprop, expected_lprops[a.id])
+
+    def _base_testcase(
+        self,
+        model_type: typing.Type[GelModel],
+        initial_targets: typing.Collection[typing.Any],
+        change_original: typing.Callable[[GelModel], None],
+        expected_targets: typing.Collection[typing.Any],
+    ) -> None:
+        expected_targets = set(expected_targets)
+
+        original = model_type(targets=initial_targets)
+        self.client.save(original)
+
+        self._check_multilinks_equal(original.targets, initial_targets)
+
+        # change a value
+        change_original(original)
+
+        # sync some of the objects
+        self.client.sync(original)
+
+        # only synced objects with value set get update
+        self._check_multilinks_equal(original.targets, expected_targets)
+
+        # cleanup
+        self.client.query(model_type.delete())
+
+    def test_model_sync_multi_link_01(self):
+        # Insert new object with multi link
+
+        from models.TestModelSyncMultiLink import default
+
+        target_a = default.Target()
+        target_b = default.Target()
+        target_c = default.Target()
+        self.client.save(target_a, target_b, target_c)
+
+        def _testcase(
+            model_type: typing.Type[GelModel],
+            initial_targets: typing.Collection[typing.Any],
+        ) -> None:
+            with_targets = model_type(targets=initial_targets)
+            without_targets = model_type()
+
+            self.client.sync(with_targets, without_targets)
+
+            self._check_multilinks_equal(with_targets.targets, initial_targets)
+            self._check_multilinks_equal(without_targets.targets, [])
+
+            # cleanup
+            self.client.query(model_type.delete())
+
+        # No linkprops
+        _testcase(default.Source, [])
+        _testcase(default.Source, [target_a, target_b, target_c])
+
+        # With linkprops
+        _testcase(default.SourceWithProp, [])
+        _testcase(
+            default.SourceWithProp,
+            [
+                default.SourceWithProp.targets.link(target_a),
+                default.SourceWithProp.targets.link(target_b),
+                default.SourceWithProp.targets.link(target_c),
+            ],
+        )
+        _testcase(
+            default.SourceWithProp,
+            [
+                default.SourceWithProp.targets.link(target_a, lprop=1),
+                default.SourceWithProp.targets.link(target_b, lprop=2),
+                default.SourceWithProp.targets.link(target_c, lprop=3),
+            ],
+        )
+
+    def _get_assign_targets_func(
+        self, changed_targets: typing.Collection[typing.Any]
+    ) -> typing.Callable[[GelModel], None]:
+        def change(original: GelModel):
+            original.targets = changed_targets
+
+        return change
+
+    def _testcase_assign(
+        self,
+        model_type: typing.Type[GelModel],
+        initial_targets: typing.Collection[typing.Any],
+        changed_targets: typing.Collection[typing.Any],
+    ) -> None:
+        self._base_testcase(
+            model_type,
+            initial_targets,
+            self._get_assign_targets_func(changed_targets),
+            changed_targets,
+        )
+
+    def test_model_sync_multi_link_02(self):
+        # Updating existing objects with multi link
+        # Set links to new value
+
+        from models.TestModelSyncMultiLink import default
+
+        target_a = default.Target()
+        target_b = default.Target()
+        target_c = default.Target()
+        target_d = default.Target()
+        self.client.save(target_a, target_b, target_c, target_d)
+
+        # No linkprops
+        self._testcase_assign(default.Source, [], [])
+        self._testcase_assign(
+            default.Source,
+            [],
+            [target_a, target_b, target_c],
+        )
+
+        self._testcase_assign(
+            default.Source,
+            [target_a, target_b, target_c],
+            [],
+        )
+        self._testcase_assign(
+            default.Source,
+            [target_a, target_b, target_c],
+            [target_a, target_b, target_c],
+        )
+
+        self._testcase_assign(
+            default.Source,
+            [target_a, target_b],
+            [target_c, target_d],
+        )
+        self._testcase_assign(
+            default.Source,
+            [target_a, target_b],
+            [target_a, target_b, target_c, target_d],
+        )
+        self._testcase_assign(
+            default.Source,
+            [target_a, target_b, target_c, target_d],
+            [target_a, target_b],
+        )
+
+        self._testcase_assign(
+            default.Source,
+            [target_a, target_b, target_c],
+            [target_c, target_d],
+        )
+
+        # With linkprops
+        self._testcase_assign(default.SourceWithProp, [], [])
+        self._testcase_assign(
+            default.SourceWithProp,
+            [],
+            [
+                default.SourceWithProp.targets.link(target_a),
+                default.SourceWithProp.targets.link(target_b),
+                default.SourceWithProp.targets.link(target_c),
+            ],
+        )
+        self._testcase_assign(
+            default.SourceWithProp,
+            [],
+            [
+                default.SourceWithProp.targets.link(target_a, lprop=1),
+                default.SourceWithProp.targets.link(target_b, lprop=2),
+                default.SourceWithProp.targets.link(target_c, lprop=3),
+            ],
+        )
+
+        self._testcase_assign(
+            default.SourceWithProp,
+            [
+                default.SourceWithProp.targets.link(target_a),
+                default.SourceWithProp.targets.link(target_b),
+                default.SourceWithProp.targets.link(target_c),
+            ],
+            [],
+        )
+        self._testcase_assign(
+            default.SourceWithProp,
+            [
+                default.SourceWithProp.targets.link(target_a),
+                default.SourceWithProp.targets.link(target_b),
+                default.SourceWithProp.targets.link(target_c),
+            ],
+            [
+                default.SourceWithProp.targets.link(target_a),
+                default.SourceWithProp.targets.link(target_b),
+                default.SourceWithProp.targets.link(target_c),
+            ],
+        )
+        self._testcase_assign(
+            default.SourceWithProp,
+            [
+                default.SourceWithProp.targets.link(target_a),
+                default.SourceWithProp.targets.link(target_b),
+                default.SourceWithProp.targets.link(target_c),
+            ],
+            [
+                default.SourceWithProp.targets.link(target_a, lprop=1),
+                default.SourceWithProp.targets.link(target_b, lprop=2),
+                default.SourceWithProp.targets.link(target_c, lprop=3),
+            ],
+        )
+
+        self._testcase_assign(
+            default.SourceWithProp,
+            [
+                default.SourceWithProp.targets.link(target_a, lprop=1),
+                default.SourceWithProp.targets.link(target_b, lprop=2),
+                default.SourceWithProp.targets.link(target_c, lprop=3),
+            ],
+            [],
+        )
+        # Fail, moved to test_model_sync_multi_link_02a
+        # self._testcase_assign(
+        #     default.SourceWithProp,
+        #     [
+        #         default.SourceWithProp.targets.link(target_a, lprop=1),
+        #         default.SourceWithProp.targets.link(target_b, lprop=2),
+        #         default.SourceWithProp.targets.link(target_c, lprop=3),
+        #     ],
+        #     [
+        #         default.SourceWithProp.targets.link(target_a),
+        #         default.SourceWithProp.targets.link(target_b),
+        #         default.SourceWithProp.targets.link(target_c),
+        #     ],
+        # )
+        self._testcase_assign(
+            default.SourceWithProp,
+            [
+                default.SourceWithProp.targets.link(target_a, lprop=1),
+                default.SourceWithProp.targets.link(target_b, lprop=2),
+                default.SourceWithProp.targets.link(target_c, lprop=3),
+            ],
+            [
+                default.SourceWithProp.targets.link(target_a, lprop=1),
+                default.SourceWithProp.targets.link(target_b, lprop=2),
+                default.SourceWithProp.targets.link(target_c, lprop=3),
+            ],
+        )
+        self._testcase_assign(
+            default.SourceWithProp,
+            [
+                default.SourceWithProp.targets.link(target_a, lprop=1),
+                default.SourceWithProp.targets.link(target_b, lprop=2),
+                default.SourceWithProp.targets.link(target_c, lprop=3),
+            ],
+            [
+                default.SourceWithProp.targets.link(target_a, lprop=4),
+                default.SourceWithProp.targets.link(target_b, lprop=5),
+                default.SourceWithProp.targets.link(target_c, lprop=6),
+            ],
+        )
+
+        self._testcase_assign(
+            default.SourceWithProp,
+            [
+                default.SourceWithProp.targets.link(target_a),
+                default.SourceWithProp.targets.link(target_b),
+            ],
+            [
+                default.SourceWithProp.targets.link(target_c),
+                default.SourceWithProp.targets.link(target_d),
+            ],
+        )
+        self._testcase_assign(
+            default.SourceWithProp,
+            [
+                default.SourceWithProp.targets.link(target_a),
+                default.SourceWithProp.targets.link(target_b),
+            ],
+            [
+                default.SourceWithProp.targets.link(target_a),
+                default.SourceWithProp.targets.link(target_b),
+                default.SourceWithProp.targets.link(target_c),
+                default.SourceWithProp.targets.link(target_d),
+            ],
+        )
+        self._testcase_assign(
+            default.SourceWithProp,
+            [
+                default.SourceWithProp.targets.link(target_a),
+                default.SourceWithProp.targets.link(target_b),
+                default.SourceWithProp.targets.link(target_c),
+                default.SourceWithProp.targets.link(target_d),
+            ],
+            [
+                default.SourceWithProp.targets.link(target_a),
+                default.SourceWithProp.targets.link(target_b),
+            ],
+        )
+        self._testcase_assign(
+            default.SourceWithProp,
+            [
+                default.SourceWithProp.targets.link(target_a),
+                default.SourceWithProp.targets.link(target_b),
+                default.SourceWithProp.targets.link(target_c),
+            ],
+            [
+                default.SourceWithProp.targets.link(target_c),
+                default.SourceWithProp.targets.link(target_d),
+            ],
+        )
+
+    @tb.xfail
+    def test_model_sync_multi_link_02a(self):
+        from models.TestModelSyncMultiLink import default
+
+        target_a = default.Target()
+        target_b = default.Target()
+        target_c = default.Target()
+        target_d = default.Target()
+        self.client.save(target_a, target_b, target_c, target_d)
+
+        # Fail, linkprop not reset
+        self._testcase_assign(
+            default.SourceWithProp,
+            [
+                default.SourceWithProp.targets.link(target_a, lprop=1),
+                default.SourceWithProp.targets.link(target_b, lprop=2),
+                default.SourceWithProp.targets.link(target_c, lprop=3),
+            ],
+            [
+                default.SourceWithProp.targets.link(target_a),
+                default.SourceWithProp.targets.link(target_b),
+                default.SourceWithProp.targets.link(target_c),
+            ],
+        )
+
+    def test_model_sync_multi_link_03(self):
+        # Updating existing objects with multi props
+        # LinkSet clear
+
+        def _get_clear_targets_func() -> typing.Callable[[GelModel], None]:
+            def change(original: GelModel):
+                original.targets.clear()
+
+            return change
+
+        def _testcase_clear(
+            model_type: typing.Type[GelModel],
+            initial_targets: typing.Collection[typing.Any],
+        ) -> None:
+            self._base_testcase(
+                model_type,
+                initial_targets,
+                _get_clear_targets_func(),
+                [],
+            )
+
+        from models.TestModelSyncMultiLink import default
+
+        target_a = default.Target()
+        target_b = default.Target()
+        target_c = default.Target()
+        self.client.save(target_a, target_b, target_c)
+
+        # No linkprops
+        _testcase_clear(default.Source, [])
+        _testcase_clear(
+            default.Source,
+            [target_a, target_b, target_c],
+        )
+
+        # With linkprops
+        _testcase_clear(default.SourceWithProp, [])
+        _testcase_clear(
+            default.SourceWithProp,
+            [
+                default.SourceWithProp.targets.link(target_a),
+                default.SourceWithProp.targets.link(target_b),
+                default.SourceWithProp.targets.link(target_c),
+            ],
+        )
+        _testcase_clear(
+            default.SourceWithProp,
+            [
+                default.SourceWithProp.targets.link(target_a, lprop=1),
+                default.SourceWithProp.targets.link(target_b, lprop=2),
+                default.SourceWithProp.targets.link(target_c, lprop=3),
+            ],
+        )
+
+    def _get_update_targets_func(
+        self,
+        update_targets: typing.Collection[typing.Any],
+    ) -> typing.Callable[[GelModel], None]:
+        def change(original: GelModel):
+            original.targets.update(update_targets)
+
+        return change
+
+    def _testcase_update(
+        self,
+        model_type: typing.Type[GelModel],
+        initial_targets: typing.Collection[typing.Any],
+        update_targets: typing.Collection[typing.Any],
+        expected_targets: typing.Collection[typing.Any],
+    ) -> None:
+        self._base_testcase(
+            model_type,
+            initial_targets,
+            self._get_update_targets_func(update_targets),
+            expected_targets,
+        )
+
+    def test_model_sync_multi_link_04(self):
+        # Updating existing objects with multi props
+        # LinkSet update
+
+        from models.TestModelSyncMultiLink import default
+
+        target_a = default.Target()
+        target_b = default.Target()
+        target_c = default.Target()
+        target_d = default.Target()
+        self.client.save(target_a, target_b, target_c, target_d)
+
+        # No linkprops
+        self._testcase_update(default.Source, [], [], [])
+        self._testcase_update(
+            default.Source,
+            [],
+            [target_a, target_b, target_c],
+            [target_a, target_b, target_c],
+        )
+
+        self._testcase_update(
+            default.Source,
+            [target_a, target_b, target_c],
+            [],
+            [target_a, target_b, target_c],
+        )
+        self._testcase_update(
+            default.Source,
+            [target_a, target_b, target_c],
+            [target_a, target_b, target_c],
+            [target_a, target_b, target_c],
+        )
+
+        self._testcase_update(
+            default.Source,
+            [target_a, target_b],
+            [target_c, target_d],
+            [target_a, target_b, target_c, target_d],
+        )
+        self._testcase_update(
+            default.Source,
+            [target_a, target_b],
+            [target_a, target_b, target_c, target_d],
+            [target_a, target_b, target_c, target_d],
+        )
+        self._testcase_update(
+            default.Source,
+            [target_a, target_b, target_c, target_d],
+            [target_a, target_b],
+            [target_a, target_b, target_c, target_d],
+        )
+
+        self._testcase_update(
+            default.Source,
+            [target_a, target_b, target_c],
+            [target_c, target_d],
+            [target_a, target_b, target_c, target_d],
+        )
+
+        # With linkprops
+        self._testcase_update(default.SourceWithProp, [], [], [])
+        self._testcase_update(
+            default.SourceWithProp,
+            [],
+            [
+                default.SourceWithProp.targets.link(target_a),
+                default.SourceWithProp.targets.link(target_b),
+            ],
+            [
+                default.SourceWithProp.targets.link(target_a),
+                default.SourceWithProp.targets.link(target_b),
+            ],
+        )
+        self._testcase_update(
+            default.SourceWithProp,
+            [],
+            [
+                default.SourceWithProp.targets.link(target_a, lprop=1),
+                default.SourceWithProp.targets.link(target_b, lprop=2),
+            ],
+            [
+                default.SourceWithProp.targets.link(target_a, lprop=1),
+                default.SourceWithProp.targets.link(target_b, lprop=2),
+            ],
+        )
+
+        self._testcase_update(
+            default.SourceWithProp,
+            [
+                default.SourceWithProp.targets.link(target_a),
+                default.SourceWithProp.targets.link(target_b),
+            ],
+            [],
+            [
+                default.SourceWithProp.targets.link(target_a),
+                default.SourceWithProp.targets.link(target_b),
+            ],
+        )
+        self._testcase_update(
+            default.SourceWithProp,
+            [
+                default.SourceWithProp.targets.link(target_a),
+                default.SourceWithProp.targets.link(target_b),
+            ],
+            [
+                default.SourceWithProp.targets.link(target_a),
+                default.SourceWithProp.targets.link(target_b),
+            ],
+            [
+                default.SourceWithProp.targets.link(target_a),
+                default.SourceWithProp.targets.link(target_b),
+            ],
+        )
+        self._testcase_update(
+            default.SourceWithProp,
+            [
+                default.SourceWithProp.targets.link(target_a),
+                default.SourceWithProp.targets.link(target_b),
+            ],
+            [
+                default.SourceWithProp.targets.link(target_a, lprop=1),
+                default.SourceWithProp.targets.link(target_b, lprop=2),
+            ],
+            [
+                # doesn't work without lprop=None ?!
+                default.SourceWithProp.targets.link(target_a, lprop=1),
+                default.SourceWithProp.targets.link(target_b, lprop=2),
+            ],
+        )
+
+        self._testcase_update(
+            default.SourceWithProp,
+            [
+                default.SourceWithProp.targets.link(target_a, lprop=1),
+                default.SourceWithProp.targets.link(target_b, lprop=2),
+            ],
+            [],
+            [
+                default.SourceWithProp.targets.link(target_a, lprop=1),
+                default.SourceWithProp.targets.link(target_b, lprop=2),
+            ],
+        )
+        # Fail, moved to test_model_sync_multi_link_04a
+        # self._testcase_update(
+        #     default.SourceWithProp,
+        #     [
+        #         default.SourceWithProp.targets.link(target_a, lprop=1),
+        #         default.SourceWithProp.targets.link(target_b, lprop=2),
+        #     ],
+        #     [
+        #         default.SourceWithProp.targets.link(target_a),
+        #         default.SourceWithProp.targets.link(target_b),
+        #     ],
+        #     [
+        #         default.SourceWithProp.targets.link(target_a),
+        #         default.SourceWithProp.targets.link(target_b),
+        #     ],
+        # )
+        self._testcase_update(
+            default.SourceWithProp,
+            [
+                default.SourceWithProp.targets.link(target_a, lprop=1),
+                default.SourceWithProp.targets.link(target_b, lprop=2),
+            ],
+            [
+                default.SourceWithProp.targets.link(target_a, lprop=1),
+                default.SourceWithProp.targets.link(target_b, lprop=2),
+            ],
+            [
+                default.SourceWithProp.targets.link(target_a, lprop=1),
+                default.SourceWithProp.targets.link(target_b, lprop=2),
+            ],
+        )
+        self._testcase_update(
+            default.SourceWithProp,
+            [
+                default.SourceWithProp.targets.link(target_a, lprop=1),
+                default.SourceWithProp.targets.link(target_b, lprop=2),
+            ],
+            [
+                default.SourceWithProp.targets.link(target_a, lprop=4),
+                default.SourceWithProp.targets.link(target_b, lprop=5),
+            ],
+            [
+                default.SourceWithProp.targets.link(target_a, lprop=4),
+                default.SourceWithProp.targets.link(target_b, lprop=5),
+            ],
+        )
+
+        self._testcase_update(
+            default.SourceWithProp,
+            [
+                default.SourceWithProp.targets.link(target_a),
+                default.SourceWithProp.targets.link(target_b),
+            ],
+            [
+                default.SourceWithProp.targets.link(target_c),
+                default.SourceWithProp.targets.link(target_d),
+            ],
+            [
+                default.SourceWithProp.targets.link(target_a),
+                default.SourceWithProp.targets.link(target_b),
+                default.SourceWithProp.targets.link(target_c),
+                default.SourceWithProp.targets.link(target_d),
+            ],
+        )
+        self._testcase_update(
+            default.SourceWithProp,
+            [
+                default.SourceWithProp.targets.link(target_a),
+                default.SourceWithProp.targets.link(target_b),
+            ],
+            [
+                default.SourceWithProp.targets.link(target_a),
+                default.SourceWithProp.targets.link(target_b),
+                default.SourceWithProp.targets.link(target_c),
+                default.SourceWithProp.targets.link(target_d),
+            ],
+            [
+                default.SourceWithProp.targets.link(target_a),
+                default.SourceWithProp.targets.link(target_b),
+                default.SourceWithProp.targets.link(target_c),
+                default.SourceWithProp.targets.link(target_d),
+            ],
+        )
+        self._testcase_update(
+            default.SourceWithProp,
+            [
+                default.SourceWithProp.targets.link(target_a),
+                default.SourceWithProp.targets.link(target_b),
+                default.SourceWithProp.targets.link(target_c),
+                default.SourceWithProp.targets.link(target_d),
+            ],
+            [
+                default.SourceWithProp.targets.link(target_a),
+                default.SourceWithProp.targets.link(target_b),
+            ],
+            [
+                default.SourceWithProp.targets.link(target_a),
+                default.SourceWithProp.targets.link(target_b),
+                default.SourceWithProp.targets.link(target_c),
+                default.SourceWithProp.targets.link(target_d),
+            ],
+        )
+        self._testcase_update(
+            default.SourceWithProp,
+            [
+                default.SourceWithProp.targets.link(target_a),
+                default.SourceWithProp.targets.link(target_b),
+                default.SourceWithProp.targets.link(target_c),
+            ],
+            [
+                default.SourceWithProp.targets.link(target_b),
+                default.SourceWithProp.targets.link(target_c),
+                default.SourceWithProp.targets.link(target_d),
+            ],
+            [
+                default.SourceWithProp.targets.link(target_a),
+                default.SourceWithProp.targets.link(target_b),
+                default.SourceWithProp.targets.link(target_c),
+                default.SourceWithProp.targets.link(target_d),
+            ],
+        )
+        # Fail, moved to test_model_sync_multi_link_04b
+        # self._testcase_update(
+        #     default.SourceWithProp,
+        #     [
+        #         default.SourceWithProp.targets.link(target_a, lprop=1),
+        #         default.SourceWithProp.targets.link(target_b, lprop=2),
+        #         default.SourceWithProp.targets.link(target_c, lprop=3),
+        #     ],
+        #     [
+        #         default.SourceWithProp.targets.link(target_b),
+        #         default.SourceWithProp.targets.link(target_c),
+        #         default.SourceWithProp.targets.link(target_d),
+        #     ],
+        #     [
+        #         default.SourceWithProp.targets.link(target_a, lprop=1),
+        #         default.SourceWithProp.targets.link(target_b),
+        #         default.SourceWithProp.targets.link(target_c),
+        #         default.SourceWithProp.targets.link(target_d),
+        #     ],
+        # )
+        self._testcase_update(
+            default.SourceWithProp,
+            [
+                default.SourceWithProp.targets.link(target_a),
+                default.SourceWithProp.targets.link(target_b),
+                default.SourceWithProp.targets.link(target_c),
+            ],
+            [
+                default.SourceWithProp.targets.link(target_b, lprop=4),
+                default.SourceWithProp.targets.link(target_c, lprop=5),
+                default.SourceWithProp.targets.link(target_d, lprop=6),
+            ],
+            [
+                default.SourceWithProp.targets.link(target_a),
+                default.SourceWithProp.targets.link(target_b, lprop=4),
+                default.SourceWithProp.targets.link(target_c, lprop=5),
+                default.SourceWithProp.targets.link(target_d, lprop=6),
+            ],
+        )
+        self._testcase_update(
+            default.SourceWithProp,
+            [
+                default.SourceWithProp.targets.link(target_a, lprop=1),
+                default.SourceWithProp.targets.link(target_b, lprop=2),
+                default.SourceWithProp.targets.link(target_c, lprop=3),
+            ],
+            [
+                default.SourceWithProp.targets.link(target_b, lprop=4),
+                default.SourceWithProp.targets.link(target_c, lprop=5),
+                default.SourceWithProp.targets.link(target_d, lprop=6),
+            ],
+            [
+                default.SourceWithProp.targets.link(target_a, lprop=1),
+                default.SourceWithProp.targets.link(target_b, lprop=4),
+                default.SourceWithProp.targets.link(target_c, lprop=5),
+                default.SourceWithProp.targets.link(target_d, lprop=6),
+            ],
+        )
+
+    @tb.xfail
+    def test_model_sync_multi_link_04a(self):
+        from models.TestModelSyncMultiLink import default
+
+        target_a = default.Target()
+        target_b = default.Target()
+        target_c = default.Target()
+        target_d = default.Target()
+        self.client.save(target_a, target_b, target_c, target_d)
+
+        self._testcase_update(
+            default.SourceWithProp,
+            [
+                default.SourceWithProp.targets.link(target_a, lprop=1),
+                default.SourceWithProp.targets.link(target_b, lprop=2),
+            ],
+            [
+                default.SourceWithProp.targets.link(target_a),
+                default.SourceWithProp.targets.link(target_b),
+            ],
+            [
+                # Fail, linkprops not reset
+                default.SourceWithProp.targets.link(target_a),
+                default.SourceWithProp.targets.link(target_b),
+            ],
+        )
+
+    @tb.xfail
+    def test_model_sync_multi_link_04b(self):
+        from models.TestModelSyncMultiLink import default
+
+        target_a = default.Target()
+        target_b = default.Target()
+        target_c = default.Target()
+        target_d = default.Target()
+        self.client.save(target_a, target_b, target_c, target_d)
+
+        self._testcase_update(
+            default.SourceWithProp,
+            [
+                default.SourceWithProp.targets.link(target_a, lprop=1),
+                default.SourceWithProp.targets.link(target_b, lprop=2),
+                default.SourceWithProp.targets.link(target_c, lprop=3),
+            ],
+            [
+                default.SourceWithProp.targets.link(target_b),
+                default.SourceWithProp.targets.link(target_c),
+                default.SourceWithProp.targets.link(target_d),
+            ],
+            [
+                # Fail, linkprops not reset
+                default.SourceWithProp.targets.link(target_a, lprop=1),
+                default.SourceWithProp.targets.link(target_b),
+                default.SourceWithProp.targets.link(target_c),
+                default.SourceWithProp.targets.link(target_d),
+            ],
+        )
+
+    def _get_add_targets_func(
+        self,
+        add_target: typing.Any,
+    ) -> typing.Callable[[GelModel], None]:
+        def change(original: GelModel):
+            original.targets.add(add_target)
+
+        return change
+
+    def _testcase_add(
+        self,
+        model_type: typing.Type[GelModel],
+        initial_targets: typing.Collection[typing.Any],
+        add_target: typing.Any,
+        expected_targets: typing.Collection[typing.Any],
+    ) -> None:
+        self._base_testcase(
+            model_type,
+            initial_targets,
+            self._get_add_targets_func(add_target),
+            expected_targets,
+        )
+
+    def test_model_sync_multi_link_05(self):
+        # Updating existing objects with multi props
+        # LinkSet add
+
+        from models.TestModelSyncMultiLink import default
+
+        target_a = default.Target()
+        target_b = default.Target()
+        target_c = default.Target()
+        target_d = default.Target()
+        self.client.save(target_a, target_b, target_c, target_d)
+
+        # No linkprops
+        self._testcase_add(
+            default.Source,
+            [],
+            target_a,
+            [target_a],
+        )
+        self._testcase_add(
+            default.Source,
+            [target_a],
+            target_a,
+            [target_a],
+        )
+        self._testcase_add(
+            default.Source,
+            [target_a, target_b, target_c],
+            target_d,
+            [target_a, target_b, target_c, target_d],
+        )
+
+        # With linkprops
+        self._testcase_add(
+            default.SourceWithProp,
+            [],
+            default.SourceWithProp.targets.link(target_a),
+            [default.SourceWithProp.targets.link(target_a)],
+        )
+        self._testcase_add(
+            default.SourceWithProp,
+            [],
+            default.SourceWithProp.targets.link(target_a, lprop=1),
+            [default.SourceWithProp.targets.link(target_a, lprop=1)],
+        )
+
+        self._testcase_add(
+            default.SourceWithProp,
+            [default.SourceWithProp.targets.link(target_a)],
+            default.SourceWithProp.targets.link(target_a),
+            [default.SourceWithProp.targets.link(target_a)],
+        )
+        self._testcase_add(
+            default.SourceWithProp,
+            [default.SourceWithProp.targets.link(target_a)],
+            default.SourceWithProp.targets.link(target_a, lprop=1),
+            [default.SourceWithProp.targets.link(target_a, lprop=1)],
+        )
+
+        # Fail, moved to test_model_sync_multi_link_05a
+        # self._testcase_add(
+        #     default.SourceWithProp,
+        #     [default.SourceWithProp.targets.link(target_a, lprop=1)],
+        #     default.SourceWithProp.targets.link(target_a),
+        #     [default.SourceWithProp.targets.link(target_a)],
+        # )
+        self._testcase_add(
+            default.SourceWithProp,
+            [default.SourceWithProp.targets.link(target_a, lprop=1)],
+            default.SourceWithProp.targets.link(target_a, lprop=1),
+            [default.SourceWithProp.targets.link(target_a, lprop=1)],
+        )
+        self._testcase_add(
+            default.SourceWithProp,
+            [default.SourceWithProp.targets.link(target_a, lprop=1)],
+            default.SourceWithProp.targets.link(target_a, lprop=2),
+            [default.SourceWithProp.targets.link(target_a, lprop=2)],
+        )
+
+        self._testcase_add(
+            default.SourceWithProp,
+            [
+                default.SourceWithProp.targets.link(target_a),
+                default.SourceWithProp.targets.link(target_b),
+                default.SourceWithProp.targets.link(target_c),
+            ],
+            default.SourceWithProp.targets.link(target_d),
+            [
+                default.SourceWithProp.targets.link(target_a),
+                default.SourceWithProp.targets.link(target_b),
+                default.SourceWithProp.targets.link(target_c),
+                default.SourceWithProp.targets.link(target_d),
+            ],
+        )
+        self._testcase_add(
+            default.SourceWithProp,
+            [
+                default.SourceWithProp.targets.link(target_a),
+                default.SourceWithProp.targets.link(target_b),
+                default.SourceWithProp.targets.link(target_c),
+            ],
+            default.SourceWithProp.targets.link(target_d, lprop=4),
+            [
+                default.SourceWithProp.targets.link(target_a),
+                default.SourceWithProp.targets.link(target_b),
+                default.SourceWithProp.targets.link(target_c),
+                default.SourceWithProp.targets.link(target_d, lprop=4),
+            ],
+        )
+
+    @tb.xfail
+    def test_model_sync_multi_link_05a(self):
+        from models.TestModelSyncMultiLink import default
+
+        target_a = default.Target()
+        target_b = default.Target()
+        target_c = default.Target()
+        target_d = default.Target()
+        self.client.save(target_a, target_b, target_c, target_d)
+
+        # Fail, linkprop not reset
+        self._testcase_add(
+            default.SourceWithProp,
+            [default.SourceWithProp.targets.link(target_a, lprop=1)],
+            default.SourceWithProp.targets.link(target_a),
+            [default.SourceWithProp.targets.link(target_a)],
+        )
+
+    def test_model_sync_multi_link_06(self):
+        # Updating existing objects with multi props
+        # LinkSet discard
+
+        def _get_discard_targets_func(
+            discard_target: typing.Any,
+        ) -> typing.Callable[[GelModel], None]:
+            def change(original: GelModel):
+                original.targets.discard(discard_target)
+
+            return change
+
+        def _testcase_discard(
+            model_type: typing.Type[GelModel],
+            initial_targets: typing.Collection[typing.Any],
+            discard_target: typing.Any,
+            expected_targets: typing.Collection[typing.Any],
+        ) -> None:
+            self._base_testcase(
+                model_type,
+                initial_targets,
+                _get_discard_targets_func(discard_target),
+                expected_targets,
+            )
+
+        from models.TestModelSyncMultiLink import default
+
+        target_a = default.Target()
+        target_b = default.Target()
+        target_c = default.Target()
+        target_d = default.Target()
+        self.client.save(target_a, target_b, target_c, target_d)
+
+        # No linkprops
+        _testcase_discard(
+            default.Source,
+            [target_a],
+            target_a,
+            [],
+        )
+        _testcase_discard(
+            default.Source,
+            [target_a, target_b, target_c],
+            target_c,
+            [target_a, target_b],
+        )
+
+        # With linkprops
+        _testcase_discard(
+            default.SourceWithProp,
+            [default.SourceWithProp.targets.link(target_a)],
+            default.SourceWithProp.targets.link(target_a),
+            [],
+        )
+        _testcase_discard(
+            default.SourceWithProp,
+            [default.SourceWithProp.targets.link(target_a)],
+            default.SourceWithProp.targets.link(target_a, lprop=1),
+            [],
+        )
+
+        _testcase_discard(
+            default.SourceWithProp,
+            [default.SourceWithProp.targets.link(target_a, lprop=1)],
+            default.SourceWithProp.targets.link(target_a),
+            [],
+        )
+        _testcase_discard(
+            default.SourceWithProp,
+            [default.SourceWithProp.targets.link(target_a, lprop=1)],
+            default.SourceWithProp.targets.link(target_a, lprop=1),
+            [],
+        )
+        _testcase_discard(
+            default.SourceWithProp,
+            [default.SourceWithProp.targets.link(target_a, lprop=1)],
+            default.SourceWithProp.targets.link(target_a, lprop=2),
+            [],
+        )
+
+        _testcase_discard(
+            default.SourceWithProp,
+            [
+                default.SourceWithProp.targets.link(target_a),
+                default.SourceWithProp.targets.link(target_b),
+                default.SourceWithProp.targets.link(target_c),
+            ],
+            default.SourceWithProp.targets.link(target_c),
+            [
+                default.SourceWithProp.targets.link(target_a),
+                default.SourceWithProp.targets.link(target_b),
+            ],
+        )
+        _testcase_discard(
+            default.SourceWithProp,
+            [
+                default.SourceWithProp.targets.link(target_a),
+                default.SourceWithProp.targets.link(target_b),
+                default.SourceWithProp.targets.link(target_c),
+            ],
+            default.SourceWithProp.targets.link(target_c, lprop=3),
+            [
+                default.SourceWithProp.targets.link(target_a),
+                default.SourceWithProp.targets.link(target_b),
+            ],
+        )
+        _testcase_discard(
+            default.SourceWithProp,
+            [
+                default.SourceWithProp.targets.link(target_a, lprop=1),
+                default.SourceWithProp.targets.link(target_b, lprop=2),
+                default.SourceWithProp.targets.link(target_c, lprop=3),
+            ],
+            default.SourceWithProp.targets.link(target_c),
+            [
+                default.SourceWithProp.targets.link(target_a, lprop=1),
+                default.SourceWithProp.targets.link(target_b, lprop=2),
+            ],
+        )
+        _testcase_discard(
+            default.SourceWithProp,
+            [
+                default.SourceWithProp.targets.link(target_a, lprop=1),
+                default.SourceWithProp.targets.link(target_b, lprop=2),
+                default.SourceWithProp.targets.link(target_c, lprop=3),
+            ],
+            default.SourceWithProp.targets.link(target_c, lprop=3),
+            [
+                default.SourceWithProp.targets.link(target_a, lprop=1),
+                default.SourceWithProp.targets.link(target_b, lprop=2),
+            ],
+        )
+        _testcase_discard(
+            default.SourceWithProp,
+            [
+                default.SourceWithProp.targets.link(target_a, lprop=1),
+                default.SourceWithProp.targets.link(target_b, lprop=2),
+                default.SourceWithProp.targets.link(target_c, lprop=3),
+            ],
+            default.SourceWithProp.targets.link(target_c, lprop=4),
+            [
+                default.SourceWithProp.targets.link(target_a, lprop=1),
+                default.SourceWithProp.targets.link(target_b, lprop=2),
+            ],
+        )
+
+        # Discarding non-member items does nothing
+        _testcase_discard(
+            default.Source,
+            [target_a, target_b, target_c],
+            target_d,
+            [target_a, target_b, target_c],
+        )
+        _testcase_discard(
+            default.SourceWithProp,
+            [
+                default.SourceWithProp.targets.link(target_a),
+                default.SourceWithProp.targets.link(target_b),
+                default.SourceWithProp.targets.link(target_c),
+            ],
+            default.SourceWithProp.targets.link(target_d),
+            [
+                default.SourceWithProp.targets.link(target_a),
+                default.SourceWithProp.targets.link(target_b),
+                default.SourceWithProp.targets.link(target_c),
+            ],
+        )
+        _testcase_discard(
+            default.SourceWithProp,
+            [
+                default.SourceWithProp.targets.link(target_a, lprop=1),
+                default.SourceWithProp.targets.link(target_b, lprop=2),
+                default.SourceWithProp.targets.link(target_c, lprop=3),
+            ],
+            default.SourceWithProp.targets.link(target_d),
+            [
+                default.SourceWithProp.targets.link(target_a, lprop=1),
+                default.SourceWithProp.targets.link(target_b, lprop=2),
+                default.SourceWithProp.targets.link(target_c, lprop=3),
+            ],
+        )
+
+    def test_model_sync_multi_link_07(self):
+        # Updating existing objects with multi props
+        # LinkSet remove
+
+        def _get_remove_targets_func(
+            remove_target: typing.Any,
+        ) -> typing.Callable[[GelModel], None]:
+            def change(original: GelModel):
+                original.targets.remove(remove_target)
+
+            return change
+
+        def _testcase_remove(
+            model_type: typing.Type[GelModel],
+            initial_targets: typing.Collection[typing.Any],
+            remove_target: typing.Any,
+            expected_targets: typing.Collection[typing.Any],
+        ) -> None:
+            self._base_testcase(
+                model_type,
+                initial_targets,
+                _get_remove_targets_func(remove_target),
+                expected_targets,
+            )
+
+        from models.TestModelSyncMultiLink import default
+
+        target_a = default.Target()
+        target_b = default.Target()
+        target_c = default.Target()
+        self.client.save(target_a, target_b, target_c)
+
+        # No linkprops
+        _testcase_remove(
+            default.Source,
+            [target_a],
+            target_a,
+            [],
+        )
+        _testcase_remove(
+            default.Source,
+            [target_a, target_b, target_c],
+            target_c,
+            [target_a, target_b],
+        )
+
+        # With linkprops
+        _testcase_remove(
+            default.SourceWithProp,
+            [default.SourceWithProp.targets.link(target_a)],
+            default.SourceWithProp.targets.link(target_a),
+            [],
+        )
+        _testcase_remove(
+            default.SourceWithProp,
+            [default.SourceWithProp.targets.link(target_a)],
+            default.SourceWithProp.targets.link(target_a, lprop=1),
+            [],
+        )
+
+        _testcase_remove(
+            default.SourceWithProp,
+            [default.SourceWithProp.targets.link(target_a, lprop=1)],
+            default.SourceWithProp.targets.link(target_a),
+            [],
+        )
+        _testcase_remove(
+            default.SourceWithProp,
+            [default.SourceWithProp.targets.link(target_a, lprop=1)],
+            default.SourceWithProp.targets.link(target_a, lprop=1),
+            [],
+        )
+        _testcase_remove(
+            default.SourceWithProp,
+            [default.SourceWithProp.targets.link(target_a, lprop=1)],
+            default.SourceWithProp.targets.link(target_a, lprop=2),
+            [],
+        )
+
+        _testcase_remove(
+            default.SourceWithProp,
+            [
+                default.SourceWithProp.targets.link(target_a),
+                default.SourceWithProp.targets.link(target_b),
+                default.SourceWithProp.targets.link(target_c),
+            ],
+            default.SourceWithProp.targets.link(target_c),
+            [
+                default.SourceWithProp.targets.link(target_a),
+                default.SourceWithProp.targets.link(target_b),
+            ],
+        )
+        _testcase_remove(
+            default.SourceWithProp,
+            [
+                default.SourceWithProp.targets.link(target_a),
+                default.SourceWithProp.targets.link(target_b),
+                default.SourceWithProp.targets.link(target_c),
+            ],
+            default.SourceWithProp.targets.link(target_c, lprop=3),
+            [
+                default.SourceWithProp.targets.link(target_a),
+                default.SourceWithProp.targets.link(target_b),
+            ],
+        )
+        _testcase_remove(
+            default.SourceWithProp,
+            [
+                default.SourceWithProp.targets.link(target_a, lprop=1),
+                default.SourceWithProp.targets.link(target_b, lprop=2),
+                default.SourceWithProp.targets.link(target_c, lprop=3),
+            ],
+            default.SourceWithProp.targets.link(target_c),
+            [
+                default.SourceWithProp.targets.link(target_a, lprop=1),
+                default.SourceWithProp.targets.link(target_b, lprop=2),
+            ],
+        )
+        _testcase_remove(
+            default.SourceWithProp,
+            [
+                default.SourceWithProp.targets.link(target_a, lprop=1),
+                default.SourceWithProp.targets.link(target_b, lprop=2),
+                default.SourceWithProp.targets.link(target_c, lprop=3),
+            ],
+            default.SourceWithProp.targets.link(target_c, lprop=3),
+            [
+                default.SourceWithProp.targets.link(target_a, lprop=1),
+                default.SourceWithProp.targets.link(target_b, lprop=2),
+            ],
+        )
+        _testcase_remove(
+            default.SourceWithProp,
+            [
+                default.SourceWithProp.targets.link(target_a, lprop=1),
+                default.SourceWithProp.targets.link(target_b, lprop=2),
+                default.SourceWithProp.targets.link(target_c, lprop=3),
+            ],
+            default.SourceWithProp.targets.link(target_c, lprop=4),
+            [
+                default.SourceWithProp.targets.link(target_a, lprop=1),
+                default.SourceWithProp.targets.link(target_b, lprop=2),
+            ],
+        )
+
+    def _get_op_iadd_targets_func(
+        self,
+        op_iadd_targets: typing.Collection[typing.Any],
+    ) -> typing.Callable[[GelModel], None]:
+        def change(original: GelModel):
+            original.targets += op_iadd_targets
+
+        return change
+
+    def _testcase_op_iadd(
+        self,
+        model_type: typing.Type[GelModel],
+        initial_targets: typing.Collection[typing.Any],
+        op_iadd_targets: typing.Collection[typing.Any],
+        expected_targets: typing.Collection[typing.Any],
+    ) -> None:
+        self._base_testcase(
+            model_type,
+            initial_targets,
+            self._get_op_iadd_targets_func(op_iadd_targets),
+            expected_targets,
+        )
+
+    def test_model_sync_multi_link_08(self):
+        # Updating existing objects with multi props
+        # LinkSet operator iadd
+
+        from models.TestModelSyncMultiLink import default
+
+        target_a = default.Target()
+        target_b = default.Target()
+        target_c = default.Target()
+        target_d = default.Target()
+        self.client.save(target_a, target_b, target_c, target_d)
+
+        # No linkprops
+        self._testcase_op_iadd(default.Source, [], [], [])
+        self._testcase_op_iadd(
+            default.Source,
+            [],
+            [target_a, target_b, target_c],
+            [target_a, target_b, target_c],
+        )
+
+        self._testcase_op_iadd(
+            default.Source,
+            [target_a, target_b, target_c],
+            [],
+            [target_a, target_b, target_c],
+        )
+        self._testcase_op_iadd(
+            default.Source,
+            [target_a, target_b, target_c],
+            [target_a, target_b, target_c],
+            [target_a, target_b, target_c],
+        )
+
+        self._testcase_op_iadd(
+            default.Source,
+            [target_a, target_b],
+            [target_c, target_d],
+            [target_a, target_b, target_c, target_d],
+        )
+        self._testcase_op_iadd(
+            default.Source,
+            [target_a, target_b],
+            [target_a, target_b, target_c, target_d],
+            [target_a, target_b, target_c, target_d],
+        )
+        self._testcase_op_iadd(
+            default.Source,
+            [target_a, target_b, target_c, target_d],
+            [target_a, target_b],
+            [target_a, target_b, target_c, target_d],
+        )
+
+        self._testcase_op_iadd(
+            default.Source,
+            [target_a, target_b, target_c],
+            [target_c, target_d],
+            [target_a, target_b, target_c, target_d],
+        )
+
+        # With linkprops
+        self._testcase_op_iadd(default.SourceWithProp, [], [], [])
+        self._testcase_op_iadd(
+            default.SourceWithProp,
+            [],
+            [
+                default.SourceWithProp.targets.link(target_a),
+                default.SourceWithProp.targets.link(target_b),
+            ],
+            [
+                default.SourceWithProp.targets.link(target_a),
+                default.SourceWithProp.targets.link(target_b),
+            ],
+        )
+        self._testcase_op_iadd(
+            default.SourceWithProp,
+            [],
+            [
+                default.SourceWithProp.targets.link(target_a, lprop=1),
+                default.SourceWithProp.targets.link(target_b, lprop=2),
+            ],
+            [
+                default.SourceWithProp.targets.link(target_a, lprop=1),
+                default.SourceWithProp.targets.link(target_b, lprop=2),
+            ],
+        )
+
+        self._testcase_op_iadd(
+            default.SourceWithProp,
+            [
+                default.SourceWithProp.targets.link(target_a),
+                default.SourceWithProp.targets.link(target_b),
+            ],
+            [],
+            [
+                default.SourceWithProp.targets.link(target_a),
+                default.SourceWithProp.targets.link(target_b),
+            ],
+        )
+        self._testcase_op_iadd(
+            default.SourceWithProp,
+            [
+                default.SourceWithProp.targets.link(target_a),
+                default.SourceWithProp.targets.link(target_b),
+            ],
+            [
+                default.SourceWithProp.targets.link(target_a),
+                default.SourceWithProp.targets.link(target_b),
+            ],
+            [
+                default.SourceWithProp.targets.link(target_a),
+                default.SourceWithProp.targets.link(target_b),
+            ],
+        )
+        self._testcase_op_iadd(
+            default.SourceWithProp,
+            [
+                default.SourceWithProp.targets.link(target_a),
+                default.SourceWithProp.targets.link(target_b),
+            ],
+            [
+                default.SourceWithProp.targets.link(target_a, lprop=1),
+                default.SourceWithProp.targets.link(target_b, lprop=2),
+            ],
+            [
+                # doesn't work without lprop=None ?!
+                default.SourceWithProp.targets.link(target_a, lprop=1),
+                default.SourceWithProp.targets.link(target_b, lprop=2),
+            ],
+        )
+
+        self._testcase_op_iadd(
+            default.SourceWithProp,
+            [
+                default.SourceWithProp.targets.link(target_a, lprop=1),
+                default.SourceWithProp.targets.link(target_b, lprop=2),
+            ],
+            [],
+            [
+                default.SourceWithProp.targets.link(target_a, lprop=1),
+                default.SourceWithProp.targets.link(target_b, lprop=2),
+            ],
+        )
+        # Fail, moved to test_model_sync_multi_link_08a
+        # self._testcase_op_iadd(
+        #     default.SourceWithProp,
+        #     [
+        #         default.SourceWithProp.targets.link(target_a, lprop=1),
+        #         default.SourceWithProp.targets.link(target_b, lprop=2),
+        #     ],
+        #     [
+        #         default.SourceWithProp.targets.link(target_a),
+        #         default.SourceWithProp.targets.link(target_b),
+        #     ],
+        #     [
+        #         default.SourceWithProp.targets.link(target_a),
+        #         default.SourceWithProp.targets.link(target_b),
+        #     ],
+        # )
+        self._testcase_op_iadd(
+            default.SourceWithProp,
+            [
+                default.SourceWithProp.targets.link(target_a, lprop=1),
+                default.SourceWithProp.targets.link(target_b, lprop=2),
+            ],
+            [
+                default.SourceWithProp.targets.link(target_a, lprop=1),
+                default.SourceWithProp.targets.link(target_b, lprop=2),
+            ],
+            [
+                default.SourceWithProp.targets.link(target_a, lprop=1),
+                default.SourceWithProp.targets.link(target_b, lprop=2),
+            ],
+        )
+        self._testcase_op_iadd(
+            default.SourceWithProp,
+            [
+                default.SourceWithProp.targets.link(target_a, lprop=1),
+                default.SourceWithProp.targets.link(target_b, lprop=2),
+            ],
+            [
+                default.SourceWithProp.targets.link(target_a, lprop=4),
+                default.SourceWithProp.targets.link(target_b, lprop=5),
+            ],
+            [
+                default.SourceWithProp.targets.link(target_a, lprop=4),
+                default.SourceWithProp.targets.link(target_b, lprop=5),
+            ],
+        )
+
+        self._testcase_op_iadd(
+            default.SourceWithProp,
+            [
+                default.SourceWithProp.targets.link(target_a),
+                default.SourceWithProp.targets.link(target_b),
+            ],
+            [
+                default.SourceWithProp.targets.link(target_c),
+                default.SourceWithProp.targets.link(target_d),
+            ],
+            [
+                default.SourceWithProp.targets.link(target_a),
+                default.SourceWithProp.targets.link(target_b),
+                default.SourceWithProp.targets.link(target_c),
+                default.SourceWithProp.targets.link(target_d),
+            ],
+        )
+        self._testcase_op_iadd(
+            default.SourceWithProp,
+            [
+                default.SourceWithProp.targets.link(target_a),
+                default.SourceWithProp.targets.link(target_b),
+            ],
+            [
+                default.SourceWithProp.targets.link(target_a),
+                default.SourceWithProp.targets.link(target_b),
+                default.SourceWithProp.targets.link(target_c),
+                default.SourceWithProp.targets.link(target_d),
+            ],
+            [
+                default.SourceWithProp.targets.link(target_a),
+                default.SourceWithProp.targets.link(target_b),
+                default.SourceWithProp.targets.link(target_c),
+                default.SourceWithProp.targets.link(target_d),
+            ],
+        )
+        self._testcase_op_iadd(
+            default.SourceWithProp,
+            [
+                default.SourceWithProp.targets.link(target_a),
+                default.SourceWithProp.targets.link(target_b),
+                default.SourceWithProp.targets.link(target_c),
+                default.SourceWithProp.targets.link(target_d),
+            ],
+            [
+                default.SourceWithProp.targets.link(target_a),
+                default.SourceWithProp.targets.link(target_b),
+            ],
+            [
+                default.SourceWithProp.targets.link(target_a),
+                default.SourceWithProp.targets.link(target_b),
+                default.SourceWithProp.targets.link(target_c),
+                default.SourceWithProp.targets.link(target_d),
+            ],
+        )
+        self._testcase_op_iadd(
+            default.SourceWithProp,
+            [
+                default.SourceWithProp.targets.link(target_a),
+                default.SourceWithProp.targets.link(target_b),
+                default.SourceWithProp.targets.link(target_c),
+            ],
+            [
+                default.SourceWithProp.targets.link(target_b),
+                default.SourceWithProp.targets.link(target_c),
+                default.SourceWithProp.targets.link(target_d),
+            ],
+            [
+                default.SourceWithProp.targets.link(target_a),
+                default.SourceWithProp.targets.link(target_b),
+                default.SourceWithProp.targets.link(target_c),
+                default.SourceWithProp.targets.link(target_d),
+            ],
+        )
+        # Fail, moved to test_model_sync_multi_link_08b
+        # self._testcase_op_iadd(
+        #     default.SourceWithProp,
+        #     [
+        #         default.SourceWithProp.targets.link(target_a, lprop=1),
+        #         default.SourceWithProp.targets.link(target_b, lprop=2),
+        #         default.SourceWithProp.targets.link(target_c, lprop=3),
+        #     ],
+        #     [
+        #         default.SourceWithProp.targets.link(target_b),
+        #         default.SourceWithProp.targets.link(target_c),
+        #         default.SourceWithProp.targets.link(target_d),
+        #     ],
+        #     [
+        #         default.SourceWithProp.targets.link(target_a, lprop=1),
+        #         default.SourceWithProp.targets.link(target_b),
+        #         default.SourceWithProp.targets.link(target_c),
+        #         default.SourceWithProp.targets.link(target_d),
+        #     ],
+        # )
+        self._testcase_op_iadd(
+            default.SourceWithProp,
+            [
+                default.SourceWithProp.targets.link(target_a),
+                default.SourceWithProp.targets.link(target_b),
+                default.SourceWithProp.targets.link(target_c),
+            ],
+            [
+                default.SourceWithProp.targets.link(target_b, lprop=4),
+                default.SourceWithProp.targets.link(target_c, lprop=5),
+                default.SourceWithProp.targets.link(target_d, lprop=6),
+            ],
+            [
+                default.SourceWithProp.targets.link(target_a),
+                default.SourceWithProp.targets.link(target_b, lprop=4),
+                default.SourceWithProp.targets.link(target_c, lprop=5),
+                default.SourceWithProp.targets.link(target_d, lprop=6),
+            ],
+        )
+        self._testcase_op_iadd(
+            default.SourceWithProp,
+            [
+                default.SourceWithProp.targets.link(target_a, lprop=1),
+                default.SourceWithProp.targets.link(target_b, lprop=2),
+                default.SourceWithProp.targets.link(target_c, lprop=3),
+            ],
+            [
+                default.SourceWithProp.targets.link(target_b, lprop=4),
+                default.SourceWithProp.targets.link(target_c, lprop=5),
+                default.SourceWithProp.targets.link(target_d, lprop=6),
+            ],
+            [
+                default.SourceWithProp.targets.link(target_a, lprop=1),
+                default.SourceWithProp.targets.link(target_b, lprop=4),
+                default.SourceWithProp.targets.link(target_c, lprop=5),
+                default.SourceWithProp.targets.link(target_d, lprop=6),
+            ],
+        )
+
+    @tb.xfail
+    def test_model_sync_multi_link_08a(self):
+        from models.TestModelSyncMultiLink import default
+
+        target_a = default.Target()
+        target_b = default.Target()
+        target_c = default.Target()
+        target_d = default.Target()
+        self.client.save(target_a, target_b, target_c, target_d)
+
+        # Fail, linkprop not reset
+        self._testcase_op_iadd(
+            default.SourceWithProp,
+            [
+                default.SourceWithProp.targets.link(target_a, lprop=1),
+                default.SourceWithProp.targets.link(target_b, lprop=2),
+            ],
+            [
+                default.SourceWithProp.targets.link(target_a),
+                default.SourceWithProp.targets.link(target_b),
+            ],
+            [
+                default.SourceWithProp.targets.link(target_a),
+                default.SourceWithProp.targets.link(target_b),
+            ],
+        )
+
+    @tb.xfail
+    def test_model_sync_multi_link_08b(self):
+        from models.TestModelSyncMultiLink import default
+
+        target_a = default.Target()
+        target_b = default.Target()
+        target_c = default.Target()
+        target_d = default.Target()
+        self.client.save(target_a, target_b, target_c, target_d)
+
+        # Fail, linkprop not reset
+        self._testcase_op_iadd(
+            default.SourceWithProp,
+            [
+                default.SourceWithProp.targets.link(target_a, lprop=1),
+                default.SourceWithProp.targets.link(target_b, lprop=2),
+                default.SourceWithProp.targets.link(target_c, lprop=3),
+            ],
+            [
+                default.SourceWithProp.targets.link(target_b),
+                default.SourceWithProp.targets.link(target_c),
+                default.SourceWithProp.targets.link(target_d),
+            ],
+            [
+                default.SourceWithProp.targets.link(target_a, lprop=1),
+                default.SourceWithProp.targets.link(target_b),
+                default.SourceWithProp.targets.link(target_c),
+                default.SourceWithProp.targets.link(target_d),
+            ],
+        )
+
+    def test_model_sync_multi_link_09(self):
+        # Updating existing objects with multi props
+        # LinkSet operator isub
+
+        def _get_op_isub_targets_func(
+            op_isub_targets: typing.Collection[typing.Any],
+        ) -> typing.Callable[[GelModel], None]:
+            def change(original: GelModel):
+                original.targets -= op_isub_targets
+
+            return change
+
+        def _testcase_op_isub(
+            model_type: typing.Type[GelModel],
+            initial_targets: typing.Collection[typing.Any],
+            op_isub_targets: typing.Collection[typing.Any],
+            expected_targets: typing.Collection[typing.Any],
+        ) -> None:
+            self._base_testcase(
+                model_type,
+                initial_targets,
+                _get_op_isub_targets_func(op_isub_targets),
+                expected_targets,
+            )
+
+        from models.TestModelSyncMultiLink import default
+
+        target_a = default.Target()
+        target_b = default.Target()
+        target_c = default.Target()
+        target_d = default.Target()
+        self.client.save(target_a, target_b, target_c, target_d)
+
+        # No linkprops
+        _testcase_op_isub(default.Source, [], [], [])
+        _testcase_op_isub(
+            default.Source,
+            [],
+            [target_a],
+            [],
+        )
+
+        _testcase_op_isub(
+            default.Source,
+            [target_a],
+            [],
+            [target_a],
+        )
+        _testcase_op_isub(
+            default.Source,
+            [target_a],
+            [target_a],
+            [],
+        )
+        _testcase_op_isub(
+            default.Source,
+            [target_a],
+            [target_b],
+            [target_a],
+        )
+
+        _testcase_op_isub(
+            default.Source,
+            [target_a, target_b, target_c],
+            [target_c, target_d],
+            [target_a, target_b],
+        )
+
+        # With linkprops
+        _testcase_op_isub(default.SourceWithProp, [], [], [])
+        _testcase_op_isub(
+            default.SourceWithProp,
+            [],
+            [default.SourceWithProp.targets.link(target_a)],
+            [],
+        )
+        _testcase_op_isub(
+            default.SourceWithProp,
+            [],
+            [default.SourceWithProp.targets.link(target_a, lprop=1)],
+            [],
+        )
+
+        _testcase_op_isub(
+            default.SourceWithProp,
+            [default.SourceWithProp.targets.link(target_a)],
+            [],
+            [default.SourceWithProp.targets.link(target_a)],
+        )
+        _testcase_op_isub(
+            default.SourceWithProp,
+            [default.SourceWithProp.targets.link(target_a)],
+            [default.SourceWithProp.targets.link(target_a)],
+            [],
+        )
+        _testcase_op_isub(
+            default.SourceWithProp,
+            [default.SourceWithProp.targets.link(target_a)],
+            [default.SourceWithProp.targets.link(target_a, lprop=1)],
+            [],
+        )
+        _testcase_op_isub(
+            default.SourceWithProp,
+            [default.SourceWithProp.targets.link(target_a)],
+            [default.SourceWithProp.targets.link(target_b)],
+            [default.SourceWithProp.targets.link(target_a)],
+        )
+
+        _testcase_op_isub(
+            default.SourceWithProp,
+            [default.SourceWithProp.targets.link(target_a, lprop=1)],
+            [],
+            [default.SourceWithProp.targets.link(target_a, lprop=1)],
+        )
+        _testcase_op_isub(
+            default.SourceWithProp,
+            [default.SourceWithProp.targets.link(target_a, lprop=1)],
+            [default.SourceWithProp.targets.link(target_a)],
+            [],
+        )
+        _testcase_op_isub(
+            default.SourceWithProp,
+            [default.SourceWithProp.targets.link(target_a, lprop=1)],
+            [default.SourceWithProp.targets.link(target_a, lprop=1)],
+            [],
+        )
+        _testcase_op_isub(
+            default.SourceWithProp,
+            [default.SourceWithProp.targets.link(target_a, lprop=1)],
+            [default.SourceWithProp.targets.link(target_a, lprop=2)],
+            [],
+        )
+        _testcase_op_isub(
+            default.SourceWithProp,
+            [default.SourceWithProp.targets.link(target_a, lprop=1)],
+            [default.SourceWithProp.targets.link(target_b)],
+            [default.SourceWithProp.targets.link(target_a, lprop=1)],
+        )
+
+        _testcase_op_isub(
+            default.Source,
+            [
+                default.SourceWithProp.targets.link(target_a),
+                default.SourceWithProp.targets.link(target_b),
+                default.SourceWithProp.targets.link(target_c),
+            ],
+            [
+                default.SourceWithProp.targets.link(target_c),
+                default.SourceWithProp.targets.link(target_d),
+            ],
+            [
+                default.SourceWithProp.targets.link(target_a),
+                default.SourceWithProp.targets.link(target_b),
+            ],
+        )
+        _testcase_op_isub(
+            default.Source,
+            [
+                default.SourceWithProp.targets.link(target_a),
+                default.SourceWithProp.targets.link(target_b),
+                default.SourceWithProp.targets.link(target_c),
+            ],
+            [
+                default.SourceWithProp.targets.link(target_c, lprop=3),
+                default.SourceWithProp.targets.link(target_d, lprop=4),
+            ],
+            [
+                default.SourceWithProp.targets.link(target_a),
+                default.SourceWithProp.targets.link(target_b),
+            ],
+        )
+
+        _testcase_op_isub(
+            default.Source,
+            [
+                default.SourceWithProp.targets.link(target_a, lprop=1),
+                default.SourceWithProp.targets.link(target_b, lprop=2),
+                default.SourceWithProp.targets.link(target_c, lprop=3),
+            ],
+            [
+                default.SourceWithProp.targets.link(target_c),
+                default.SourceWithProp.targets.link(target_d),
+            ],
+            [
+                default.SourceWithProp.targets.link(target_a, lprop=1),
+                default.SourceWithProp.targets.link(target_b, lprop=2),
+            ],
+        )
+        _testcase_op_isub(
+            default.Source,
+            [
+                default.SourceWithProp.targets.link(target_a, lprop=1),
+                default.SourceWithProp.targets.link(target_b, lprop=2),
+                default.SourceWithProp.targets.link(target_c, lprop=3),
+            ],
+            [
+                default.SourceWithProp.targets.link(target_c, lprop=3),
+                default.SourceWithProp.targets.link(target_d, lprop=4),
+            ],
+            [
+                default.SourceWithProp.targets.link(target_a, lprop=1),
+                default.SourceWithProp.targets.link(target_b, lprop=2),
+            ],
+        )
+        _testcase_op_isub(
+            default.Source,
+            [
+                default.SourceWithProp.targets.link(target_a, lprop=1),
+                default.SourceWithProp.targets.link(target_b, lprop=2),
+                default.SourceWithProp.targets.link(target_c, lprop=3),
+            ],
+            [
+                default.SourceWithProp.targets.link(target_c, lprop=9),
+                default.SourceWithProp.targets.link(target_d, lprop=4),
+            ],
+            [
+                default.SourceWithProp.targets.link(target_a, lprop=1),
+                default.SourceWithProp.targets.link(target_b, lprop=2),
+            ],
+        )
+
+    @tb.xfail
+    def test_model_sync_multi_link_10(self):
+        # Existing object without link should not have it fetched
+        # No linkprops
+
+        def _testcase(
+            model_type: typing.Type[GelModel],
+            initial_targets: typing.Any,
+            changed_targets_0: typing.Any,
+            changed_targets_1: typing.Any,
+            changed_targets_2: typing.Any,
+        ):
+            original = model_type(targets=initial_targets)
+            self.client.save(original)
+
+            mirror_1 = self.client.query_required_single(
+                model_type.select(targets=False).limit(1)
+            )
+            original.targets = changed_targets_0
+            self.client.save(original)
+            self.client.sync(mirror_1)
+            self.assertEqual(mirror_1.targets._mode, _tracked_list.Mode.Write)
+            self.assertEqual(mirror_1.targets._items, [])
+
+            # Sync alongside another object with the prop set
+            mirror_2 = self.client.query_required_single(
+                model_type.select(targets=True).limit(1)
+            )
+            original.targets = changed_targets_1
+            self.client.save(original)
+            self.client.sync(mirror_1, mirror_2)
+            self.assertEqual(mirror_1.targets._mode, _tracked_list.Mode.Write)
+            self.assertEqual(mirror_1.targets._items, [])
+
+            # Sync alongside another object with the prop changed
+            mirror_2 = self.client.query_required_single(
+                model_type.select(targets=True).limit(1)
+            )
+            mirror_2.targets = changed_targets_2
+            self.client.sync(mirror_1, mirror_2)
+            self.assertEqual(mirror_1.targets._mode, _tracked_list.Mode.Write)
+            self.assertEqual(mirror_1.targets._items, [])  # Fail
+
+            # cleanup
+            self.client.query(model_type.delete())
+
+        from models.TestModelSyncMultiLink import default
+
+        initial_target = default.Target()
+        changed_target_0 = default.Target()
+        changed_target_1 = default.Target()
+        changed_target_2 = default.Target()
+        self.client.save(
+            initial_target,
+            changed_target_0,
+            changed_target_1,
+            changed_target_2,
+        )
+
+        _testcase(
+            default.Source,
+            [initial_target],
+            [changed_target_0],
+            [changed_target_1],
+            [changed_target_2],
+        )
+        _testcase(
+            default.SourceWithProp,
+            [default.SourceWithProp.targets.link(initial_target)],
+            [default.SourceWithProp.targets.link(changed_target_0)],
+            [default.SourceWithProp.targets.link(changed_target_1)],
+            [default.SourceWithProp.targets.link(changed_target_2)],
+        )
