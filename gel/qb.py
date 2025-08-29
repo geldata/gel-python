@@ -36,6 +36,4 @@ def for_in(iter: type[_T], body: Callable[[type[_T]], type[_X]]) -> type[_X]:
     )
 
 
-__all__ = (
-    "for_in",
-)
+__all__ = ("for_in",)
