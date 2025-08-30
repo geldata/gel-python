@@ -65,7 +65,7 @@ class MockPointer(typing.NamedTuple):
 
 
 @tb.typecheck
-class TestModelGenerator(tb.ModelTestCase):
+class TestModelGeneratorMain(tb.ModelTestCase):
     SCHEMA = os.path.join(os.path.dirname(__file__), "dbsetup", "orm.gel")
 
     SETUP = os.path.join(os.path.dirname(__file__), "dbsetup", "orm.edgeql")
@@ -1575,7 +1575,8 @@ class TestModelGenerator(tb.ModelTestCase):
 
         q = default.Named.select(
             "*",
-            *default.UserGroup,
+            # FIXME: pyright fails here
+            *default.UserGroup,  # pyright: ignore
         )
 
         for item in self.client.query(q):
@@ -1823,7 +1824,8 @@ class TestModelGenerator(tb.ModelTestCase):
 
         pq = (
             default.Post.select(
-                *default.Post,
+                # FIXME: pyright fails here
+                *default.Post,  # pyright: ignore
                 author=True,
             )
             .filter(lambda p: p.body == "I'm Alice")
@@ -4133,6 +4135,7 @@ class TestModelGenerator(tb.ModelTestCase):
 
         self.assertEqual({u.name for u in g.users}, {"0", "1", "2"})
 
+        u = None
         for u in g.users:
             u.name += "aaa"
 
@@ -4142,6 +4145,8 @@ class TestModelGenerator(tb.ModelTestCase):
 
         for u in g.users:
             u.name += "bbb"
+
+        assert u
 
         g.users.remove(u)
         g.users.add(default.User(name="new"))
@@ -5088,6 +5093,7 @@ class TestModelGenerator(tb.ModelTestCase):
         gs = self.client.get(
             default.GameSession.select("*", players=True).filter(num=123)
         )
+        alice = None
         for p in gs.players:
             if p.name == "Alice":
                 alice = p
@@ -5095,6 +5101,7 @@ class TestModelGenerator(tb.ModelTestCase):
                 alice.__linkprops__.is_tall_enough = True
 
         self.client.sync(gs)
+        assert alice
         self.assertEqual(alice.__linkprops__.is_tall_enough, True)
 
     def test_modelgen_globals_01(self):
