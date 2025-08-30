@@ -16,15 +16,15 @@ _T = TypeVar("_T", bound=_abstract.GelType)
 _X = TypeVar("_X", bound=_abstract.GelType)
 
 
-def for_(iter: type[_T], body: Callable[[type[_T]], type[_X]]) -> type[_X]:
+def for_(iterator: type[_T], body: Callable[[type[_T]], type[_X]]) -> type[_X]:
     """Evaluate the expression returned by *body* for each element in *iter*.
 
     This is the Pythonic representation of the EdgeQL FOR expression."""
 
-    iter_expr = _qb.edgeql_qb_expr(iter)
+    iter_expr = _qb.edgeql_qb_expr(iterator)
     scope = _qb.Scope()
     var = _qb.Variable(type_=iter_expr.type, scope=scope)
-    body_ = body(_qb.AnnotatedVar(iter.__gel_origin__, var))  # type: ignore [arg-type, attr-defined]
+    body_ = body(_qb.AnnotatedVar(iterator.__gel_origin__, var))  # type: ignore [arg-type, attr-defined]
     return _qb.AnnotatedExpr(  # type: ignore [return-value]
         body_.__gel_origin__,  # type: ignore [attr-defined]
         _qb.ForStmt(
