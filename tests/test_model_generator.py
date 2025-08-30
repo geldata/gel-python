@@ -6583,6 +6583,8 @@ class TestModelGenDirect(tb.ModelTestCase):
     def test_model_gen_direct_02(self):
         from models.TestModelGenDirect import default
 
+        # This still works because the actual test runs with a model generated
+        # after SETUP.
         bar = default.Bar(x=12)
         self.client.sync(bar)
 
