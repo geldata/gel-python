@@ -35,7 +35,6 @@ import pathlib
 import pickle
 import re
 import shutil
-import site
 import subprocess
 import sys
 import tempfile
@@ -63,12 +62,6 @@ from gel.orm.django.generator import ModelGenerator as DjangoModGen
 log = logging.getLogger(__name__)
 
 _unset = object()
-
-
-SITE_PACKAGES: typing.Final[pathlib.Path] = pathlib.Path(
-    site.getsitepackages()[0]
-)
-MODELS_DEST: typing.Final[pathlib.Path] = SITE_PACKAGES / "models"
 
 
 @contextlib.contextmanager
@@ -635,7 +628,7 @@ class DatabaseTestCase(ClusterTestCase, ConnectedTestCaseMixin):
         return dbname.lower()
 
     @classmethod
-    def get_schema_texts(cls) -> list[str]:
+    def get_combined_schemas(cls) -> str:
         schema_texts: list[str] = []
 
         # Look at all SCHEMA entries and potentially create multiple
@@ -647,7 +640,11 @@ class DatabaseTestCase(ClusterTestCase, ConnectedTestCaseMixin):
             if schema_text := cls.get_schema_text(name):
                 schema_texts.append(schema_text)
 
-        return schema_texts
+        return "\n\n".join(st for st in schema_texts)
+
+    @classmethod
+    def is_schema_field(cls, field: str) -> bool:
+        return bool(re.match(r"^SCHEMA(?:_(\w+))?", field))
 
     @classmethod
     def get_schema_text(cls, field: str) -> str | None:
@@ -678,12 +675,11 @@ class DatabaseTestCase(ClusterTestCase, ConnectedTestCaseMixin):
     @classmethod
     def get_setup_script(cls):
         script = ""
-        schema = "\n\n".join(st for st in cls.get_schema_texts())
 
         # Don't wrap the script into a transaction here, so that
         # potentially it's easier to stitch multiple such scripts
         # together in a fashion similar to what `edb inittestdb` does.
-        script += f"\nSTART MIGRATION TO {{ {schema} }};"
+        script += f"\nSTART MIGRATION TO {{ {cls.get_combined_schemas()} }};"
         script += f"\nPOPULATE MIGRATION; \nCOMMIT MIGRATION;"
 
         if cls.SETUP:
@@ -763,6 +759,7 @@ class SyncQueryTestCase(DatabaseTestCase):
 
 
 class BaseModelTestCase(DatabaseTestCase):
+    SCHEMA: str
     DEFAULT_MODULE = "default"
 
     client: typing.ClassVar[gel.Client]
@@ -790,7 +787,7 @@ class BaseModelTestCase(DatabaseTestCase):
 
         cls.tmp_model_dir = tempfile.TemporaryDirectory(**td_kwargs)
 
-        model_from_file, model_name = cls._model_info()
+        _, model_name = cls._model_info()
 
         if cls.orm_debug:
             print(cls.tmp_model_dir.name)
@@ -829,15 +826,6 @@ class BaseModelTestCase(DatabaseTestCase):
                 ) from e
         finally:
             gen_client.terminate()
-
-        if not model_from_file:
-            # This is a direct schema, let's copy it to the site paths
-            site_model_dir = MODELS_DEST / model_name
-            if site_model_dir.exists():
-                shutil.rmtree(site_model_dir)
-            shutil.copytree(
-                model_output_dir, site_model_dir, dirs_exist_ok=True
-            )
 
         sys.path.insert(0, cls.tmp_model_dir.name)
 

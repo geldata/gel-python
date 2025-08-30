@@ -36,3 +36,4 @@ docs/_build
 /uv.lock
 .dir-locals.el
 .envrc
+.gen_models_cache
