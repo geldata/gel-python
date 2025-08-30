@@ -789,6 +789,28 @@ class BaseModelTestCase(DatabaseTestCase):
 
         _, model_name = cls._model_info()
 
+        if cached := os.environ.get("GEL_PYTHON_TEST_MODEL_DIR"):
+            base = pathlib.Path(cls.tmp_model_dir.name) / 'models'
+            shutil.copytree(cached, base)
+            (base / "__init__.py").touch()
+        else:
+            cls._generate()
+
+        sys.path.insert(0, cls.tmp_model_dir.name)
+
+        import models
+
+        assert models.__file__ == os.path.join(
+            cls.tmp_model_dir.name, "models", "__init__.py"
+        ), (
+            models.__file__,
+            os.path.join(cls.tmp_model_dir.name, "models", "__init__.py"),
+        )
+
+    @classmethod
+    def _generate(cls):
+        model_from_file, model_name = cls._model_info()
+
         if cls.orm_debug:
             print(cls.tmp_model_dir.name)
 
@@ -826,17 +848,6 @@ class BaseModelTestCase(DatabaseTestCase):
                 ) from e
         finally:
             gen_client.terminate()
-
-        sys.path.insert(0, cls.tmp_model_dir.name)
-
-        import models
-
-        assert models.__file__ == os.path.join(
-            cls.tmp_model_dir.name, "models", "__init__.py"
-        ), (
-            models.__file__,
-            os.path.join(cls.tmp_model_dir.name, "models", "__init__.py"),
-        )
 
     @classmethod
     def tearDownClass(cls):
