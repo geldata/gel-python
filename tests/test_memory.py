@@ -45,11 +45,11 @@ class TestConfigMemory(tb.SyncQueryTestCase):
         # Test that ConfigMemory.__str__ formats the
         # same as <str><cfg::memory>
         mem_tuples = self.client.query('''
-            WITH args := array_unpack(<array<str>>$0)
-            SELECT (
-                <cfg::memory>args,
-                <str><cfg::memory>args,
-                <int64><cfg::memory>args
+            FOR a IN array_unpack(<array<str>>$0) UNION
+            (
+                <cfg::memory>a,
+                <str><cfg::memory>a,
+                <int64><cfg::memory>a,
             );
         ''', mem_strs)
 
@@ -57,8 +57,7 @@ class TestConfigMemory(tb.SyncQueryTestCase):
 
         # Test encode/decode roundtrip
         roundtrip = self.client.query('''
-            WITH args := array_unpack(<array<cfg::memory>>$0)
-            SELECT args;
+            SELECT array_unpack(<array<cfg::memory>>$0);
         ''', mem_vals)
 
         self.assertEqual(
