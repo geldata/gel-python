@@ -323,12 +323,12 @@ class TestQueryBuilder(tb.ModelTestCase):
         self.assertEqual(post.author.name, "Elsa")
         self.assertEqual(post.body, "*magic stuff*")
 
-    @tb.xfail
+    @tb.skip_typecheck  # FIXME: array equality busted
     def test_qb_filter_09(self):
         from models.orm import default, std
 
         # Find GameSession with same players as the green group
-        green = default.UserGroup.filter(name="green")
+        green = default.UserGroup.select(users=True).filter(name="green")
         q = default.GameSession.select(
             "*",
             players=True,
@@ -337,27 +337,31 @@ class TestQueryBuilder(tb.ModelTestCase):
             == std.array_agg(green.users.id)
         )
 
+        self.assertEqual(1, 2)
         res = self.client.get(q)
+        green_res = self.client.get(green)
         self.assertEqual(res.num, 123)
         self.assertEqual(
-            {u.id for u in res.players}, {u.id for u in green.users}
+            {u.id for u in res.players},
+            {u.id for u in green_res.users},
         )
 
-    @tb.xfail
     def test_qb_filter_10(self):
         from models.orm import default, std
 
         # Find GameSession with same *number* of players as the green group
-        green = default.UserGroup.filter(name="green")
+        green = default.UserGroup.select(users=True).filter(name="green")
         q = default.GameSession.select(
             "*",
             players=True,
         ).filter(lambda g: std.count(g.players) == std.count(green.users))
 
         res = self.client.get(q)
+        green_res = self.client.get(green)
         self.assertEqual(res.num, 123)
         self.assertEqual(
-            {u.id for u in res.players}, {u.id for u in green.users}
+            {u.id for u in res.players},
+            {u.id for u in green_res.users},
         )
 
     def test_qb_link_property_01(self):
