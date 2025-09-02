@@ -5,6 +5,7 @@
 """Packge version utilities."""
 
 from __future__ import annotations
+from typing import TYPE_CHECKING
 
 import dataclasses
 import functools
@@ -16,6 +17,9 @@ import urllib.parse
 
 from gel import _version as _gel_py_ver
 
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
 
 @dataclasses.dataclass(kw_only=True, frozen=True)
 class DirectURLOrigin:
@@ -24,12 +28,32 @@ class DirectURLOrigin:
     commit_id: str | None = None
 
 
-def get_direct_url_origin(dist_name: str) -> DirectURLOrigin | None:
+@functools.cache
+def get_direct_url_origin(
+    dist_name: str,
+    path: Sequence[str] | None = None,
+) -> DirectURLOrigin | None:
     """Return PEP 660 Direct URL Origin metadata for package if present"""
-    try:
-        dist = importlib.metadata.distribution(dist_name)
-    except importlib.metadata.PackageNotFoundError:
-        return None
+    if path is not None:
+        dists = importlib.metadata.distributions(name=dist_name, path=[*path])
+    else:
+        dists = importlib.metadata.distributions(name=dist_name)
+
+    # Distribution finder will return a Distribution for
+    # each matching distribution in sys.path even if they're
+    # duplicate.  We try them in order until we find one that
+    # has direct_url.json in it.
+    for dist in dists:
+        url_origin = _get_direct_url_origin(dist)
+        if url_origin is not None:
+            return url_origin
+
+    return None
+
+
+def _get_direct_url_origin(
+    dist: importlib.metadata.Distribution,
+) -> DirectURLOrigin | None:
     try:
         data = dist.read_text("direct_url.json")
     except OSError:
@@ -70,12 +94,10 @@ def _is_revision_sha(s: str) -> bool:
     return bool(re.match(r"^\b[0-9a-f]{5,40}\b$", s))
 
 
-def get_origin_commit_id(dist_name: str) -> str | None:
+def get_origin_source_dir(dist_name: str) -> pathlib.Path | None:
     url_origin = get_direct_url_origin(dist_name)
     if url_origin is None:
         return None
-    if url_origin.commit_id is not None:
-        return url_origin.commit_id
 
     try:
         dir_url = urllib.parse.urlparse(url_origin.url)
@@ -90,7 +112,22 @@ def get_origin_commit_id(dist_name: str) -> str | None:
         # No path?
         return None
 
-    git_dir = pathlib.Path(dir_url.path) / ".git"
+    return pathlib.Path(dir_url.path)
+
+
+def get_origin_commit_id(dist_name: str) -> str | None:
+    url_origin = get_direct_url_origin(dist_name)
+    if url_origin is None:
+        return None
+
+    if url_origin.commit_id is not None:
+        return url_origin.commit_id
+
+    source_dir = get_origin_source_dir(dist_name)
+    if source_dir is None:
+        return None
+
+    git_dir = source_dir / ".git"
     if not git_dir.exists():
         return None
 
@@ -149,3 +186,8 @@ def get_project_version_key() -> str:
     if commit_id:
         ver_key = f"{ver_key}.dev{commit_id[:9]}"
     return ver_key
+
+
+@functools.cache
+def get_project_source_root() -> pathlib.Path | None:
+    return get_origin_source_dir("gel")

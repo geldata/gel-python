@@ -51,12 +51,7 @@ STRONG_CIPHERSUITES = ":".join(
 )
 
 
-def _die(msg: str) -> NoReturn:
-    print(f"error: {msg}", file=sys.stderr)
-    sys.exit(1)
-
-
-def _warn(msg: str) -> NoReturn:
+def _warn(msg: str) -> None:
     print(f"warning: {msg}", file=sys.stderr)
 
 
@@ -82,7 +77,7 @@ def _real_mac_machine(machine: str) -> str:
 
     libc_path = ctypes.util.find_library("c")
     if not libc_path:
-        _die("could not find the C library")
+        raise RuntimeError("could not find the C library")
     libc = ctypes.CDLL(libc_path)
     if machine == "i386":
         # check for 32-bit emulation on a 64-bit x86 machine
@@ -114,7 +109,7 @@ def _platform() -> Tuple[str, str]:
     elif uname_sys == "Linux":
         os = "Linux"
     else:
-        _die(f"unsupported OS: {uname_sys}")
+        raise RuntimeError(f"unsupported OS: {uname_sys}")
 
     if machine in ("x86-64", "x64", "amd64"):
         machine = "x86_64"
@@ -124,14 +119,14 @@ def _platform() -> Tuple[str, str]:
     if machine not in ("x86_64", "aarch64") or (
         machine == "aarch64" and os not in ("Darwin", "Linux")
     ):
-        _die(f"unsupported hardware architecture: {machine}")
+        raise RuntimeError(f"unsupported hardware architecture: {machine}")
 
     return os, machine
 
 
 def _download(url: str, dest: pathlib.Path) -> None:
     if not url.lower().startswith("https://"):
-        _die(f"unexpected insecure URL: {url}")
+        raise RuntimeError(f"unexpected insecure URL: {url}")
 
     # Create an SSL context with certificate verification enabled
     ssl_context = ssl.create_default_context()
@@ -143,7 +138,9 @@ def _download(url: str, dest: pathlib.Path) -> None:
         with urllib.request.urlopen(url, context=ssl_context) as response:
             final_url = response.geturl()
             if not final_url.lower().startswith("https://"):
-                _die("redirected to a non-HTTPS URL, download aborted.")
+                raise RuntimeError(
+                    "redirected to a non-HTTPS URL, download aborted."
+                )
 
             if response.status != 200:
                 raise RuntimeError(f"{response.status}")
@@ -170,7 +167,7 @@ def _download(url: str, dest: pathlib.Path) -> None:
             print(f"{' ' * (len(msg) + 2)}", end="\r")
 
     except Exception as e:
-        _die(f"could not download Gel CLI: {e}")
+        raise RuntimeError(f"could not download Gel CLI: {e}")
 
 
 def _get_binary_cache_dir(os_name) -> pathlib.Path:
@@ -190,7 +187,7 @@ def _get_binary_cache_dir(os_name) -> pathlib.Path:
     elif os_name == "Darwin":
         base_cache_dir = home / "Library" / "Caches"
     else:
-        _die(f"unsupported OS: {os_name}")
+        raise RuntimeError(f"unsupported OS: {os_name}")
 
     cache_dir = base_cache_dir / "gel" / "bin"
     try:
@@ -201,7 +198,7 @@ def _get_binary_cache_dir(os_name) -> pathlib.Path:
         try:
             cache_dir = pathlib.Path(tempfile.mkdtemp(prefix="gel"))
         except Exception as e:
-            _die(f"could not create temporary directory: {e}")
+            raise RuntimeError(f"could not create temporary directory: {e}")
 
     return cache_dir
 
@@ -215,10 +212,10 @@ def _get_mountpoint(path: pathlib.Path) -> pathlib.Path:
             if os.path.ismount(str(p)):
                 return p
 
-        return p
+        return path.parents[-1]
 
 
-def _install_cli(os_name: str, arch: str, path: pathlib.Path) -> str:
+def _install_cli(os_name: str, arch: str, path: pathlib.Path) -> None:
     triple = f"{arch}"
     ext = ""
     if os_name == "Windows":
@@ -229,12 +226,12 @@ def _install_cli(os_name: str, arch: str, path: pathlib.Path) -> str:
     elif os_name == "Linux":
         triple += "-unknown-linux-musl"
     else:
-        _die(f"unexpected OS: {os}")
+        raise RuntimeError(f"unexpected OS: {os}")
 
     url = f"{PACKAGE_URL_PREFIX}/{triple}/gel-cli{ext}"
 
     if path.exists() and not path.is_file():
-        _die(
+        raise RuntimeError(
             f"{path} exists but is not a regular file, "
             f"please remove it and try again"
         )
@@ -250,16 +247,16 @@ def _install_cli(os_name: str, arch: str, path: pathlib.Path) -> str:
             | stat.S_IXOTH,
         )
     except OSError as e:
-        _die(f"could not max {path!r} executable: {e}")
+        raise RuntimeError(f"could not make {path!r} executable: {e}") from e
 
     if not os.access(str(path), os.X_OK):
-        _die(
+        raise RuntimeError(
             f"cannot execute {path!r} "
             f"(likely because {_get_mountpoint(path)} is mounted as noexec)"
         )
 
 
-def main() -> NoReturn:
+def get_cli() -> str:
     dev_cli = shutil.which("gel-dev")
     if dev_cli:
         path = pathlib.Path(dev_cli)
@@ -270,7 +267,18 @@ def main() -> NoReturn:
         if not path.exists():
             _install_cli(os, arch, path)
 
-    _run_cli(path)
+    return str(path)
+
+
+def main() -> NoReturn:
+    try:
+        _run_cli(get_cli())
+    except RuntimeError as e:
+        print(f"error: {e.args[0]}", file=sys.stderr)
+        sys.exit(1)
+    except Exception as e:
+        print(f"error: {e}", file=sys.stderr)
+        sys.exit(1)
 
 
 if __name__ == "__main__":
