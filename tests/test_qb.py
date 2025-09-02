@@ -65,7 +65,11 @@ class TestQueryBuilder(tb.ModelTestCase):
         self.assertEqual(res.name, "Alice")
         self.assertEqual(res.nickname, "Little Alice")
 
-    @tb.xfail
+    @tb.xfail_unimplemented('''
+        Needs casts. Issue #672.
+        Medium priority.
+        (We might do different syntax and need to change the test.)
+    ''')
     def test_qb_computed_03(self):
         from models.orm import default, std
 
@@ -187,6 +191,25 @@ class TestQueryBuilder(tb.ModelTestCase):
             [("Alice", False), ("Billie", True)],
         )
 
+    @tb.xfail('''
+        Broken because of bug #893
+    ''')
+    def test_qb_order_04(self):
+        from models.orm import default, std
+
+        res = self.client.query(
+            default.UserGroup.select(
+                name=True,
+            )
+            .filter(
+                lambda g: std.count(g.users.filter(lambda u: u.name_len > 5))
+                >= 0
+            )
+            .order_by(name=True)
+        )
+        names = [x.name for x in res]
+        self.assertEqual(names, sorted(names))
+
     def test_qb_filter_01(self):
         from models.orm import default, std
 
@@ -227,7 +250,6 @@ class TestQueryBuilder(tb.ModelTestCase):
             ["Alice", "Billie", "Cameron", "Dana"],
         )
 
-    @tb.xfail
     def test_qb_filter_03(self):
         from models.orm import default
 
@@ -240,8 +262,18 @@ class TestQueryBuilder(tb.ModelTestCase):
         )
         self.assertEqual(res.name, "red")
         self.assertEqual(res.mascot, "dragon")
+
+        # We didn't fetch name as part of that query so we need to
+        # fetch them separately to check that the order still worked.
+        users = []
+        for u in res.users:
+            ures = self.client.get(
+                default.User.select(name=True).filter(id=u.id)
+            )
+            users.append(ures.name)
+
         self.assertEqual(
-            [u.name for u in res.users], ["Alice", "Billie", "Cameron", "Dana"]
+            users, ["Alice", "Billie", "Cameron", "Dana"]
         )
 
     def test_qb_filter_04(self):
@@ -261,7 +293,11 @@ class TestQueryBuilder(tb.ModelTestCase):
             [u.name for u in res.users], ["Cameron", "Billie", "Alice"]
         )
 
-    @tb.xfail
+    @tb.xfail_unimplemented('''
+        I think supporting *typing* this will need a PEP.
+        We could make it work dynamically if we wanted, though
+        or add a **kwargs.
+    ''')
     def test_qb_filter_05(self):
         from models.orm import default, std
 
@@ -275,7 +311,10 @@ class TestQueryBuilder(tb.ModelTestCase):
         self.assertEqual(res.name, "red")
         self.assertEqual(res.user_count, 4)
 
-    @tb.xfail
+    @tb.xfail_unimplemented('''
+        I think supporting *typing* this will need a PEP.
+        We could make it work dynamically if we wanted, though.
+    ''')
     def test_qb_filter_06(self):
         from models.orm import default, std
 
@@ -323,7 +362,10 @@ class TestQueryBuilder(tb.ModelTestCase):
         self.assertEqual(post.author.name, "Elsa")
         self.assertEqual(post.body, "*magic stuff*")
 
-    @tb.skip_typecheck  # FIXME: array equality busted
+    @tb.xfail('''
+        == on Array seems busted both for the typechecker and runtime
+        Issue #896
+    ''')
     def test_qb_filter_09(self):
         from models.orm import default, std
 
@@ -413,22 +455,18 @@ class TestQueryBuilder(tb.ModelTestCase):
         self.assertEqual(res[1].str, "hello world")
         self.assertEqual(set(res[1].p_multi_str), {"brown", "fox"})
 
-    @tb.xfail
     def test_qb_multiprop_02(self):
-        from models.orm import default
+        from models.orm import default, std
 
-        # FIXME: This straight up hangs
-        raise Exception("This filter will hang")
         res = self.client.get(
             default.KitchenSink.select(
                 str=True,
                 p_multi_str=True,
-            ).filter(lambda k: "quick" in k.p_multi_str)
+            ).filter(lambda k: std.in_("quick", k.p_multi_str))
         )
         self.assertEqual(res.str, "another one")
         self.assertEqual(set(res.p_multi_str), {"quick", "fox", "jumps"})
 
-    @tb.xfail
     def test_qb_multiprop_03(self):
         from models.orm import default
 
@@ -437,26 +475,32 @@ class TestQueryBuilder(tb.ModelTestCase):
                 str=True,
                 p_multi_str=True,
                 # In filters == and in behave similarly for multi props
-            ).filter(lambda k: "quick" == k.p_multi_str)
+            ).filter(lambda k: k.p_multi_str == "quick")
         )
         self.assertEqual(res.str, "another one")
         self.assertEqual(set(res.p_multi_str), {"quick", "fox", "jumps"})
 
-    @tb.xfail
+    @tb.xfail_unimplemented('''
+        We don't support .order_by on a multi prop.
+        We might want *some* way to do it.
+    ''')
     def test_qb_multiprop_04(self):
         from models.orm import default
 
         res = self.client.get(
             default.KitchenSink.select(
                 str=True,
-                # FIXME: Not sure how to express filtering a multi prop
+                # FIXME: Not sure how to express ordering a multi prop
                 p_multi_str=lambda k: k.p_multi_str.order_by(k.p_multi_str),
             ).filter(str="another one")
         )
         self.assertEqual(res.str, "another one")
         self.assertEqual(set(res.p_multi_str), {"brown", "jumps"})
 
-    @tb.xfail
+    @tb.xfail_unimplemented('''
+        We don't support .filter on a multi prop.
+        We might want *some* way to do it.
+    ''')
     def test_qb_multiprop_05(self):
         from models.orm import default, std
 
@@ -537,7 +581,11 @@ class TestQueryBuilder(tb.ModelTestCase):
         with self.assertRaisesRegex(TypeError, "use std.exists"):
             default.User.filter(lambda u: u.name is not None)  # type: ignore
 
-    @tb.xfail
+    @tb.xfail('''
+        Filtering on enums broken. And Enums need __gel_type_class__?
+        See #635
+    ''')
+    @tb.skip_typecheck
     def test_qb_enum_01(self):
         from models.orm import default
 
@@ -587,7 +635,12 @@ class TestQueryBuilderModify(tb.ModelTestCase):
         self.assertEqual(res.name, "blue")
         self.assertEqual({u.name for u in res.users}, {"Zoe", "Dana"})
 
-    @tb.xfail
+    @tb.xfail('''
+       Runtime failure because assert_single doesn't work.
+       Bug #897.
+
+       Also fails at typecheck time because assert_single can return None?
+    ''')
     def test_qb_update_03(self):
         from models.orm import default, std
 
@@ -604,7 +657,13 @@ class TestQueryBuilderModify(tb.ModelTestCase):
         self.assertEqual(res.author.name, "Zoe")
         self.assertEqual({g.name for g in res.author.groups}, {"redgreen"})
 
-    @tb.xfail
+    @tb.xfail('''
+       Runtime failure because assert_single doesn't work.
+       Bug #897.
+
+       Also fails at typecheck time because update's *types* dont't
+       support callbacks, though runtime does.
+    ''')
     def test_qb_update_04(self):
         from models.orm import default, std
 
@@ -714,7 +773,10 @@ class TestQueryBuilderModify(tb.ModelTestCase):
         self.assertEqual(res[1].body, "I'm Alice")
         self.assertEqual(res[1].author.name, "Alice")
 
-    @tb.xfail
+    @tb.xfail('''
+        Filtering on enums broken. And Enums need __gel_type_class__?
+        See #635
+    ''')
     def test_qb_enum_edit_01(self):
         from models.orm import default
 
@@ -729,7 +791,10 @@ class TestQueryBuilderModify(tb.ModelTestCase):
         self.assertEqual(e.color, default.Color.Orange)
         self.assertEqual(e.name, "red")
 
-    @tb.xfail
+    @tb.xfail('''
+        Filtering on enums broken. And Enums need __gel_type_class__?
+        See #635
+    ''')
     def test_qb_enum_edit_02(self):
         from models.orm import default
 
