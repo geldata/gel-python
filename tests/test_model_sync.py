@@ -667,7 +667,7 @@ class TestModelSyncComputedSingleProp(tb.ModelTestCase):
         }
 
         type FromStableExpr {
-            val := count(FromStableExpr);
+            val := count(detached FromStableExpr);
         };
 
         global SomeGlobal: int64;
@@ -885,8 +885,10 @@ class TestModelSyncComputedSingleProp(tb.ModelTestCase):
         from models.TestModelSyncComputedSingleProp import default
 
         target = default.Target(val=1)
-        original = default.FromSingleLink()
-        self.client.sync(original, target)
+        self.client.save(target)
+
+        original = default.FromSingleLink(target=target)
+        self.client.sync(original)
 
         target.val = 9
         self.client.sync(original, target)
@@ -1886,7 +1888,7 @@ class TestModelSyncComputedMultiProp(tb.ModelTestCase):
         }
 
         type FromStableExpr {
-            val := array_unpack(array_fill(9, count(FromStableExpr)));
+            val := array_unpack(array_fill(9, count(detached FromStableExpr)));
         };
 
         global SomeGlobal: int64;
@@ -2104,8 +2106,10 @@ class TestModelSyncComputedMultiProp(tb.ModelTestCase):
         from models.TestModelSyncComputedMultiProp import default
 
         target = default.Target(val=1)
-        original = default.FromSingleLink()
-        self.client.sync(original, target)
+        self.client.save(target)
+
+        original = default.FromSingleLink(target=target)
+        self.client.sync(original)
 
         target.val = 9
         self.client.sync(original, target)
