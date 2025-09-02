@@ -236,6 +236,22 @@ class _ImportScope:
         assert ref_expr is not None
         return ref_expr
 
+    def import_star(
+        self,
+        module: str,
+        *,
+        import_time: ImportTime = ImportTime.runtime,
+    ) -> None:
+        if _is_all_dots(module):
+            raise ValueError(
+                f"import_name: bare relative imports are "
+                f"not supported: {module!r}"
+            )
+
+        imported = Import(module=module, attr="*", time=import_time)
+        self.imports[import_time][imported.module, imported.attr] = imported
+        self.ns.add(imported.name)
+
 
 def _is_all_dots(s: str) -> bool:
     return bool(s) and all(c == "." for c in s)
@@ -402,6 +418,31 @@ class GeneratedModule:
             localns=localns,
         )
 
+    def import_star(
+        self,
+        module: str,
+        *,
+        import_time: ImportTime = ImportTime.runtime,
+    ) -> None:
+        if import_time is ImportTime.typecheck_runtime:
+            raise ValueError(
+                "typecheck/deferred import time does not support star imports"
+            )
+        if import_time is ImportTime.local:
+            scope = _ImportScope(set(), parent=self._imports)
+        else:
+            scope = self._imports
+
+        scope.import_star(
+            module,
+            import_time=ImportTime.runtime
+            if import_time is ImportTime.local
+            else import_time,
+        )
+
+        if import_time is ImportTime.local:
+            self.write(self.render_imports(scope))
+
     def export(self, *names: str) -> None:
         self._exports.update(names)
 
@@ -525,7 +566,7 @@ class GeneratedModule:
                 ]
             )
         else:
-            return ""
+            return "__all__ = ()"
 
     def render_imports(self, scope: _ImportScope | None = None) -> str:
         if scope is None:

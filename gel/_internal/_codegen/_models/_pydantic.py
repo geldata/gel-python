@@ -8,7 +8,6 @@ from typing import (
     Any,
     Literal,
     NamedTuple,
-    Optional,
     Protocol,
     TypedDict,
     TypeVar,
@@ -26,6 +25,7 @@ import json
 import graphlib
 import logging
 import operator
+import os.path
 import pathlib
 import tempfile
 import textwrap
@@ -50,6 +50,7 @@ from gel._internal._namespace import ident, dunder
 from gel._internal._qbmodel import _abstract as _qbmodel
 from gel._internal._reflection._enums import SchemaPart, TypeModifier
 from gel._internal._schemapath import SchemaPath
+from gel._internal._polyfills import _strenum
 
 from .._generator import C, AbstractCodeGenerator
 from .._module import ImportTime, CodeSection, GeneratedModule
@@ -177,13 +178,31 @@ class GeneratedState:
     client_version: str
 
 
+class StdSourceMethod(_strenum.StrEnum):
+    COPY = "copy"
+    REEXPORT = "reexport"
+
+
 class PydanticModelsGenerator(AbstractCodeGenerator):
-    _output: Optional[str | pathlib.Path] = None
+    _output: pathlib.Path | None = None
+    _source_std_from: pathlib.Path | None
+    _source_std_method: StdSourceMethod | None
+    _std_only: bool
 
     def _apply_cli_config(self, args: argparse.Namespace) -> None:
         super()._apply_cli_config(args)
         if args.output is not None:
-            self._output = args.output
+            self._output = pathlib.Path(args.output)
+        if std_from := getattr(args, "source_std_from", None):
+            self._source_std_from = pathlib.Path(std_from)
+        else:
+            self._source_std_from = None
+        if std_method := getattr(args, "source_std_method", None):
+            assert isinstance(std_method, str)
+            self._source_std_method = StdSourceMethod(std_method)
+        else:
+            self._source_std_method = None
+        self._std_only = bool(getattr(args, "std_only", False))
 
     def _apply_env_output(self, value: Any) -> None:
         if not isinstance(value, str):
@@ -208,13 +227,14 @@ class PydanticModelsGenerator(AbstractCodeGenerator):
         if not models_root:
             for app_file in map(pathlib.Path, ["app.py", "api.py"]):
                 if app_file.is_file():
-                    models_root = "models"
+                    models_root = pathlib.Path("models")
                     break
 
         # Or else, defaults to "models" directory in the project root
         if not models_root:
             models_root = self._project_dir / "models"
 
+        self._project_dir.mkdir(exist_ok=True)
         tmp_models_root = tempfile.TemporaryDirectory(
             prefix=".~tmp.models.",
             dir=self._project_dir,
@@ -225,6 +245,7 @@ class PydanticModelsGenerator(AbstractCodeGenerator):
             db_state = reflection.fetch_branch_state(self._client)
             this_client_ver = _ver_utils.get_project_version_key()
             std_schema: Schema | None = None
+            std_manifest: set[pathlib.Path] | None = None
 
             std_gen = SchemaGenerator(
                 self._client,
@@ -233,50 +254,87 @@ class PydanticModelsGenerator(AbstractCodeGenerator):
 
             outdir = pathlib.Path(tmp_models_root.name)
             need_dirsync = False
+            sync_sources: list[pathlib.Path] = []
+            sync_method: Literal["copy", "move"] = "move"
 
-            if (
-                file_state is None
-                or file_state.db.server_version != db_state.server_version
-                or file_state.client_version != this_client_ver
-                or self._no_cache
-            ):
-                std_schema, std_manifest = std_gen.run(outdir)
-                self._save_std_schema_cache(
-                    std_schema, db_state.server_version
-                )
-                need_dirsync = True
-            else:
-                std_schema = self._load_std_schema_cache(
-                    db_state.server_version,
-                )
-                std_manifest = std_gen.dry_run_manifest()
+            if self._source_std_from is not None:
+                std_state = self._get_last_state(self._source_std_from)
+                if (
+                    std_state is not None
+                    and std_state.db.server_version == db_state.server_version
+                    and std_state.client_version == this_client_ver
+                ):
+                    std_schema = self._load_std_schema_cache(
+                        db_state.server_version,
+                    )
+                    std_manifest = std_gen.dry_run_manifest()
+                    if std_schema is not None:
+                        if self._source_std_method is StdSourceMethod.COPY:
+                            sync_sources.append(self._source_std_from)
+                            sync_method = "copy"
+                        else:
+                            std_gen.reexport(
+                                self._source_std_from,
+                                models_root,
+                                outdir=outdir,
+                            )
 
-            if (
-                file_state is None
-                or file_state.db.server_version != db_state.server_version
-                or file_state.db.top_migration != db_state.top_migration
-                or file_state.client_version != this_client_ver
-                or self._no_cache
-            ):
-                usr_gen = SchemaGenerator(
-                    self._client,
-                    reflection.SchemaPart.USER,
-                    std_schema=std_schema,
-                )
-                usr_gen.run(outdir)
-                need_dirsync = True
+            if std_manifest is None or std_schema is None:
+                if (
+                    file_state is not None
+                    and file_state.db.server_version == db_state.server_version
+                    and file_state.client_version == this_client_ver
+                    and not self._no_cache
+                ):
+                    std_schema = self._load_std_schema_cache(
+                        db_state.server_version,
+                    )
 
-            self._write_state(
-                GeneratedState(db=db_state, client_version=this_client_ver),
-                outdir,
-            )
+                if std_schema is not None:
+                    std_manifest = std_gen.dry_run_manifest()
+                else:
+                    std_schema, std_manifest = std_gen.run(outdir)
+                    self._save_std_schema_cache(
+                        std_schema, db_state.server_version
+                    )
+                    need_dirsync = True
+                    sync_sources.append(outdir)
+
+            if not self._std_only:
+                if (
+                    file_state is None
+                    or file_state.db.server_version != db_state.server_version
+                    or file_state.db.top_migration != db_state.top_migration
+                    or file_state.client_version != this_client_ver
+                    or self._no_cache
+                ):
+                    usr_gen = SchemaGenerator(
+                        self._client,
+                        reflection.SchemaPart.USER,
+                        std_schema=std_schema,
+                    )
+                    usr_gen.run(outdir)
+                    need_dirsync = True
+                    if outdir not in sync_sources:
+                        sync_sources.append(outdir)
 
             if need_dirsync:
                 for fn in list(std_manifest):
                     # Also keep the directories
                     std_manifest.update(fn.parents)
 
-                _dirsync.dirsync(outdir, models_root, keep=std_manifest)
+                _dirsync.dirsync(
+                    sync_sources,
+                    models_root,
+                    keep=std_manifest,
+                    ignore={"_state.json"},
+                    method=sync_method,
+                )
+
+            self._write_state(
+                GeneratedState(db=db_state, client_version=this_client_ver),
+                models_root,
+            )
 
         if not self._quiet:
             self.print_msg(
@@ -286,7 +344,8 @@ class PydanticModelsGenerator(AbstractCodeGenerator):
 
     def _cache_key(self, suf: str, sv: reflection.ServerVersion) -> str:
         ver_key = _ver_utils.get_project_version_key()
-        return f"gm-c-{ver_key}-s-{sv.major}.{sv.minor}-{suf}"
+        cache_key = f"gm-c-{ver_key}-s-{sv.major}.{sv.minor}"
+        return f"{cache_key}-{suf}"
 
     def _save_std_schema_cache(
         self, schema: Schema, sv: reflection.ServerVersion
@@ -294,12 +353,18 @@ class PydanticModelsGenerator(AbstractCodeGenerator):
         _cache.save_json(
             self._cache_key("std.json", sv),
             dataclasses.asdict(schema),
+            cache_dir=self._cache_dir,
+            extra_key=self._extra_cache_key,
         )
 
     def _load_std_schema_cache(
         self, sv: reflection.ServerVersion
     ) -> Schema | None:
-        schema_data = _cache.load_json(self._cache_key("std.json", sv))
+        schema_data = _cache.load_json(
+            self._cache_key("std.json", sv),
+            cache_dir=self._cache_dir,
+            extra_key=self._extra_cache_key,
+        )
         if schema_data is None:
             return None
 
@@ -338,7 +403,7 @@ class PydanticModelsGenerator(AbstractCodeGenerator):
         if not isinstance(client_version, str) or not client_version:
             return None
 
-        if not isinstance(top_migration, str):
+        if top_migration is not None and not isinstance(top_migration, str):
             return None
 
         return GeneratedState(
@@ -362,11 +427,19 @@ class PydanticModelsGenerator(AbstractCodeGenerator):
             return None
 
 
+class ModuleAspect(enum.Enum):
+    MAIN = enum.auto()
+    SHAPES = enum.auto()
+    LATE = enum.auto()
+
+
 class SchemaGenerator:
     def __init__(
         self,
         client: abstract.ReadOnlyExecutor,
         schema_part: reflection.SchemaPart,
+        *,
+        source_from: str | None = None,
         std_schema: Schema | None = None,
     ) -> None:
         self._client = client
@@ -382,14 +455,19 @@ class SchemaGenerator:
         self._named_tuples: dict[str, reflection.NamedTupleType] = {}
         self._wrapped_types: set[str] = set()
         self._std_schema = std_schema
+        self._source_from = source_from
         if schema_part is not SchemaPart.STD and std_schema is None:
             raise ValueError(
                 "must pass std_schema when reflecting user schemas"
             )
 
-    def dry_run_manifest(self) -> set[pathlib.Path]:
+    def iter_modpaths(
+        self,
+        *,
+        aspects: Iterable[ModuleAspect] = ModuleAspect,
+    ) -> Iterator[tuple[SchemaPath, ModuleAspect, bool]]:
         part = self._schema_part
-        std_modules: dict[SchemaPath, bool] = dict.fromkeys(
+        modules: dict[SchemaPath, bool] = dict.fromkeys(
             (
                 SchemaPath(mod)
                 for mod in reflection.fetch_modules(self._client, part)
@@ -397,23 +475,85 @@ class SchemaGenerator:
             False,
         )
 
-        for mod in list(std_modules):
+        for mod in [*modules]:
             if mod.parent:
-                std_modules[mod.parent] = True
+                modules[mod.parent] = True
 
-        files = set()
-        for mod, has_submodules in std_modules.items():
+        for mod, has_submodules in modules.items():
             modpath = get_modpath(mod, ModuleAspect.MAIN)
             as_pkg = mod_is_package(modpath, part) or has_submodules
-            for aspect in ModuleAspect.__members__.values():
-                modpath = get_modpath(mod, aspect)
-                files.add(mod_filename(modpath, as_pkg=as_pkg))
+            if not aspects:
+                yield modpath, ModuleAspect.MAIN, as_pkg
+            else:
+                for aspect in aspects:
+                    modpath = get_modpath(mod, aspect)
+                    yield modpath, aspect, as_pkg
 
         common_modpath = get_common_types_modpath(self._schema_part)
         as_pkg = mod_is_package(common_modpath, part)
-        files.add(mod_filename(common_modpath, as_pkg=as_pkg))
+        yield common_modpath, ModuleAspect.MAIN, as_pkg
 
-        return files
+    def dry_run_manifest(self) -> set[pathlib.Path]:
+        return {
+            mod_filename(modpath, as_pkg=is_pkg)
+            for modpath, _, is_pkg in self.iter_modpaths()
+        }
+
+    def reexport(
+        self,
+        srcdir: pathlib.Path,
+        dstdir: pathlib.Path,
+        outdir: pathlib.Path,
+    ) -> None:
+        common = pathlib.Path(os.path.commonpath((srcdir, dstdir)))
+        srcpath = SchemaPath.from_segments(*srcdir.relative_to(common).parts)
+        dstpath = SchemaPath.from_segments(*dstdir.relative_to(common).parts)
+
+        for modpath, _, is_pkg in self.iter_modpaths(
+            aspects=(ModuleAspect.MAIN,)
+        ):
+            for aspect in ModuleAspect:
+                aspect_mod = get_modpath(modpath, aspect)
+                fname = mod_filename(aspect_mod, as_pkg=is_pkg)
+                if not (srcdir / fname).exists():
+                    continue
+
+                genmod = GeneratedModule(COMMENT, BASE_IMPL)
+
+                rel_imp = _resolve_rel_import(
+                    src_mod=dstpath / modpath,
+                    src_aspect_mod=dstpath / aspect_mod,
+                    src_is_pkg=is_pkg,
+                    src_aspect=aspect,
+                    dst_mod=srcpath / modpath,
+                    dst_aspect_mod=srcpath / aspect_mod,
+                    dst_aspect=aspect,
+                )
+
+                assert rel_imp is not None
+
+                genmod.import_star(rel_imp.module)
+
+                srcmod_all = genmod.import_qual_name(
+                    rel_imp.module,
+                    "__all__",
+                    suggested_module_alias=rel_imp.module_alias,
+                )
+
+                list_ = genmod.import_name(
+                    "builtins", "list", import_time=ImportTime.typecheck
+                )
+                str_ = genmod.import_name(
+                    "builtins", "str", import_time=ImportTime.typecheck
+                )
+
+                genmod.write(f"__all__: {list_}[{str_}] = []")
+                genmod.write(f"__all__.extend({srcmod_all})")
+
+                tgt_file = outdir / fname
+                tgt_file.parent.mkdir(parents=True, exist_ok=True)
+                with open(tgt_file, "w", encoding="utf8") as f:
+                    genmod.output(f)
 
     def run(self, outdir: pathlib.Path) -> tuple[Schema, set[pathlib.Path]]:
         schema = self.introspect_schema()
@@ -453,23 +593,25 @@ class SchemaGenerator:
             written.update(module.write_files(outdir))
             modules[modname] = module
 
-        all_modules = list(self._modules)
         if self._schema_part is not reflection.SchemaPart.STD:
+            all_modules = list(self._modules)
             all_modules += [m for m in self._std_modules if len(m.parts) == 1]
-        module = GeneratedSchemaModule(
-            SchemaPath(),
-            all_types=self._types,
-            all_casts=self._casts,
-            all_operators=self._operators,
-            all_globals=self._globals,
-            modules=all_modules,
-            schema_part=self._schema_part,
-        )
-        module.write_submodules([m for m in all_modules if len(m.parts) == 1])
-        default_module = modules.get(SchemaPath("default"))
-        if default_module is not None:
-            module.reexport_module(default_module)
-        written.update(module.write_files(outdir))
+            module = GeneratedSchemaModule(
+                SchemaPath(),
+                all_types=self._types,
+                all_casts=self._casts,
+                all_operators=self._operators,
+                all_globals=self._globals,
+                modules=all_modules,
+                schema_part=self._schema_part,
+            )
+            module.write_submodules(
+                [m for m in all_modules if len(m.parts) == 1]
+            )
+            default_module = modules.get(SchemaPath("default"))
+            if default_module is not None:
+                module.reexport_module(default_module)
+            written.update(module.write_files(outdir))
 
         return schema, written
 
@@ -557,12 +699,6 @@ class SchemaGenerator:
         return module.write_files(outdir)
 
 
-class ModuleAspect(enum.Enum):
-    MAIN = enum.auto()
-    SHAPES = enum.auto()
-    LATE = enum.auto()
-
-
 class Import(NamedTuple):
     module: str
     module_alias: str | None
@@ -618,6 +754,51 @@ def mod_filename(
         filename = f"{modpath.name}.py"
 
     return dirpath.as_pathlib_path() / filename
+
+
+def _resolve_rel_import(
+    *,
+    src_mod: SchemaPath,
+    src_aspect_mod: SchemaPath,
+    src_aspect: ModuleAspect,
+    src_is_pkg: bool,
+    dst_mod: SchemaPath,
+    dst_aspect_mod: SchemaPath,
+    dst_aspect: ModuleAspect,
+) -> Import | None:
+    if dst_aspect_mod == src_aspect_mod and dst_aspect is src_aspect:
+        # It's this module, no need to import
+        return None
+    else:
+        if dst_mod == src_mod and src_aspect is ModuleAspect.MAIN:
+            module_alias = "base"
+        else:
+            module_alias = "_".join(dst_mod.parts)
+
+        if dst_aspect is ModuleAspect.SHAPES:
+            module_alias += "_shapes"
+        elif dst_aspect is ModuleAspect.LATE:
+            module_alias += "_late"
+
+        src_pkg = src_aspect_mod if src_is_pkg else src_aspect_mod.parent
+        common_parts = dst_aspect_mod.common_parts(src_pkg)
+        import_tail = dst_aspect_mod.parts[len(common_parts) :]
+
+        relative_depth = len(src_pkg.parts) - len(common_parts) + 1
+        if not import_tail:
+            relative_depth += 1
+
+        dots = "." * relative_depth
+        if not import_tail:
+            # Pure ancestor import
+            py_mod = f"{dots}{dst_mod.name}"
+        else:
+            py_mod = dots + ".".join(import_tail)
+
+        return Import(
+            module=py_mod,
+            module_alias=module_alias,
+        )
 
 
 def _map_name(
@@ -879,7 +1060,6 @@ class BaseGeneratedModule:
     ) -> Generator[io.TextIOWrapper, None, None]:
         mod_fname = mod_filename(modpath, as_pkg=as_pkg)
         # Along the dirpath we need to ensure that all packages are created
-        self._init_dir(path)
         for el in mod_fname.parent.parts:
             path /= el
             self._init_dir(path)
@@ -1289,46 +1469,18 @@ class BaseGeneratedModule:
         aspect: ModuleAspect,
     ) -> Import | None:
         imp_mod = module
-        cur_mod = self.current_modpath
         if aspect is not ModuleAspect.MAIN:
             imp_mod = get_modpath(imp_mod, aspect)
 
-        if imp_mod == cur_mod and aspect is self.current_aspect:
-            # It's this module, no need to import
-            return None
-        else:
-            if (
-                module == self.canonical_modpath
-                and self.current_aspect is ModuleAspect.MAIN
-            ):
-                module_alias = "base"
-            else:
-                module_alias = "_".join(module.parts)
-
-            if aspect is ModuleAspect.SHAPES:
-                module_alias += "_shapes"
-            elif aspect is ModuleAspect.LATE:
-                module_alias += "_late"
-
-            cur_pkg = cur_mod if self._is_package else cur_mod.parent
-            common_parts = imp_mod.common_parts(cur_pkg)
-            import_tail = imp_mod.parts[len(common_parts) :]
-
-            relative_depth = len(cur_pkg.parts) - len(common_parts) + 1
-            if not import_tail:
-                relative_depth += 1
-
-            dots = "." * relative_depth
-            if not import_tail:
-                # Pure ancestor import
-                py_mod = f"{dots}{module.name}"
-            else:
-                py_mod = dots + ".".join(import_tail)
-
-            return Import(
-                module=py_mod,
-                module_alias=module_alias,
-            )
+        return _resolve_rel_import(
+            src_mod=self.canonical_modpath,
+            src_aspect_mod=self.current_modpath,
+            src_aspect=self.current_aspect,
+            src_is_pkg=self._is_package,
+            dst_mod=module,
+            dst_aspect_mod=imp_mod,
+            dst_aspect=aspect,
+        )
 
     def get_type(
         self,
@@ -2289,6 +2441,8 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                             self.write()
                         self.write_type_reflection(ptype)
 
+                self.export(tname)
+
             for gt, bases in generics.items():
                 if gt.name in PSEUDO_TYPES:
                     continue
@@ -2316,6 +2470,8 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                         )
                     else:
                         self.write("pass")
+
+                self.export(gt.name)
                 self.write_section_break()
 
         with self.code_section(CodeSection.after_late_import):
@@ -3105,6 +3261,9 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                 style=style,
             )
 
+        if style == "function":
+            self.export(ident(overloads[0].ident))
+
     def _write_potentially_overlapping_overloads(
         self,
         overloads: list[_Callable_T],
@@ -3609,6 +3768,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                         self.write("...")
 
             self.write_object_type_reflection(objtype, reflection_bases)
+            self.export(base_shape_class)
 
         def _mangle_default_shape(name: str) -> str:
             return f"__{name}_default_shape__"
@@ -3639,6 +3799,8 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                         ptr_t = self.get_ptr_type(objtype, ptr)
                         defn = f"{type_alias}('{ptr.name}', '{ptr_t}')"
                         self.write(f"{ptr.name} = {defn}")
+
+            self.export(default_shape_class)
 
         self.write()
         self.write()
@@ -3767,6 +3929,8 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             [default_shape_class, *vbase_types],
             class_kwargs={**class_kwargs, **class_r_kwargs},
         ):
+            self.export(name)
+
             if not base_types:
                 with self.not_type_checking():
                     self.write(f"__gel_type_class__ = __{name}_ops__")

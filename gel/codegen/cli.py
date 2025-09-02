@@ -107,6 +107,31 @@ def _augment_models_parser(parser: argparse.ArgumentParser) -> None:
             "defaults to <PROJECT_ROOT>/models"
         ),
     )
+    parser.add_argument(
+        "--std-only",
+        action=argparse.BooleanOptionalAction,
+        help=(
+            "Generate only the stdlib reflection and omit all user and "
+            "extension modules"
+        ),
+    )
+    parser.add_argument(
+        "--source-std-from",
+        help=(
+            "Instead of generating Gel stdlib reflection anew, attempt to "
+            "source and copy it from the given directory"
+        ),
+    )
+    parser.add_argument(
+        "--source-std-method",
+        choices=["copy", "reexport"],
+        default="copy",
+        help=(
+            "How to source the std reflection specified in --source-std-from. "
+            "Pass `copy` to copy the sources and `reexport` to generate shims "
+            "that import and reexport all modules within specified reflection."
+        ),
+    )
 
 
 def run_models_generator(args: argparse.Namespace) -> None:
