@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import os
 
-from gel import _testbase as tb
+from gel._internal._testbase import _models as tb
 
 
 @tb.typecheck

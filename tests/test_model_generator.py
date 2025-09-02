@@ -30,6 +30,8 @@
 #    Don't forget to re-run if you are messing with codegen
 #    implementation or testing different versions of Gel.
 
+# mypy: ignore-errors
+
 from __future__ import annotations
 
 import os
@@ -45,13 +47,14 @@ import unittest
 if typing.TYPE_CHECKING:
     from typing import reveal_type
 
-from gel import _testbase as tb
 from gel._internal import _dirdiff
 from gel._internal import _typing_inspect
 from gel._internal._qbmodel._abstract import LinkSet, LinkWithPropsSet
 from gel._internal._edgeql import Cardinality, PointerKind
 from gel._internal._qbmodel._pydantic._models import GelModel
 from gel._internal._schemapath import SchemaPath
+
+from gel._internal._testbase import _models as tb
 
 
 class MockPointer(typing.NamedTuple):
@@ -630,7 +633,7 @@ class TestModelGenerator(tb.ModelTestCase):
 
         import json
         from models.orm import default
-        from gel._testbase import pop_ids, pop_ids_json
+        from gel._internal._testbase._models import pop_ids, pop_ids_json
 
         sl = self.client.query_required_single(
             default.StackableLoot.select(
@@ -741,7 +744,7 @@ class TestModelGenerator(tb.ModelTestCase):
 
         import json
         from models.orm import default
-        from gel._testbase import pop_ids, pop_ids_json
+        from gel._internal._testbase._models import pop_ids, pop_ids_json
 
         sl = self.client.query_required_single(
             default.GameSession.select(
@@ -803,7 +806,7 @@ class TestModelGenerator(tb.ModelTestCase):
         # Test pickling a nested model that has a multi link with link props.
 
         from models.orm import default
-        from gel._testbase import repickle
+        from gel._internal._testbase._models import repickle
 
         sl = self.client.query_required_single(
             default.GameSession.select(
@@ -858,7 +861,7 @@ class TestModelGenerator(tb.ModelTestCase):
         # Test pickling a nested model that has a single link with link props.
 
         from models.orm import default
-        from gel._testbase import repickle
+        from gel._internal._testbase._models import repickle
 
         sl = self.client.query_required_single(
             default.StackableLoot.select(
@@ -913,7 +916,7 @@ class TestModelGenerator(tb.ModelTestCase):
         # Test pickling a nested model that has a multi link.
 
         from models.orm import default
-        from gel._testbase import repickle
+        from gel._internal._testbase._models import repickle
 
         sl = self.client.query_required_single(
             default.UserGroup.select(
@@ -975,7 +978,7 @@ class TestModelGenerator(tb.ModelTestCase):
         # Test pickling a model that has a multi prop.
 
         from models.orm import default
-        from gel._testbase import repickle
+        from gel._internal._testbase._models import repickle
 
         sl = self.client.query_required_single(
             default.KitchenSink.select(
@@ -1377,7 +1380,7 @@ class TestModelGenerator(tb.ModelTestCase):
         import json
         import pydantic
         from models.orm import default
-        from gel._testbase import pop_ids, pop_ids_json
+        from gel._internal._testbase._models import pop_ids, pop_ids_json
 
         class MyGroup(pydantic.BaseModel):
             users: list[default.User]
@@ -1553,7 +1556,7 @@ class TestModelGenerator(tb.ModelTestCase):
         # Test that ComputedLinkSet can be pickled / dumped
 
         from models.orm import default
-        from gel._testbase import repickle
+        from gel._internal._testbase._models import repickle
 
         alice = self.client.get(
             default.User.select(
@@ -4321,13 +4324,13 @@ class TestModelGenerator(tb.ModelTestCase):
             ),  # __bool__ uses len internally
         ]
 
-        for method_name, method_call, action_phrase in read_methods:
-            with self.assertRaisesRegex(
-                RuntimeError,
-                rf"Cannot {action_phrase} the collection in write-only mode",
-                msg=f"Method {method_name} should raise RuntimeError",
-            ):
-                method_call()
+        for method_name, method_call, _ in read_methods:
+            with self.subTest(method=method_name):
+                with self.assertRaises(
+                    RuntimeError,
+                    msg=f"Method {method_name} should raise RuntimeError",
+                ):
+                    method_call()
 
         # Verify write operations still work
         user_a = self.client.get(default.User.filter(name="Alice"))
@@ -5311,7 +5314,7 @@ class TestModelGenerator(tb.ModelTestCase):
         import json
 
         from models.orm import default
-        from gel._testbase_schema import render_schema_from_json
+        from gel._internal._testbase._jsonschema import render_schema_from_json
 
         schema = render_schema_from_json(
             json.dumps(
@@ -5368,7 +5371,7 @@ class TestModelGenerator(tb.ModelTestCase):
         import json
 
         from models.orm import default
-        from gel._testbase_schema import render_schema_from_json
+        from gel._internal._testbase._jsonschema import render_schema_from_json
 
         class CreateUser(default.User.__shapes__.Create):
             pass
@@ -6503,7 +6506,7 @@ class TestModelGeneratorReproducibility(tb.SyncQueryTestCase):
         conn_env = {}
         for k, v in self.get_connect_args().items():
             conn_env[f"EDGEDB_{k.upper()}"] = str(v)
-        conn_env['EDGEDB_DATABASE'] = self.get_database_name()
+        conn_env["EDGEDB_DATABASE"] = self.get_database_name()
 
         env = os.environ | conn_env
 

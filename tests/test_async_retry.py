@@ -24,7 +24,7 @@ import unittest.mock
 import gel
 from gel import errors
 from gel import RetryOptions
-from gel import _testbase as tb
+from gel._internal import _testbase as tb
 
 log = logging.getLogger(__name__)
 
@@ -58,6 +58,11 @@ class TestAsyncRetry(tb.AsyncQueryTestCase):
             };
         };
     '''
+
+    @classmethod
+    def get_default_retry_options(cls) -> gel.RetryOptions:
+        # Don't retry too hard by default.
+        return gel.RetryOptions(attempts=3)
 
     async def test_async_retry_01(self):
         async for tx in self.client.transaction():

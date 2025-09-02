@@ -21,7 +21,7 @@ import itertools
 
 import gel
 
-from gel import _testbase as tb
+from gel._internal import _testbase as tb
 from gel import TransactionOptions
 from gel.options import RetryOptions
 

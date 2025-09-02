@@ -92,16 +92,28 @@ jobs:
         fi
         mkdir "${{ runner.temp }}/pytests"
         ln -s "${{ github.workspace }}/tests" "${{ runner.temp }}/pytests/tests"
-        uv run --verbose --extra=test --no-editable --isolated \
+        export GEL_PYTHON_TEST_ROOT="${{ runner.temp }}/pytests"
+        uv run --extra=test --no-editable --isolated \
             --project="${{ github.workspace }}" \
             --directory="${{ runner.temp }}/pytests" \
-            python -m unittest -v tests.suite
+            --with "geltest@git+https://github.com/geldata/geltest.git" \
+            geltest --verbose --exclude test_cqa_ruff
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - uses: astral-sh/ruff-action@57714a7c8a2e59f32539362ba31877a1957dded1  # v3.5.1
+      with:
+        version: "0.12.11"
+    - run: ruff check
+    - run: ruff format --check
 
   # This job exists solely to act as the test job aggregate to be
   # targeted by branch policies.
   regression-tests:
     name: "Regression Tests"
-    needs: [test]
+    needs: [test, lint]
     runs-on: ubuntu-latest
 
     steps:

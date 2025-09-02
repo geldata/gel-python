@@ -225,13 +225,18 @@ extend-ignore = [
 
 [tool.ruff.format]
 quote-style = "preserve"
+exclude = [
+    "docs/*",
+    "edgedb/*",
+    "tests/*",
+]
 
 # ========================
 #          PYTEST
 # ========================
 [tool.pytest.ini_options]
 minversion = "6.0"
-addopts = "--capture=no --assert=plain --strict --tb native"
+addopts = "--capture=no --assert=plain --strict --tb native --ignore tests/models"
 testpaths = ["tests"]
 filterwarnings = "default"
 

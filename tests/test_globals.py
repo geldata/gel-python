@@ -18,7 +18,7 @@
 
 import json
 
-from gel import _testbase as tb
+from gel._internal import _testbase as tb
 from gel import errors
 
 
@@ -44,44 +44,44 @@ class TestGlobals(tb.AsyncQueryTestCase):
         };
     '''
 
-    async def test_globals_01(self):
+    async def test_globals_01(self) -> None:
         db = self.client
         if db.is_proto_lt_1_0:
             self.skipTest("Global is added in EdgeDB 2.0")
 
-        async with db.with_globals(glob='test') as gdb:
-            x = await gdb.query_single('select global glob')
-            self.assertEqual(x, 'test')
+        gdb = db.with_globals(glob='test')
+        x = await gdb.query_single('select global glob')
+        self.assertEqual(x, 'test')
 
-            x = await gdb.query_single('select global req_glob')
-            self.assertEqual(x, '!')
+        x = await gdb.query_single('select global req_glob')
+        self.assertEqual(x, '!')
 
-            x = await gdb.query_single('select global def_glob')
-            self.assertEqual(x, '!')
+        x = await gdb.query_single('select global def_glob')
+        self.assertEqual(x, '!')
 
-        async with db.with_globals(req_glob='test') as gdb:
-            x = await gdb.query_single('select global req_glob')
-            self.assertEqual(x, 'test')
+        gdb = db.with_globals(req_glob='test')
+        x = await gdb.query_single('select global req_glob')
+        self.assertEqual(x, 'test')
 
-        async with db.with_globals(def_glob='test') as gdb:
-            x = await gdb.query_single('select global def_glob')
-            self.assertEqual(x, 'test')
+        gdb = db.with_globals(def_glob='test')
+        x = await gdb.query_single('select global def_glob')
+        self.assertEqual(x, 'test')
 
         # Setting def_glob explicitly to None should override
-        async with db.with_globals(def_glob=None) as gdb:
-            x = await gdb.query_single('select global def_glob')
-            self.assertEqual(x, None)
+        gdb = db.with_globals(def_glob=None)
+        x = await gdb.query_single('select global def_glob')
+        self.assertEqual(x, None)
 
         # Setting computed global should produce error
-        async with db.with_globals(computed='test') as gdb:
-            with self.assertRaises(errors.QueryArgumentError):
-                await gdb.query_single('select global computed')
+        gdb = db.with_globals(computed='test')
+        with self.assertRaises(errors.QueryArgumentError):
+            await gdb.query_single('select global computed')
 
-        async with db.with_globals({'foo::bar::baz': 'asdf'}) as gdb:
-            x = await gdb.query_single('select global foo::bar::baz')
-            self.assertEqual(x, 'asdf')
+        gdb = db.with_globals({'foo::bar::baz': 'asdf'})
+        x = await gdb.query_single('select global foo::bar::baz')
+        self.assertEqual(x, 'asdf')
 
-    async def test_global_graphql_01(self):
+    async def test_global_graphql_01(self) -> None:
         if self.server_version.major < 7:
             self.skipTest("GraphQL added in 7.0")
 
@@ -97,48 +97,46 @@ class TestGlobals(tb.AsyncQueryTestCase):
             }
         '''
 
-        async with db.with_globals(glob='test') as gdb:
-            x = json.loads(await gdb.query_graphql_json(query))
-            self.assertEqual(
-                x,
-                dict(GlobalTest=[
-                    dict(
-                        glob='test',
-                        req_glob='!',
-                        def_glob='!',
-                    )
-                ]),
+        gdb = db.with_globals(glob='test')
+        x = json.loads(await gdb.query_graphql_json(query))
+        self.assertEqual(
+            x,
+            dict(GlobalTest=[
+                dict(
+                    glob='test',
+                    req_glob='!',
+                    def_glob='!',
+                )
+            ]),
             )
 
-        async with db.with_globals(
-            req_glob='test1', def_glob='test2'
-        ) as gdb:
-            x = json.loads(await gdb.query_graphql_json(query))
-            self.assertEqual(
-                x,
-                dict(GlobalTest=[
-                    dict(
-                        glob=None,
-                        req_glob='test1',
-                        def_glob='test2',
-                    )
-                ]),
-            )
+        gdb = db.with_globals(req_glob='test1', def_glob='test2')
+        x = json.loads(await gdb.query_graphql_json(query))
+        self.assertEqual(
+            x,
+            dict(GlobalTest=[
+                dict(
+                    glob=None,
+                    req_glob='test1',
+                    def_glob='test2',
+                )
+            ]),
+        )
 
-        async with db.with_globals(def_glob=None) as gdb:
-            x = json.loads(await gdb.query_graphql_json(query))
-            self.assertEqual(
-                x,
-                dict(GlobalTest=[
-                    dict(
-                        glob=None,
-                        req_glob='!',
-                        def_glob=None,
-                    )
-                ]),
-            )
+        gdb = db.with_globals(def_glob=None)
+        x = json.loads(await gdb.query_graphql_json(query))
+        self.assertEqual(
+            x,
+            dict(GlobalTest=[
+                dict(
+                    glob=None,
+                    req_glob='!',
+                    def_glob=None,
+                )
+            ]),
+        )
 
-    async def test_client_state_mismatch(self):
+    async def test_client_state_mismatch(self) -> None:
         db = self.client
         if db.is_proto_lt_1_0:
             self.skipTest("State over protocol is added in EdgeDB 2.0")
@@ -147,13 +145,16 @@ class TestGlobals(tb.AsyncQueryTestCase):
 
         c = self.make_test_client(database=self.get_database_name())
         c = c.with_globals(mglob=42)
-        self.assertEqual(await c.query_single('select global mglob'), 42)
 
-        await db.execute('create global mglob2 -> str')
-        self.assertEqual(await c.query_single('select global mglob'), 42)
+        try:
+            self.assertEqual(await c.query_single('select global mglob'), 42)
 
-        await db.execute('alter global mglob set type str reset to default')
-        with self.assertRaises(errors.InvalidArgumentError):
-            await c.query_single('select global mglob')
+            await db.execute('create global mglob2 -> str')
+            self.assertEqual(await c.query_single('select global mglob'), 42)
 
-        await c.aclose()
+            await db.execute(
+                'alter global mglob set type str reset to default')
+            with self.assertRaises(errors.InvalidArgumentError):
+                await c.query_single('select global mglob')
+        finally:
+            await c.aclose()

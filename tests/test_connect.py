@@ -21,7 +21,7 @@ import socket
 
 import gel
 
-from gel import _testbase as tb
+from gel._internal import _testbase as tb
 
 
 class TestConnect(tb.AsyncQueryTestCase):

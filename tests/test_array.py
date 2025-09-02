@@ -19,7 +19,7 @@
 import unittest
 
 from gel import errors
-from gel import _testbase as tb
+from gel._internal import _testbase as tb
 
 
 class TestArrayOfArray(tb.SyncQueryTestCase):

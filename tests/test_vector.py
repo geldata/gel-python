@@ -16,12 +16,15 @@
 # limitations under the License.
 #
 
-from gel import _testbase as tb
+from gel._internal import _testbase as tb
 import gel
 
 import array
 import math
 import unittest
+
+
+from gel._internal import _testbase
 
 
 # An array.array subtype where indexing doesn't work.
@@ -35,6 +38,45 @@ class brokenarray(array.array):
 class TestVector(tb.SyncQueryTestCase):
 
     PGVECTOR_VER = None
+    # no parallelizing to avoid extension setup hassle
+    PARALLELISM_GRANULARITY = "suite"
+
+    @classmethod
+    async def set_up_class_once(cls, ui: _testbase.UI) -> None:
+        await super().set_up_class_once(ui)
+
+        dbname = cls.get_base_database_name()
+
+        async with cls.async_test_client(database=dbname) as client:
+            cls.PGVECTOR_VER = await client.query_single('''
+                select assert_single((
+                    select sys::ExtensionPackage filter .name = 'pgvector'
+                )).version
+            ''')
+
+            if cls.PGVECTOR_VER is None:
+                raise unittest.SkipTest("feature not implemented")
+
+            try:
+                await client.execute('''
+                    create extension pgvector;
+                ''')
+            except gel.SchemaError:
+                if cls.db_cache_enabled:
+                    pass
+                else:
+                    raise
+
+    @classmethod
+    async def tear_down_class_once(cls, ui: _testbase.UI) -> None:
+        try:
+            dbname = cls.get_base_database_name()
+            async with cls.async_test_client(database=dbname) as client:
+                await client.execute('''
+                    drop extension pgvector;
+                ''')
+        finally:
+            await super().tear_down_class_once(ui)
 
     @classmethod
     def setUpClass(cls):
@@ -48,19 +90,6 @@ class TestVector(tb.SyncQueryTestCase):
 
         if cls.PGVECTOR_VER is None:
             raise unittest.SkipTest("feature not implemented")
-
-        cls.client.execute('''
-            create extension pgvector;
-        ''')
-
-    @classmethod
-    def tearDownClass(cls):
-        try:
-            cls.client.execute('''
-                drop extension pgvector;
-            ''')
-        finally:
-            super().tearDownClass()
 
     def test_vector_01(self):
         val = self.client.query_single('''
