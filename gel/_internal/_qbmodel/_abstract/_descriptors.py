@@ -188,6 +188,7 @@ class ModelFieldDescriptor(_qb.AbstractFieldDescriptor):
                 source=source,
                 name=self.__gel_name__,
                 is_lprop=False,
+                is_link=issubclass(t, AbstractGelModel)
             )
             return _qb.AnnotatedPath(t, metadata)
 
