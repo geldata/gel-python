@@ -183,14 +183,22 @@ class ModelFieldDescriptor(_qb.AbstractFieldDescriptor):
                 type_ = t.__gel_reflection__.name
             else:
                 type_ = ptr.type
+
+            is_link = issubclass(t, AbstractGelModel)
             metadata = _qb.Path(
                 type_=type_,
                 source=source,
                 name=self.__gel_name__,
                 is_lprop=False,
-                is_link=issubclass(t, AbstractGelModel)
+                is_link=is_link,
             )
-            return _qb.AnnotatedPath(t, metadata)
+            res = _qb.AnnotatedPath(t, metadata)
+
+            if is_link:
+                # wrap into a splat shape
+                res = _qb.Shape.splat(res)
+
+            return res
 
     def __get__(
         self,
