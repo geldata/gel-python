@@ -625,25 +625,21 @@ def _add_refetch_shape(
     tp_pointers = tp_obj.__gel_reflection__.pointers
     ref_shape = refetch_ops[tp_obj]
     ref_shape.models.append(obj)
-    if not obj.__gel_new__:
-        # Existing objects should refetch anything that was previously set
-        for field_name in obj.__pydantic_fields_set__:
-            if (
-                field_name in ref_shape.fields
-                or field_name in _STOP_FIELDS_NO_ID
-            ):
-                continue
+    # Existing objects should refetch anything that was previously set
+    for field_name in obj.__pydantic_fields_set__:
+        if field_name in ref_shape.fields or field_name in _STOP_FIELDS_NO_ID:
+            continue
 
-            try:
-                ptr_info = tp_pointers[field_name]
-            except KeyError:
-                # ad-hoc computed
-                pass
-            else:
-                ref_shape.fields[field_name] = ptr_info
+        try:
+            ptr_info = tp_pointers[field_name]
+        except KeyError:
+            # ad-hoc computed
+            pass
+        else:
+            ref_shape.fields[field_name] = ptr_info
 
-    else:
-        # New objects only need computed properties refetched
+    if obj.__gel_new__:
+        # New objects should additionally refetch any computed properties
         for ptr_name, ptr_info in tp_pointers.items():
             if not ptr_info.computed or ptr_info.kind != PointerKind.Property:
                 continue
@@ -714,10 +710,7 @@ def make_plan(
             if not obj.__gel_new__:
                 push_refetch_existing(obj, existing_objects, refetch_ops)
 
-            elif any(
-                prop.kind == PointerKind.Property and prop.computed
-                for prop in pointers
-            ):
+            else:
                 # Refetch computed properties, they may depend on other objects
                 # being inserted later
                 push_refetch_new(obj, refetch_ops)
@@ -1404,12 +1397,13 @@ class SaveExecutor:
                             )
                     else:
                         s_link: GelModel = model_attr(obj, lname)
-                        if ptr.properties:
-                            obj_link_ids.append(
-                                self._get_id(unwrap_proxy(s_link))
-                            )
-                        else:
-                            obj_link_ids.append(self._get_id(s_link))
+                        if s_link is not None:
+                            if ptr.properties:
+                                obj_link_ids.append(
+                                    self._get_id(unwrap_proxy(s_link))
+                                )
+                            else:
+                                obj_link_ids.append(self._get_id(s_link))
 
             spec_arg: list[RefetchSpecEntry] = [
                 (
@@ -1600,7 +1594,9 @@ class SaveExecutor:
                         )
 
                     elif is_link:
-                        if shape_field.properties:
+                        if new_value is None:
+                            model_dict[field] = new_value
+                        elif shape_field.properties:
                             model_dict[field] = reconcile_proxy_link(
                                 existing=model_dict.get(field),
                                 refetched=new_value,  # pyright: ignore [reportArgumentType]
@@ -1719,16 +1715,19 @@ class SaveExecutor:
                 and obj in self.new_object_ids
                 and (new_obj_id := self.new_object_ids.get(obj))
             ):
-                # Update computed properties for new objects
+                new_obj = self.new_objects.get(new_obj_id)
+
+                # Update new objects with refetched data
                 for prop in get_pointers(type(obj)):
-                    if not prop.computed or prop.kind is PointerKind.Link:
+                    if prop.name not in new_obj.__dict__:
+                        # prop not refetched
                         continue
 
-                    assert prop.kind is PointerKind.Property
-
-                    new_obj = self.new_objects.get(new_obj_id)
                     obj.__dict__[prop.name] = new_obj.__dict__[prop.name]
-                    obj.__pydantic_fields_set__.add(prop.name)
+
+                    if prop.computed:
+                        # Computed props may not have been "set" yet
+                        obj.__pydantic_fields_set__.add(prop.name)
 
         for o in self.objs:
             _traverse(o)
