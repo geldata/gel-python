@@ -101,16 +101,20 @@ class TestDatetimeTypes(tb.SyncQueryTestCase):
 
         # Test encode
         durs_enc = self.client.query('''
-            WITH args := array_unpack(
-                <array<tuple<duration, duration, duration>>>$0)
-            SELECT args.0 + args.1 = args.2;
+            WITH
+              args := array_unpack(
+                <array<tuple<duration, duration, duration>>>$0
+              )
+            FOR a IN args UNION a.0 + a.1 = a.2;
         ''', durs)
 
         # Test decode
         durs_dec = self.client.query('''
-            WITH args := array_unpack(
-                <array<tuple<duration, duration, duration>>>$0)
-            SELECT (args.0 + args.1, args.2);
+            WITH
+              args := array_unpack(
+                <array<tuple<duration, duration, duration>>>$0
+              )
+            FOR a IN args UNION (a.0 + a.1, a.2);
         ''', durs)
 
         self.assertEqual(durs_enc, [True] * len(durs))
