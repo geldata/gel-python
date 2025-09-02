@@ -19,7 +19,7 @@
 import unittest
 from collections import namedtuple
 
-from gel import _testbase as tb
+from gel._internal import _testbase as tb
 
 
 Geo = namedtuple('Geo', ['wkb'])

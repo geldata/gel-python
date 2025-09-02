@@ -24,8 +24,13 @@ import unittest
 
 def suite():
     test_loader = unittest.TestLoader()
-    test_suite = test_loader.discover(str(pathlib.Path(__file__).parent),
-                                      pattern='test_*.py')
+    start_dir = pathlib.Path(__file__).parent
+    top_level_dir = start_dir.parent
+    test_suite = test_loader.discover(
+        start_dir=str(start_dir),
+        top_level_dir=str(top_level_dir),
+        pattern='test_*.py',
+    )
     return test_suite
 
 

@@ -23,10 +23,14 @@ import subprocess
 import sys
 import unittest
 
+from gel._internal import _version
+
 
 def find_project_root() -> pathlib.Path:
     if gh_checkout := os.environ.get("GITHUB_WORKSPACE"):
         return pathlib.Path(gh_checkout)
+    elif src_root := _version.get_project_source_root():
+        return src_root
     else:
         return pathlib.Path(__file__).parent.parent
 
@@ -136,6 +140,11 @@ class TestFlake8(unittest.TestCase):
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 cwd=project_root,
+                env=os.environ | {
+                    # Prevent pyright from checking and
+                    # warning about upgrades.
+                    "PYRIGHT_PYTHON_FORCE_VERSION": "latest",
+                }
             )
         except subprocess.CalledProcessError as ex:
             output = ex.stdout.decode()

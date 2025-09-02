@@ -87,14 +87,20 @@ type Raid extending ExclusivelyNamed {
 }
 
 # Object with multi link and several link props
-type Team extending ExclusivelyNamed {
+# Use abstract type base to avoid exclusive constraint inheritance.
+abstract type AbstractTeam extending ExclusivelyNamed {
+    overloaded name {
+        delegated constraint exclusive;
+    };
     multi members: User {
         role: str;
         rank: int64;
     };
 }
 
-type ExtraTeam extending Team {
+type Team extending AbstractTeam;
+
+type ExtraTeam extending AbstractTeam {
     # multi prop computed
     multi property member_names := .members.name;
 }

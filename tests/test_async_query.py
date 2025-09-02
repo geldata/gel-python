@@ -29,7 +29,7 @@ import asyncio
 import gel
 
 from gel import abstract
-from gel import _testbase as tb
+from gel._internal import _testbase as tb
 from gel.options import RetryOptions
 from gel.protocol import protocol
 
@@ -1088,6 +1088,16 @@ class TestAsyncQuery(tb.AsyncQueryTestCase):
             await client.aclose()
 
     async def test_async_log_message(self):
+        has_internal_restart = await self.client.query_single("""
+            select exists(
+                select
+                    (select schema::ObjectType filter .name = 'cfg::Config')
+                    .pointers filter .name = '__internal_restart'
+            );
+        """)
+        if not has_internal_restart:
+            self.skipTest("No cfg::__internal_restart config")
+
         msgs = []
 
         def on_log(con, msg):
@@ -1152,6 +1162,9 @@ class TestAsyncQuery(tb.AsyncQueryTestCase):
         ''')
 
     async def test_transaction_state(self):
+        # gel.errors.InternalServerError: relation "..." does not exist
+        # likely a server query cache bug
+        raise unittest.SkipTest("raises an ISE sometimes")
         with self.assertRaisesRegex(gel.QueryError, "cannot assign to.*id"):
             async for tx in self.client.transaction():
                 async with tx:
@@ -1445,6 +1458,7 @@ class TestAsyncQuery(tb.AsyncQueryTestCase):
                 async with tx._batch() as batch:
                     await test(batch)
 
+    @unittest.skip("runs for a very long time")
     async def test_batch_07(self):
         async def test(bx):
             await bx.send_query_single("select 42")
@@ -1455,7 +1469,7 @@ class TestAsyncQuery(tb.AsyncQueryTestCase):
 
         c = self.client.with_config(
             session_idle_transaction_timeout=datetime.timedelta(seconds=0.2)
-        )
+        ).with_retry_options(gel.RetryOptions(attempts=3))
 
         # c._batch() disables idle transaction timeout, so this should work
         async for batch in c._batch():

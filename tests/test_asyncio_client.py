@@ -18,10 +18,11 @@
 
 import asyncio
 import random
+import sys
 
 import gel
 
-from gel import _testbase as tb
+from gel._internal import _testbase as tb
 from gel import errors
 from gel import asyncio_client
 
@@ -471,21 +472,20 @@ class TestAsyncIOClient(tb.AsyncQueryTestCase):
 
         await client.aclose()
 
-    def test_client_with_different_loop(self):
-        conargs = self.get_connect_args()
-        client = gel.create_async_client(**conargs)
+    if sys.version_info >= (3, 11):
+        def test_client_with_different_loop(self):
+            conargs = self.get_connect_args()
+            client = gel.create_async_client(**conargs)
 
-        async def test():
-            self.assertIsNot(asyncio.get_event_loop(), self.loop)
-            result = await client.query_single("SELECT 42")
-            self.assertEqual(result, 42)
-            await asyncio.gather(
-                client.query_single("SELECT 42"),
-                client.query_single("SELECT 42"),
-            )
-            await client.aclose()
+            async def test():
+                self.assertIsNot(asyncio.get_event_loop(), self.loop)
+                result = await client.query_single("SELECT 42")
+                self.assertEqual(result, 42)
+                await asyncio.gather(
+                    client.query_single("SELECT 42"),
+                    client.query_single("SELECT 42"),
+                )
+                await client.aclose()
 
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        loop.run_until_complete(test())
-        asyncio.set_event_loop(self.loop)
+            with asyncio.Runner() as runner:
+                runner.run(test())

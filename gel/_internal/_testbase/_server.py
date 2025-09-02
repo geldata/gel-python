@@ -47,6 +47,10 @@ _debug_enabled = os.environ.get("EDGEDB_DEBUG_SERVER", "").strip().lower() in {
 }
 
 
+if not _debug_enabled:
+    _debug_enabled = os.environ.get("ACTIONS_STEP_DEBUG", "") == "true"
+
+
 def _debug(*msg: str) -> None:
     if _debug_enabled:
         print("[gel.captive]", *msg, file=sys.stderr, flush=True)
@@ -55,7 +59,7 @@ def _debug(*msg: str) -> None:
 if sys.platform == "win32":
     _WSL_CMD = ["wsl", "-u", "edgedb"]
 
-    def _find_server_executable() -> pathlib.Path | None:
+    def _find_server_executable() -> pathlib.PurePosixPath | None:
         which_res = subprocess.run(
             [*_WSL_CMD, "which", "gel-server"],
             capture_output=True,
@@ -73,19 +77,19 @@ if sys.platform == "win32":
             return None
         else:
             try:
-                return pathlib.Path(which_res.stdout.strip())
+                return pathlib.PurePosixPath(which_res.stdout.strip())
             except ValueError:
                 return None
 else:
 
-    def _find_server_executable() -> pathlib.Path | None:
+    def _find_server_executable() -> pathlib.PurePosixPath | None:
         path = shutil.which("gel-server")
         if not path:
             path = shutil.which("edgedb-server")
         if not path:
             return None
         else:
-            return pathlib.Path(path)
+            return pathlib.PurePosixPath(path)
 
 
 def _get_wsl_path(win_path: str) -> str:
@@ -99,7 +103,7 @@ def _get_wsl_path(win_path: str) -> str:
 def _get_cli_managed_server_path(
     cli_bin: str,
     min_server_version: VersionConstraint | None,
-) -> pathlib.Path | None:
+) -> pathlib.PurePosixPath | None:
     cmd = [cli_bin, "server", "info", "--get", "bin-path"]
     if min_server_version is not None:
         cmd.extend(
@@ -123,7 +127,7 @@ def _get_cli_managed_server_path(
             return None
         else:
             try:
-                return pathlib.Path(path)
+                return pathlib.PurePosixPath(path)
             except ValueError:
                 return None
     else:
@@ -184,11 +188,15 @@ def _get_server_venv_site(
     return python, site_packages
 
 
-def _is_devmode_server(executable_path: pathlib.Path) -> pathlib.Path | None:
+def _is_devmode_server(
+    executable_path: pathlib.PurePosixPath,
+) -> pathlib.Path | None:
     if sys.platform == "win32":
         return None
 
-    python, server_venv_site = _get_server_venv_site(executable_path)
+    python, server_venv_site = _get_server_venv_site(
+        pathlib.PosixPath(executable_path)
+    )
     if not server_venv_site:
         return None
 
@@ -350,7 +358,7 @@ def _server_env(env: Mapping[str, str] | None = None, /) -> dict[str, str]:
 
 
 def _get_server_version(
-    executable: pathlib.Path,
+    executable: pathlib.PurePosixPath,
 ) -> tuple[Version, pathlib.Path | None]:
     devmode_python = _is_devmode_server(executable)
     cmd = []
@@ -386,14 +394,14 @@ def _get_server_version(
 
 
 class ServerInfo(NamedTuple):
-    executable: pathlib.Path
+    executable: pathlib.PurePosixPath
     version: Version
     devmode_python: pathlib.Path | None
     context: str
 
 
 def _check_server(
-    executable: pathlib.Path,
+    executable: pathlib.PurePosixPath,
     min_server_version: VersionConstraint | None = None,
     *,
     context: str,
@@ -422,7 +430,7 @@ def _check_server(
 
 
 def _server_from_arg(
-    executable: pathlib.Path | None,
+    executable: pathlib.PurePosixPath | None,
     min_server_version: VersionConstraint | None = None,
 ) -> ServerInfo | None:
     if executable is None:
@@ -441,7 +449,7 @@ def _server_from_env(
     for var in ["GEL_SERVER_BINARY", "EDGEDB_SERVER_BINARY"]:
         if path := os.environ.get(var):
             return _check_server(
-                pathlib.Path(path),
+                pathlib.PurePosixPath(path),
                 min_server_version,
                 context=(
                     f"server specified in the {var} environment variable"
@@ -494,7 +502,7 @@ def _server_from_cli(
 
 
 def _ensure_server(
-    executable: pathlib.Path | None,
+    executable: pathlib.PurePosixPath | None,
     min_server_version: VersionConstraint | None = None,
 ) -> ServerInfo:
     server = (
@@ -640,7 +648,7 @@ class ManagedInstance(BaseInstance):
         *,
         data_dir: pathlib.Path | None = None,
         min_server_version: VersionConstraint | None = None,
-        executable: pathlib.Path | None = None,
+        executable: pathlib.PurePosixPath | None = None,
         runstate_dir: pathlib.Path | None = None,
         port: int = 0,
         env: Optional[Mapping[str, str]] = None,
@@ -652,10 +660,25 @@ class ManagedInstance(BaseInstance):
         log_level: Optional[str] = None,
         data_tarball: pathlib.Path | None = None,
     ) -> None:
-        server = _ensure_server(executable, min_server_version)
         self._env = {**env} if env is not None else {}
         self._server_cmd: list[str] = []
         self._data_tarball = data_tarball
+        self._backend_dsn = backend_dsn
+        self._data_dir = data_dir
+        self._temp_data_dir: tempfile.TemporaryDirectory[str] | None = None
+        self._log_level = log_level
+        self._runstate_dir = runstate_dir
+        self._daemon_process: Optional[subprocess.Popen[str]] = None
+        self._port = port
+        self._effective_port = None
+        self._tls_cert_file = None
+        self._instance_config = instance_config
+        self._superuser_password = superuser_password
+        self._trust_all_connections = trust_all_connections
+
+        server = _ensure_server(executable, min_server_version)
+        self._server_version = server.version
+
         if server.devmode_python is not None:
             self._env["__EDGEDB_DEVMODE"] = "1"
             self._server_cmd.extend([str(server.devmode_python), "-I"])
@@ -671,10 +694,6 @@ class ManagedInstance(BaseInstance):
         if backend_dsn is not None:
             self._server_cmd.append(f"--backend-dsn={backend_dsn}")
 
-        self._backend_dsn = backend_dsn
-        self._data_dir = data_dir
-        self._temp_data_dir: tempfile.TemporaryDirectory[str] | None = None
-
         if runstate_dir:
             self._server_cmd.append(f"--runstate-dir={runstate_dir}")
 
@@ -689,16 +708,6 @@ class ManagedInstance(BaseInstance):
             self._default_role = "admin"
         else:
             self._default_role = "edgedb"
-        self._server_version = server.version
-        self._log_level = log_level
-        self._runstate_dir = runstate_dir
-        self._daemon_process: Optional[subprocess.Popen[str]] = None
-        self._port = port
-        self._effective_port = None
-        self._tls_cert_file = None
-        self._instance_config = instance_config
-        self._superuser_password = superuser_password
-        self._trust_all_connections = trust_all_connections
 
     def set_data_tarball(self, path: pathlib.Path) -> None:
         if self.running():
@@ -736,9 +745,6 @@ class ManagedInstance(BaseInstance):
             for k, v in settings.items()
         ]
         extra_args.append(f"--port={cmd_port}")
-        status_r = status_w = None
-        status_r, status_w = socket.socketpair()
-        extra_args.append(f"--emit-server-status=fd://{status_w.fileno()}")
 
         if self._data_tarball is not None:
             if self._data_dir is None:
@@ -769,12 +775,33 @@ class ManagedInstance(BaseInstance):
         env = _server_env(self._env)
         server_stdout = None if _debug_enabled else subprocess.DEVNULL
 
-        with self._bootstrap_command_file() as bcmdf:
-            args = [
-                *self._server_cmd,
-                *extra_args,
-                f"--bootstrap-command-file={bcmdf}",
-            ]
+        with contextlib.ExitStack() as ctx:
+            bcmdf = ctx.enter_context(self._bootstrap_command_file())
+
+            status_r: pathlib.Path | socket.socket
+            status_w: socket.socket | None = None
+
+            if sys.platform == "win32":
+                sock_tmp = ctx.enter_context(tempfile.TemporaryDirectory())
+                status_r = pathlib.Path(sock_tmp) / "server-status"
+                status_uri = f"file://{_get_wsl_path(str(status_r))}"
+                bcmdf = _get_wsl_path(bcmdf)
+            else:
+                status_r, status_w = socket.socketpair()
+                status_uri = f"fd://{status_w.fileno()}"
+
+            extra_args.extend(
+                [
+                    f"--emit-server-status={status_uri}",
+                    f"--bootstrap-command-file={bcmdf}",
+                ]
+            )
+
+            if sys.platform == "win32":
+                args = [*_WSL_CMD, *self._server_cmd, *extra_args]
+            else:
+                args = [*self._server_cmd, *extra_args]
+
             _debug("running", " ".join(args))
             self._daemon_process = subprocess.Popen(
                 args,
@@ -789,7 +816,7 @@ class ManagedInstance(BaseInstance):
                 status_w.close()
 
             try:
-                await self._wait_for_server(timeout=wait, status_sock=status_r)
+                await self._wait_for_server(status=status_r, timeout=wait)
             except Exception:
                 self.stop()
                 raise
@@ -912,67 +939,78 @@ class ManagedInstance(BaseInstance):
 
     async def _wait_for_server(
         self,
+        status: socket.socket | pathlib.Path,
+        *,
         timeout: float = 30.0,
-        status_sock: Optional[socket.socket] = None,
     ) -> None:
-        async def _read_server_status(
-            stream: asyncio.StreamReader,
-        ) -> dict[str, Any]:
-            while True:
-                line = await stream.readline()
-                if not line:
-                    raise InstanceError("Gel server terminated")
-                if line.startswith(b"READY="):
-                    break
-
-            _, _, dataline = line.decode().partition("=")
+        async def sock_monitor(sock: socket.socket) -> bytes:
+            reader, writer = await asyncio.open_connection(sock=sock)
             try:
-                data: dict[str, Any] = json.loads(dataline)
-            except Exception as e:
-                raise InstanceError(
-                    f"Gel server returned invalid status line: "
-                    f"{dataline!r} ({e})"
-                ) from e
-
-            return data
-
-        async def test() -> None:
-            stat_reader, stat_writer = await asyncio.open_connection(
-                sock=status_sock,
-            )
-            try:
-                data = await asyncio.wait_for(
-                    _read_server_status(stat_reader), timeout=timeout
-                )
-            except asyncio.TimeoutError:
-                raise InstanceError(
-                    f"Gel server did not initialize within {timeout} seconds"
-                ) from None
+                async for line in reader:
+                    _, ready, data = line.partition(b"READY=")
+                    if ready:
+                        return data
             finally:
-                stat_writer.close()
+                writer.close()
 
-            self._effective_port = data["port"]
-            self._tls_cert_file = data["tls_cert_file"]
-            if self._data_dir is None:
-                self._data_dir = pathlib.Path(data["socket_dir"])
-            if sys.platform == "win32":
-                wsl_tls_cert_file = self._tls_cert_file
-                fd, self._tls_cert_file = tempfile.mkstemp()
-                os.close(fd)
-                subprocess.check_call(
-                    [
-                        *_WSL_CMD,
-                        "cp",
-                        wsl_tls_cert_file,
-                        _get_wsl_path(self._tls_cert_file),
-                    ]
-                )
+            raise InstanceError("Gel server terminated")
+
+        async def file_monitor(path: pathlib.Path) -> bytes:
+            while True:
+                try:
+                    with path.open("rb") as f:
+                        for line in f:
+                            _debug(f"received server status line: {line!r}")
+                            _, ready, data = line.partition(b"READY=")
+                            if ready:
+                                return data
+                        raise RuntimeError("not ready")
+                except Exception as e:  # noqa: PERF203
+                    _debug(f"server status not yet ready: {e}")
+                    await asyncio.sleep(1)
+
+        async def monitor(status: socket.socket | pathlib.Path) -> bytes:
+            if isinstance(status, socket.socket):
+                return await sock_monitor(status)
+            else:
+                return await file_monitor(status)
 
         left = timeout
-        if status_sock is not None:
-            started = time.monotonic()
-            await test()
-            left -= time.monotonic() - started
+        started = time.monotonic()
+
+        try:
+            line = await asyncio.wait_for(monitor(status), timeout=timeout)
+        except asyncio.TimeoutError:
+            raise InstanceError(
+                f"Gel server did not initialize within {timeout} seconds"
+            ) from None
+
+        try:
+            data: dict[str, Any] = json.loads(line)
+        except Exception as e:
+            raise InstanceError(
+                f"Gel server returned invalid status line: {line!r} ({e})"
+            ) from e
+
+        self._effective_port = data["port"]
+        self._tls_cert_file = data["tls_cert_file"]
+        if self._data_dir is None:
+            self._data_dir = pathlib.Path(data["socket_dir"])
+        if sys.platform == "win32":
+            assert self._tls_cert_file is not None
+            wsl_tls_cert_file = self._tls_cert_file
+            fd, self._tls_cert_file = tempfile.mkstemp()
+            os.close(fd)
+            subprocess.check_call(
+                [
+                    *_WSL_CMD,
+                    "cp",
+                    wsl_tls_cert_file,
+                    _get_wsl_path(self._tls_cert_file),
+                ]
+            )
+
+        left -= time.monotonic() - started
 
         async with self.aclient(
             wait_until_available=f"{max(1, int(left))}s",
@@ -1008,7 +1046,7 @@ class PersistentInstance(ManagedInstance):
         *,
         data_dir: pathlib.Path,
         min_server_version: VersionConstraint | None = None,
-        executable: pathlib.Path | None = None,
+        executable: pathlib.PurePosixPath | None = None,
         runstate_dir: pathlib.Path,
         port: int = 5656,
         env: Optional[Mapping[str, str]] = None,
@@ -1038,7 +1076,7 @@ class TempInstance(ManagedInstance):
         *,
         data_dir: pathlib.Path | None = None,
         min_server_version: VersionConstraint | None = None,
-        executable: pathlib.Path | None = None,
+        executable: pathlib.PurePosixPath | None = None,
         env: Optional[Mapping[str, str]] = None,
         instance_config: Mapping[str, str] | None = None,
         backend_dsn: str | None = None,
@@ -1081,7 +1119,7 @@ class TestInstance(TempInstance):
         *,
         data_dir: pathlib.Path | None = None,
         min_server_version: VersionConstraint | None = None,
-        executable: pathlib.Path | None = None,
+        executable: pathlib.PurePosixPath | None = None,
         env: Optional[Mapping[str, str]] = None,
         instance_config: dict[str, str] | None = None,
         backend_dsn: str | None = None,
