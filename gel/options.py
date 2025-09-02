@@ -29,6 +29,8 @@ import typing
 import sys
 from collections import namedtuple
 
+from gel._internal._polyfills import _strenum
+
 from . import errors
 
 
@@ -71,7 +73,7 @@ class RetryCondition:
     NetworkError = enum.auto()
 
 
-class IsolationLevel:
+class IsolationLevel(_strenum.StrEnum):
     """Isolation level for transaction"""
 
     Serializable = "Serializable"
