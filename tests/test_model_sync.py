@@ -618,6 +618,717 @@ class TestModelSyncSingleProp(tb.ModelTestCase):
         self.assertFalse(hasattr(mirror_1, "val"))  # Fail
 
 
+class TestModelSyncComputedSingleProp(tb.ModelTestCase):
+    ISOLATED_TEST_BRANCHES = True
+
+    SCHEMA = """
+        type FromConstant {
+            val := 1;
+        };
+
+        type FromSingleProp {
+            n: int64;
+            val := .n + 1;
+        };
+
+        type FromMultiProp {
+            multi n: int64;
+            val := sum(.n) + 1;
+        };
+
+        type Target {
+            val: int64;
+        };
+        type FromSingleLink {
+            target: Target;
+            val := .target.val + 1;
+        };
+        type FromMultiLink {
+            multi target: Target;
+            val := sum(.target.val) + 1;
+        };
+
+        type ExclusiveSource {
+            target: FromExclusiveBacklink {
+                constraint exclusive;
+            };
+            val: int64;
+        };
+        type FromExclusiveBacklink {
+            val := .<target[is ExclusiveSource].val + 1;
+        }
+
+        type SingleSource {
+            target: FromSingleBacklink;
+            val: int64;
+        };
+        type FromSingleBacklink {
+            val := sum(.<target[is SingleSource].val) + 1;
+        }
+
+        type FromStableExpr {
+            val := count(FromStableExpr);
+        };
+
+        global SomeGlobal: int64;
+        type FromGlobal {
+            val := global SomeGlobal + 1;
+        };
+    """
+
+    def test_model_sync_computed_single_prop_constant_01(self):
+        # Create new
+
+        from models.TestModelSyncComputedSingleProp import default
+
+        original = default.FromConstant()
+        self.client.sync(original)
+
+        self.assertEqual(original.val, 1)
+
+    def test_model_sync_computed_single_prop_constant_02(self):
+        # Update without val set does not fetch it
+
+        from models.TestModelSyncComputedSingleProp import default
+
+        self.client.sync(default.FromConstant())
+        mirror = self.client.query_required_single(
+            default.FromConstant.select(val=False).limit(1)
+        )
+        self.client.sync(mirror)
+
+        self.assertFalse(hasattr(mirror, 'val'))
+
+    def test_model_sync_computed_single_prop_from_single_prop_01(self):
+        # Create new, expr prop is None
+
+        from models.TestModelSyncComputedSingleProp import default
+
+        original = default.FromSingleProp()
+        self.client.sync(original)
+
+        self.assertEqual(original.val, None)
+
+    def test_model_sync_computed_single_prop_from_single_prop_02(self):
+        # Create new, expr prop has value
+
+        from models.TestModelSyncComputedSingleProp import default
+
+        original = default.FromSingleProp(n=1)
+        self.client.sync(original)
+
+        self.assertEqual(original.val, 2)
+
+    def test_model_sync_computed_single_prop_from_single_prop_03(self):
+        # Update without val set does not fetch it
+
+        from models.TestModelSyncComputedSingleProp import default
+
+        self.client.sync(default.FromSingleProp())
+        mirror = self.client.query_required_single(
+            default.FromSingleProp.select(val=False).limit(1)
+        )
+        self.client.sync(mirror)
+
+        self.assertFalse(hasattr(mirror, 'val'))
+
+    def test_model_sync_computed_single_prop_from_single_prop_04(self):
+        # Update with val set, initially None
+
+        from models.TestModelSyncComputedSingleProp import default
+
+        original = default.FromSingleProp()
+        self.client.sync(original)
+
+        original.n = 9
+        self.client.sync(original)
+
+        self.assertEqual(original.val, 10)
+
+    def test_model_sync_computed_single_prop_from_single_prop_05(self):
+        # Update with val set, initially not None
+
+        from models.TestModelSyncComputedSingleProp import default
+
+        original = default.FromSingleProp(n=1)
+        self.client.sync(original)
+
+        original.n = 9
+        self.client.sync(original)
+
+        self.assertEqual(original.val, 10)
+
+    def test_model_sync_computed_single_prop_from_multi_prop_01(self):
+        # Create new, expr prop is empty
+
+        from models.TestModelSyncComputedSingleProp import default
+
+        original = default.FromMultiProp()
+        self.client.sync(original)
+
+        self.assertEqual(original.val, 1)
+
+    def test_model_sync_computed_single_prop_from_multi_prop_02(self):
+        # Create new, expr prop has values
+
+        from models.TestModelSyncComputedSingleProp import default
+
+        original = default.FromMultiProp(n=[1, 2, 3])
+        self.client.sync(original)
+
+        self.assertEqual(original.val, 7)
+
+    def test_model_sync_computed_single_prop_from_multi_prop_03(self):
+        # Update without val set does not fetch it
+
+        from models.TestModelSyncComputedSingleProp import default
+
+        self.client.sync(default.FromMultiProp())
+        mirror = self.client.query_required_single(
+            default.FromMultiProp.select(val=False).limit(1)
+        )
+        self.client.sync(mirror)
+
+        self.assertFalse(hasattr(mirror, 'val'))
+
+    def test_model_sync_computed_single_prop_from_multi_prop_04(self):
+        # Update with val set, initially empty
+
+        from models.TestModelSyncComputedSingleProp import default
+
+        original = default.FromMultiProp()
+        self.client.sync(original)
+
+        original.n = [7, 8, 9]
+        self.client.sync(original)
+
+        self.assertEqual(original.val, 25)
+
+    def test_model_sync_computed_single_prop_from_multi_prop_05(self):
+        # Update with val set, initially has values
+
+        from models.TestModelSyncComputedSingleProp import default
+
+        original = default.FromMultiProp(n=[1, 2, 3])
+        self.client.sync(original)
+
+        original.n = [7, 8, 9]
+        self.client.sync(original)
+
+        self.assertEqual(original.val, 25)
+
+    def test_model_sync_computed_single_prop_from_single_link_01(self):
+        # Create new, expr prop is None
+
+        from models.TestModelSyncComputedSingleProp import default
+
+        original = default.FromSingleLink()
+        self.client.sync(original)
+
+        self.assertEqual(original.val, None)
+
+    def test_model_sync_computed_single_prop_from_single_link_02(self):
+        # Create new, target already exists
+
+        from models.TestModelSyncComputedSingleProp import default
+
+        target = default.Target(val=1)
+        self.client.save(target)
+
+        original = default.FromSingleLink(target=target)
+        self.client.sync(original)
+
+        self.assertEqual(original.val, 2)
+
+    def test_model_sync_computed_single_prop_from_single_link_03(self):
+        # Create new, target created alongside object
+
+        from models.TestModelSyncComputedSingleProp import default
+
+        target = default.Target(val=1)
+        original = default.FromSingleLink(target=target)
+        self.client.sync(original, target)
+
+        self.assertEqual(original.val, 2)
+
+    def test_model_sync_computed_single_prop_from_single_link_04(self):
+        # Update without val set does not fetch it
+
+        from models.TestModelSyncComputedSingleProp import default
+
+        self.client.sync(default.FromSingleLink())
+        mirror = self.client.query_required_single(
+            default.FromSingleLink.select(val=False).limit(1)
+        )
+        self.client.sync(mirror)
+
+        self.assertFalse(hasattr(mirror, 'val'))
+
+    def test_model_sync_computed_single_prop_from_single_link_05(self):
+        # Update with val set, initially target is None
+
+        from models.TestModelSyncComputedSingleProp import default
+
+        target = default.Target(val=9)
+        original = default.FromSingleLink()
+        self.client.sync(original, target)
+
+        original.target = target
+        self.client.sync(original)
+
+        self.assertEqual(original.val, 10)
+
+    def test_model_sync_computed_single_prop_from_single_link_06(self):
+        # Update with val set, initially target is set
+        # target val changes
+
+        from models.TestModelSyncComputedSingleProp import default
+
+        target = default.Target(val=1)
+        original = default.FromSingleLink()
+        self.client.sync(original, target)
+
+        target.val = 9
+        self.client.sync(original, target)
+
+        self.assertEqual(original.val, 10)
+
+    def test_model_sync_computed_single_prop_from_single_link_07(self):
+        # Update with val set, initially target is set
+        # target changes
+
+        from models.TestModelSyncComputedSingleProp import default
+
+        target_a = default.Target(val=1)
+        self.client.save(target_a)
+
+        original = default.FromSingleLink(target=target_a)
+        self.client.sync(original)
+
+        target_b = default.Target(val=9)
+        original.target = target_b
+        self.client.sync(original, target_b)
+
+        self.assertEqual(original.val, 10)
+
+    def test_model_sync_computed_multi_prop_from_multi_link_01(self):
+        # Create new, expr prop is None
+
+        from models.TestModelSyncComputedSingleProp import default
+
+        original = default.FromMultiLink()
+        self.client.sync(original)
+
+        self.assertEqual(original.val, 1)
+
+    def test_model_sync_computed_multi_prop_from_multi_link_02(self):
+        # Create new, target already exists
+
+        from models.TestModelSyncComputedSingleProp import default
+
+        target_a = default.Target(val=1)
+        target_b = default.Target(val=2)
+        target_c = default.Target(val=3)
+        self.client.save(target_a, target_b, target_c)
+
+        original = default.FromMultiLink(target=[target_a, target_b, target_c])
+        self.client.sync(original)
+
+        self.assertEqual(original.val, 7)
+
+    def test_model_sync_computed_multi_prop_from_multi_link_03(self):
+        # Create new, target created alongside object
+
+        from models.TestModelSyncComputedSingleProp import default
+
+        target_a = default.Target(val=1)
+        target_b = default.Target(val=2)
+        target_c = default.Target(val=3)
+        original = default.FromMultiLink(target=[target_a, target_b, target_c])
+        self.client.sync(original, target_a, target_b, target_c)
+
+        self.assertEqual(original.val, 7)
+
+    def test_model_sync_computed_multi_prop_from_multi_link_04(self):
+        # Update without val set does not fetch it
+
+        from models.TestModelSyncComputedSingleProp import default
+
+        self.client.sync(default.FromMultiLink())
+        mirror = self.client.query_required_single(
+            default.FromMultiLink.select(val=False).limit(1)
+        )
+        self.client.sync(mirror)
+
+        self.assertFalse(hasattr(mirror, 'val'))
+
+    def test_model_sync_computed_multi_prop_from_multi_link_05(self):
+        # Update with val set, initially target is empty
+
+        from models.TestModelSyncComputedSingleProp import default
+
+        target_a = default.Target(val=7)
+        target_b = default.Target(val=8)
+        target_c = default.Target(val=9)
+        self.client.save(target_a, target_b, target_c)
+
+        original = default.FromMultiLink()
+        self.client.sync(original)
+
+        original.target = [target_a, target_b, target_c]
+        self.client.sync(original)
+
+        self.assertEqual(original.val, 25)
+
+    def test_model_sync_computed_multi_prop_from_multi_link_06(self):
+        # Update with val set, initially target has values
+        # target val changes
+
+        from models.TestModelSyncComputedSingleProp import default
+
+        target_a = default.Target(val=1)
+        target_b = default.Target(val=2)
+        target_c = default.Target(val=3)
+        self.client.save(target_a, target_b, target_c)
+
+        original = default.FromMultiLink(target=[target_a, target_b, target_c])
+        self.client.sync(original)
+
+        target_a.val = 7
+        target_b.val = 8
+        target_c.val = 9
+        self.client.sync(original)
+
+        self.assertEqual(original.val, 25)
+
+    def test_model_sync_computed_multi_prop_from_multi_link_07(self):
+        # Update with val set, initially target has values
+        # target changes
+
+        from models.TestModelSyncComputedSingleProp import default
+
+        target_a = default.Target(val=1)
+        target_b = default.Target(val=2)
+        target_c = default.Target(val=3)
+        self.client.save(target_a, target_b, target_c)
+
+        original = default.FromMultiLink(target=[target_a, target_b, target_c])
+        self.client.sync(original)
+
+        target_d = default.Target(val=7)
+        target_e = default.Target(val=8)
+        target_f = default.Target(val=9)
+        original.target = [target_d, target_e, target_f]
+        self.client.sync(original, target_d, target_e, target_f)
+
+        self.assertEqual(original.val, 25)
+
+    def test_model_sync_computed_single_prop_from_exclusive_backlink_01(self):
+        # Create new, no source
+
+        from models.TestModelSyncComputedSingleProp import default
+
+        original = default.FromExclusiveBacklink()
+        self.client.sync(original)
+
+        self.assertEqual(original.val, None)
+
+    def test_model_sync_computed_single_prop_from_exclusive_backlink_02(self):
+        # Create new, source already exists
+
+        from models.TestModelSyncComputedSingleProp import default
+
+        source = default.ExclusiveSource(val=1)
+        self.client.save(source)
+
+        original = default.FromExclusiveBacklink()
+        source.target = original
+        self.client.sync(original, source)
+
+        self.assertEqual(original.val, 2)
+
+    def test_model_sync_computed_single_prop_from_exclusive_backlink_03(self):
+        # Create new, source created alongside object
+
+        from models.TestModelSyncComputedSingleProp import default
+
+        original = default.FromExclusiveBacklink()
+        source = default.ExclusiveSource(val=1, target=original)
+        self.client.sync(original, source)
+
+        self.assertEqual(original.val, 2)
+
+    def test_model_sync_computed_single_prop_from_exclusive_backlink_04(self):
+        # Update without val set does not fetch it
+
+        from models.TestModelSyncComputedSingleProp import default
+
+        self.client.sync(default.FromExclusiveBacklink())
+        mirror = self.client.query_required_single(
+            default.FromExclusiveBacklink.select(val=False).limit(1)
+        )
+        self.client.sync(mirror)
+
+        self.assertFalse(hasattr(mirror, 'val'))
+
+    def test_model_sync_computed_single_prop_from_exclusive_backlink_05(self):
+        # Update with val set, initially no source
+
+        from models.TestModelSyncComputedSingleProp import default
+
+        source = default.ExclusiveSource(val=9)
+        self.client.save(source)
+
+        original = default.FromExclusiveBacklink()
+        self.client.sync(original)
+
+        source.target = original
+        self.client.sync(original, source)
+
+        self.assertEqual(original.val, 10)
+
+    def test_model_sync_computed_single_prop_from_exclusive_backlink_06(self):
+        # Update with val set, initially no source
+        # source val changes
+
+        from models.TestModelSyncComputedSingleProp import default
+
+        original = default.FromExclusiveBacklink()
+        source = default.ExclusiveSource(val=1, target=original)
+        self.client.sync(original, source)
+
+        source.val = 9
+        self.client.sync(original, source)
+
+        self.assertEqual(original.val, 10)
+
+    @tb.xfail  # Syncing to None doesn't work
+    def test_model_sync_computed_single_prop_from_exclusive_backlink_07(self):
+        # Update with val set, initially has source
+        # source changes
+
+        from models.TestModelSyncComputedSingleProp import default
+
+        original = default.FromExclusiveBacklink()
+        source_a = default.ExclusiveSource(val=1, target=original)
+        self.client.sync(original, source_a)
+
+        source_a.target = None
+        self.client.sync(source_a)
+        source_b = default.ExclusiveSource(val=9, target=original)
+        self.client.sync(original, source_b)
+
+        self.assertEqual(original.val, 10)
+
+    def test_model_sync_computed_single_prop_from_single_backlink_01(self):
+        # Create new, no sources
+
+        from models.TestModelSyncComputedSingleProp import default
+
+        original = default.FromSingleBacklink()
+        self.client.sync(original)
+
+        self.assertEqual(original.val, 1)
+
+    def test_model_sync_computed_single_prop_from_single_backlink_02(self):
+        # Create new, sources already exists
+
+        from models.TestModelSyncComputedSingleProp import default
+
+        source_a = default.SingleSource(val=1)
+        source_b = default.SingleSource(val=2)
+        source_c = default.SingleSource(val=3)
+        self.client.save(source_a, source_b, source_c)
+
+        original = default.FromSingleBacklink()
+        source_a.target = original
+        source_b.target = original
+        source_c.target = original
+        self.client.sync(original, source_a, source_b, source_c)
+
+        self.assertEqual(original.val, 7)
+
+    def test_model_sync_computed_single_prop_from_single_backlink_03(self):
+        # Create new, sources created alongside object
+
+        from models.TestModelSyncComputedSingleProp import default
+
+        original = default.FromSingleBacklink()
+        source_a = default.SingleSource(val=1, target=original)
+        source_b = default.SingleSource(val=2, target=original)
+        source_c = default.SingleSource(val=3, target=original)
+        self.client.sync(original, source_a, source_b, source_c)
+
+        self.assertEqual(original.val, 7)
+
+    def test_model_sync_computed_single_prop_from_single_backlink_04(self):
+        # Update without val set does not fetch it
+
+        from models.TestModelSyncComputedSingleProp import default
+
+        self.client.sync(default.FromSingleBacklink())
+        mirror = self.client.query_required_single(
+            default.FromSingleBacklink.select(val=False).limit(1)
+        )
+        self.client.sync(mirror)
+
+        self.assertFalse(hasattr(mirror, 'val'))
+
+    def test_model_sync_computed_single_prop_from_single_backlink_05(self):
+        # Update with val set, initially no sources
+
+        from models.TestModelSyncComputedSingleProp import default
+
+        source_a = default.SingleSource(val=7)
+        source_b = default.SingleSource(val=8)
+        source_c = default.SingleSource(val=9)
+        self.client.save(source_a, source_b, source_c)
+
+        original = default.FromSingleBacklink()
+        self.client.sync(original)
+
+        source_a.target = original
+        source_b.target = original
+        source_c.target = original
+        self.client.sync(original, source_a, source_b, source_c)
+
+        self.assertEqual(original.val, 25)
+
+    def test_model_sync_computed_single_prop_from_single_backlink_06(self):
+        # Update with val set, initially no sources
+        # source vals changes
+
+        from models.TestModelSyncComputedSingleProp import default
+
+        original = default.FromSingleBacklink()
+        source_a = default.SingleSource(val=1, target=original)
+        source_b = default.SingleSource(val=2, target=original)
+        source_c = default.SingleSource(val=3, target=original)
+        self.client.sync(original, source_a, source_b, source_c)
+
+        source_a.val = 7
+        source_b.val = 8
+        source_c.val = 9
+        self.client.sync(original, source_a, source_b, source_c)
+
+        self.assertEqual(original.val, 25)
+
+    @tb.xfail  # Syncing to None doesn't work
+    def test_model_sync_computed_single_prop_from_single_backlink_07(self):
+        # Update with val set, initially has sources
+        # sources change
+
+        from models.TestModelSyncComputedSingleProp import default
+
+        original = default.FromSingleBacklink()
+        source_a = default.SingleSource(val=1)
+        source_b = default.SingleSource(val=2)
+        source_c = default.SingleSource(val=3)
+        self.client.sync(original, source_a, source_b, source_c)
+
+        source_a.target = None
+        source_b.target = None
+        source_c.target = None
+        self.client.sync(source_a, source_b, source_c)
+        source_d = default.SingleSource(val=7, target=original)
+        source_e = default.SingleSource(val=8, target=original)
+        source_f = default.SingleSource(val=9, target=original)
+        self.client.sync(original, source_d, source_e, source_f)
+
+        self.assertEqual(original.val, 25)
+
+    def test_model_sync_computed_single_prop_from_stable_expr_01(self):
+        # Create new, expr prop is None
+
+        from models.TestModelSyncComputedSingleProp import default
+
+        original = default.FromStableExpr()
+        self.client.sync(original)
+
+        self.assertEqual(original.val, 1)
+
+    def test_model_sync_computed_single_prop_from_stable_expr_02(self):
+        # Update without val set does not fetch it
+
+        from models.TestModelSyncComputedSingleProp import default
+
+        self.client.sync(default.FromStableExpr())
+        mirror = self.client.query_required_single(
+            default.FromStableExpr.select(val=False).limit(1)
+        )
+        self.client.sync(mirror)
+
+        self.assertFalse(hasattr(mirror, 'val'))
+
+    def test_model_sync_computed_single_prop_from_stable_expr_03(self):
+        # Update with val set, initially None
+
+        from models.TestModelSyncComputedSingleProp import default
+
+        original = default.FromStableExpr()
+        self.client.sync(original)
+
+        # This increments val by 1
+        other = default.FromStableExpr()
+        self.client.sync(original, other)
+
+        self.assertEqual(original.val, 2)
+
+    def test_model_sync_computed_single_prop_from_global_01(self):
+        # Create new, global is None
+
+        from models.TestModelSyncComputedSingleProp import default
+
+        original = default.FromGlobal()
+        self.client.sync(original)
+
+        self.assertEqual(original.val, None)
+
+    def test_model_sync_computed_single_prop_from_global_02(self):
+        # Create new, global has value
+
+        from models.TestModelSyncComputedSingleProp import default
+
+        sess_client = self.client.with_globals(
+            {"default::SomeGlobal": 1}
+        )
+        original = default.FromGlobal()
+        sess_client.sync(original)
+
+        self.assertEqual(original.val, 2)
+
+    def test_model_sync_computed_single_prop_from_global_03(self):
+        # Update without val set does not fetch it
+
+        from models.TestModelSyncComputedSingleProp import default
+
+        self.client.sync(default.FromGlobal())
+        mirror = self.client.query_required_single(
+            default.FromGlobal.select(val=False).limit(1)
+        )
+        self.client.sync(mirror)
+
+        self.assertFalse(hasattr(mirror, 'val'))
+
+    def test_model_sync_computed_single_prop_from_global_04(self):
+        # Update with val set, initially None
+
+        from models.TestModelSyncComputedSingleProp import default
+
+        sess_client = self.client.with_globals(
+            {"default::SomeGlobal": 1}
+        )
+        original = default.FromGlobal()
+        sess_client.sync(original)
+
+        sess_client = self.client.with_globals(
+            {"default::SomeGlobal": 9}
+        )
+        sess_client.sync(original)
+
+        self.assertEqual(original.val, 10)
+
+
 class TestModelSyncMultiProp(tb.ModelTestCase):
     ISOLATED_TEST_BRANCHES = True
 
@@ -1118,6 +1829,723 @@ class TestModelSyncMultiProp(tb.ModelTestCase):
         _testcase(default.A, [1], [2], [3], [4])
         _testcase(default.B, [[1]], [[2, 2]], [[3, 3, 3]], [[4, 4, 4, 4]])
         _testcase(default.C, [("a", 1)], [("b", 2)], [("c", 3)], [("d", 4)])
+
+
+class TestModelSyncComputedMultiProp(tb.ModelTestCase):
+    ISOLATED_TEST_BRANCHES = True
+
+    SCHEMA = """
+        type FromConstant {
+            val := {1, 2, 3};
+        };
+
+        type FromSingleProp {
+            n: int64;
+            val := array_unpack(array_fill(9, .n + 1));
+        };
+
+        type FromMultiProp {
+            multi n: int64;
+            val := array_unpack(array_fill(9, sum(.n) + 1));
+        };
+
+        type Target {
+            val: int64;
+        };
+        type FromSingleLink {
+            target: Target;
+            val := array_unpack(array_fill(9, .target.val + 1));
+        };
+        type FromMultiLink {
+            multi target: Target;
+            val := array_unpack(array_fill(9, sum(.target.val) + 1));
+        };
+
+        type ExclusiveSource {
+            target: FromExclusiveBacklink {
+                constraint exclusive;
+            };
+            val: int64;
+        };
+        type FromExclusiveBacklink {
+            val := array_unpack(array_fill(
+                9,
+                .<target[is ExclusiveSource].val + 1,
+            ));
+        }
+
+        type SingleSource {
+            target: FromSingleBacklink;
+            val: int64;
+        };
+        type FromSingleBacklink {
+            val := array_unpack(array_fill(
+                9,
+                sum(.<target[is SingleSource].val) + 1,
+            ));
+        }
+
+        type FromStableExpr {
+            val := array_unpack(array_fill(9, count(FromStableExpr)));
+        };
+
+        global SomeGlobal: int64;
+        type FromGlobal {
+            val := array_unpack(array_fill(9, global SomeGlobal + 1));
+        };
+    """
+
+    def test_model_sync_computed_multi_prop_constant_01(self):
+        # Create new
+
+        from models.TestModelSyncComputedMultiProp import default
+
+        original = default.FromConstant()
+        self.client.sync(original)
+
+        self.assertEqual(original.val, (1, 2, 3))
+
+    def test_model_sync_computed_multi_prop_constant_02(self):
+        # Update without val set does not fetch it
+
+        from models.TestModelSyncComputedMultiProp import default
+
+        self.client.sync(default.FromConstant())
+        mirror = self.client.query_required_single(
+            default.FromConstant.select(val=False).limit(1)
+        )
+        self.client.sync(mirror)
+
+        self.assertFalse(hasattr(mirror, 'val'))
+
+    def test_model_sync_computed_multi_prop_from_single_prop_01(self):
+        # Create new, expr prop is None
+
+        from models.TestModelSyncComputedMultiProp import default
+
+        original = default.FromSingleProp()
+        self.client.sync(original)
+
+        self.assertEqual(original.val, ())
+
+    def test_model_sync_computed_multi_prop_from_single_prop_02(self):
+        # Create new, expr prop has value
+
+        from models.TestModelSyncComputedMultiProp import default
+
+        original = default.FromSingleProp(n=1)
+        self.client.sync(original)
+
+        self.assertEqual(original.val, (9,) * 2)
+
+    def test_model_sync_computed_multi_prop_from_single_prop_03(self):
+        # Update without val set does not fetch it
+
+        from models.TestModelSyncComputedMultiProp import default
+
+        self.client.sync(default.FromSingleProp())
+        mirror = self.client.query_required_single(
+            default.FromSingleProp.select(val=False).limit(1)
+        )
+        self.client.sync(mirror)
+
+        self.assertFalse(hasattr(mirror, 'val'))
+
+    def test_model_sync_computed_multi_prop_from_single_prop_04(self):
+        # Update with val set, initially None
+
+        from models.TestModelSyncComputedMultiProp import default
+
+        original = default.FromSingleProp()
+        self.client.sync(original)
+
+        original.n = 9
+        self.client.sync(original)
+
+        self.assertEqual(original.val, (9,) * 10)
+
+    def test_model_sync_computed_multi_prop_from_single_prop_05(self):
+        # Update with val set, initially not None
+
+        from models.TestModelSyncComputedMultiProp import default
+
+        original = default.FromSingleProp(n=1)
+        self.client.sync(original)
+
+        original.n = 9
+        self.client.sync(original)
+
+        self.assertEqual(original.val, (9,) * 10)
+
+    def test_model_sync_computed_multi_prop_from_multi_prop_01(self):
+        # Create new, expr prop is empty
+
+        from models.TestModelSyncComputedMultiProp import default
+
+        original = default.FromMultiProp()
+        self.client.sync(original)
+
+        self.assertEqual(original.val, (9,) * 1)
+
+    def test_model_sync_computed_multi_prop_from_multi_prop_02(self):
+        # Create new, expr prop has values
+
+        from models.TestModelSyncComputedMultiProp import default
+
+        original = default.FromMultiProp(n=[1, 2, 3])
+        self.client.sync(original)
+
+        self.assertEqual(original.val, (9,) * 7)
+
+    def test_model_sync_computed_multi_prop_from_multi_prop_03(self):
+        # Update without val set does not fetch it
+
+        from models.TestModelSyncComputedMultiProp import default
+
+        self.client.sync(default.FromMultiProp())
+        mirror = self.client.query_required_single(
+            default.FromMultiProp.select(val=False).limit(1)
+        )
+        self.client.sync(mirror)
+
+        self.assertFalse(hasattr(mirror, 'val'))
+
+    def test_model_sync_computed_multi_prop_from_multi_prop_04(self):
+        # Update with val set, initially empty
+
+        from models.TestModelSyncComputedMultiProp import default
+
+        original = default.FromMultiProp()
+        self.client.sync(original)
+
+        original.n = [7, 8, 9]
+        self.client.sync(original)
+
+        self.assertEqual(original.val, (9,) * 25)
+
+    def test_model_sync_computed_multi_prop_from_multi_prop_05(self):
+        # Update with val set, initially has values
+
+        from models.TestModelSyncComputedMultiProp import default
+
+        original = default.FromMultiProp(n=[1, 2, 3])
+        self.client.sync(original)
+
+        original.n = [7, 8, 9]
+        self.client.sync(original)
+
+        self.assertEqual(original.val, (9,) * 25)
+
+    def test_model_sync_computed_multi_prop_from_single_link_01(self):
+        # Create new, expr prop is None
+
+        from models.TestModelSyncComputedMultiProp import default
+
+        original = default.FromSingleLink()
+        self.client.sync(original)
+
+        self.assertEqual(original.val, ())
+
+    def test_model_sync_computed_multi_prop_from_single_link_02(self):
+        # Create new, target already exists
+
+        from models.TestModelSyncComputedMultiProp import default
+
+        target = default.Target(val=1)
+        self.client.save(target)
+
+        original = default.FromSingleLink(target=target)
+        self.client.sync(original)
+
+        self.assertEqual(original.val, (9,) * 2)
+
+    def test_model_sync_computed_multi_prop_from_single_link_03(self):
+        # Create new, target created alongside object
+
+        from models.TestModelSyncComputedMultiProp import default
+
+        target = default.Target(val=1)
+        original = default.FromSingleLink(target=target)
+        self.client.sync(original, target)
+
+        self.assertEqual(original.val, (9,) * 2)
+
+    def test_model_sync_computed_multi_prop_from_single_link_04(self):
+        # Update without val set does not fetch it
+
+        from models.TestModelSyncComputedMultiProp import default
+
+        self.client.sync(default.FromSingleLink())
+        mirror = self.client.query_required_single(
+            default.FromSingleLink.select(val=False).limit(1)
+        )
+        self.client.sync(mirror)
+
+        self.assertFalse(hasattr(mirror, 'val'))
+
+    def test_model_sync_computed_multi_prop_from_single_link_05(self):
+        # Update with val set, initially target is None
+
+        from models.TestModelSyncComputedMultiProp import default
+
+        target = default.Target(val=9)
+        original = default.FromSingleLink()
+        self.client.sync(original, target)
+
+        original.target = target
+        self.client.sync(original)
+
+        self.assertEqual(original.val, (9,) * 10)
+
+    def test_model_sync_computed_multi_prop_from_single_link_06(self):
+        # Update with val set, initially target is set
+        # target val changes
+
+        from models.TestModelSyncComputedMultiProp import default
+
+        target = default.Target(val=1)
+        original = default.FromSingleLink()
+        self.client.sync(original, target)
+
+        target.val = 9
+        self.client.sync(original, target)
+
+        self.assertEqual(original.val, (9,) * 10)
+
+    def test_model_sync_computed_multi_prop_from_single_link_07(self):
+        # Update with val set, initially target is set
+        # target changes
+
+        from models.TestModelSyncComputedMultiProp import default
+
+        target_a = default.Target(val=1)
+        self.client.save(target_a)
+
+        original = default.FromSingleLink(target=target_a)
+        self.client.sync(original)
+
+        target_b = default.Target(val=9)
+        original.target = target_b
+        self.client.sync(original, target_b)
+
+        self.assertEqual(original.val, (9,) * 10)
+
+    def test_model_sync_computed_multi_prop_from_multi_link_01(self):
+        # Create new, expr prop is None
+
+        from models.TestModelSyncComputedMultiProp import default
+
+        original = default.FromMultiLink()
+        self.client.sync(original)
+
+        self.assertEqual(original.val, (9,) * 1)
+
+    def test_model_sync_computed_multi_prop_from_multi_link_02(self):
+        # Create new, target already exists
+
+        from models.TestModelSyncComputedMultiProp import default
+
+        target_a = default.Target(val=1)
+        target_b = default.Target(val=2)
+        target_c = default.Target(val=3)
+        self.client.save(target_a, target_b, target_c)
+
+        original = default.FromMultiLink(target=[target_a, target_b, target_c])
+        self.client.sync(original)
+
+        self.assertEqual(original.val, (9,) * 7)
+
+    def test_model_sync_computed_multi_prop_from_multi_link_03(self):
+        # Create new, target created alongside object
+
+        from models.TestModelSyncComputedMultiProp import default
+
+        target_a = default.Target(val=1)
+        target_b = default.Target(val=2)
+        target_c = default.Target(val=3)
+        original = default.FromMultiLink(target=[target_a, target_b, target_c])
+        self.client.sync(original, target_a, target_b, target_c)
+
+        self.assertEqual(original.val, (9,) * 7)
+
+    def test_model_sync_computed_multi_prop_from_multi_link_04(self):
+        # Update without val set does not fetch it
+
+        from models.TestModelSyncComputedMultiProp import default
+
+        self.client.sync(default.FromMultiLink())
+        mirror = self.client.query_required_single(
+            default.FromMultiLink.select(val=False).limit(1)
+        )
+        self.client.sync(mirror)
+
+        self.assertFalse(hasattr(mirror, 'val'))
+
+    def test_model_sync_computed_multi_prop_from_multi_link_05(self):
+        # Update with val set, initially target is empty
+
+        from models.TestModelSyncComputedMultiProp import default
+
+        target_a = default.Target(val=7)
+        target_b = default.Target(val=8)
+        target_c = default.Target(val=9)
+        self.client.save(target_a, target_b, target_c)
+
+        original = default.FromMultiLink()
+        self.client.sync(original)
+
+        original.target = [target_a, target_b, target_c]
+        self.client.sync(original)
+
+        self.assertEqual(original.val, (9,) * 25)
+
+    def test_model_sync_computed_multi_prop_from_multi_link_06(self):
+        # Update with val set, initially target has values
+        # target val changes
+
+        from models.TestModelSyncComputedMultiProp import default
+
+        target_a = default.Target(val=1)
+        target_b = default.Target(val=2)
+        target_c = default.Target(val=3)
+        self.client.save(target_a, target_b, target_c)
+
+        original = default.FromMultiLink(target=[target_a, target_b, target_c])
+        self.client.sync(original)
+
+        target_a.val = 7
+        target_b.val = 8
+        target_c.val = 9
+        self.client.sync(original)
+
+        self.assertEqual(original.val, (9,) * 25)
+
+    def test_model_sync_computed_multi_prop_from_multi_link_07(self):
+        # Update with val set, initially target has values
+        # target changes
+
+        from models.TestModelSyncComputedMultiProp import default
+
+        target_a = default.Target(val=1)
+        target_b = default.Target(val=2)
+        target_c = default.Target(val=3)
+        self.client.save(target_a, target_b, target_c)
+
+        original = default.FromMultiLink(target=[target_a, target_b, target_c])
+        self.client.sync(original)
+
+        target_d = default.Target(val=7)
+        target_e = default.Target(val=8)
+        target_f = default.Target(val=9)
+        original.target = [target_d, target_e, target_f]
+        self.client.sync(original, target_d, target_e, target_f)
+
+        self.assertEqual(original.val, (9,) * 25)
+
+    def test_model_sync_computed_multi_prop_from_exclusive_backlink_01(self):
+        # Create new, no source
+
+        from models.TestModelSyncComputedMultiProp import default
+
+        original = default.FromExclusiveBacklink()
+        self.client.sync(original)
+
+        self.assertEqual(original.val, ())
+
+    def test_model_sync_computed_multi_prop_from_exclusive_backlink_02(self):
+        # Create new, source already exists
+
+        from models.TestModelSyncComputedMultiProp import default
+
+        source = default.ExclusiveSource(val=1)
+        self.client.save(source)
+
+        original = default.FromExclusiveBacklink()
+        source.target = original
+        self.client.sync(original, source)
+
+        self.assertEqual(original.val, (9,) * 2)
+
+    def test_model_sync_computed_multi_prop_from_exclusive_backlink_03(self):
+        # Create new, source created alongside object
+
+        from models.TestModelSyncComputedMultiProp import default
+
+        original = default.FromExclusiveBacklink()
+        source = default.ExclusiveSource(val=1, target=original)
+        self.client.sync(original, source)
+
+        self.assertEqual(original.val, (9,) * 2)
+
+    def test_model_sync_computed_multi_prop_from_exclusive_backlink_04(self):
+        # Update without val set does not fetch it
+
+        from models.TestModelSyncComputedMultiProp import default
+
+        self.client.sync(default.FromExclusiveBacklink())
+        mirror = self.client.query_required_single(
+            default.FromExclusiveBacklink.select(val=False).limit(1)
+        )
+        self.client.sync(mirror)
+
+        self.assertFalse(hasattr(mirror, 'val'))
+
+    def test_model_sync_computed_multi_prop_from_exclusive_backlink_05(self):
+        # Update with val set, initially no source
+
+        from models.TestModelSyncComputedMultiProp import default
+
+        source = default.ExclusiveSource(val=9)
+        self.client.save(source)
+
+        original = default.FromExclusiveBacklink()
+        self.client.sync(original)
+
+        source.target = original
+        self.client.sync(original, source)
+
+        self.assertEqual(original.val, (9,) * 10)
+
+    def test_model_sync_computed_multi_prop_from_exclusive_backlink_06(self):
+        # Update with val set, initially no source
+        # source val changes
+
+        from models.TestModelSyncComputedMultiProp import default
+
+        original = default.FromExclusiveBacklink()
+        source = default.ExclusiveSource(val=1, target=original)
+        self.client.sync(original, source)
+
+        source.val = 9
+        self.client.sync(original, source)
+
+        self.assertEqual(original.val, (9,) * 10)
+
+    @tb.xfail  # Syncing to None doesn't work
+    def test_model_sync_computed_multi_prop_from_exclusive_backlink_07(self):
+        # Update with val set, initially has source
+        # source changes
+
+        from models.TestModelSyncComputedMultiProp import default
+
+        original = default.FromExclusiveBacklink()
+        source_a = default.ExclusiveSource(val=1, target=original)
+        self.client.sync(original, source_a)
+
+        source_a.target = None
+        self.client.sync(source_a)
+        source_b = default.ExclusiveSource(val=9, target=original)
+        self.client.sync(original, source_b)
+
+        self.assertEqual(original.val, (9,) * 10)
+
+    def test_model_sync_computed_multi_prop_from_single_backlink_01(self):
+        # Create new, no sources
+
+        from models.TestModelSyncComputedMultiProp import default
+
+        original = default.FromSingleBacklink()
+        self.client.sync(original)
+
+        self.assertEqual(original.val, (9,) * 1)
+
+    def test_model_sync_computed_multi_prop_from_single_backlink_02(self):
+        # Create new, sources already exists
+
+        from models.TestModelSyncComputedMultiProp import default
+
+        source_a = default.SingleSource(val=1)
+        source_b = default.SingleSource(val=2)
+        source_c = default.SingleSource(val=3)
+        self.client.save(source_a, source_b, source_c)
+
+        original = default.FromSingleBacklink()
+        source_a.target = original
+        source_b.target = original
+        source_c.target = original
+        self.client.sync(original, source_a, source_b, source_c)
+
+        self.assertEqual(original.val, (9,) * 7)
+
+    def test_model_sync_computed_multi_prop_from_single_backlink_03(self):
+        # Create new, sources created alongside object
+
+        from models.TestModelSyncComputedMultiProp import default
+
+        original = default.FromSingleBacklink()
+        source_a = default.SingleSource(val=1, target=original)
+        source_b = default.SingleSource(val=2, target=original)
+        source_c = default.SingleSource(val=3, target=original)
+        self.client.sync(original, source_a, source_b, source_c)
+
+        self.assertEqual(original.val, (9,) * 7)
+
+    def test_model_sync_computed_multi_prop_from_single_backlink_04(self):
+        # Update without val set does not fetch it
+
+        from models.TestModelSyncComputedMultiProp import default
+
+        self.client.sync(default.FromSingleBacklink())
+        mirror = self.client.query_required_single(
+            default.FromSingleBacklink.select(val=False).limit(1)
+        )
+        self.client.sync(mirror)
+
+        self.assertFalse(hasattr(mirror, 'val'))
+
+    def test_model_sync_computed_multi_prop_from_single_backlink_05(self):
+        # Update with val set, initially no sources
+
+        from models.TestModelSyncComputedMultiProp import default
+
+        source_a = default.SingleSource(val=7)
+        source_b = default.SingleSource(val=8)
+        source_c = default.SingleSource(val=9)
+        self.client.save(source_a, source_b, source_c)
+
+        original = default.FromSingleBacklink()
+        self.client.sync(original)
+
+        source_a.target = original
+        source_b.target = original
+        source_c.target = original
+        self.client.sync(original, source_a, source_b, source_c)
+
+        self.assertEqual(original.val, (9,) * 25)
+
+    def test_model_sync_computed_multi_prop_from_single_backlink_06(self):
+        # Update with val set, initially no sources
+        # source vals changes
+
+        from models.TestModelSyncComputedMultiProp import default
+
+        original = default.FromSingleBacklink()
+        source_a = default.SingleSource(val=1, target=original)
+        source_b = default.SingleSource(val=2, target=original)
+        source_c = default.SingleSource(val=3, target=original)
+        self.client.sync(original, source_a, source_b, source_c)
+
+        source_a.val = 7
+        source_b.val = 8
+        source_c.val = 9
+        self.client.sync(original, source_a, source_b, source_c)
+
+        self.assertEqual(original.val, (9,) * 25)
+
+    @tb.xfail  # Syncing to None doesn't work
+    def test_model_sync_computed_multi_prop_from_single_backlink_07(self):
+        # Update with val set, initially has sources
+        # sources change
+
+        from models.TestModelSyncComputedMultiProp import default
+
+        original = default.FromSingleBacklink()
+        source_a = default.SingleSource(val=1)
+        source_b = default.SingleSource(val=2)
+        source_c = default.SingleSource(val=3)
+        self.client.sync(original, source_a, source_b, source_c)
+
+        source_a.target = None
+        source_b.target = None
+        source_c.target = None
+        self.client.sync(source_a, source_b, source_c)
+        source_d = default.SingleSource(val=7, target=original)
+        source_e = default.SingleSource(val=8, target=original)
+        source_f = default.SingleSource(val=9, target=original)
+        self.client.sync(original, source_d, source_e, source_f)
+
+        self.assertEqual(original.val, (9,) * 25)
+
+    def test_model_sync_computed_multi_prop_from_stable_expr_01(self):
+        # Create new, expr prop is None
+
+        from models.TestModelSyncComputedMultiProp import default
+
+        original = default.FromStableExpr()
+        self.client.sync(original)
+
+        self.assertEqual(original.val, (9,) * 1)
+
+    def test_model_sync_computed_multi_prop_from_stable_expr_02(self):
+        # Update without val set does not fetch it
+
+        from models.TestModelSyncComputedMultiProp import default
+
+        self.client.sync(default.FromStableExpr())
+        mirror = self.client.query_required_single(
+            default.FromStableExpr.select(val=False).limit(1)
+        )
+        self.client.sync(mirror)
+
+        self.assertFalse(hasattr(mirror, 'val'))
+
+    def test_model_sync_computed_multi_prop_from_stable_expr_03(self):
+        # Update with val set, initially None
+
+        from models.TestModelSyncComputedMultiProp import default
+
+        original = default.FromStableExpr()
+        self.client.sync(original)
+
+        # This increments val by 1
+        other = default.FromStableExpr()
+        self.client.sync(original, other)
+
+        self.assertEqual(original.val, (9,) * 2)
+
+    def test_model_sync_computed_multi_prop_from_global_01(self):
+        # Create new, global is None
+
+        from models.TestModelSyncComputedMultiProp import default
+
+        original = default.FromGlobal()
+        self.client.sync(original)
+
+        self.assertEqual(original.val, ())
+
+    def test_model_sync_computed_multi_prop_from_global_02(self):
+        # Create new, global has value
+
+        from models.TestModelSyncComputedMultiProp import default
+
+        sess_client = self.client.with_globals(
+            {"default::SomeGlobal": 1}
+        )
+        original = default.FromGlobal()
+        sess_client.sync(original)
+
+        self.assertEqual(original.val, (9,) * 2)
+
+    def test_model_sync_computed_multi_prop_from_global_03(self):
+        # Update without val set does not fetch it
+
+        from models.TestModelSyncComputedMultiProp import default
+
+        self.client.sync(default.FromGlobal())
+        mirror = self.client.query_required_single(
+            default.FromGlobal.select(val=False).limit(1)
+        )
+        self.client.sync(mirror)
+
+        self.assertFalse(hasattr(mirror, 'val'))
+
+    def test_model_sync_computed_multi_prop_from_global_04(self):
+        # Update with val set, initially None
+
+        from models.TestModelSyncComputedMultiProp import default
+
+        sess_client = self.client.with_globals(
+            {"default::SomeGlobal": 1}
+        )
+        original = default.FromGlobal()
+        sess_client.sync(original)
+
+        sess_client = self.client.with_globals(
+            {"default::SomeGlobal": 9}
+        )
+        sess_client.sync(original)
+
+        self.assertEqual(original.val, (9,) * 10)
 
 
 class TestModelSyncSingleLink(tb.ModelTestCase):
@@ -3516,3 +4944,323 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
             [default.SourceWithProp.targets.link(changed_target_1)],
             [default.SourceWithProp.targets.link(changed_target_2)],
         )
+
+
+class TestModelSyncRewrite(tb.ModelTestCase):
+    ISOLATED_TEST_BRANCHES = True
+
+    SCHEMA = """
+        type SingleProp {
+            n: int64;
+            dummy: int64;
+            val: int64 {
+                rewrite insert using (__subject__.n + 1);
+                rewrite update using (__subject__.n + 2);
+            };
+        };
+
+        type Target {
+            n: int64;
+        };
+        type SingleLink {
+            n: int64;
+            dummy: int64;
+            target: Target {
+                rewrite insert using ((
+                    insert Target { n := __subject__.n + 1 }
+                ));
+                rewrite update using ((
+                    insert Target { n := __subject__.n + 2 }
+                ));
+            };
+        };
+    """
+
+    def test_model_sync_rewrite_insert_01(self):
+        # Insert, property with rewrite
+
+        from models.TestModelSyncRewrite import default
+
+        def _testcase(
+            insert_n: int | None,
+            insert_val: int | None,
+            expected_val: int | None,
+        ) -> None:
+            original = default.SingleProp(n=insert_n, val=insert_val)
+            self.client.sync(original)
+
+            self.assertEqual(original.val, expected_val)
+
+            # cleanup
+            self.client.query(default.SingleProp.delete())
+
+        _testcase(None, None, None)
+        _testcase(1, None, 2)
+        _testcase(1, 0, 2)
+
+    @tb.xfail  # updated link is not refetched
+    def test_model_sync_rewrite_insert_02(self):
+        # Insert, link with rewrite
+
+        from models.TestModelSyncRewrite import default
+
+        def _testcase(
+            insert_n: int | None,
+            insert_target: default.Target | None,
+            expected_val: int | None,
+        ) -> None:
+            original = default.SingleLink(n=insert_n, target=insert_target)
+            self.client.sync(original)
+
+            self.assertNotEqual(original.target, insert_target)
+            assert original.target is not None
+            self.assertEqual(original.target.n, expected_val)
+
+            # cleanup
+            self.client.query(default.SingleLink.delete())
+
+        target_zero = default.Target(n=0)
+        self.client.save(target_zero)
+
+        # _testcase(None, None, None)  # Syncing to None doesn't work
+        # _testcase(1, None, 2)  # Syncing to None doesn't work
+        _testcase(1, target_zero, 2)
+
+    def test_model_sync_rewrite_update_01(self):
+        # Update, property with rewrite
+        # Only update the rewrite field
+
+        from models.TestModelSyncRewrite import default
+
+        def _testcase(
+            insert_n: int | None,
+            update_val: int | None,
+            expected_val: int | None,
+        ) -> None:
+            original = default.SingleProp(n=insert_n)
+            self.client.sync(original)
+
+            original.val = update_val
+            original.dummy = 1  # Change some other prop in parallel
+            self.client.sync(original)
+
+            self.assertEqual(original.val, expected_val)
+
+            # cleanup
+            self.client.query(default.SingleProp.delete())
+
+        _testcase(None, None, None)
+        _testcase(None, 1, None)
+        _testcase(1, None, 3)
+        _testcase(1, 1, 3)
+        _testcase(1, 9, 3)
+
+    def test_model_sync_rewrite_update_02(self):
+        # Update, property with rewrite
+        # Only update other field
+
+        from models.TestModelSyncRewrite import default
+
+        def _testcase(
+            insert_n: int | None,
+            update_n: int | None,
+            expected_val: int | None,
+        ) -> None:
+            original = default.SingleProp(n=insert_n)
+            self.client.sync(original)
+
+            original.n = update_n
+            original.dummy = 1  # Change some other prop in parallel
+            self.client.sync(original)
+
+            self.assertEqual(original.val, expected_val)
+
+            # cleanup
+            self.client.query(default.SingleProp.delete())
+
+        _testcase(None, None, None)
+        _testcase(None, 1, 3)
+        _testcase(1, None, None)
+        _testcase(1, 1, 3)
+        _testcase(1, 9, 11)
+
+    @tb.xfail  # Fails because of bugs syncing links
+    def test_model_sync_rewrite_update_03(self):
+        # Update, link with rewrite
+        # Only update the rewrite field
+
+        from models.TestModelSyncRewrite import default
+
+        # Initialize all links to not None, because sync currently breaks
+        # otherwise.
+        target_zero = default.Target(n=0)
+        self.client.save(target_zero)
+
+        def _testcase(
+            insert_n: int | None,
+            update_target: default.Target | None,
+            expected_val: int | None,
+        ) -> None:
+            original = default.SingleLink(n=insert_n, target=target_zero)
+            self.client.sync(original)
+
+            insert_target = original.target
+
+            original.target = update_target
+            original.dummy = 1  # Change some other prop in parallel
+            self.client.sync(original)
+
+            self.assertNotEqual(original.target, insert_target)
+            self.assertNotEqual(original.target, update_target)
+            assert original.target is not None
+            self.assertEqual(original.target.n, expected_val)
+
+            # cleanup
+            self.client.query(default.SingleLink.delete())
+
+        target_one = default.Target(n=1)
+        self.client.save(target_one)
+
+        _testcase(1, None, 3)  # Syncing to None doesn't work
+        _testcase(1, target_one, 3)  # Sync doesn't fetch linked new object
+
+    @tb.xfail  # Fails because of bugs syncing links
+    def test_model_sync_rewrite_update_04(self):
+        # Update, link with rewrite
+        # Only update other field
+
+        from models.TestModelSyncRewrite import default
+
+        # Initialize all links to not None, because sync currently breaks
+        # otherwise.
+        target_zero = default.Target(n=0)
+        self.client.save(target_zero)
+
+        def _testcase(
+            insert_n: int | None,
+            update_n: int | None,
+            expected_val: int | None,
+        ) -> None:
+            original = default.SingleLink(n=insert_n, target=target_zero)
+            self.client.sync(original)
+
+            insert_target = original.target
+
+            original.n = update_n
+            original.dummy = 1  # Change some other prop in parallel
+            self.client.sync(original)
+
+            self.assertNotEqual(original.target, insert_target)
+            assert original.target is not None
+            self.assertEqual(original.target.n, expected_val)
+
+            # cleanup
+            self.client.query(default.SingleLink.delete())
+
+        _testcase(None, None, None)  # Syncing to None doesn't work
+        _testcase(1, None, None)  # Syncing to None doesn't work
+        _testcase(1, 1, 3)  # Sync doesn't fetch linked new object
+        _testcase(1, 9, 11)  # Sync doesn't fetch linked new object
+
+
+class TestModelSyncTrigger(tb.ModelTestCase):
+    ISOLATED_TEST_BRANCHES = True
+
+    SCHEMA = """
+        type TestInsert {
+            val: int64;
+        };
+        type TriggerInsert {
+            n: int64;
+            trigger update_target after insert
+            for each do (
+                update TestInsert
+                set {
+                    val := .val + __new__.n
+                }
+            );
+        };
+        type TriggerInsertWithLink {
+            n: int64;
+            test: TestInsert;
+            trigger update_target after insert
+            for each do (
+                update TestInsert
+                set {
+                    val := .val + __new__.n
+                }
+            );
+        };
+
+        type TestUpdate {
+            val: int64;
+        };
+        type TriggerUpdate {
+            n: int64;
+            trigger update_target after update
+            for each do (
+                update TestUpdate
+                set {
+                    val := .val + __new__.n
+                }
+            );
+        };
+    """
+
+    def test_model_sync_trigger_insert_01(self):
+        # Insert trigger, basic
+        from models.TestModelSyncTrigger import default
+
+        test_obj = default.TestInsert(val=0)
+        self.client.sync(test_obj)
+
+        trigger_a = default.TriggerInsert(n=1)
+        self.client.sync(test_obj, trigger_a)
+        self.assertEqual(test_obj.val, 1)
+
+        trigger_b = default.TriggerInsert(n=2)
+        self.client.sync(test_obj, trigger_b)
+        self.assertEqual(test_obj.val, 3)
+
+        trigger_c = default.TriggerInsert(n=3)
+        self.client.sync(test_obj, trigger_c)
+        self.assertEqual(test_obj.val, 6)
+
+    def test_model_sync_trigger_insert_02(self):
+        # Insert trigger
+        # Link will cause test objs to be batched before trigger objs
+        from models.TestModelSyncTrigger import default
+
+        test_obj = default.TestInsert(val=0)
+        self.client.sync(test_obj)
+
+        trigger_a = default.TriggerInsertWithLink(n=1, test=test_obj)
+        self.client.sync(test_obj, trigger_a)
+        self.assertEqual(test_obj.val, 1)
+
+        trigger_b = default.TriggerInsertWithLink(n=2, test=test_obj)
+        self.client.sync(test_obj, trigger_b)
+        self.assertEqual(test_obj.val, 3)
+
+        trigger_c = default.TriggerInsertWithLink(n=3, test=test_obj)
+        self.client.sync(test_obj, trigger_c)
+        self.assertEqual(test_obj.val, 6)
+
+    def test_model_sync_trigger_update_01(self):
+        from models.TestModelSyncTrigger import default
+
+        test_obj = default.TestUpdate(val=0)
+        trigger = default.TriggerUpdate(n=0)
+        self.client.sync(test_obj, trigger)
+
+        trigger.n = 1
+        self.client.sync(test_obj, trigger)
+        self.assertEqual(test_obj.val, 1)
+
+        trigger.n = 2
+        self.client.sync(test_obj, trigger)
+        self.assertEqual(test_obj.val, 3)
+
+        trigger.n = 3
+        self.client.sync(test_obj, trigger)
+        self.assertEqual(test_obj.val, 6)
