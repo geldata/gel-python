@@ -227,7 +227,9 @@ class Path(PathExpr):
             base = f"({base})"
         steps.append(base)
 
-        return "".join(reversed(steps))
+        path_ql = "".join(reversed(steps))
+        shape_ql = " { * }" if self.is_link else ""
+        return path_ql + shape_ql
 
 
 @dataclass(kw_only=True, frozen=True)
@@ -851,7 +853,8 @@ def _render_shape(
                 and el_expr.source.type == source.type
                 and el_expr.name == el.name
             ):
-                el_text = _edgeql.quote_ident(el.name)
+                el_shape_text = " { * }" if el_expr.is_link else ""
+                el_text = _edgeql.quote_ident(el.name) + el_shape_text
             else:
                 assign = InfixOp(
                     lexpr=Ident(name=el.name, type_=el_expr.type),
