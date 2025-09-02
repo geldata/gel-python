@@ -91,6 +91,9 @@ class SchemaPath:
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}({str(self)!r})"
 
+    def __bool__(self) -> bool:
+        return bool(self._raw_paths)
+
     @functools.cached_property
     def parts(self) -> tuple[str, ...]:
         """A sequence of components of the schema path."""

@@ -35,6 +35,8 @@ class AbstractCodeGenerator:
         args: argparse.Namespace,
         *,
         project_dir: pathlib.Path | None = None,
+        cache_dir: pathlib.Path | None = None,
+        extra_cache_key: str | None = None,
         client: gel.Client | None = None,
         interactive: bool = True,
     ):
@@ -42,6 +44,8 @@ class AbstractCodeGenerator:
         self._quiet = False
         self._default_module = "default"
         self._async = False
+        self._cache_dir = cache_dir
+        self._extra_cache_key = extra_cache_key
 
         self._interactive = interactive
         self._stderr: TextIO
