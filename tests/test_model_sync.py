@@ -5184,6 +5184,18 @@ class TestModelSyncTrigger(tb.ModelTestCase):
                 }
             );
         };
+        type TriggerInsertComputed {
+            n: int64;
+            trigger update_target after insert
+            for each do (
+                update TestInsert
+                set {
+                    val := .val + __new__.n
+                }
+            );
+
+            test_vals := TestInsert.val;
+        };
         type TriggerInsertWithLink {
             n: int64;
             test: TestInsert;
@@ -5209,6 +5221,18 @@ class TestModelSyncTrigger(tb.ModelTestCase):
                 }
             );
         };
+        type TriggerUpdateComputed {
+            n: int64;
+            trigger update_target after update
+            for each do (
+                update TestUpdate
+                set {
+                    val := .val + __new__.n
+                }
+            );
+
+            test_vals := TestUpdate.val;
+        };
     """
 
     def test_model_sync_trigger_insert_01(self):
@@ -5216,8 +5240,6 @@ class TestModelSyncTrigger(tb.ModelTestCase):
         from models.TestModelSyncTrigger import default
 
         test_obj = default.TestInsert(val=0)
-        self.client.sync(test_obj)
-
         trigger_a = default.TriggerInsert(n=1)
         self.client.sync(test_obj, trigger_a)
         self.assertEqual(test_obj.val, 1)
@@ -5231,13 +5253,21 @@ class TestModelSyncTrigger(tb.ModelTestCase):
         self.assertEqual(test_obj.val, 6)
 
     def test_model_sync_trigger_insert_02(self):
+        # Insert trigger, computed modified by trigger
+        from models.TestModelSyncTrigger import default
+
+        test_obj = default.TestInsert(val=0)
+        trigger = default.TriggerInsertComputed(n=1)
+        self.client.sync(test_obj, trigger)
+
+        self.assertEqual(trigger.test_vals, (1,))
+
+    def test_model_sync_trigger_insert_03(self):
         # Insert trigger
         # Link will cause test objs to be batched before trigger objs
         from models.TestModelSyncTrigger import default
 
         test_obj = default.TestInsert(val=0)
-        self.client.sync(test_obj)
-
         trigger_a = default.TriggerInsertWithLink(n=1, test=test_obj)
         self.client.sync(test_obj, trigger_a)
         self.assertEqual(test_obj.val, 1)
@@ -5268,3 +5298,15 @@ class TestModelSyncTrigger(tb.ModelTestCase):
         trigger.n = 3
         self.client.sync(test_obj, trigger)
         self.assertEqual(test_obj.val, 6)
+
+    def test_model_sync_trigger_update_02(self):
+        # Update trigger, computed modified by trigger
+        from models.TestModelSyncTrigger import default
+
+        test_obj = default.TestUpdate(val=0)
+        trigger = default.TriggerUpdateComputed(n=0)
+        self.client.sync(test_obj, trigger)
+
+        trigger.n = 1
+        self.client.sync(test_obj, trigger)
+        self.assertEqual(trigger.test_vals, (1,))
