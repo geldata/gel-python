@@ -222,7 +222,10 @@ class Path(PathExpr):
             steps.append(step)
             current = source
 
-        steps.append(edgeql(current, ctx=ctx))
+        base = edgeql(current, ctx=ctx)
+        if not isinstance(current, AtomicExpr):
+            base = f"({base})"
+        steps.append(base)
 
         return "".join(reversed(steps))
 
@@ -868,6 +871,10 @@ def _need_left_parens(
 ) -> bool:
     if isinstance(lexpr, AtomicExpr):
         return False
+    # FIXME?: This is true up until 7.0. Before 7.0 we usually need
+    # to parenthesize statements, but afterward not.
+    if isinstance(lexpr, Stmt):
+        return True
     left_prec = lprec if lprec is not None else lexpr.precedence
     return _edgeql.need_left_parens(prod_prec, left_prec)
 
@@ -879,6 +886,10 @@ def _need_right_parens(
 ) -> bool:
     if isinstance(rexpr, AtomicExpr):
         return False
+    # FIXME?: This is true up until 7.0. Before 7.0 we usually need
+    # to parenthesize statements, but afterward not.
+    if isinstance(rexpr, Stmt):
+        return True
     right_prec = rprec if rprec is not None else rexpr.precedence
     return _edgeql.need_right_parens(prod_prec, right_prec)
 
