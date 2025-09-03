@@ -191,9 +191,6 @@ class TestQueryBuilder(tb.ModelTestCase):
             [("Alice", False), ("Billie", True)],
         )
 
-    @tb.xfail('''
-        Broken because of bug #893
-    ''')
     def test_qb_order_04(self):
         from models.orm import default, std
 
@@ -405,6 +402,47 @@ class TestQueryBuilder(tb.ModelTestCase):
             {u.id for u in res.players},
             {u.id for u in green_res.users},
         )
+
+    def test_qb_filter_11(self):
+        from models.orm import default
+
+        sess_client = self.client.with_globals(
+            {"default::current_game_session_num": 123}
+        )
+
+        q = (
+            default.User.select(
+                name=True,
+            )
+            .filter(
+                # want to use std::in_, but that fails dynamically...
+                lambda g: g == default.CurrentGameSession.players
+            )
+            .order_by(name=True)
+        )
+        res = sess_client.query(q)
+        self.assertEqual(len(res), 2)
+
+    def test_qb_filter_12(self):
+        # Same as above but with an extra .select() in the filter
+        from models.orm import default
+
+        sess_client = self.client.with_globals(
+            {"default::current_game_session_num": 123}
+        )
+
+        q = (
+            default.User.select(
+                name=True,
+            )
+            .filter(
+                # want to use std::in_, but that fails dynamically...
+                lambda g: g.select() == default.CurrentGameSession.players
+            )
+            .order_by(name=True)
+        )
+        res = sess_client.query(q)
+        self.assertEqual(len(res), 2)
 
     def test_qb_link_property_01(self):
         from models.orm import default

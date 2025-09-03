@@ -24,6 +24,19 @@ if TYPE_CHECKING:
 
 @dataclass(kw_only=True, frozen=True)
 class Node(abc.ABC):
+    # The symbol sets are at least a little confusing.
+    # I think the meanings are:
+    # symrefs: symbol references that are bound by the top of current node
+    #          or somewhere external. Symbols bound *inside* a subnode
+    #          don't seem to be included.
+    # outside_refs: specifically references that *reach past* at least
+    #               one binding site and aren't bound inside a subnode.
+    # must_bind_refs: path prefixes used in an expression *bare* (without
+    #                 projecting from them) that thus must be bound if used.
+    #                 Symbols bound in subnodes not included.
+    #
+    # visible_refs: This is outside_refs for ScopedExprs and symrefs
+    #               otherwise.
     symrefs: frozenset[Symbol] = field(init=False, compare=False)
     outside_refs: frozenset[Symbol] = field(init=False, compare=False)
     must_bind_refs: frozenset[Symbol] = field(init=False, compare=False)
@@ -56,10 +69,8 @@ class Node(abc.ABC):
     def compute_must_bind_refs(
         self, subnodes: Iterable[Node | None]
     ) -> Iterable[Symbol]:
-        return itertools.chain(
-            itertools.chain.from_iterable(
-                n.visible_must_bind_refs for n in subnodes if n is not None
-            ),
+        return itertools.chain.from_iterable(
+            n.visible_must_bind_refs for n in subnodes if n is not None
         )
 
     def __post_init__(self) -> None:
