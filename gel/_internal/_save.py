@@ -1719,8 +1719,12 @@ class SaveExecutor:
 
                 # Update new objects with refetched data
                 for prop in get_pointers(type(obj)):
-                    if prop.name not in new_obj.__dict__:
+                    if (
                         # prop not refetched
+                        prop.name not in new_obj.__dict__
+                        # TODO: Refetching links for new objects
+                        or prop.kind == PointerKind.Link
+                    ):
                         continue
 
                     obj.__dict__[prop.name] = new_obj.__dict__[prop.name]
