@@ -1628,19 +1628,30 @@ class SaveExecutor:
         for obj, new_id in self.new_object_ids.items():
             assert new_id is not None
 
-            if self.refetch:
-                updated = self.new_objects[new_id]
-                pydantic_set_fields = obj.__pydantic_fields_set__
-                for field in updated.__dict__:
-                    if field == "id":
-                        continue
-                    obj.__dict__[field] = updated.__dict__[field]
-                    pydantic_set_fields.add(field)
-
             obj.__gel_commit__(new_id=new_id)
 
         if self.refetch:
             self._apply_refetched_data()
+
+            for obj, new_id in self.new_object_ids.items():
+                assert new_id is not None
+
+                updated = self.new_objects[new_id]
+                pydantic_set_fields = obj.__pydantic_fields_set__
+
+                for prop in get_pointers(type(obj)):
+                    if (
+                        # id is already set and should never change.
+                        prop.name == "id"
+                        # prop not refetched
+                        or prop.name not in updated.__dict__
+                        # TODO: Refetching links for new objects
+                        or prop.kind == PointerKind.Link
+                    ):
+                        continue
+
+                    obj.__dict__[prop.name] = updated.__dict__[prop.name]
+                    pydantic_set_fields.add(prop.name)
 
         self._commit_recursive()
 
@@ -1709,29 +1720,6 @@ class SaveExecutor:
                         # we still need to commit it recursively;
                         # see the above comment.
                         multi_prop_commit_recursive(linked)
-
-            if (
-                self.refetch
-                and obj in self.new_object_ids
-                and (new_obj_id := self.new_object_ids.get(obj))
-            ):
-                new_obj = self.new_objects.get(new_obj_id)
-
-                # Update new objects with refetched data
-                for prop in get_pointers(type(obj)):
-                    if (
-                        # prop not refetched
-                        prop.name not in new_obj.__dict__
-                        # TODO: Refetching links for new objects
-                        or prop.kind == PointerKind.Link
-                    ):
-                        continue
-
-                    obj.__dict__[prop.name] = new_obj.__dict__[prop.name]
-
-                    if prop.computed:
-                        # Computed props may not have been "set" yet
-                        obj.__pydantic_fields_set__.add(prop.name)
 
         for o in self.objs:
             _traverse(o)
