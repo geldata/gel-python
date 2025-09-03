@@ -4302,11 +4302,6 @@ class TestModelGenerator(tb.ModelTestCase):
         # Test all read methods that should raise RuntimeError
         read_methods = [
             ("__len__", lambda: len(session.players), "get the length of"),
-            (
-                "__getitem__",
-                lambda: list(session.players)[0],
-                "index items of",
-            ),
             ("__iter__", lambda: list(session.players), "iterate over"),
             (
                 "__contains__",
@@ -4335,20 +4330,24 @@ class TestModelGenerator(tb.ModelTestCase):
         session.players.add(user)
         self.assertEqual(session.players.unsafe_len(), 1)
 
-        # Test extend works
+        # Test extend works -- should stay at 1
         session.players.update([user])
-        self.assertEqual(session.players.unsafe_len(), 2)
-
-        # Test += works
-        session.players += [user]
-        self.assertEqual(session.players.unsafe_len(), 3)
+        self.assertEqual(session.players.unsafe_len(), 1)
 
         # Test remove works
         session.players.remove(user)
-        self.assertEqual(session.players.unsafe_len(), 2)
+        self.assertEqual(session.players.unsafe_len(), 0)
+
+        # Test extend works -- should go up to 1 this time
+        session.players.update([user])
+        self.assertEqual(session.players.unsafe_len(), 1)
 
         # Test -= works
         session.players -= [user]
+        self.assertEqual(session.players.unsafe_len(), 0)
+
+        # Test += works
+        session.players += [user]
         self.assertEqual(session.players.unsafe_len(), 1)
 
         # Verify mode stays write-only after modifications
