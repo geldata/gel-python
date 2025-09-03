@@ -1104,7 +1104,6 @@ class TestModelSyncComputedSingleProp(tb.ModelTestCase):
 
         self.assertEqual(original.val, 10)
 
-    @tb.xfail  # Syncing to None doesn't work
     def test_model_sync_computed_single_prop_from_exclusive_backlink_07(self):
         # Update with val set, initially has source
         # source changes
@@ -1215,7 +1214,6 @@ class TestModelSyncComputedSingleProp(tb.ModelTestCase):
 
         self.assertEqual(original.val, 25)
 
-    @tb.xfail  # Syncing to None doesn't work
     def test_model_sync_computed_single_prop_from_single_backlink_07(self):
         # Update with val set, initially has sources
         # sources change
@@ -1291,9 +1289,7 @@ class TestModelSyncComputedSingleProp(tb.ModelTestCase):
 
         from models.TestModelSyncComputedSingleProp import default
 
-        sess_client = self.client.with_globals(
-            {"default::SomeGlobal": 1}
-        )
+        sess_client = self.client.with_globals({"default::SomeGlobal": 1})
         original = default.FromGlobal()
         sess_client.sync(original)
 
@@ -1317,15 +1313,11 @@ class TestModelSyncComputedSingleProp(tb.ModelTestCase):
 
         from models.TestModelSyncComputedSingleProp import default
 
-        sess_client = self.client.with_globals(
-            {"default::SomeGlobal": 1}
-        )
+        sess_client = self.client.with_globals({"default::SomeGlobal": 1})
         original = default.FromGlobal()
         sess_client.sync(original)
 
-        sess_client = self.client.with_globals(
-            {"default::SomeGlobal": 9}
-        )
+        sess_client = self.client.with_globals({"default::SomeGlobal": 9})
         sess_client.sync(original)
 
         self.assertEqual(original.val, 10)
@@ -2325,7 +2317,6 @@ class TestModelSyncComputedMultiProp(tb.ModelTestCase):
 
         self.assertEqual(original.val, (9,) * 10)
 
-    @tb.xfail  # Syncing to None doesn't work
     def test_model_sync_computed_multi_prop_from_exclusive_backlink_07(self):
         # Update with val set, initially has source
         # source changes
@@ -2436,7 +2427,6 @@ class TestModelSyncComputedMultiProp(tb.ModelTestCase):
 
         self.assertEqual(original.val, (9,) * 25)
 
-    @tb.xfail  # Syncing to None doesn't work
     def test_model_sync_computed_multi_prop_from_single_backlink_07(self):
         # Update with val set, initially has sources
         # sources change
@@ -2512,9 +2502,7 @@ class TestModelSyncComputedMultiProp(tb.ModelTestCase):
 
         from models.TestModelSyncComputedMultiProp import default
 
-        sess_client = self.client.with_globals(
-            {"default::SomeGlobal": 1}
-        )
+        sess_client = self.client.with_globals({"default::SomeGlobal": 1})
         original = default.FromGlobal()
         sess_client.sync(original)
 
@@ -2538,15 +2526,11 @@ class TestModelSyncComputedMultiProp(tb.ModelTestCase):
 
         from models.TestModelSyncComputedMultiProp import default
 
-        sess_client = self.client.with_globals(
-            {"default::SomeGlobal": 1}
-        )
+        sess_client = self.client.with_globals({"default::SomeGlobal": 1})
         original = default.FromGlobal()
         sess_client.sync(original)
 
-        sess_client = self.client.with_globals(
-            {"default::SomeGlobal": 9}
-        )
+        sess_client = self.client.with_globals({"default::SomeGlobal": 9})
         sess_client.sync(original)
 
         self.assertEqual(original.val, (9,) * 10)
@@ -2625,6 +2609,45 @@ class TestModelSyncSingleLink(tb.ModelTestCase):
         with_none = default.SourceWithProp(target=None)
         self.client.sync(with_none)
 
+    def _testcase_02(
+        self,
+        model_type: typing.Type[GelModel],
+        initial_target: typing.Any,
+        changed_target: typing.Any,
+    ) -> None:
+        original = model_type(target=initial_target)
+        self.client.save(original)
+
+        mirror_1 = self.client.query_required_single(
+            model_type.select(target=True).limit(1)
+        )
+        mirror_2 = self.client.query_required_single(
+            model_type.select(target=True).limit(1)
+        )
+        mirror_3 = self.client.query_required_single(
+            model_type.select(target=False).limit(1)
+        )
+
+        self._check_links_equal(original.target, initial_target)
+        self._check_links_equal(mirror_1.target, initial_target)
+        self._check_links_equal(mirror_2.target, initial_target)
+        self.assertFalse(hasattr(mirror_3, "val"))
+
+        # change a value
+        original.target = changed_target
+
+        # sync some of the objects
+        self.client.sync(original, mirror_1, mirror_3)
+
+        # only synced objects with value set get update
+        self._check_links_equal(original.target, changed_target)
+        self._check_links_equal(mirror_1.target, changed_target)
+        self._check_links_equal(mirror_2.target, initial_target)
+        self.assertFalse(hasattr(mirror_3, 'val'))
+
+        # cleanup
+        self.client.query(model_type.delete())
+
     def test_model_sync_single_link_02(self):
         # Updating existing objects with single link
 
@@ -2634,176 +2657,116 @@ class TestModelSyncSingleLink(tb.ModelTestCase):
         target_b = default.Target()
         self.client.save(target_a, target_b)
 
-        def _testcase(
-            model_type: typing.Type[GelModel],
-            initial_target: typing.Any,
-            changed_target: typing.Any,
-        ) -> None:
-            original = model_type(target=initial_target)
-            self.client.save(original)
+        # Change to/from None
+        self._testcase_02(default.Source, None, target_b)
+        self._testcase_02(default.Source, target_a, None)
+        self._testcase_02(default.Source, target_a, target_b)
 
-            mirror_1 = self.client.query_required_single(
-                model_type.select(target=True).limit(1)
-            )
-            mirror_2 = self.client.query_required_single(
-                model_type.select(target=True).limit(1)
-            )
-            mirror_3 = self.client.query_required_single(
-                model_type.select(target=False).limit(1)
-            )
-
-            self._check_links_equal(original.target, initial_target)
-            self._check_links_equal(mirror_1.target, initial_target)
-            self._check_links_equal(mirror_2.target, initial_target)
-            self.assertFalse(hasattr(mirror_3, "val"))
-
-            # change a value
-            original.target = changed_target
-
-            # sync some of the objects
-            self.client.sync(original, mirror_1, mirror_3)
-
-            # only synced objects with value set get update
-            self._check_links_equal(original.target, changed_target)
-            self._check_links_equal(mirror_1.target, changed_target)
-            self._check_links_equal(mirror_2.target, initial_target)
-            self.assertFalse(hasattr(mirror_3, 'val'))
-
-            # cleanup
-            self.client.query(model_type.delete())
+        # Moved to test_model_sync_single_link_02c
+        # self._testcase_02(
+        #     default.SourceWithProp,
+        #     None,
+        #     default.SourceWithProp.target.link(target_b),
+        # )
+        # self._testcase_02(
+        #     default.SourceWithProp,
+        #     None,
+        #     default.SourceWithProp.target.link(target_b, lprop=1),
+        # )
+        # self._testcase_02(
+        #     default.SourceWithProp,
+        #     default.SourceWithProp.target.link(target_a),
+        #     None,
+        # )
+        # self._testcase_02(
+        #     default.SourceWithProp,
+        #     default.SourceWithProp.target.link(target_a, lprop=1),
+        #     None,
+        # )
 
         # Change to a new value
-        _testcase(default.Source, target_a, target_b)
-        _testcase(
+        self._testcase_02(
             default.SourceWithProp,
             default.SourceWithProp.target.link(target_a),
             default.SourceWithProp.target.link(target_b),
         )
-        _testcase(
+        self._testcase_02(
             default.SourceWithProp,
             default.SourceWithProp.target.link(target_a, lprop=1),
             default.SourceWithProp.target.link(target_b),
         )
-        _testcase(
+        self._testcase_02(
             default.SourceWithProp,
             default.SourceWithProp.target.link(target_a),
             default.SourceWithProp.target.link(target_b, lprop=1),
         )
-        _testcase(
+        self._testcase_02(
             default.SourceWithProp,
             default.SourceWithProp.target.link(target_a, lprop=1),
             default.SourceWithProp.target.link(target_b, lprop=1),
         )
 
         # only changing lprop
-        _testcase(
+        self._testcase_02(
             default.SourceWithProp,
             default.SourceWithProp.target.link(target_a),
             default.SourceWithProp.target.link(target_a, lprop=2),
         )
-        _testcase(
+        self._testcase_02(
             default.SourceWithProp,
             default.SourceWithProp.target.link(target_a, lprop=1),
             default.SourceWithProp.target.link(target_a),
         )
-        _testcase(
+        self._testcase_02(
             default.SourceWithProp,
             default.SourceWithProp.target.link(target_a, lprop=1),
             default.SourceWithProp.target.link(target_a, lprop=2),
         )
 
         # Change to the same value
-        _testcase(default.Source, target_a, target_a)
-        _testcase(
+        self._testcase_02(default.Source, None, None)
+        self._testcase_02(default.Source, target_a, target_a)
+        self._testcase_02(
             default.SourceWithProp,
             default.SourceWithProp.target.link(target_a),
             default.SourceWithProp.target.link(target_a),
         )
-        _testcase(
+        self._testcase_02(
             default.SourceWithProp,
             default.SourceWithProp.target.link(target_a, lprop=1),
             default.SourceWithProp.target.link(target_a, lprop=1),
         )
 
-    @tb.xfail
-    def test_model_sync_single_link_02a(self):
+    @tb.xfail  # Changing links with props to/from None fails assertion
+    def test_model_sync_single_link_02c(self):
         # Updating existing objects with single link
-        # Change from None to value
 
         from models.TestModelSyncSingleLink import default
 
-        changed_target = default.Target()
-        self.client.save(changed_target)
+        target_a = default.Target()
+        target_b = default.Target()
+        self.client.save(target_a, target_b)
 
-        original = default.Source()
-        self.client.save(original)
-
-        mirror_1 = self.client.query_required_single(
-            default.Source.select(target=True).limit(1)
+        self._testcase_02(
+            default.SourceWithProp,
+            None,
+            default.SourceWithProp.target.link(target_b),
         )
-        mirror_2 = self.client.query_required_single(
-            default.Source.select(target=True).limit(1)
+        self._testcase_02(
+            default.SourceWithProp,
+            None,
+            default.SourceWithProp.target.link(target_b, lprop=1),
         )
-        mirror_3 = self.client.query_required_single(
-            default.Source.select(target=False).limit(1)
+        self._testcase_02(
+            default.SourceWithProp,
+            default.SourceWithProp.target.link(target_a),
+            None,
         )
-
-        self.assertIsNone(original.target, None)
-        self.assertIsNone(mirror_1.target, None)
-        self.assertIsNone(mirror_2.target, None)
-        self.assertFalse(hasattr(mirror_3, "val"))
-
-        # change a value
-        original.target = changed_target
-
-        # sync some of the objects
-        self.client.sync(original, mirror_1, mirror_3)  # Error here
-
-        # only synced objects with value set get update
-        self._check_links_equal(original.target, changed_target)
-        self._check_links_equal(mirror_1.target, changed_target)
-        self.assertIsNone(mirror_2.target)
-        self.assertFalse(hasattr(mirror_3, 'val'))
-
-    @tb.xfail
-    def test_model_sync_single_link_02b(self):
-        # Updating existing objects with single link
-        # Change from value to None
-
-        from models.TestModelSyncSingleLink import default
-
-        initial_target = default.Target()
-        self.client.save(initial_target)
-
-        original = default.Source(target=initial_target)
-        self.client.save(original)
-
-        mirror_1 = self.client.query_required_single(
-            default.Source.select(target=True).limit(1)
+        self._testcase_02(
+            default.SourceWithProp,
+            default.SourceWithProp.target.link(target_a, lprop=1),
+            None,
         )
-        mirror_2 = self.client.query_required_single(
-            default.Source.select(target=True).limit(1)
-        )
-        mirror_3 = self.client.query_required_single(
-            default.Source.select(target=False).limit(1)
-        )
-
-        self._check_links_equal(original.target, initial_target)
-        self._check_links_equal(mirror_1.target, initial_target)
-        self._check_links_equal(mirror_2.target, initial_target)
-        self.assertFalse(hasattr(mirror_3, "val"))
-
-        # change a value
-        original.target = None
-
-        # sync some of the objects
-        self.client.sync(original, mirror_1, mirror_3)  # Error here
-
-        # only synced objects with value set get update
-        self.assertIsNone(original.target)
-        self.assertIsNone(mirror_1.target)
-        self._check_links_equal(mirror_2.target, initial_target)
-        self.assertFalse(hasattr(mirror_3, 'val'))
 
     def _testcase_03(
         self,
@@ -5002,7 +4965,7 @@ class TestModelSyncRewrite(tb.ModelTestCase):
         _testcase(1, None, 2)
         _testcase(1, 0, 2)
 
-    @tb.xfail  # updated link is not refetched
+    @tb.xfail  # rewritten link is not refetched
     def test_model_sync_rewrite_insert_02(self):
         # Insert, link with rewrite
 
@@ -5026,8 +4989,8 @@ class TestModelSyncRewrite(tb.ModelTestCase):
         target_zero = default.Target(n=0)
         self.client.save(target_zero)
 
-        # _testcase(None, None, None)  # Syncing to None doesn't work
-        # _testcase(1, None, 2)  # Syncing to None doesn't work
+        _testcase(None, None, None)
+        _testcase(1, None, 2)
         _testcase(1, target_zero, 2)
 
     def test_model_sync_rewrite_update_01(self):
@@ -5088,7 +5051,7 @@ class TestModelSyncRewrite(tb.ModelTestCase):
         _testcase(1, 1, 3)
         _testcase(1, 9, 11)
 
-    @tb.xfail  # Fails because of bugs syncing links
+    @tb.xfail  # rewritten link is not refetched
     def test_model_sync_rewrite_update_03(self):
         # Update, link with rewrite
         # Only update the rewrite field
@@ -5125,10 +5088,10 @@ class TestModelSyncRewrite(tb.ModelTestCase):
         target_one = default.Target(n=1)
         self.client.save(target_one)
 
-        _testcase(1, None, 3)  # Syncing to None doesn't work
-        _testcase(1, target_one, 3)  # Sync doesn't fetch linked new object
+        _testcase(1, None, 3)
+        _testcase(1, target_one, 3)
 
-    @tb.xfail  # Fails because of bugs syncing links
+    @tb.xfail  # rewritten link is not refetched
     def test_model_sync_rewrite_update_04(self):
         # Update, link with rewrite
         # Only update other field
@@ -5161,10 +5124,10 @@ class TestModelSyncRewrite(tb.ModelTestCase):
             # cleanup
             self.client.query(default.SingleLink.delete())
 
-        _testcase(None, None, None)  # Syncing to None doesn't work
-        _testcase(1, None, None)  # Syncing to None doesn't work
-        _testcase(1, 1, 3)  # Sync doesn't fetch linked new object
-        _testcase(1, 9, 11)  # Sync doesn't fetch linked new object
+        _testcase(None, None, None)
+        _testcase(1, None, None)
+        _testcase(1, 1, 3)
+        _testcase(1, 9, 11)
 
 
 class TestModelSyncTrigger(tb.ModelTestCase):
