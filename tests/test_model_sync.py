@@ -2592,6 +2592,7 @@ class TestModelSyncSingleLink(tb.ModelTestCase):
         _testcase(default.Source, None)
         _testcase(default.Source, target)
 
+        _testcase(default.SourceWithProp, None)
         _testcase(
             default.SourceWithProp,
             default.SourceWithProp.target.link(target),
@@ -2601,55 +2602,46 @@ class TestModelSyncSingleLink(tb.ModelTestCase):
             default.SourceWithProp.target.link(target, lprop=1),
         )
 
-    @tb.xfail
-    def test_model_sync_single_link_01a(self):
-        # Asserting error in _save
-        from models.TestModelSyncSingleLink import default
-
-        with_none = default.SourceWithProp(target=None)
-        self.client.sync(with_none)
-
-    def _testcase_02(
-        self,
-        model_type: typing.Type[GelModel],
-        initial_target: typing.Any,
-        changed_target: typing.Any,
-    ) -> None:
-        original = model_type(target=initial_target)
-        self.client.save(original)
-
-        mirror_1 = self.client.query_required_single(
-            model_type.select(target=True).limit(1)
-        )
-        mirror_2 = self.client.query_required_single(
-            model_type.select(target=True).limit(1)
-        )
-        mirror_3 = self.client.query_required_single(
-            model_type.select(target=False).limit(1)
-        )
-
-        self._check_links_equal(original.target, initial_target)
-        self._check_links_equal(mirror_1.target, initial_target)
-        self._check_links_equal(mirror_2.target, initial_target)
-        self.assertFalse(hasattr(mirror_3, "val"))
-
-        # change a value
-        original.target = changed_target
-
-        # sync some of the objects
-        self.client.sync(original, mirror_1, mirror_3)
-
-        # only synced objects with value set get update
-        self._check_links_equal(original.target, changed_target)
-        self._check_links_equal(mirror_1.target, changed_target)
-        self._check_links_equal(mirror_2.target, initial_target)
-        self.assertFalse(hasattr(mirror_3, 'val'))
-
-        # cleanup
-        self.client.query(model_type.delete())
-
     def test_model_sync_single_link_02(self):
         # Updating existing objects with single link
+
+        def _testcase(
+            model_type: typing.Type[GelModel],
+            initial_target: typing.Any,
+            changed_target: typing.Any,
+        ) -> None:
+            original = model_type(target=initial_target)
+            self.client.save(original)
+
+            mirror_1 = self.client.query_required_single(
+                model_type.select(target=True).limit(1)
+            )
+            mirror_2 = self.client.query_required_single(
+                model_type.select(target=True).limit(1)
+            )
+            mirror_3 = self.client.query_required_single(
+                model_type.select(target=False).limit(1)
+            )
+
+            self._check_links_equal(original.target, initial_target)
+            self._check_links_equal(mirror_1.target, initial_target)
+            self._check_links_equal(mirror_2.target, initial_target)
+            self.assertFalse(hasattr(mirror_3, "val"))
+
+            # change a value
+            original.target = changed_target
+
+            # sync some of the objects
+            self.client.sync(original, mirror_1, mirror_3)
+
+            # only synced objects with value set get update
+            self._check_links_equal(original.target, changed_target)
+            self._check_links_equal(mirror_1.target, changed_target)
+            self._check_links_equal(mirror_2.target, initial_target)
+            self.assertFalse(hasattr(mirror_3, 'val'))
+
+            # cleanup
+            self.client.query(model_type.delete())
 
         from models.TestModelSyncSingleLink import default
 
@@ -2658,114 +2650,83 @@ class TestModelSyncSingleLink(tb.ModelTestCase):
         self.client.save(target_a, target_b)
 
         # Change to/from None
-        self._testcase_02(default.Source, None, target_b)
-        self._testcase_02(default.Source, target_a, None)
-        self._testcase_02(default.Source, target_a, target_b)
+        _testcase(default.Source, None, target_b)
+        _testcase(default.Source, target_a, None)
 
-        # Moved to test_model_sync_single_link_02c
-        # self._testcase_02(
-        #     default.SourceWithProp,
-        #     None,
-        #     default.SourceWithProp.target.link(target_b),
-        # )
-        # self._testcase_02(
-        #     default.SourceWithProp,
-        #     None,
-        #     default.SourceWithProp.target.link(target_b, lprop=1),
-        # )
-        # self._testcase_02(
-        #     default.SourceWithProp,
-        #     default.SourceWithProp.target.link(target_a),
-        #     None,
-        # )
-        # self._testcase_02(
-        #     default.SourceWithProp,
-        #     default.SourceWithProp.target.link(target_a, lprop=1),
-        #     None,
-        # )
+        _testcase(
+            default.SourceWithProp,
+            None,
+            default.SourceWithProp.target.link(target_b),
+        )
+        _testcase(
+            default.SourceWithProp,
+            None,
+            default.SourceWithProp.target.link(target_b, lprop=1),
+        )
+        _testcase(
+            default.SourceWithProp,
+            default.SourceWithProp.target.link(target_a),
+            None,
+        )
+        _testcase(
+            default.SourceWithProp,
+            default.SourceWithProp.target.link(target_a, lprop=1),
+            None,
+        )
 
         # Change to a new value
-        self._testcase_02(
+        _testcase(default.Source, target_a, target_b)
+
+        _testcase(
             default.SourceWithProp,
             default.SourceWithProp.target.link(target_a),
             default.SourceWithProp.target.link(target_b),
         )
-        self._testcase_02(
+        _testcase(
             default.SourceWithProp,
             default.SourceWithProp.target.link(target_a, lprop=1),
             default.SourceWithProp.target.link(target_b),
         )
-        self._testcase_02(
+        _testcase(
             default.SourceWithProp,
             default.SourceWithProp.target.link(target_a),
             default.SourceWithProp.target.link(target_b, lprop=1),
         )
-        self._testcase_02(
+        _testcase(
             default.SourceWithProp,
             default.SourceWithProp.target.link(target_a, lprop=1),
             default.SourceWithProp.target.link(target_b, lprop=1),
         )
 
         # only changing lprop
-        self._testcase_02(
+        _testcase(
             default.SourceWithProp,
             default.SourceWithProp.target.link(target_a),
             default.SourceWithProp.target.link(target_a, lprop=2),
         )
-        self._testcase_02(
+        _testcase(
             default.SourceWithProp,
             default.SourceWithProp.target.link(target_a, lprop=1),
             default.SourceWithProp.target.link(target_a),
         )
-        self._testcase_02(
+        _testcase(
             default.SourceWithProp,
             default.SourceWithProp.target.link(target_a, lprop=1),
             default.SourceWithProp.target.link(target_a, lprop=2),
         )
 
         # Change to the same value
-        self._testcase_02(default.Source, None, None)
-        self._testcase_02(default.Source, target_a, target_a)
-        self._testcase_02(
+        _testcase(default.Source, None, None)
+        _testcase(default.Source, target_a, target_a)
+        _testcase(
             default.SourceWithProp,
             default.SourceWithProp.target.link(target_a),
             default.SourceWithProp.target.link(target_a),
         )
-        self._testcase_02(
+        _testcase(
             default.SourceWithProp,
             default.SourceWithProp.target.link(target_a, lprop=1),
             default.SourceWithProp.target.link(target_a, lprop=1),
-        )
-
-    @tb.xfail  # Changing links with props to/from None fails assertion
-    def test_model_sync_single_link_02c(self):
-        # Updating existing objects with single link
-
-        from models.TestModelSyncSingleLink import default
-
-        target_a = default.Target()
-        target_b = default.Target()
-        self.client.save(target_a, target_b)
-
-        self._testcase_02(
-            default.SourceWithProp,
-            None,
-            default.SourceWithProp.target.link(target_b),
-        )
-        self._testcase_02(
-            default.SourceWithProp,
-            None,
-            default.SourceWithProp.target.link(target_b, lprop=1),
-        )
-        self._testcase_02(
-            default.SourceWithProp,
-            default.SourceWithProp.target.link(target_a),
-            None,
-        )
-        self._testcase_02(
-            default.SourceWithProp,
-            default.SourceWithProp.target.link(target_a, lprop=1),
-            None,
         )
 
     def _testcase_03(
