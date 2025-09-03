@@ -4281,8 +4281,7 @@ class TestModelGenerator(tb.ModelTestCase):
         ):
             team.member_names.append("Billie")  # type: ignore
 
-    @tb.skip_typecheck
-    def test_modelgen_write_only_dlist_errors(self):
+    def test_modelgen_write_only_link_set_errors(self):
         # Test that reading operations on write-only dlists raise
         # RuntimeError
         from gel._internal._tracked_list import Mode
@@ -4300,12 +4299,14 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(session.players._mode, Mode.Write)
 
         # Test all read methods that should raise RuntimeError
-        read_methods = [
+        read_methods: list[
+            tuple[str, typing.Callable[[], typing.Any], str]
+        ] = [
             ("__len__", lambda: len(session.players), "get the length of"),
             (
-                "__getitem__",
-                lambda: list(session.players)[0],
-                "index items of",
+                "__iter__",
+                lambda: iter(session.players),
+                "iterate over",
             ),
             ("__iter__", lambda: list(session.players), "iterate over"),
             (
@@ -4329,26 +4330,28 @@ class TestModelGenerator(tb.ModelTestCase):
                 method_call()
 
         # Verify write operations still work
-        user = self.client.get(default.User.filter(name="Elsa"))
+        user_a = self.client.get(default.User.filter(name="Alice"))
+        user_b = self.client.get(default.User.filter(name="Billie"))
+        user_c = self.client.get(default.User.filter(name="Cameron"))
 
         # Test append works
-        session.players.add(user)
+        session.players.add(user_a)
         self.assertEqual(session.players.unsafe_len(), 1)
 
         # Test extend works
-        session.players.update([user])
+        session.players.update([user_b])
         self.assertEqual(session.players.unsafe_len(), 2)
 
         # Test += works
-        session.players += [user]
+        session.players += [user_c]
         self.assertEqual(session.players.unsafe_len(), 3)
 
         # Test remove works
-        session.players.remove(user)
+        session.players.remove(user_a)
         self.assertEqual(session.players.unsafe_len(), 2)
 
         # Test -= works
-        session.players -= [user]
+        session.players -= [user_b]
         self.assertEqual(session.players.unsafe_len(), 1)
 
         # Verify mode stays write-only after modifications
@@ -6258,7 +6261,8 @@ class TestModelGenerator(tb.ModelTestCase):
 
         res = self.client.query(
             default.RangeTest.filter(
-                lambda u: std.contains(u.int_range, u.int_range))
+                lambda u: std.contains(u.int_range, u.int_range)
+            )
         )
         # This one doesn't typecheck
         # res = self.client.query(

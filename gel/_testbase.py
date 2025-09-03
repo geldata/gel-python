@@ -1382,6 +1382,7 @@ def skip_typecheck(arg):
     """
     assert isinstance(arg, types.FunctionType)
     arg._typecheck_skipped = True
+    return arg
 
 
 def must_fail(f):
@@ -1392,8 +1393,22 @@ def to_be_fixed(f):
     return unittest.expectedFailure(f)
 
 
-def xfail(f):
-    return unittest.expectedFailure(f)
+def xfail_unimplemented(reason):
+    def t(f):
+        return unittest.expectedFailure(f)
+
+    return t
+
+
+def xfail(func_or_reason):
+    def t(f):
+        return unittest.expectedFailure(f)
+
+    return (
+        unittest.expectedFailure(func_or_reason)
+        if callable(func_or_reason)
+        else t
+    )
 
 
 if os.environ.get("USE_UVLOOP"):
