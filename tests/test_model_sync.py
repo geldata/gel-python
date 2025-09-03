@@ -2568,25 +2568,29 @@ class TestModelSyncSingleLink(tb.ModelTestCase):
     def test_model_sync_single_link_01(self):
         # Insert new object with single link
 
-        from models.TestModelSyncSingleLink import default
-
-        target = default.Target()
-        self.client.save(target)
-
         def _testcase(
             model_type: typing.Type[GelModel],
             initial_target: typing.Any,
+            expected_target: typing.Any | None = None,
         ) -> None:
+            if expected_target is None:
+                expected_target = initial_target
+
             with_target = model_type(target=initial_target)
             without_target = model_type()
 
             self.client.sync(with_target, without_target)
 
-            self._check_links_equal(with_target.target, initial_target)
+            self._check_links_equal(with_target.target, expected_target)
             self._check_links_equal(without_target.target, None)
 
             # cleanup
             self.client.query(model_type.delete())
+
+        from models.TestModelSyncSingleLink import default
+
+        target = default.Target()
+        self.client.save(target)
 
         _testcase(default.Source, None)
         _testcase(default.Source, target)
@@ -2601,6 +2605,14 @@ class TestModelSyncSingleLink(tb.ModelTestCase):
             default.SourceWithProp.target.link(target, lprop=1),
         )
 
+        # Passing unwrapped target as link with props automatically wraps
+        # it in a proxy model.
+        _testcase(
+            default.SourceWithProp,
+            target,
+            default.SourceWithProp.target.link(target),
+        )
+
     def test_model_sync_single_link_02(self):
         # Updating existing objects with single link
 
@@ -2608,7 +2620,11 @@ class TestModelSyncSingleLink(tb.ModelTestCase):
             model_type: typing.Type[GelModel],
             initial_target: typing.Any,
             changed_target: typing.Any,
+            expected_target: typing.Any | None = None,
         ) -> None:
+            if expected_target is None:
+                expected_target = changed_target
+
             original = model_type(target=initial_target)
             self.client.save(original)
 
@@ -2634,8 +2650,8 @@ class TestModelSyncSingleLink(tb.ModelTestCase):
             self.client.sync(original, mirror_1, mirror_3)
 
             # only synced objects with value set get update
-            self._check_links_equal(original.target, changed_target)
-            self._check_links_equal(mirror_1.target, changed_target)
+            self._check_links_equal(original.target, expected_target)
+            self._check_links_equal(mirror_1.target, expected_target)
             self._check_links_equal(mirror_2.target, initial_target)
             self.assertFalse(hasattr(mirror_3, 'val'))
 
@@ -2695,6 +2711,21 @@ class TestModelSyncSingleLink(tb.ModelTestCase):
             default.SourceWithProp,
             default.SourceWithProp.target.link(target_a, lprop=1),
             default.SourceWithProp.target.link(target_b, lprop=1),
+        )
+
+        # Passing unwrapped target as link with props automatically wraps
+        # it in a proxy model.
+        _testcase(
+            default.SourceWithProp,
+            None,
+            target_b,
+            default.SourceWithProp.target.link(target_b),
+        )
+        _testcase(
+            default.SourceWithProp,
+            default.SourceWithProp.target.link(target_a),
+            target_b,
+            default.SourceWithProp.target.link(target_b),
         )
 
         # only changing lprop

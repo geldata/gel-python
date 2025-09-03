@@ -426,25 +426,20 @@ class _AnyLink(Generic[_MT_co, _BMT_co]):
         cls,
         value: Any,
         generic_args: tuple[type[Any], type[Any]],
-    ) -> None:
+    ) -> _MT_co | None:
         if isinstance(value, generic_args[1]) and not isinstance(
             value, generic_args[0]
         ):
-            link_meth_name = ".".join(
-                (
-                    generic_args[1].__module__,
-                    generic_args[0].__qualname__.replace(".__links__.", "."),
-                    "link",
-                )
+            # The value is the correct target, but has not yet been wrapped
+            # in the correct proxy model.
+            assert issubclass(generic_args[0], ProxyModel)
+            value = generic_args[0].link(
+                value.without_linkprops()
+                if isinstance(value, ProxyModel)
+                else value
             )
-            raise ValueError(
-                f"object is an instance of {generic_args[1].__qualname__!r} "
-                f"but an instance of {generic_args[0].__qualname__!r} "
-                f"is expected to satisfy Python type "
-                f"system restrictions.\n\n"
-                f"Use `{link_meth_name}()` to wrap your object for this link."
-                f"\n\n"
-            )
+
+        return value
 
 
 class _Link(
@@ -492,7 +487,7 @@ class _OptionalLinkWithProps(
     ) -> _MT_co | None:
         if value is None:
             return None
-        cls._validate_link_prop_target(value, generic_args)
+        value = cls._validate_link_prop_target(value, generic_args)
         return super()._validate(value, generic_args)
 
 
@@ -505,7 +500,7 @@ class _RequiredLinkWithProps(
         value: Any,
         generic_args: tuple[type[Any], type[Any]],
     ) -> _MT_co | None:
-        cls._validate_link_prop_target(value, generic_args)
+        value = cls._validate_link_prop_target(value, generic_args)
         return super()._validate(value, generic_args)
 
 
