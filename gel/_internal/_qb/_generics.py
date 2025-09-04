@@ -10,6 +10,7 @@ from typing import (
     TYPE_CHECKING,
     Any,
     TypedDict,
+    TypeVar,
     NoReturn,
     get_args,
 )
@@ -373,6 +374,17 @@ class BaseAlias(
         else:
             splat_cb = None
         return type_, toplevel_edgeql(self, splat_cb=splat_cb)
+
+
+_T = TypeVar("_T")
+
+
+def get_origin(x: type[_T] | BaseAlias) -> type[_T]:
+    return (
+        x.__gel_origin__
+        if isinstance(x, BaseAlias)  # type: ignore[return-value]
+        else x
+    )
 
 
 class PathAlias(BaseAlias):

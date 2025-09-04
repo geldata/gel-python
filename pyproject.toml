@@ -126,7 +126,6 @@ module = [
     "gel._internal._qbmodel.*",
     "gel._internal._qbmodel._abstract.*",
     "gel._internal._qbmodel._pydantic.*",
-    "gel.qb",
     "tests.test_dataclass_extras",
     "tests.test_dis_bool",
     "tests.test_is_overload",

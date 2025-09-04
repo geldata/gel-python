@@ -24,9 +24,10 @@ def for_(iterator: type[_T], body: Callable[[type[_T]], type[_X]]) -> type[_X]:
     iter_expr = _qb.edgeql_qb_expr(iterator)
     scope = _qb.Scope()
     var = _qb.Variable(type_=iter_expr.type, scope=scope)
-    body_ = body(_qb.AnnotatedVar(iterator.__gel_origin__, var))  # type: ignore [arg-type, attr-defined]
+    t = _qb.get_origin(iterator)
+    body_ = body(_qb.AnnotatedVar(t, var))  # type: ignore [arg-type]
     return _qb.AnnotatedExpr(  # type: ignore [return-value]
-        body_.__gel_origin__,  # type: ignore [attr-defined]
+        _qb.get_origin(body_),
         _qb.ForStmt(
             iter_expr=iter_expr,
             body=_qb.edgeql_qb_expr(body_),

@@ -633,7 +633,7 @@ class TestQueryBuilder(tb.ModelTestCase):
         self.assertEqual(e.name, "red")
 
     def test_qb_for_01(self):
-        from models.orm import std
+        from models.orm import default, std
 
         res = self.client.query(
             std.for_(
@@ -654,6 +654,17 @@ class TestQueryBuilder(tb.ModelTestCase):
         )
 
         self.assertEqual(set(res), {11, 12, 21, 22})
+
+        res2 = self.client.query(
+            std.for_(
+                default.User,
+                lambda x: x.name,
+            )
+        )
+        self.assertEqual(
+            set(res2),
+            {'Alice', 'Zoe', 'Billie', 'Dana', 'Cameron', 'Elsa'},
+        )
 
 
 class TestQueryBuilderModify(tb.ModelTestCase):
