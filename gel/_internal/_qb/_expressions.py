@@ -586,7 +586,7 @@ class InsertStmt(Stmt, TypedExpr):
 class IteratorStmt(ImplicitIteratorStmt):
     @property
     def precedence(self) -> _edgeql.Precedence:
-        token = _edgeql.Token.FOR if self.self_ref is not None else self.stmt
+        token = _edgeql.Token.WITH if self.self_ref is not None else self.stmt
         return _edgeql.PRECEDENCE[token]
 
     def _iteration_edgeql(self, ctx: ScopeContext) -> str:
@@ -605,9 +605,9 @@ class IteratorStmt(ImplicitIteratorStmt):
             if var is None:
                 raise AssertionError(f"{self.self_ref} in {self} is unbound")
             parts = [
-                _edgeql.Token.FOR,
+                _edgeql.Token.WITH,
                 var,
-                _edgeql.Token.IN,
+                _edgeql.Token.ASSIGN,
                 iterable,
                 self.stmt,
                 var,
