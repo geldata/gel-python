@@ -511,14 +511,14 @@ class _RequiredLinkWithProps(
 RequiredLinkWithProps = TypeAliasType(
     "RequiredLinkWithProps",
     Annotated[
-        _RequiredLinkWithProps[_MT_co, _BMT_co],
+        _RequiredLinkWithProps[_PT_co, _BMT_co],
         PointerInfo(
             cardinality=_edgeql.Cardinality.One,
             kind=_edgeql.PointerKind.Link,
             has_props=True,
         ),
     ],
-    type_params=(_MT_co, _BMT_co),
+    type_params=(_PT_co, _BMT_co),
 )
 
 
