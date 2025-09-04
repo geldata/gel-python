@@ -758,7 +758,16 @@ def make_plan(
                     # `__gel_get_changed_fields__()`, se we process them
                     # separately).
 
-                    assert val is None or isinstance(val, GelModel)
+                    if val is None:
+                        sch = SingleLinkChange(
+                            name=prop.name,
+                            info=prop,
+                            target=None,
+                        )
+                        push_change(requireds, sched, sch)
+                        continue
+
+                    assert isinstance(val, GelModel)
                     assert not prop.cardinality.is_multi()
 
                     link_prop_variant = False
