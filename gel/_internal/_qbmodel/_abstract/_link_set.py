@@ -954,6 +954,7 @@ class LinkWithPropsSet(
 
         self._ensure_snapshot()
 
+        linked_type = type(self).type
         proxy_type = type(self).proxytype
 
         assert self._tracking_index is not None
@@ -963,14 +964,34 @@ class LinkWithPropsSet(
         # of slow iterative appends.
         empty_items = not self._items
 
-        for v in values:
-            existing = self._find_proxy(v)
+        for val in values:
+            proxy_val: _PT_co | _BMT_co
+            if isinstance(val, linked_type) and not isinstance(
+                val, proxy_type
+            ):
+                # The value is the correct target, but has not yet been wrapped
+                # in the correct proxy model.
+                proxy_val = proxy_type.__gel_proxy_construct__(
+                    (
+                        val.without_linkprops()
+                        if isinstance(val, AbstractGelProxyModel)
+                        else val
+                    ),
+                    dict.fromkeys(
+                        proxy_type.__linkprops__.__gel_reflection__.pointers.keys()
+                    ),
+                )
+
+            else:
+                proxy_val = val
+
+            existing = self._find_proxy(proxy_val)
 
             proxy = cast(
                 "_PT_co",
                 proxy_link(
                     existing=existing,
-                    new=v,
+                    new=proxy_val,
                     proxy_type=proxy_type,
                 ),
             )

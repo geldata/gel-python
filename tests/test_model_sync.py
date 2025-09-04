@@ -2977,13 +2977,17 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
         def _testcase(
             model_type: typing.Type[GelModel],
             initial_targets: typing.Collection[typing.Any],
+            expected_targets: typing.Collection[typing.Any] | None = None,
         ) -> None:
+            if expected_targets is None:
+                expected_targets = initial_targets
+
             with_targets = model_type(targets=initial_targets)
             without_targets = model_type()
 
             self.client.sync(with_targets, without_targets)
 
-            self._check_multilinks_equal(with_targets.targets, initial_targets)
+            self._check_multilinks_equal(with_targets.targets, expected_targets)
             self._check_multilinks_equal(without_targets.targets, [])
 
             # cleanup
@@ -2995,6 +2999,15 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
 
         # With linkprops
         _testcase(default.SourceWithProp, [])
+        _testcase(
+            default.SourceWithProp,
+            [target_a, target_b, target_c],
+            [
+                default.SourceWithProp.targets.link(target_a),
+                default.SourceWithProp.targets.link(target_b),
+                default.SourceWithProp.targets.link(target_c),
+            ],
+        )
         _testcase(
             default.SourceWithProp,
             [
@@ -3025,12 +3038,16 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
         model_type: typing.Type[GelModel],
         initial_targets: typing.Collection[typing.Any],
         changed_targets: typing.Collection[typing.Any],
+        expected_targets: typing.Collection[typing.Any] | None = None,
     ) -> None:
+        if expected_targets is None:
+            expected_targets = changed_targets
+
         self._base_testcase(
             model_type,
             initial_targets,
             self._get_assign_targets_func(changed_targets),
-            changed_targets,
+            expected_targets,
         )
 
     def test_model_sync_multi_link_02(self):
@@ -3091,6 +3108,16 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
         self._testcase_assign(
             default.SourceWithProp,
             [],
+            [target_a, target_b, target_c],
+            [
+                default.SourceWithProp.targets.link(target_a),
+                default.SourceWithProp.targets.link(target_b),
+                default.SourceWithProp.targets.link(target_c),
+            ],
+        )
+        self._testcase_assign(
+            default.SourceWithProp,
+            [],
             [
                 default.SourceWithProp.targets.link(target_a),
                 default.SourceWithProp.targets.link(target_b),
@@ -3115,6 +3142,20 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
                 default.SourceWithProp.targets.link(target_c),
             ],
             [],
+        )
+        self._testcase_assign(
+            default.SourceWithProp,
+            [
+                default.SourceWithProp.targets.link(target_a),
+                default.SourceWithProp.targets.link(target_b),
+                default.SourceWithProp.targets.link(target_c),
+            ],
+            [target_a, target_b, target_c],
+            [
+                default.SourceWithProp.targets.link(target_a),
+                default.SourceWithProp.targets.link(target_b),
+                default.SourceWithProp.targets.link(target_c),
+            ],
         )
         self._testcase_assign(
             default.SourceWithProp,
@@ -3193,6 +3234,18 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
             ],
         )
 
+        self._testcase_assign(
+            default.SourceWithProp,
+            [
+                default.SourceWithProp.targets.link(target_a),
+                default.SourceWithProp.targets.link(target_b),
+            ],
+            [target_c, target_d],
+            [
+                default.SourceWithProp.targets.link(target_c),
+                default.SourceWithProp.targets.link(target_d),
+            ],
+        )
         self._testcase_assign(
             default.SourceWithProp,
             [
