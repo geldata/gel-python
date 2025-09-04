@@ -865,9 +865,6 @@ class ManagedInstance(BaseInstance):
                 (
                     "tar",
                     "--create",
-                    "--zstd",
-                    "--options",
-                    "zstd:compression-level=1,zstd:threads=0",
                     "--file",
                     path,
                     ".",

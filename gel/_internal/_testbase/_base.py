@@ -431,7 +431,7 @@ class InstanceFixture:
     ) -> pathlib.Path | None:
         cache_info = self.get_cache_info(instance)
         if cache_info is not None:
-            fname = f"{cache_info[1]}-test-dbs.tar.zst"
+            fname = f"{cache_info[1]}-test-dbs.tar"
             return cache_info[0] / fname
         else:
             return None
