@@ -666,6 +666,27 @@ class TestQueryBuilder(tb.ModelTestCase):
             {'Alice', 'Zoe', 'Billie', 'Dana', 'Cameron', 'Elsa'},
         )
 
+        res3 = self.client.query(
+            default.User.filter(
+                lambda u: std.for_(
+                    std.assert_exists(std.int64(0)),
+                    # HMMMMM
+                    lambda x: x == x,
+                )
+            )
+        )
+        self.assertEqual(len(res3), 6)
+
+        res4 = self.client.query(
+            default.User.filter(
+                lambda u: std.for_(
+                    u.name,
+                    lambda x: x == "Alice",
+                )
+            )
+        )
+        self.assertEqual(len(res4), 1)
+
 
 class TestQueryBuilderModify(tb.ModelTestCase):
     """This test suite is for data manipulation using QB."""

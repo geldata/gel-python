@@ -316,9 +316,6 @@ class BaseAlias(
         *,
         swapped: bool = False,
     ) -> Any:
-        if op == "__eq__" and operand is self:
-            return True
-
         # Check for None comparison and raise appropriate error
         if operand is None and op in {"__eq__", "__ne__"}:
             _raise_op_error(_Op.IS_NONE if op == "__eq__" else _Op.IS_NOT_NONE)

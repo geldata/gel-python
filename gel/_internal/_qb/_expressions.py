@@ -457,7 +457,7 @@ class Filter(Clause):
                 rexpr=item,
                 type_=SchemaPath("std", "bool"),
             )
-        return f"FILTER {edgeql(fexpr, ctx=ctx)}"
+        return f"FILTER {edgeql_exprstmt(fexpr, ctx=ctx)}"
 
 
 class OrderDirection(_strenum.StrEnum):
@@ -529,7 +529,7 @@ class OrderBy(Clause):
                 type_=SchemaPath("std", "bool"),
             )
 
-        return f"ORDER BY {edgeql(dexpr, ctx=ctx)}"
+        return f"ORDER BY {edgeql_exprstmt(dexpr, ctx=ctx)}"
 
 
 @dataclass(kw_only=True, frozen=True)
@@ -548,7 +548,7 @@ class Limit(Clause):
         if isinstance(self.limit, IntLiteral) and self.limit.val == 1:
             return "LIMIT 1"
         else:
-            clause = edgeql(self.limit, ctx=ctx)
+            clause = edgeql_exprstmt(self.limit, ctx=ctx)
             return f"LIMIT {clause}"
 
 
@@ -564,7 +564,7 @@ class Offset(Clause):
         return _edgeql.PRECEDENCE[_edgeql.Token.OFFSET]
 
     def __edgeql_expr__(self, *, ctx: ScopeContext) -> str:
-        return f"OFFSET {edgeql(self.offset, ctx=ctx)}"
+        return f"OFFSET {edgeql_exprstmt(self.offset, ctx=ctx)}"
 
 
 @dataclass(kw_only=True, frozen=True)
@@ -913,6 +913,17 @@ def get_object_type_splat(cls: type[GelTypeMetadata]) -> Shape:
         shape = Shape.splat(source=reflection.name)
         _type_splat_cache[cls] = shape
     return shape
+
+
+def edgeql_exprstmt(
+    source: ExprCompatible,
+    *,
+    ctx: ScopeContext,
+) -> str:
+    res = edgeql(source, ctx=ctx)
+    if isinstance(source, Stmt):
+        res = f'({res})'
+    return res
 
 
 def toplevel_edgeql(
