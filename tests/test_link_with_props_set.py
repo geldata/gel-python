@@ -3,6 +3,9 @@ import dataclasses
 from typing import Any
 import unittest
 
+from gel._internal import _qb
+from gel._internal._edgeql._schema import PointerKind, Cardinality
+from gel._internal._schemapath import SchemaPath
 from gel._internal._qbmodel import _abstract
 from gel._internal._qbmodel._abstract import (
     AbstractGelLinkModel,
@@ -45,6 +48,22 @@ class DummyIntList(LinkSet[DummyInt]):
 
 
 class DummyLinkModel(AbstractGelLinkModel):
+    class __gel_reflection__(AbstractGelLinkModel.__gel_reflection__):  # noqa: N801
+        pointers = {
+            "comment": _qb.GelPointerReflection(
+                name="comment",
+                type=SchemaPath("std", "str"),
+                typexpr="std::str",
+                kind=PointerKind.Property,
+                cardinality=Cardinality.AtMostOne,
+                computed=False,
+                readonly=False,
+                has_default=False,
+                properties=None,
+                mutable=True,
+            ),
+        }
+
     __gel_has_mutable_props__ = True
 
     def __init__(self, comment: str | None = None):

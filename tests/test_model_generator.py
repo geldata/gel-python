@@ -1102,13 +1102,17 @@ class TestModelGenerator(tb.ModelTestCase):
 
         t.opt_friend = u
 
-        # Assignment of a different ProxyModel is an error
-        with self.assertRaisesRegex(
-            ValueError, "satisfy Python type system restrictions"
-        ):
-            t.opt_wprop_friend = default.TestSingleLinks.req_wprop_friend.link(  # type: ignore [assignment]
-                u, strength=123
-            )
+        # Assignment of a different ProxyModel is ok, link props are dropped
+        t.opt_wprop_friend = default.TestSingleLinks.req_wprop_friend.link(  # type: ignore [assignment]
+            u, strength=123
+        )
+        assert t.opt_wprop_friend is not None
+        self.assertIsInstance(
+            t.opt_wprop_friend,
+            default.TestSingleLinks.__links__.opt_wprop_friend,
+        )
+        self.assertEqual(t.opt_wprop_friend, u)
+        self.assertIsNone(t.opt_wprop_friend.__linkprops__.strength)
 
         t.opt_wprop_friend = default.TestSingleLinks.opt_wprop_friend.link(
             u, strength=456
@@ -1814,12 +1818,15 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertEqual(t.req_wprop_friend.name, "bbb")
         self.assertEqual(t.req_wprop_friend.__linkprops__.strength, None)
 
-        with self.assertRaisesRegex(
-            ValueError,
-            r"(?s)is expected to satisfy Python type system.*"
-            r"models.orm.default.TestSingleLinks.opt_wprop_friend.link\(\)",
-        ):
-            t.opt_wprop_friend = u1  # type: ignore [assignment]
+        # directly assigning to unproxied target is ok
+        t.opt_wprop_friend = u1  # type: ignore [assignment]
+        assert t.opt_wprop_friend is not None
+        self.assertIsInstance(
+            t.opt_wprop_friend,
+            default.TestSingleLinks.__links__.opt_wprop_friend,
+        )
+        self.assertEqual(t.opt_wprop_friend, u1)
+        self.assertIsNone(t.opt_wprop_friend.__linkprops__.strength)
 
     def test_modelgen_save_01(self):
         from models.orm import default

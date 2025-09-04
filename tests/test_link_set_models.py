@@ -1637,7 +1637,7 @@ class TestLinkSetModels(tb.ModelTestCase):
         )
         self.assertEqual(
             {f: f.__linkprops__.opinion for f in harry.friends},
-            {hermione: "smart", ron: "reliable"},
+            {hermione: "smart", ron: None},
         )
 
     def test_link_set_model_modify_multi_link_with_props_update_02(self):
@@ -1765,7 +1765,7 @@ class TestLinkSetModels(tb.ModelTestCase):
         )
         self.assertEqual(
             {f: f.__linkprops__.opinion for f in harry.friends},
-            {hermione: "smart", ron: "reliable"},
+            {hermione: "smart", ron: None},
         )
 
     def test_link_set_model_modify_multi_link_with_props_op_iadd_02(self):
