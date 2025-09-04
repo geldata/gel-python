@@ -457,7 +457,7 @@ class Filter(Clause):
                 rexpr=item,
                 type_=SchemaPath("std", "bool"),
             )
-        return f"FILTER {edgeql(fexpr, ctx=ctx)}"
+        return f"FILTER {edgeql_exprstmt(fexpr, ctx=ctx)}"
 
 
 class OrderDirection(_strenum.StrEnum):
@@ -529,7 +529,7 @@ class OrderBy(Clause):
                 type_=SchemaPath("std", "bool"),
             )
 
-        return f"ORDER BY {edgeql(dexpr, ctx=ctx)}"
+        return f"ORDER BY {edgeql_exprstmt(dexpr, ctx=ctx)}"
 
 
 @dataclass(kw_only=True, frozen=True)
@@ -548,7 +548,7 @@ class Limit(Clause):
         if isinstance(self.limit, IntLiteral) and self.limit.val == 1:
             return "LIMIT 1"
         else:
-            clause = edgeql(self.limit, ctx=ctx)
+            clause = edgeql_exprstmt(self.limit, ctx=ctx)
             return f"LIMIT {clause}"
 
 
@@ -564,7 +564,7 @@ class Offset(Clause):
         return _edgeql.PRECEDENCE[_edgeql.Token.OFFSET]
 
     def __edgeql_expr__(self, *, ctx: ScopeContext) -> str:
-        return f"OFFSET {edgeql(self.offset, ctx=ctx)}"
+        return f"OFFSET {edgeql_exprstmt(self.offset, ctx=ctx)}"
 
 
 @dataclass(kw_only=True, frozen=True)
@@ -726,7 +726,7 @@ class DeleteStmt(IteratorStmt):
 
 
 @dataclass(kw_only=True, frozen=True)
-class ForStmt(IteratorExpr):
+class ForStmt(IteratorExpr, Stmt):
     stmt: _edgeql.Token = _edgeql.Token.FOR
     iter_expr: Expr
     body: Expr
@@ -745,11 +745,18 @@ class ForStmt(IteratorExpr):
         return (self.iter_expr, self.body)
 
     def _edgeql(self, ctx: ScopeContext) -> str:
+        ctx.bind(self.var)
         return (
             f"{self.stmt} {edgeql(self.var, ctx=ctx)} IN "
             f"({edgeql(self.iter_expr, ctx=ctx)})\n"
             f"UNION ({edgeql(self.body, ctx=ctx)})"
         )
+
+    def _iteration_edgeql(self, ctx: ScopeContext) -> str:
+        raise AssertionError('...')
+
+    def _body_edgeql(self, ctx: ScopeContext) -> str:
+        raise AssertionError('...')
 
 
 class Splat(_strenum.StrEnum):
@@ -906,6 +913,17 @@ def get_object_type_splat(cls: type[GelTypeMetadata]) -> Shape:
         shape = Shape.splat(source=reflection.name)
         _type_splat_cache[cls] = shape
     return shape
+
+
+def edgeql_exprstmt(
+    source: ExprCompatible,
+    *,
+    ctx: ScopeContext,
+) -> str:
+    res = edgeql(source, ctx=ctx)
+    if isinstance(source, Stmt):
+        res = f'({res})'
+    return res
 
 
 def toplevel_edgeql(

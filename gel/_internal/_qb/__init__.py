@@ -75,6 +75,7 @@ from ._generics import (
     SortAlias,
     VarAlias,
     is_pointer_descriptor,
+    get_origin,
 )
 
 from ._protocols import (
@@ -170,6 +171,7 @@ __all__ = (
     "empty_set_if_none",
     "exprmethod",
     "get_object_type_splat",
+    "get_origin",
     "is_expr_compatible",
     "is_pointer_descriptor",
     "toplevel_edgeql",

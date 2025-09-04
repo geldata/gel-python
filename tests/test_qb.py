@@ -632,6 +632,61 @@ class TestQueryBuilder(tb.ModelTestCase):
         self.assertEqual(e.color, default.Color.Red)
         self.assertEqual(e.name, "red")
 
+    def test_qb_for_01(self):
+        from models.orm import default, std
+
+        res = self.client.query(
+            std.for_(
+                std.range_unpack(std.range(std.int64(1), std.int64(10))),
+                lambda x: x * 2,
+            )
+        )
+        self.assertEqual(set(res), {i * 2 for i in range(1, 10)})
+
+        res = self.client.query(
+            std.for_(
+                std.range_unpack(std.range(std.int64(1), std.int64(3))),
+                lambda x: std.for_(
+                    std.range_unpack(std.range(std.int64(1), std.int64(3))),
+                    lambda y: x * 10 + y,
+                )
+            )
+        )
+
+        self.assertEqual(set(res), {11, 12, 21, 22})
+
+        res2 = self.client.query(
+            std.for_(
+                default.User,
+                lambda x: x.name,
+            )
+        )
+        self.assertEqual(
+            set(res2),
+            {'Alice', 'Zoe', 'Billie', 'Dana', 'Cameron', 'Elsa'},
+        )
+
+        res3 = self.client.query(
+            default.User.filter(
+                lambda u: std.for_(
+                    std.assert_exists(std.int64(0)),
+                    # HMMMMM
+                    lambda x: x == x,
+                )
+            )
+        )
+        self.assertEqual(len(res3), 6)
+
+        res4 = self.client.query(
+            default.User.filter(
+                lambda u: std.for_(
+                    u.name,
+                    lambda x: x == "Alice",
+                )
+            )
+        )
+        self.assertEqual(len(res4), 1)
+
 
 class TestQueryBuilderModify(tb.ModelTestCase):
     """This test suite is for data manipulation using QB."""

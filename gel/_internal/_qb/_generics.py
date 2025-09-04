@@ -10,6 +10,7 @@ from typing import (
     TYPE_CHECKING,
     Any,
     TypedDict,
+    TypeVar,
     NoReturn,
     get_args,
 )
@@ -315,9 +316,6 @@ class BaseAlias(
         *,
         swapped: bool = False,
     ) -> Any:
-        if op == "__eq__" and operand is self:
-            return True
-
         # Check for None comparison and raise appropriate error
         if operand is None and op in {"__eq__", "__ne__"}:
             _raise_op_error(_Op.IS_NONE if op == "__eq__" else _Op.IS_NOT_NONE)
@@ -373,6 +371,17 @@ class BaseAlias(
         else:
             splat_cb = None
         return type_, toplevel_edgeql(self, splat_cb=splat_cb)
+
+
+_T = TypeVar("_T")
+
+
+def get_origin(x: type[_T] | BaseAlias) -> type[_T]:
+    return (
+        x.__gel_origin__
+        if isinstance(x, BaseAlias)  # type: ignore[return-value]
+        else x
+    )
 
 
 class PathAlias(BaseAlias):

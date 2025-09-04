@@ -48,6 +48,8 @@ from gel._internal import _version as _ver_utils
 from gel._internal._collections_extras import ImmutableChainMap
 from gel._internal._namespace import ident, dunder
 from gel._internal._qbmodel import _abstract as _qbmodel
+from gel._internal._qbmodel._abstract import _syntax as _qbsyntax
+
 from gel._internal._reflection._enums import SchemaPart, TypeModifier
 from gel._internal._schemapath import SchemaPath
 from gel._internal._polyfills import _strenum
@@ -2272,6 +2274,15 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                     # Only std "defines" generic types at the moment.
                     self.py_file.update_globals(
                         gt.name for gt in GENERIC_TYPES
+                    )
+                    names = _qbsyntax.__all__
+                    self.py_file.export(*names)
+                    self.py_file.update_globals(names)
+
+                    self.write("# Re-export top-level query-builder functions")
+                    self.write(
+                        "from gel._internal._qbmodel._abstract._syntax "
+                        "import *"
                     )
 
                 self.py_file.update_globals(
