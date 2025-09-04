@@ -2987,7 +2987,9 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
 
             self.client.sync(with_targets, without_targets)
 
-            self._check_multilinks_equal(with_targets.targets, expected_targets)
+            self._check_multilinks_equal(
+                with_targets.targets, expected_targets
+            )
             self._check_multilinks_equal(without_targets.targets, [])
 
             # cleanup
@@ -3463,6 +3465,15 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
         self._testcase_update(
             default.SourceWithProp,
             [],
+            [target_a, target_b],
+            [
+                default.SourceWithProp.targets.link(target_a),
+                default.SourceWithProp.targets.link(target_b),
+            ],
+        )
+        self._testcase_update(
+            default.SourceWithProp,
+            [],
             [
                 default.SourceWithProp.targets.link(target_a),
                 default.SourceWithProp.targets.link(target_b),
@@ -3492,6 +3503,18 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
                 default.SourceWithProp.targets.link(target_b),
             ],
             [],
+            [
+                default.SourceWithProp.targets.link(target_a),
+                default.SourceWithProp.targets.link(target_b),
+            ],
+        )
+        self._testcase_update(
+            default.SourceWithProp,
+            [
+                default.SourceWithProp.targets.link(target_a),
+                default.SourceWithProp.targets.link(target_b),
+            ],
+            [target_a, target_b],
             [
                 default.SourceWithProp.targets.link(target_a),
                 default.SourceWithProp.targets.link(target_b),
@@ -3588,6 +3611,20 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
             ],
         )
 
+        self._testcase_update(
+            default.SourceWithProp,
+            [
+                default.SourceWithProp.targets.link(target_a),
+                default.SourceWithProp.targets.link(target_b),
+            ],
+            [target_c, target_d],
+            [
+                default.SourceWithProp.targets.link(target_a),
+                default.SourceWithProp.targets.link(target_b),
+                default.SourceWithProp.targets.link(target_c),
+                default.SourceWithProp.targets.link(target_d),
+            ],
+        )
         self._testcase_update(
             default.SourceWithProp,
             [
@@ -3838,6 +3875,12 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
         self._testcase_add(
             default.SourceWithProp,
             [],
+            target_a,
+            [default.SourceWithProp.targets.link(target_a)],
+        )
+        self._testcase_add(
+            default.SourceWithProp,
+            [],
             default.SourceWithProp.targets.link(target_a),
             [default.SourceWithProp.targets.link(target_a)],
         )
@@ -3848,6 +3891,12 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
             [default.SourceWithProp.targets.link(target_a, lprop=1)],
         )
 
+        self._testcase_add(
+            default.SourceWithProp,
+            [default.SourceWithProp.targets.link(target_a)],
+            target_a,
+            [default.SourceWithProp.targets.link(target_a)],
+        )
         self._testcase_add(
             default.SourceWithProp,
             [default.SourceWithProp.targets.link(target_a)],
@@ -3881,6 +3930,21 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
             [default.SourceWithProp.targets.link(target_a, lprop=2)],
         )
 
+        self._testcase_add(
+            default.SourceWithProp,
+            [
+                default.SourceWithProp.targets.link(target_a),
+                default.SourceWithProp.targets.link(target_b),
+                default.SourceWithProp.targets.link(target_c),
+            ],
+            target_d,
+            [
+                default.SourceWithProp.targets.link(target_a),
+                default.SourceWithProp.targets.link(target_b),
+                default.SourceWithProp.targets.link(target_c),
+                default.SourceWithProp.targets.link(target_d),
+            ],
+        )
         self._testcase_add(
             default.SourceWithProp,
             [
@@ -3981,6 +4045,12 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
         _testcase_discard(
             default.SourceWithProp,
             [default.SourceWithProp.targets.link(target_a)],
+            target_a,
+            [],
+        )
+        _testcase_discard(
+            default.SourceWithProp,
+            [default.SourceWithProp.targets.link(target_a)],
             default.SourceWithProp.targets.link(target_a),
             [],
         )
@@ -4010,6 +4080,19 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
             [],
         )
 
+        _testcase_discard(
+            default.SourceWithProp,
+            [
+                default.SourceWithProp.targets.link(target_a),
+                default.SourceWithProp.targets.link(target_b),
+                default.SourceWithProp.targets.link(target_c),
+            ],
+            target_c,
+            [
+                default.SourceWithProp.targets.link(target_a),
+                default.SourceWithProp.targets.link(target_b),
+            ],
+        )
         _testcase_discard(
             default.SourceWithProp,
             [
@@ -4090,6 +4173,20 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
                 default.SourceWithProp.targets.link(target_b),
                 default.SourceWithProp.targets.link(target_c),
             ],
+            target_d,
+            [
+                default.SourceWithProp.targets.link(target_a),
+                default.SourceWithProp.targets.link(target_b),
+                default.SourceWithProp.targets.link(target_c),
+            ],
+        )
+        _testcase_discard(
+            default.SourceWithProp,
+            [
+                default.SourceWithProp.targets.link(target_a),
+                default.SourceWithProp.targets.link(target_b),
+                default.SourceWithProp.targets.link(target_c),
+            ],
             default.SourceWithProp.targets.link(target_d),
             [
                 default.SourceWithProp.targets.link(target_a),
@@ -4162,6 +4259,12 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
         _testcase_remove(
             default.SourceWithProp,
             [default.SourceWithProp.targets.link(target_a)],
+            target_a,
+            [],
+        )
+        _testcase_remove(
+            default.SourceWithProp,
+            [default.SourceWithProp.targets.link(target_a)],
             default.SourceWithProp.targets.link(target_a),
             [],
         )
@@ -4191,6 +4294,19 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
             [],
         )
 
+        _testcase_remove(
+            default.SourceWithProp,
+            [
+                default.SourceWithProp.targets.link(target_a),
+                default.SourceWithProp.targets.link(target_b),
+                default.SourceWithProp.targets.link(target_c),
+            ],
+            target_c,
+            [
+                default.SourceWithProp.targets.link(target_a),
+                default.SourceWithProp.targets.link(target_b),
+            ],
+        )
         _testcase_remove(
             default.SourceWithProp,
             [
@@ -4345,6 +4461,15 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
         self._testcase_op_iadd(
             default.SourceWithProp,
             [],
+            [target_a, target_b],
+            [
+                default.SourceWithProp.targets.link(target_a),
+                default.SourceWithProp.targets.link(target_b),
+            ],
+        )
+        self._testcase_op_iadd(
+            default.SourceWithProp,
+            [],
             [
                 default.SourceWithProp.targets.link(target_a),
                 default.SourceWithProp.targets.link(target_b),
@@ -4374,6 +4499,18 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
                 default.SourceWithProp.targets.link(target_b),
             ],
             [],
+            [
+                default.SourceWithProp.targets.link(target_a),
+                default.SourceWithProp.targets.link(target_b),
+            ],
+        )
+        self._testcase_op_iadd(
+            default.SourceWithProp,
+            [
+                default.SourceWithProp.targets.link(target_a),
+                default.SourceWithProp.targets.link(target_b),
+            ],
+            [target_a, target_b],
             [
                 default.SourceWithProp.targets.link(target_a),
                 default.SourceWithProp.targets.link(target_b),
@@ -4470,6 +4607,20 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
             ],
         )
 
+        self._testcase_op_iadd(
+            default.SourceWithProp,
+            [
+                default.SourceWithProp.targets.link(target_a),
+                default.SourceWithProp.targets.link(target_b),
+            ],
+            [target_c, target_d],
+            [
+                default.SourceWithProp.targets.link(target_a),
+                default.SourceWithProp.targets.link(target_b),
+                default.SourceWithProp.targets.link(target_c),
+                default.SourceWithProp.targets.link(target_d),
+            ],
+        )
         self._testcase_op_iadd(
             default.SourceWithProp,
             [
@@ -4734,6 +4885,12 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
         _testcase_op_isub(
             default.SourceWithProp,
             [],
+            [target_a],
+            [],
+        )
+        _testcase_op_isub(
+            default.SourceWithProp,
+            [],
             [default.SourceWithProp.targets.link(target_a)],
             [],
         )
@@ -4753,6 +4910,12 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
         _testcase_op_isub(
             default.SourceWithProp,
             [default.SourceWithProp.targets.link(target_a)],
+            [target_a],
+            [],
+        )
+        _testcase_op_isub(
+            default.SourceWithProp,
+            [default.SourceWithProp.targets.link(target_a)],
             [default.SourceWithProp.targets.link(target_a)],
             [],
         )
@@ -4761,6 +4924,12 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
             [default.SourceWithProp.targets.link(target_a)],
             [default.SourceWithProp.targets.link(target_a, lprop=1)],
             [],
+        )
+        _testcase_op_isub(
+            default.SourceWithProp,
+            [default.SourceWithProp.targets.link(target_a)],
+            [target_b],
+            [default.SourceWithProp.targets.link(target_a)],
         )
         _testcase_op_isub(
             default.SourceWithProp,
@@ -4800,6 +4969,19 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
             [default.SourceWithProp.targets.link(target_a, lprop=1)],
         )
 
+        _testcase_op_isub(
+            default.Source,
+            [
+                default.SourceWithProp.targets.link(target_a),
+                default.SourceWithProp.targets.link(target_b),
+                default.SourceWithProp.targets.link(target_c),
+            ],
+            [target_c, target_d],
+            [
+                default.SourceWithProp.targets.link(target_a),
+                default.SourceWithProp.targets.link(target_b),
+            ],
+        )
         _testcase_op_isub(
             default.Source,
             [
