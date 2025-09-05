@@ -372,7 +372,7 @@ class _AnyLink(Generic[_MT_co, _BMT_co]):
     def _validate(
         cls,
         value: Any,
-        generic_args: tuple[type[Any], type[Any]],
+        generic_args: tuple[type[_MT_co], type[_BMT_co]],
     ) -> _MT_co | None:
         mt, bmt = generic_args
 
@@ -390,7 +390,7 @@ class _AnyLink(Generic[_MT_co, _BMT_co]):
                 value = value._p__obj__
 
             if isinstance(value, mt):
-                return value  # type: ignore [no-any-return]
+                return value
         else:
             # link or optional link *with* props
             if isinstance(value, mt):
@@ -419,32 +419,29 @@ class _AnyLink(Generic[_MT_co, _BMT_co]):
                 )
 
         # defer to Pydantic
-        return mt.model_validate(value)  # type: ignore [no-any-return]
+        return mt.model_validate(value)
 
+
+class _AnyLinkWithProps(Generic[_PT_co, _BMT_co]):
     @classmethod
     def _validate_link_prop_target(
         cls,
-        value: Any,
-        generic_args: tuple[type[Any], type[Any]],
-    ) -> None:
+        value: GelModel,
+        generic_args: tuple[type[_PT_co], type[_BMT_co]],
+    ) -> GelModel | None:
         if isinstance(value, generic_args[1]) and not isinstance(
             value, generic_args[0]
         ):
-            link_meth_name = ".".join(
-                (
-                    generic_args[1].__module__,
-                    generic_args[0].__qualname__.replace(".__links__.", "."),
-                    "link",
-                )
+            # The value is the correct target, but has not yet been wrapped
+            # in the correct proxy model.
+            assert issubclass(generic_args[0], ProxyModel)
+            value = generic_args[0].link(
+                value.without_linkprops()
+                if isinstance(value, ProxyModel)
+                else value
             )
-            raise ValueError(
-                f"object is an instance of {generic_args[1].__qualname__!r} "
-                f"but an instance of {generic_args[0].__qualname__!r} "
-                f"is expected to satisfy Python type "
-                f"system restrictions.\n\n"
-                f"Use `{link_meth_name}()` to wrap your object for this link."
-                f"\n\n"
-            )
+
+        return value
 
 
 class _Link(
@@ -474,7 +471,7 @@ class _OptionalLink(
     def _validate(
         cls,
         value: Any,
-        generic_args: tuple[type[Any], type[Any]],
+        generic_args: tuple[type[_MT_co], type[_BMT_co]],
     ) -> _MT_co | None:
         if value is None:
             return None
@@ -482,44 +479,46 @@ class _OptionalLink(
 
 
 class _OptionalLinkWithProps(
-    _OptionalLink[_MT_co, _BMT_co],
+    _OptionalLink[_PT_co, _BMT_co],
+    _AnyLinkWithProps[_PT_co, _BMT_co],
 ):
     @classmethod
     def _validate(
         cls,
         value: Any,
-        generic_args: tuple[type[Any], type[Any]],
-    ) -> _MT_co | None:
+        generic_args: tuple[type[_PT_co], type[_BMT_co]],
+    ) -> _PT_co | None:
         if value is None:
             return None
-        cls._validate_link_prop_target(value, generic_args)
+        value = cls._validate_link_prop_target(value, generic_args)
         return super()._validate(value, generic_args)
 
 
 class _RequiredLinkWithProps(
-    _Link[_MT_co, _BMT_co],
+    _Link[_PT_co, _BMT_co],
+    _AnyLinkWithProps[_PT_co, _BMT_co],
 ):
     @classmethod
     def _validate(
         cls,
         value: Any,
-        generic_args: tuple[type[Any], type[Any]],
-    ) -> _MT_co | None:
-        cls._validate_link_prop_target(value, generic_args)
+        generic_args: tuple[type[_PT_co], type[_BMT_co]],
+    ) -> _PT_co | None:
+        value = cls._validate_link_prop_target(value, generic_args)
         return super()._validate(value, generic_args)
 
 
 RequiredLinkWithProps = TypeAliasType(
     "RequiredLinkWithProps",
     Annotated[
-        _RequiredLinkWithProps[_MT_co, _BMT_co],
+        _RequiredLinkWithProps[_PT_co, _BMT_co],
         PointerInfo(
             cardinality=_edgeql.Cardinality.One,
             kind=_edgeql.PointerKind.Link,
             has_props=True,
         ),
     ],
-    type_params=(_MT_co, _BMT_co),
+    type_params=(_PT_co, _BMT_co),
 )
 
 
