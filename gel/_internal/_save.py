@@ -1568,6 +1568,8 @@ class SaveExecutor:
 
             model_or_models: GelModel | IDTracker[GelModel, None]
             if gel_id in self.new_objects:
+                # For new objects, update the data we got back from the batch
+                # queries.
                 model_or_models = self.new_objects[gel_id]
             else:
                 model_or_models = self.existing_objects[gel_id]
@@ -1593,65 +1595,85 @@ class SaveExecutor:
                     continue
 
                 shape_field = shape.fields[field]
-                is_multi = shape_field.cardinality.is_multi()
-                is_link = shape_field.kind.is_link()
 
                 for model in models:
                     assert model.id == gel_id
-                    model_dict = model.__dict__
 
-                    model.__pydantic_fields_set__.add(field)
-
-                    if is_link and is_multi:
-                        link = model_dict.get(field)
-                        if link is None:
-                            # This instance never had this link, but
-                            # now it will.
-                            # TODO: this needs to be optimized.
-                            link = copy.copy(new_value)
-                            model_dict[field] = link
-                            link.__gel_replace_with_empty__()
-
-                        assert is_link_abstract_dlist(link)
-                        assert type(new_value) is type(link)
-                        model_dict[field] = link.__gel_reconcile__(
-                            # no need to copy `new_value`,
-                            # it will only be iterated over
-                            new_value,
-                            self.existing_objects,  # type: ignore [arg-type]
-                            self.new_objects,  # type: ignore [arg-type]
-                        )
-
-                    elif is_link:
-                        if new_value is None:
-                            model_dict[field] = new_value
-                        elif shape_field.properties:
-                            model_dict[field] = reconcile_proxy_link(
-                                existing=model_dict.get(field),
-                                refetched=new_value,  # pyright: ignore [reportArgumentType]
-                                existing_objects=self.existing_objects,  # type: ignore [arg-type]
-                                new_objects=self.new_objects,
-                            )
-                        else:
-                            model_dict[field] = reconcile_link(
-                                existing=model_dict.get(field),
-                                refetched=new_value,
-                                existing_objects=self.existing_objects,  # type: ignore [arg-type]
-                                new_objects=self.new_objects,
-                            )
-
-                    elif not is_link:
-                        # could be a multi prop, could be a single prop
-                        # with an array value
-                        if shape_field.mutable:
-                            model_dict[field] = deepcopy(new_value)
-                        else:
-                            model_dict[field] = new_value
+                    self._apply_refetched_field_to_model(
+                        shape_field, new_value, model, deepcopy
+                    )
 
             # Let's be extra cautious and help GC a bit here. `obj` can
             # have recursive references to other objects via links and
             # computed backlinks.
             obj.__dict__.clear()
+
+    def _apply_refetched_field_to_model(
+        self,
+        shape_field: GelPointerReflection,
+        new_value: Any,
+        model: GelModel,
+        deepcopy: Callable[[T], T],
+    ) -> None:
+        field = shape_field.name
+        is_multi = shape_field.cardinality.is_multi()
+        is_link = shape_field.kind.is_link()
+
+        model_dict = model.__dict__
+
+        model.__pydantic_fields_set__.add(field)
+
+        if is_link and is_multi:
+            link = model_dict.get(field)
+            assert isinstance(new_value, AbstractCollection)
+            if link is None:
+                # This instance never had this link, but
+                # now it will.
+                # TODO: this needs to be optimized.
+                link = copy.copy(new_value)
+                model_dict[field] = link
+                link.__gel_replace_with_empty__()
+
+            assert is_link_abstract_dlist(link)
+            assert type(new_value) is type(link)
+            model_dict[field] = link.__gel_reconcile__(
+                # no need to copy `new_value`,
+                # it will only be iterated over
+                new_value,  # type: ignore [arg-type]
+                self.existing_objects,  # type: ignore [arg-type]
+                self.new_objects,  # type: ignore [arg-type]
+            )
+
+        elif is_link:
+            existing = model_dict.get(field)
+            if (
+                new_value is None
+                or existing is None
+                or existing is DEFAULT_VALUE
+            ):
+                model_dict[field] = new_value
+            elif shape_field.properties:
+                model_dict[field] = reconcile_proxy_link(
+                    existing=existing,
+                    refetched=new_value,  # pyright: ignore [reportArgumentType]
+                    existing_objects=self.existing_objects,  # type: ignore [arg-type]
+                    new_objects=self.new_objects,
+                )
+            else:
+                model_dict[field] = reconcile_link(
+                    existing=existing,
+                    refetched=new_value,
+                    existing_objects=self.existing_objects,  # type: ignore [arg-type]
+                    new_objects=self.new_objects,
+                )
+
+        elif not is_link:
+            # could be a multi prop, could be a single prop
+            # with an array value
+            if shape_field.mutable:
+                model_dict[field] = deepcopy(new_value)
+            else:
+                model_dict[field] = new_value
 
     def _commit(self) -> None:
         for obj, new_id in self.new_object_ids.items():
@@ -1662,11 +1684,20 @@ class SaveExecutor:
         if self.refetch:
             self._apply_refetched_data()
 
+            # Apply refetched data to new objects.
+            #
+            # There are 3 instances of a newly synced object:
+            # - The user instance
+            # - The batch instance
+            # - The refetch instance
+            #
+            # In _apply_refetched_data, the batch instance will be updated
+            # using data from the refetech instance. Here, we finally update
+            # the user's copy.
             for obj, new_id in self.new_object_ids.items():
                 assert new_id is not None
 
                 updated = self.new_objects[new_id]
-                pydantic_set_fields = obj.__pydantic_fields_set__
 
                 for prop in get_pointers(type(obj)):
                     if (
@@ -1674,13 +1705,15 @@ class SaveExecutor:
                         prop.name == "id"
                         # prop not refetched
                         or prop.name not in updated.__dict__
-                        # TODO: Refetching links for new objects
-                        or prop.kind == PointerKind.Link
                     ):
                         continue
 
-                    obj.__dict__[prop.name] = updated.__dict__[prop.name]
-                    pydantic_set_fields.add(prop.name)
+                    self._apply_refetched_field_to_model(
+                        prop,
+                        updated.__dict__[prop.name],
+                        obj,
+                        _identity_func,
+                    )
 
         self._commit_recursive()
 
