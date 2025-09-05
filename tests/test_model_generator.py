@@ -6122,7 +6122,7 @@ class TestModelGenerator(tb.ModelTestCase):
         self.assertTrue(all(len(u.name) == 5 for u in exact_len_users))
 
     @tb.to_be_fixed  # comparisons with None are broken
-    def test_modelgen_operators_boolean_logical(self):
+    def test_modelgen_operators_boolean_logical_01(self):
         """Test boolean logical operators and functions"""
         from models.orm import default, std
 
@@ -6144,6 +6144,60 @@ class TestModelGenerator(tb.ModelTestCase):
         )
         for user in users_std_or:
             self.assertTrue(len(user.name) > 10 or user.nickname is not None)
+
+    def test_modelgen_operators_boolean_logical_02(self):
+        """Test boolean logical operators and functions"""
+        from models.orm import default, std
+
+        # Test std.and_ function
+        users_std_and = self.client.query(
+            default.User.filter(
+                lambda u: std.and_(
+                    u.name != "Alice",
+                    u.name != "Dana",
+                    u.name != "Elsa",
+                    u.name != "Zoe",
+                )
+            ).limit(5)
+        )
+        for user in users_std_and:
+            self.assertTrue(user.name not in ("Alice", "Dana", "Elsa", "Zoe"))
+
+        # Test std.and_ function, with a single arg
+        users_std_and = self.client.query(
+            default.User.filter(
+                lambda u: std.and_(
+                    u.name != "Alice",
+                )
+            ).limit(5)
+        )
+        for user in users_std_and:
+            self.assertTrue(user.name not in ("Alice"))
+
+        # Test std.or_ function
+        users_std_or = self.client.query(
+            default.User.filter(
+                lambda u: std.or_(
+                    u.name == "Alice",
+                    u.name == "Dana",
+                    u.name == "Elsa",
+                    u.name == "Zoe",
+                )
+            )
+        )
+        for user in users_std_or:
+            self.assertTrue(user.name in ("Alice", "Dana", "Elsa", "Zoe"))
+
+        # Test std.or_ function, with a single arg
+        users_std_or = self.client.query(
+            default.User.filter(
+                lambda u: std.or_(
+                    u.name == "Alice"
+                )
+            )
+        )
+        for user in users_std_or:
+            self.assertTrue(user.name in ("Alice"))
 
     def test_modelgen_operators_boolean_not(self):
         """Test boolean not operator and std.not_ function"""
