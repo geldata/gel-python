@@ -54,6 +54,13 @@ if TYPE_CHECKING:
     )
 
 
+class _UnresolvedType:
+    pass
+
+
+_UNRESOLVED_TYPE = _UnresolvedType()
+
+
 class ModelFieldDescriptor(_qb.AbstractFieldDescriptor):
     __slots__ = (
         "__gel_annotation__",
@@ -154,7 +161,7 @@ class ModelFieldDescriptor(_qb.AbstractFieldDescriptor):
     ) -> Any:
         t = self.get_resolved_type()
         if t is None:
-            return self
+            return _UNRESOLVED_TYPE
         else:
             source: _qb.Expr
             if expr is not None:
@@ -196,7 +203,8 @@ class ModelFieldDescriptor(_qb.AbstractFieldDescriptor):
                 pass
 
             path = self.get(owner)
-            setattr(owner, cache_attr, path)
+            if path is not _UNRESOLVED_TYPE:
+                setattr(owner, cache_attr, path)
             return path
 
 
