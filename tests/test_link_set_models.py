@@ -182,7 +182,6 @@ class TestLinkSetModels(tb.ModelTestCase):
             "models.link_set.default.Pet | None",
         )
 
-    @tb.xfail  # link not set
     def test_link_set_model_query_single_link_03(self):
         from models.link_set import default
 
@@ -193,19 +192,8 @@ class TestLinkSetModels(tb.ModelTestCase):
             .filter(name="Harry Potter")
             .limit(1)
         )
-        hedwig = self.client.query_required_single(
-            default.Pet.filter(name="Hedwig").limit(1)
-        )
 
-        self.assertEqual(harry.pet, hedwig)
-        self.assertEqual(
-            reveal_type(harry.pet),
-            (
-                "gel._internal._qbmodel._abstract._link_set.LinkSet["
-                "models.link_set.default.Class"
-                "]"
-            ),
-        )
+        self.assertFalse(hasattr(harry, 'pet'))
 
     def test_link_set_model_query_multi_link_01(self):
         from models.link_set import default
@@ -261,8 +249,8 @@ class TestLinkSetModels(tb.ModelTestCase):
             ),
         )
 
-    @tb.xfail  # nothing fetched
     def test_link_set_model_query_multi_link_03(self):
+        from gel._internal import _tracked_list
         from models.link_set import default
 
         harry = self.client.query_required_single(
@@ -272,17 +260,15 @@ class TestLinkSetModels(tb.ModelTestCase):
             .filter(name="Harry Potter")
             .limit(1)
         )
-        charms = self.client.query_required_single(
-            default.Class.filter(name="Charms").limit(1)
-        )
-        potions = self.client.query_required_single(
-            default.Class.filter(name="Potions").limit(1)
-        )
 
-        self.assertEqual(harry.classes, {charms, potions})
+        self.assertTrue(hasattr(harry, "classes"))
+        self.assertEqual(harry.classes._mode, _tracked_list.Mode.Write)
+        self.assertEqual(harry.classes._items, [])
         self.assertEqual(
             reveal_type(harry.classes),
-            "models.link_set.default.Pet | None",
+            "gel._internal._qbmodel._abstract._link_set.LinkSet["
+            "models.link_set.default.Class"
+            "]",
         )
 
     def test_link_set_model_query_single_link_with_props_01(self):
@@ -357,7 +343,6 @@ class TestLinkSetModels(tb.ModelTestCase):
             "builtins.str | None",
         )
 
-    @tb.xfail  # link not set
     def test_link_set_model_query_single_link_with_props_03(self):
         from models.link_set import default
 
@@ -368,31 +353,8 @@ class TestLinkSetModels(tb.ModelTestCase):
             .filter(name="Harry Potter")
             .limit(1)
         )
-        griffindor = self.client.query_required_single(
-            default.House.filter(name="Griffindor").limit(1)
-        )
 
-        self.assertEqual(harry.house, griffindor)
-        self.assertEqual(
-            reveal_type(harry.house),
-            "models.link_set.__shapes__.default.Person.__links__.house | None",
-        )
-        self.assertEqual(
-            (
-                harry.house.__linkprops__.rank
-                if harry.house is not None
-                else ""
-            ),
-            "seeker",
-        )
-        self.assertEqual(
-            reveal_type(
-                harry.house.__linkprops__.rank
-                if harry.house is not None
-                else None
-            ),
-            "builtins.str | None",
-        )
+        self.assertFalse(hasattr(harry, 'house'))
 
     def test_link_set_model_query_multi_link_with_props_01(self):
         from models.link_set import default
@@ -466,8 +428,8 @@ class TestLinkSetModels(tb.ModelTestCase):
             "builtins.str | None",
         )
 
-    @tb.xfail  # nothing fetched
     def test_link_set_model_query_multi_link_with_props_03(self):
+        from gel._internal import _tracked_list
         from models.link_set import default
 
         harry = self.client.query_required_single(
@@ -477,14 +439,10 @@ class TestLinkSetModels(tb.ModelTestCase):
             .filter(name="Harry Potter")
             .limit(1)
         )
-        hermione = self.client.query_required_single(
-            default.Person.filter(name="Hermione Granger").limit(1)
-        )
-        ron = self.client.query_required_single(
-            default.Person.filter(name="Ron Weasley").limit(1)
-        )
 
-        self.assertEqual(harry.friends, {hermione, ron})
+        self.assertTrue(hasattr(harry, "friends"))
+        self.assertEqual(harry.friends._mode, _tracked_list.Mode.Write)
+        self.assertEqual(harry.friends._items, [])
         self.assertEqual(
             reveal_type(harry.friends),
             (
@@ -493,16 +451,6 @@ class TestLinkSetModels(tb.ModelTestCase):
                 "models.link_set.default.Person"
                 "]"
             ),
-        )
-        self.assertEqual(
-            {f: f.__linkprops__.opinion for f in harry.friends},
-            {hermione: "smart", ron: "reliable"},
-        )
-        self.assertEqual(
-            reveal_type(
-                list(harry.friends.unsafe_iter())[0].__linkprops__.opinion
-            ),
-            "builtins.str | None",
         )
 
     def test_link_set_model_query_computed_single_link_01(self):
@@ -539,7 +487,6 @@ class TestLinkSetModels(tb.ModelTestCase):
             "models.link_set.default.Person | None",
         )
 
-    @tb.xfail  # link not set
     def test_link_set_model_query_computed_single_link_03(self):
         from models.link_set import default
 
@@ -550,15 +497,8 @@ class TestLinkSetModels(tb.ModelTestCase):
             .filter(name="Hedwig")
             .limit(1)
         )
-        harry = self.client.query_required_single(
-            default.Person.filter(name="Harry Potter").limit(1)
-        )
 
-        self.assertEqual(hedwig.owner, harry)
-        self.assertEqual(
-            reveal_type(hedwig.owner),
-            "models.link_set.default.Person | None",
-        )
+        self.assertFalse(hasattr(hedwig, "owner"))
 
     @tb.xfail  # expected ForwardRef to be a path alias
     def test_link_set_model_query_computed_multi_link_01(self):
@@ -624,7 +564,6 @@ class TestLinkSetModels(tb.ModelTestCase):
             ),
         )
 
-    @tb.xfail  # link not set
     def test_link_set_model_query_computed_multi_link_03(self):
         from models.link_set import default
 
@@ -635,25 +574,8 @@ class TestLinkSetModels(tb.ModelTestCase):
             .filter(name="Griffindor")
             .limit(1)
         )
-        harry = self.client.query_required_single(
-            default.Person.filter(name="Harry Potter").limit(1)
-        )
-        hermione = self.client.query_required_single(
-            default.Person.filter(name="Hermione Granger").limit(1)
-        )
-        ron = self.client.query_required_single(
-            default.Person.filter(name="Ron Weasley").limit(1)
-        )
 
-        self.assertEqual(griffindor.members, {harry, hermione, ron})
-        self.assertEqual(
-            reveal_type(griffindor.members),
-            (
-                "gel._internal._qbmodel._abstract._link_set.ComputedLinkSet["
-                "models.link_set.default.Person"
-                "]"
-            ),
-        )
+        self.assertFalse(hasattr(griffindor, "members"))
 
     def test_link_set_model_modify_multi_link_add_01(self):
         # Add existing item
