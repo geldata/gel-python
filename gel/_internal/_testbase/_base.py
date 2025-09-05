@@ -916,7 +916,7 @@ class BranchTestCase(InstanceTestCase):
             return base_dbname
 
     @classmethod
-    def get_schema_texts(cls) -> list[str]:
+    def get_combined_schemas(cls) -> str:
         schema_texts: list[str] = []
 
         # Look at all SCHEMA entries and potentially create multiple
@@ -930,12 +930,19 @@ class BranchTestCase(InstanceTestCase):
             if (schema_text := cls.get_schema_text(name))
         )
 
-        return schema_texts
+        return "\n\n".join(st for st in schema_texts)
+
+    @classmethod
+    def get_schema_field_name(cls, field: str) -> str | None:
+        if m := re.match(r"^SCHEMA(?:_(\w+))?", field):
+            return m.group(1) or ""
+
+        return None
 
     @classmethod
     def get_schema_text(cls, field: str) -> str | None:
-        m = re.match(r"^SCHEMA(?:_(\w+))?", field)
-        if not m:
+        schema_name = cls.get_schema_field_name(field)
+        if schema_name is None:
             return None
 
         val = cls.__dict__.get(field)
@@ -944,7 +951,7 @@ class BranchTestCase(InstanceTestCase):
         assert isinstance(val, str)
 
         module_name = (
-            (m.group(1) or cls.DEFAULT_MODULE).lower().replace("_", "::")
+            (schema_name or cls.DEFAULT_MODULE).lower().replace("_", "::")
         )
 
         if os.path.exists(val):
@@ -960,12 +967,11 @@ class BranchTestCase(InstanceTestCase):
     @classmethod
     def get_setup_script(cls) -> str:
         script = ""
-        schema = "\n\n".join(st for st in cls.get_schema_texts())
 
         # Don't wrap the script into a transaction here, so that
         # potentially it's easier to stitch multiple such scripts
         # together in a fashion similar to what `edb inittestdb` does.
-        script += f"\nSTART MIGRATION TO {{ {schema} }};"
+        script += f"\nSTART MIGRATION TO {{ {cls.get_combined_schemas()} }};"
         script += "\nPOPULATE MIGRATION; \nCOMMIT MIGRATION;"
 
         if cls.SETUP:

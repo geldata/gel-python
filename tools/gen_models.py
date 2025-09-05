@@ -34,7 +34,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-from gel._testbase import DatabaseTestCase, BaseModelTestCase
+from gel._internal._testbase._models import BranchTestCase, BaseModelTestCase
 
 # ---------------------------------------------------------------------------
 # Safety checks & constants
@@ -134,7 +134,7 @@ def find_classes_of_type(
 
 
 def get_schema_info(
-    model_tests: typing.Collection[typing.Type[DatabaseTestCase]],
+    model_tests: typing.Collection[typing.Type[BranchTestCase]],
 ) -> dict[str, str | Path]:
     """Find the schemas which are directly defined in a test's SCHEMA.
 
@@ -153,7 +153,7 @@ def get_schema_info(
 
         else:
             for name, val in model_test.__dict__.items():
-                if not model_test.is_schema_field(name):
+                if model_test.get_schema_field_name(name) is None:
                     continue
 
                 schema_path = Path(val)
@@ -277,7 +277,7 @@ def main(
     if k:
         model_tests = find_test_classes(
             TESTS_ROOT,
-            DatabaseTestCase,
+            BranchTestCase,
             k,
         )
         all_schemas = list(get_schema_info(model_tests).items())
