@@ -495,3 +495,29 @@ function complex_variadic(
 };
 
 }
+
+module content {
+
+abstract type Content {
+  required title: str;
+}
+
+type Movie extending Content {
+  release_year: int64;
+}
+
+type TVShow extending Content {
+  num_seasons: int64;
+}
+
+type Account {
+  required username: str;
+  multi watchlist: Content;
+}
+
+type NoobAccount {
+  required username: str;
+  multi watchlist: Movie;
+}
+
+}
