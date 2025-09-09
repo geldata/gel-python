@@ -41,7 +41,7 @@ from gel._internal._qbmodel._abstract import _link_set
 from gel._internal._qbmodel._pydantic._models import GelModel
 from gel._internal._testbase import _models as tb
 
-from . import nested_collections
+from tests import nested_collections
 
 _T = typing.TypeVar("_T")
 
