@@ -818,7 +818,12 @@ def make_plan(
 
                 assert is_prop_list(val)
 
-                if mp_added := val.__gel_get_added__():
+                if (
+                    (mp_added := val.__gel_get_added__())
+                    # Even if there are no added values, push the change if
+                    # there is a default value we want to override.
+                    or (is_new and prop.has_default)
+                ):
                     push_change(
                         requireds,
                         sched,

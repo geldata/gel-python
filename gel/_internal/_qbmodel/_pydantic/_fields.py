@@ -278,14 +278,22 @@ class _MultiProperty(
     def _validate(
         cls,
         value: Any,
-        generic_args: tuple[type[Any], type[Any]],
-    ) -> _tracked_list.DowncastingTrackedList[_ST_co, _BT_co]:
+        generic_args: tuple[type[_ST_co], type[_BT_co]],
+    ) -> (
+        _tracked_list.DowncastingTrackedList[_ST_co, _BT_co]
+        | _abstract.DefaultValue
+    ):
         lt: type[_tracked_list.DowncastingTrackedList[_ST_co, _BT_co]] = (
             _tracked_list.DowncastingTrackedList[
-                generic_args[0],  # type: ignore [valid-type]
-                generic_args[1],  # type: ignore [valid-type]
+                generic_args[0],
+                generic_args[1],
             ]
         )
+        if isinstance(value, _tracked_list.DefaultList):
+            # Convert the pydantic generated default into
+            # the internal DEFAULT_VALUE
+            return _abstract.DEFAULT_VALUE
+
         return LinkSet.__gel_validate__(lt, value)
 
 

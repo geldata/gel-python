@@ -1416,6 +1416,22 @@ class TestModelSyncMultiProp(tb.ModelTestCase):
         type C {
             multi val: tuple<str, int64>;
         };
+
+        type Az {
+            multi val: int64 {
+                default := {-1, -2, -3};
+            };
+        };
+        type Bz {
+            multi val: array<int64> {
+                default := {[-1], [-2, -2], [-3, -3, -3]};
+            };
+        };
+        type Cz {
+            multi val: tuple<str, int64> {
+                default := {('.', -1), ('.', -2), ('.', -3)};
+            };
+        };
     """
 
     def _base_change_testcase(
@@ -1469,26 +1485,54 @@ class TestModelSyncMultiProp(tb.ModelTestCase):
         def _testcase(
             model_type: typing.Type[GelModel],
             val: typing.Any,
+            *,
+            default_val: typing.Any | None = None,
         ) -> None:
-            with_val = model_type(val=val)
-            without_val = model_type()
+            if default_val is None:
+                default_val = []
 
-            self.client.sync(with_val, without_val)
+            # sync one at a time
+            with_val = model_type(val=val)
+            self.client.sync(with_val)
+            self.assertEqual(with_val.val, val)
+
+            with_unset = model_type()
+            self.client.sync(with_unset)
+            self.assertEqual(with_unset.val, default_val)
+
+            with_empty = model_type(val=[])
+            self.client.sync(with_empty)
+            self.assertEqual(with_empty.val, [])
+
+            # sync all together
+            with_val = model_type(val=val)
+            with_unset = model_type()
+            with_empty = model_type(val=[])
+
+            self.client.sync(with_val, with_unset, with_empty)
 
             self.assertEqual(with_val.val, val)
-            self.assertEqual(without_val.val, [])
+            self.assertEqual(with_unset.val, default_val)
+            self.assertEqual(with_empty.val, [])
 
             # cleanup
             self.client.query(model_type.delete())
 
-        _testcase(default.A, [])
-        _testcase(default.B, [])
-        _testcase(default.C, [])
-
         _testcase(default.A, [1, 2, 3])
-        _testcase(default.B, [[]])
         _testcase(default.B, [[1], [2, 2], [3, 3, 3]])
         _testcase(default.C, [("a", 1), ("b", 2), ("c", 3)])
+
+        _testcase(default.Az, [1, 2, 3], default_val=[-1, -2, -3])
+        _testcase(
+            default.Bz,
+            [[1], [2, 2], [3, 3, 3]],
+            default_val=[[-1], [-2, -2], [-3, -3, -3]],
+        )
+        _testcase(
+            default.Cz,
+            [("a", 1), ("b", 2), ("c", 3)],
+            default_val=[(".", -1), (".", -2), (".", -3)],
+        )
 
     def test_model_sync_multi_prop_02(self):
         # Updating existing objects with multi props
