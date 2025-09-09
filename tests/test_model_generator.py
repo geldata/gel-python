@@ -498,6 +498,7 @@ class TestModelGeneratorMain(tb.ModelTestCase):
                 user_dct,
                 {
                     "name": user.name,
+                    # tb.TNAME: "default::User",
                 },
             )
 
@@ -542,7 +543,11 @@ class TestModelGeneratorMain(tb.ModelTestCase):
 
         self.assertEqual(
             user_loaded.model_dump(),
-            {"id": user_loaded.id, "name": "Alice"},
+            {
+                "id": user_loaded.id,
+                "name": "Alice",
+                tb.TNAME: "default::User",
+            },
         )
 
         with self.assertRaisesRegex(
@@ -572,7 +577,7 @@ class TestModelGeneratorMain(tb.ModelTestCase):
             user_new.model_dump(
                 context={"gel_allow_unsaved": True},
             ),
-            {"name": "Bob", "nickname": None},
+            {"name": "Bob", "nickname": None, tb.TNAME: "default::User"},
         )
 
         self.assertEqual(
@@ -580,7 +585,7 @@ class TestModelGeneratorMain(tb.ModelTestCase):
                 exclude={"nickname"},
                 context={"gel_allow_unsaved": True},
             ),
-            {"name": "Bob"},
+            {"name": "Bob", tb.TNAME: "default::User"},
         )
 
         self.assertEqual(
@@ -588,13 +593,14 @@ class TestModelGeneratorMain(tb.ModelTestCase):
                 exclude={"nickname": True},
                 context={"gel_allow_unsaved": True},
             ),
-            {"name": "Bob"},
+            {"name": "Bob", tb.TNAME: "default::User"},
         )
 
         self.assertEqual(
             user_loaded.model_dump_json(),
             json.dumps(
-                {"id": str(user_loaded.id), "name": "Alice"},
+                {"id": str(user_loaded.id), "name": "Alice",
+                 tb.TNAME: "default::User"},
                 separators=(",", ":"),
             ),
         )
@@ -622,7 +628,8 @@ class TestModelGeneratorMain(tb.ModelTestCase):
                 context={"gel_allow_unsaved": True},
             ),
             json.dumps(
-                {"id": str(user_loaded.id), "name": "Alice..."},
+                {"id": str(user_loaded.id), "name": "Alice...",
+                 tb.TNAME: "default::User"},
                 separators=(",", ":"),
             ),
         )
@@ -662,7 +669,11 @@ class TestModelGeneratorMain(tb.ModelTestCase):
         )
 
         self.assertEqual(
-            sl.model_dump(exclude={"id": True, "owner": {"id": True}}),
+            sl.model_dump(exclude={
+                "id": True,
+                tb.TNAME: True,
+                "owner": {"id": True, tb.TNAME: True},
+            }),
             expected,
         )
 
@@ -674,7 +685,11 @@ class TestModelGeneratorMain(tb.ModelTestCase):
         )
 
         self.assertEqual(
-            sl.model_dump_json(exclude={"id": True, "owner": {"id": True}}),
+            sl.model_dump_json(exclude={
+                "id": True,
+                tb.TNAME: True,
+                "owner": {"id": True, tb.TNAME: True},
+            }),
             json.dumps(expected, separators=(",", ":")),
         )
 
@@ -1235,6 +1250,7 @@ class TestModelGeneratorMain(tb.ModelTestCase):
                 "comp_opt_wprop_friend",
                 "comp_req_friend",
                 "comp_req_wprop_friend",
+                "tname_",
             },
         )
 
@@ -1549,11 +1565,13 @@ class TestModelGeneratorMain(tb.ModelTestCase):
         g = default.GameSession(num=1, public=True)
         self.assertEqual(
             g.model_dump(context={"gel_allow_unsaved": True}),
-            {"num": 1, "public": True, "players": []},
+            {"num": 1, "public": True, "players": [],
+             tb.TNAME: "default::GameSession"},
         )
         self.assertEqual(
             g.model_dump_json(context={"gel_allow_unsaved": True}),
-            '{"num":1,"players":[],"public":true}',
+            '{"tname_":"default::GameSession","num":1,"players":[],'
+            '"public":true}',
         )
 
     def test_modelgen_pydantic_apis_20(self):
@@ -5359,6 +5377,7 @@ class TestModelGeneratorMain(tb.ModelTestCase):
                     name_len: Any  # readonly
                     nickname: None | str = None
                     nickname_len: None | int  # readonly
+                    tname_: Literal['default::User'] = 'default::User'
 
                 class UserGroup:
                     id: UUID
@@ -5367,6 +5386,8 @@ class TestModelGeneratorMain(tb.ModelTestCase):
                     name_len: Any  # readonly
                     nickname: None | str = None
                     nickname_len: None | int  # readonly
+                    tname_: Literal['default::UserGroup'] \
+= 'default::UserGroup'
                     users: list[User] = ..."""
             ),
         )
@@ -5385,7 +5406,8 @@ class TestModelGeneratorMain(tb.ModelTestCase):
                 class User:
                     id: UUID
                     name: str
-                    nickname: None | str = None"""
+                    nickname: None | str = None
+                    tname_: Literal['default::User'] = 'default::User'"""
             ),
         )
 
@@ -5424,6 +5446,7 @@ class TestModelGeneratorMain(tb.ModelTestCase):
                 indent=2,
             )
         )
+        self.maxDiff = None
 
         self.assertEqual(
             schema.strip(),
@@ -5444,6 +5467,7 @@ class TestModelGeneratorMain(tb.ModelTestCase):
                     name_len: Any  # readonly
                     nickname: None | str = None
                     nickname_len: None | int  # readonly
+                    tname_: Literal['default::User'] = 'default::User'
 
                 class UserGroup:
                     id: UUID
@@ -5452,6 +5476,8 @@ class TestModelGeneratorMain(tb.ModelTestCase):
                     name_len: Any  # readonly
                     nickname: None | str = None
                     nickname_len: None | int  # readonly
+                    tname_: Literal['default::UserGroup'] \
+= 'default::UserGroup'
                     users: list[User] = ..."""
             ),
         )
@@ -6404,6 +6430,7 @@ class TestModelGeneratorMain(tb.ModelTestCase):
                 "name",
                 "name_len",
                 "upper_name",
+                tb.TNAME,
             },
         )
         self.assertEqual(

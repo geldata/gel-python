@@ -58,6 +58,7 @@ from ._base import (
 )
 
 __all__ = (
+    "TNAME",
     "AsyncModelTestCase",
     "ModelTestCase",
     "must_fail",
@@ -68,7 +69,7 @@ __all__ = (
     "to_be_fixed",
     "typecheck",
     "xfail",
-    "xfail_unimplemented",
+    "xfail_unimplemented"
 )
 
 if TYPE_CHECKING:
@@ -82,6 +83,7 @@ _T = TypeVar("_T")
 _P = ParamSpec("_P")
 _R = TypeVar("_R", covariant=True)
 _ModelTestCase_T = TypeVar("_ModelTestCase_T", bound="BaseModelTestCase")
+TNAME = "tname_"
 
 
 MYPY_INI = """\
@@ -875,6 +877,7 @@ def pop_ids(dct: Any) -> Any:
     else:
         assert isinstance(dct, dict)
         dct.pop("id", None)
+        dct.pop(TNAME, None)
         for k, v in dct.items():
             if isinstance(v, list):
                 for item in v:

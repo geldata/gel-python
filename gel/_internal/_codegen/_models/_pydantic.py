@@ -4717,7 +4717,10 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             self.write(f'"""type {objtype.name}"""')
             self.write()
             literal = self.import_name("typing", "Literal")
-            self._write_model_attribute("tname_", f'{literal}["{type_name}"]')
+            self._write_model_attribute(
+                "tname_",
+                f'{literal}["{type_name}"] = "{type_name}"',
+            )
             pointers = _get_object_type_body(objtype)
             if pointers:
                 localns = frozenset(ptr.name for ptr in pointers)
