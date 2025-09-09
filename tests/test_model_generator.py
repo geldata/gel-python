@@ -1577,6 +1577,30 @@ class TestModelGenerator(tb.ModelTestCase):
             {"red", "green"},
         )
 
+    @tb.xfail('''
+        Broken because of inheritance.
+        It tries to deserialize a Content, which fails.
+        See issue #755.
+    ''')
+    def test_modelgen_pydantic_apis_21(self):
+        # Test model_dump() and model_dump_json() on models;
+        # test *inheritance*
+
+        from models.orm import content
+
+        t = content.Account(
+            username='p.emarg',
+            watchlist=[
+                content.TVShow(title='Foo', num_seasons=4),
+                content.Movie(title='Bar', release_year=1900),
+            ],
+        )
+
+        self.assertPydanticPickles(t)
+        self.assertPydanticSerializes(
+            t,
+        )
+
     def test_modelgen_data_unpack_polymorphic(self):
         from models.orm import default
 
