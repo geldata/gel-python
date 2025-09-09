@@ -44,6 +44,7 @@ from gel._internal import _typing_inspect
 from gel._internal import _utils
 from gel._internal._unsetid import UNSET_UUID
 
+
 from gel._internal._qbmodel import _abstract
 
 from . import _utils as _pydantic_utils
@@ -1000,6 +1001,18 @@ class GelModel(
             super().__init__(**kwargs)
 
         self.__gel_new__ = True
+
+    @pydantic.model_validator(mode='wrap')
+    @classmethod
+    def dispatch_to_subtypes(
+        cls, data: Any, handler: Any, info: pydantic.ValidationInfo
+    ) -> Any:
+        key = 'tname_'
+        if key in data:
+            ncls: Any = cls.get_class_by_name(data[key])
+            if ncls is not cls:
+                return ncls.model_validate(data, context=info.context)
+        return handler(data)
 
     def __getattr__(self, name: str) -> Any:
         cls = type(self)

@@ -166,7 +166,7 @@ class AbstractGelModelMeta(GelTypeMeta):
         )
         reflection = cls.__gel_reflection__
         if (tname := getattr(reflection, "name", None)) is not None:
-            mcls.__gel_class_registry__[tname] = cls
+            mcls.__gel_class_registry__[str(tname)] = cls
         cls.__gel_shape__ = __gel_shape__
         return cls
 
