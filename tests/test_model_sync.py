@@ -300,29 +300,86 @@ class TestModelSyncSingleProp(tb.ModelTestCase):
         type I {
             val: tuple<str, array<tuple<str, int64>>>;
         };
+
+        type Az {
+            val: int64 {
+                default := -1;
+            };
+        };
+        type Bz {
+            val: array<int64> {
+                default := [-1];
+            };
+        };
+        type Cz {
+            val: tuple<str, int64> {
+                default := ('.', -1);
+            };
+        };
+        # save Dz for array<array<...>>
+        type Fz {
+            val: tuple<str, array<int64>> {
+                default := ('.', [-1]);
+            };
+        };
+        type Gz {
+            val: tuple<str, tuple<str, int64>> {
+                default := ('.', ('.', -1));
+            };
+        };
+
+        # type Ez {  # Causes ISE
+        #     val: array<tuple<str, int64>> {
+        #         default := [('.', -1)];
+        #     };
+        # };
+        # type Hz {  # Causes ISE
+        #     val: array<tuple<str, array<int64>>> {
+        #         default := [('.', [-1])];
+        #     };
+        # };
+        # type Iz {  # Causes ISE
+        #     val: tuple<str, array<tuple<str, int64>>> {
+        #         default := ('.', [('.', -1)]);
+        #     };
+        # };
     """
 
     def test_model_sync_single_prop_01(self):
         # Insert new object with single prop
 
-        from models.TestModelSyncSingleProp import default
-
         def _testcase(
             model_type: typing.Type[GelModel],
             val: typing.Any,
+            *,
+            default_val: typing.Any | None = None,
         ) -> None:
+            # sync one at a time
             with_val = model_type(val=val)
-            without_val = model_type()
+            self.client.sync(with_val)
+            self.assertEqual(with_val.val, val)
 
-            self.client.sync(with_val, without_val)
+            with_unset = model_type()
+            self.client.sync(with_unset)
+            self.assertEqual(with_unset.val, default_val)
+
+            with_none = model_type(val=None)
+            self.client.sync(with_none)
+            self.assertIsNone(with_none.val)
+
+            # sync all together
+            with_val = model_type(val=val)
+            with_unset = model_type()
+            with_none = model_type(val=None)
+
+            self.client.sync(with_val, with_unset, with_none)
 
             self.assertEqual(with_val.val, val)
-            self.assertIsNone(without_val.val)
+            self.assertEqual(with_unset.val, default_val)
+            self.assertIsNone(with_none.val)
 
-            # cleanup
-            self.client.query(model_type.delete())
+        from models.TestModelSyncSingleProp import default
 
-        _testcase(default.A, None)
         _testcase(default.A, 1)
         _testcase(default.B, [1, 2, 3])
         _testcase(default.C, ("x", 1))
@@ -336,6 +393,30 @@ class TestModelSyncSingleProp(tb.ModelTestCase):
         _testcase(
             default.I,
             ("w", [("x", 1), ("y", 2), ("z", 3)]),
+        )
+
+        _testcase(default.Az, 9, default_val=-1)
+        _testcase(default.Bz, [1, 2, 3], default_val=[-1])
+        _testcase(default.Cz, ("x", 1), default_val=(".", -1))
+        _testcase(default.Fz, ("x", [1, 2, 3]), default_val=(".", [-1]))
+        _testcase(default.Gz, ("x", ("x", 1)), default_val=(".", (".", -1)))
+
+    @tb.xfail  # Adding the types to the schema causes ISE
+    def test_model_sync_single_prop_01b(self):
+        from models.TestModelSyncSingleProp import default
+
+        self._testcase(
+            default.Ez, [("x", 1), ("y", 2), ("z", 3)], default_val=[(".", -1)]
+        )
+        self._testcase(
+            default.Hz,
+            [("x", [1, 2, 3]), ("y", [4, 5, 6]), ("z", [7, 8, 9])],
+            default_val=[(".", [-1])],
+        )
+        self._testcase(
+            default.Iz,
+            ("w", [("x", 1), ("y", 2), ("z", 3)]),
+            default_val=(".", [(".", -1)]),
         )
 
     def test_model_sync_single_prop_02(self):
