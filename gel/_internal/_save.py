@@ -40,8 +40,9 @@ from gel._internal._qbmodel._pydantic._models import (
 from gel._internal._tracked_list import (
     AbstractCollection,
     AbstractTrackedList,
-    TrackedList,
     DowncastingTrackedList,
+    Mode,
+    TrackedList,
 )
 from gel._internal._edgeql import PointerKind, quote_ident
 
@@ -822,7 +823,21 @@ def make_plan(
                     (mp_added := val.__gel_get_added__())
                     # Even if there are no added values, push the change if
                     # there is a default value we want to override.
-                    or (is_new and prop.has_default)
+                    or (
+                        is_new
+                        and prop.has_default
+                        and not (
+                            # Pydantic should ensure unset tracked lists will
+                            # have these flags.
+                            # We do this in:
+                            # - GelSourceModel.model_construct
+                            # - GelSourceModel.__getattr__
+                            # - GelSourceModel.__init__
+                            #   - via _MultiProperty._validate
+                            val._mode == Mode.Write
+                            and not val.__gel_overwrite_data__
+                        )
+                    )
                 ):
                     push_change(
                         requireds,
