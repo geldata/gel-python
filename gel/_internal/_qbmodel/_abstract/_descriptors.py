@@ -36,6 +36,7 @@ from ._base import (
     AbstractGelLinkModel,
     is_gel_type,
     maybe_collapse_object_type_variant_union,
+    LITERAL_TAG_FIELDS,
 )
 
 
@@ -116,7 +117,9 @@ class ModelFieldDescriptor(_qb.AbstractFieldDescriptor):
         if (
             t is not None
             and _typing_inspect.is_generic_alias(t)
-            and issubclass(typing.get_origin(t), PointerDescriptor)
+            and (origin := typing.get_origin(t))
+            and isinstance(origin, type)
+            and issubclass(origin, PointerDescriptor)
         ):
             self.__gel_resolved_descriptor__ = t
             t = typing.get_args(t)[0]
@@ -127,7 +130,10 @@ class ModelFieldDescriptor(_qb.AbstractFieldDescriptor):
                 if collapsed is not None:
                     t = collapsed
 
-            if not is_gel_type(t):
+            if (
+                not is_gel_type(t)
+                and self.__gel_name__ not in LITERAL_TAG_FIELDS
+            ):
                 raise AssertionError(
                     f"{self._fqname} type argument is not a GelType: {t}"
                 )

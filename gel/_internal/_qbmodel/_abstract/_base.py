@@ -35,6 +35,9 @@ T = TypeVar("T")
 T_co = TypeVar("T_co", covariant=True)
 
 
+LITERAL_TAG_FIELDS = ('tname_',)
+
+
 if TYPE_CHECKING:
 
     class GelTypeMeta(abc.ABCMeta):
