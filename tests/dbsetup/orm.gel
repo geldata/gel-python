@@ -513,11 +513,13 @@ type TVShow extending Content {
 type Account {
   required username: str;
   multi watchlist: Content;
+  favorite: Content;
 }
 
 type NoobAccount {
   required username: str;
   multi watchlist: Movie;
+  favorite: Movie;
 }
 
 }
