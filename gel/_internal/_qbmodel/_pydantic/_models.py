@@ -395,7 +395,11 @@ def _process_pydantic_fields(
 
     for fn, field in fields.items():
         ptr = cls.__gel_reflection__.pointers.get(fn)
-        if (ptr is None or ptr.computed) and fn != "__linkprops__":
+        if (
+            (ptr is None or ptr.computed)
+            and fn != "__linkprops__"
+            and fn not in _abstract.LITERAL_TAG_FIELDS
+        ):
             # Regarding `fn != "__linkprops__"`: see MergedModelMeta --
             # it renames `linkprops____` to `__linkprops__` to circumvent
             # Pydantic's restriction on fields starting with `_`.
