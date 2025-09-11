@@ -640,12 +640,18 @@ def _add_refetch_shape(
             ref_shape.fields[field_name] = ptr_info
 
     if obj.__gel_new__:
-        # New objects should additionally refetch any computed properties
         for ptr_name, ptr_info in tp_pointers.items():
-            if not ptr_info.computed or ptr_info.kind != PointerKind.Property:
-                continue
+            # New objects should refetch computed properties
+            if ptr_info.kind == PointerKind.Property and ptr_info.computed:
+                ref_shape.fields[ptr_name] = ptr_info
 
-            ref_shape.fields[ptr_name] = ptr_info
+            # New objects should refetch single links
+            if (
+                ptr_info.kind == PointerKind.Link
+                and not ptr_info.cardinality.is_multi()
+                and ptr_name != "__type__"
+            ):
+                ref_shape.fields[ptr_name] = ptr_info
 
 
 def push_refetch_new(
@@ -1347,13 +1353,17 @@ class SaveExecutor:
                     link_arg_order.append(ptr.name)
                     link_num = len(link_arg_order) - 1
 
+                    link_shape_elems: list[str] = []
+                    if not ptr.cardinality.is_multi():
+                        link_shape_elems += ["id"]
                     if ptr.properties:
-                        props = ",".join(
+                        link_shape_elems += [
                             f"@{quote_ident(p)}" for p in ptr.properties
-                        )
-                        props = f"{{ {props} }}"
-                    else:
-                        props = ""
+                        ]
+
+                    link_shape = ""
+                    if link_shape_elems:
+                        link_shape = f"{{ {','.join(link_shape_elems)} }}"
 
                     maybe_assert = maybe_assert_end = ""
 
@@ -1365,25 +1375,34 @@ class SaveExecutor:
                     if ptr.computed:
                         computed_filter = "or .id in __existing"
 
-                    # The logic of the `filter` clause is:
-                    # - first test if the link was fetched for this object
-                    #   at all - if not - we don't need to update it
-                    # - if the link was fetched for this particular GelModel --
-                    #   filter it by all existing objects prior to sync() in
-                    #   this link PLUS all new objects that were inserted
-                    #   during sync().
-                    select_shape.append(f"""
-                        {quote_ident(ptr.name)} := {maybe_assert}(
-                            with
-                                __link := __obj_data.1[{link_num}]
-                            select .{quote_ident(ptr.name)} {props}
-                            filter __link.0 and (
-                                .id in array_unpack(__link.1)
-                                or .id in __new
-                                {computed_filter}
-                            )
-                        ){maybe_assert_end}
-                    """)
+                    if ptr.cardinality.is_multi():
+                        # The logic of the `filter` clause is:
+                        # - first test if the link was fetched for this object
+                        #   at all - if not - we don't need to update it
+                        # - if the link was fetched for this particular
+                        #   GelModel -- filter it by all existing objects prior
+                        #   to sync() in this link PLUS all new objects that
+                        #   were inserted during sync().
+                        select_shape.append(f"""
+                            {quote_ident(ptr.name)} := {maybe_assert}(
+                                with
+                                    __link := __obj_data.1[{link_num}]
+                                select .{quote_ident(ptr.name)} {link_shape}
+                                filter __link.0 and (
+                                    .id in array_unpack(__link.1)
+                                    or .id in __new
+                                    {computed_filter}
+                                )
+                            ){maybe_assert_end}
+                        """)
+
+                    else:
+                        # Single links should always refetch the link
+                        select_shape.append(f"""
+                            {quote_ident(ptr.name)} := {maybe_assert}(
+                                .{quote_ident(ptr.name)} {link_shape}
+                            ){maybe_assert_end}
+                        """)
 
                 else:
                     select_shape.append(quote_ident(ptr.name))

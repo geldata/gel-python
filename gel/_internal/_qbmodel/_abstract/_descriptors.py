@@ -771,7 +771,11 @@ def reconcile_link(
         else:
             return next(iter(link_to))
 
-    return new_objects[obj_id]
+    if obj_id in new_objects:
+        return new_objects[obj_id]
+
+    # The refetched object appeared out of nowhere.
+    return refetched
 
 
 def reconcile_proxy_link(
@@ -799,8 +803,11 @@ def reconcile_proxy_link(
             link_to = _link_to
         else:
             link_to = next(iter(_link_to))
-    else:
+    elif obj_id in new_objects:
         link_to = new_objects[obj_id]
+    else:
+        # The refetched object appeared out of nowhere.
+        link_to = refetched.without_linkprops()
 
     # Make sure we create a new proxy model that
     # would wrap either an object that already exists
