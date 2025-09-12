@@ -278,15 +278,32 @@ class _MultiProperty(
     def _validate(
         cls,
         value: Any,
-        generic_args: tuple[type[Any], type[Any]],
-    ) -> _tracked_list.DowncastingTrackedList[_ST_co, _BT_co]:
+        generic_args: tuple[type[_ST_co], type[_BT_co]],
+    ) -> (
+        _tracked_list.DowncastingTrackedList[_ST_co, _BT_co]
+        | _abstract.DefaultValue
+    ):
         lt: type[_tracked_list.DowncastingTrackedList[_ST_co, _BT_co]] = (
             _tracked_list.DowncastingTrackedList[
                 generic_args[0],  # type: ignore [valid-type]
                 generic_args[1],  # type: ignore [valid-type]
             ]
         )
-        return LinkSet.__gel_validate__(lt, value)
+
+        # If the value wasn't explicitly provided by a user, pydantic will
+        # generate a DefaultList. __gel_validate__ will then create the
+        # appropriate tracked list.
+        lst = LinkSet.__gel_validate__(lt, value)
+
+        if isinstance(value, _tracked_list.DefaultList):
+            # GelSourceModel will do its best to set tracking flags, but set
+            # the here just in case.
+            #
+            # eg. __init__ will call this
+            lst._mode = _tracked_list.Mode.Write
+            lst.__gel_overwrite_data__ = False
+
+        return lst
 
 
 class _ComputedMultiProperty(
