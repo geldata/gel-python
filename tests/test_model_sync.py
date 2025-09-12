@@ -2684,6 +2684,13 @@ class TestModelSyncSingleLink(tb.ModelTestCase):
                 lprop: int64;
             };
         };
+        type SourceWithPropWithDefault {
+            target: Target {
+                lprop: int64 {
+                    default := -1;
+                };
+            };
+        };
 
         type Target2 extending Target;
         type SourceWithDmlDefault {
@@ -2813,6 +2820,36 @@ class TestModelSyncSingleLink(tb.ModelTestCase):
             default.SourceWithDmlDefault,
             target,
             dml_default_type=default.Target2,
+        )
+
+        # Linkprop with default
+        _testcase(
+            default.SourceWithPropWithDefault,
+            target,
+            expected_target=default.SourceWithPropWithDefault.target.link(
+                target, lprop=-1
+            ),
+        )
+        _testcase(
+            default.SourceWithPropWithDefault,
+            default.SourceWithPropWithDefault.target.link(target),
+            expected_target=default.SourceWithPropWithDefault.target.link(
+                target, lprop=-1
+            ),
+        )
+        _testcase(
+            default.SourceWithPropWithDefault,
+            default.SourceWithPropWithDefault.target.link(target, lprop=None),
+            expected_target=default.SourceWithPropWithDefault.target.link(
+                target, lprop=None
+            ),
+        )
+        _testcase(
+            default.SourceWithPropWithDefault,
+            default.SourceWithPropWithDefault.target.link(target, lprop=1),
+            expected_target=default.SourceWithPropWithDefault.target.link(
+                target, lprop=1
+            ),
         )
 
     def test_model_sync_single_link_02(self):
@@ -2959,6 +2996,92 @@ class TestModelSyncSingleLink(tb.ModelTestCase):
             default.SourceWithProp,
             default.SourceWithProp.target.link(target_a, lprop=1),
             default.SourceWithProp.target.link(target_a, lprop=1),
+        )
+
+        # Linkprop with default
+        _testcase(
+            default.SourceWithPropWithDefault,
+            None,
+            target_a,
+            default.SourceWithPropWithDefault.target.link(target_a, lprop=-1),
+        )
+        _testcase(
+            default.SourceWithPropWithDefault,
+            None,
+            default.SourceWithPropWithDefault.target.link(target_a),
+            default.SourceWithPropWithDefault.target.link(target_a, lprop=-1),
+        )
+        _testcase(
+            default.SourceWithPropWithDefault,
+            None,
+            default.SourceWithPropWithDefault.target.link(
+                target_a, lprop=None
+            ),
+            default.SourceWithPropWithDefault.target.link(
+                target_a, lprop=None
+            ),
+        )
+        _testcase(
+            default.SourceWithPropWithDefault,
+            None,
+            default.SourceWithPropWithDefault.target.link(target_a, lprop=1),
+            default.SourceWithPropWithDefault.target.link(target_a, lprop=1),
+        )
+        _testcase(
+            default.SourceWithPropWithDefault,
+            default.SourceWithPropWithDefault.target.link(target_a, lprop=9),
+            target_a,
+            default.SourceWithPropWithDefault.target.link(target_a, lprop=-1),
+        )
+        _testcase(
+            default.SourceWithPropWithDefault,
+            default.SourceWithPropWithDefault.target.link(target_a, lprop=9),
+            default.SourceWithPropWithDefault.target.link(target_a),
+            default.SourceWithPropWithDefault.target.link(target_a, lprop=-1),
+        )
+        _testcase(
+            default.SourceWithPropWithDefault,
+            default.SourceWithPropWithDefault.target.link(target_a, lprop=9),
+            default.SourceWithPropWithDefault.target.link(
+                target_a, lprop=None
+            ),
+            default.SourceWithPropWithDefault.target.link(
+                target_a, lprop=None
+            ),
+        )
+        _testcase(
+            default.SourceWithPropWithDefault,
+            default.SourceWithPropWithDefault.target.link(target_a, lprop=9),
+            default.SourceWithPropWithDefault.target.link(target_a, lprop=1),
+            default.SourceWithPropWithDefault.target.link(target_a, lprop=1),
+        )
+        _testcase(
+            default.SourceWithPropWithDefault,
+            default.SourceWithPropWithDefault.target.link(target_a, lprop=9),
+            target_b,
+            default.SourceWithPropWithDefault.target.link(target_b, lprop=-1),
+        )
+        _testcase(
+            default.SourceWithPropWithDefault,
+            default.SourceWithPropWithDefault.target.link(target_a, lprop=9),
+            default.SourceWithPropWithDefault.target.link(target_b),
+            default.SourceWithPropWithDefault.target.link(target_b, lprop=-1),
+        )
+        _testcase(
+            default.SourceWithPropWithDefault,
+            default.SourceWithPropWithDefault.target.link(target_a, lprop=9),
+            default.SourceWithPropWithDefault.target.link(
+                target_b, lprop=None
+            ),
+            default.SourceWithPropWithDefault.target.link(
+                target_b, lprop=None
+            ),
+        )
+        _testcase(
+            default.SourceWithPropWithDefault,
+            default.SourceWithPropWithDefault.target.link(target_a, lprop=9),
+            default.SourceWithPropWithDefault.target.link(target_b, lprop=1),
+            default.SourceWithPropWithDefault.target.link(target_b, lprop=1),
         )
 
     def _testcase_03(
