@@ -3916,26 +3916,18 @@ class TestModelGenerator(tb.ModelTestCase):
 
         self.client.sync(tsl)
 
-        # Computed links should not be set -- we never fetched them
-        with self.assertRaisesRegex(
-            AttributeError, "'comp_req_wprop_friend' is not set"
-        ):
-            assert tsl.comp_req_wprop_friend is not None  # access field
+        # Computed single links should be refetched, but the ids
+        self.assertEqual(tsl.comp_req_wprop_friend, alice)
+        self.assertFalse(hasattr(tsl.comp_req_wprop_friend, "name"))
 
-        with self.assertRaisesRegex(
-            AttributeError, "'comp_req_friend' is not set"
-        ):
-            assert tsl.comp_req_friend is not None  # access field
+        self.assertEqual(tsl.comp_req_friend, alice)
+        self.assertFalse(hasattr(tsl.comp_req_friend, "name"))
 
-        with self.assertRaisesRegex(
-            AttributeError, "'comp_opt_friend' is not set"
-        ):
-            assert tsl.comp_opt_friend is not None  # access field
+        self.assertEqual(tsl.comp_opt_friend, alice)
+        self.assertFalse(hasattr(tsl.comp_opt_friend, "name"))
 
-        with self.assertRaisesRegex(
-            AttributeError, "'comp_opt_wprop_friend' is not set"
-        ):
-            assert tsl.comp_opt_wprop_friend is not None  # access field
+        self.assertEqual(tsl.comp_opt_wprop_friend, alice)
+        self.assertFalse(hasattr(tsl.comp_opt_wprop_friend, "name"))
 
         # Make mypy happy
         assert tsl.opt_friend is not None
@@ -4203,8 +4195,6 @@ class TestModelGenerator(tb.ModelTestCase):
         )
         self.assertEqual({gr.id for gr in alice.groups}, orig_groups | {g.id})
 
-    @tb.xfail
-    # link props aren't reloaded after save
     def test_modelgen_save_reload_linkprops_01(self):
         from models.orm import default
 
