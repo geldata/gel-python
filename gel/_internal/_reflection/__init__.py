@@ -83,6 +83,7 @@ from ._types import (
     is_range_type,
     is_scalar_type,
     is_tuple_type,
+    kind_of_type,
 )
 
 from ._modules import (
@@ -147,4 +148,5 @@ __all__ = (
     "is_range_type",
     "is_scalar_type",
     "is_tuple_type",
+    "kind_of_type",
 )

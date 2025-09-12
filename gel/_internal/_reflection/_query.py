@@ -164,22 +164,18 @@ WITH
     )
 
 SELECT Type {
-    kind := assert_exists(
-        'Object' IF Type IS ObjectType ELSE
-        'Scalar' IF Type IS ScalarType ELSE
-        'Array' IF Type IS Array ELSE
-        'NamedTuple' IF Type[IS Tuple].named ?? false ELSE
-        'Tuple' IF Type IS Tuple ELSE
-        'Range' IF Type IS Range ELSE
-        'MultiRange' IF Type IS MultiRange ELSE
-        'Pseudo' IF Type IS PseudoType ELSE
-        <str>{},
-        message := "unexpected type",
-    ),
-
     id,
     builtin,
     internal,
+
+    is_object := Type IS ObjectType,
+    is_scalar := Type IS ScalarType,
+    is_array := Type IS Array,
+    is_named_tuple := Type[IS Tuple].named ?? false,
+    is_tuple := Type IS Tuple,
+    is_range := Type IS Range,
+    is_multi_range := Type IS MultiRange,
+    is_pseudo := Type IS PseudoType,
 
     name := (
         array_join(array_agg([IS ObjectType].union_of.name), ' | ')

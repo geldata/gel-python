@@ -48,9 +48,21 @@ class TypeRef:
 
 @sobject
 class Type(SchemaObject, abc.ABC):
-    kind: TypeKind
     builtin: bool
     internal: bool
+
+    is_object: bool
+    is_scalar: bool
+    is_array: bool
+    is_named_tuple: bool
+    is_tuple: bool
+    is_range: bool
+    is_multi_range: bool
+    is_pseudo: bool
+
+    @functools.cached_property
+    def kind(self) -> TypeKind:
+        return kind_of_type(self)
 
     def __str__(self) -> str:
         return self.name
@@ -221,7 +233,18 @@ _InheritingType_T = TypeVar("_InheritingType_T", bound=InheritingType)
 
 @struct
 class PseudoType(Type):
-    kind: Literal[TypeKind.Pseudo]
+    is_object: Literal[False]
+    is_scalar: Literal[False]
+    is_array: Literal[False]
+    is_named_tuple: Literal[False]
+    is_tuple: Literal[False]
+    is_range: Literal[False]
+    is_multi_range: Literal[False]
+    is_pseudo: Literal[True]
+
+    @functools.cached_property
+    def kind(self) -> Literal[TypeKind.Pseudo]:
+        return TypeKind.Pseudo
 
     @functools.cached_property
     def generic(self) -> bool:
@@ -246,22 +269,46 @@ class PseudoType(Type):
 
 @struct
 class ScalarType(InheritingType):
-    kind: Literal[TypeKind.Scalar]
     is_seq: bool
     enum_values: tuple[str, ...] | None = None
     material_id: str | None = None
     cast_type: str | None = None
 
+    is_object: Literal[False]
+    is_scalar: Literal[True]
+    is_array: Literal[False]
+    is_named_tuple: Literal[False]
+    is_tuple: Literal[False]
+    is_range: Literal[False]
+    is_multi_range: Literal[False]
+    is_pseudo: Literal[False]
+
+    @functools.cached_property
+    def kind(self) -> Literal[TypeKind.Scalar]:
+        return TypeKind.Scalar
+
 
 @struct
 class ObjectType(InheritingType):
-    kind: Literal[TypeKind.Object]
     union_of: tuple[TypeRef, ...]
     intersection_of: tuple[TypeRef, ...]
     compound_type: bool
     # N.B: We store Pointers sorted by name, from the
     # introspection query
     pointers: tuple[Pointer, ...]
+
+    is_object: Literal[True]
+    is_scalar: Literal[False]
+    is_array: Literal[False]
+    is_named_tuple: Literal[False]
+    is_tuple: Literal[False]
+    is_range: Literal[False]
+    is_multi_range: Literal[False]
+    is_pseudo: Literal[False]
+
+    @functools.cached_property
+    def kind(self) -> Literal[TypeKind.Object]:
+        return TypeKind.Object
 
     def get_pointer(self, name: str) -> Pointer:
         for ptr in self.pointers:
@@ -506,8 +553,20 @@ class HeterogeneousCollectionType(CollectionType):
 
 @struct
 class ArrayType(HomogeneousCollectionType):
-    kind: Literal[TypeKind.Array]
     array_element_id: str
+
+    is_object: Literal[False]
+    is_scalar: Literal[False]
+    is_array: Literal[True]
+    is_named_tuple: Literal[False]
+    is_tuple: Literal[False]
+    is_range: Literal[False]
+    is_multi_range: Literal[False]
+    is_pseudo: Literal[False]
+
+    @functools.cached_property
+    def kind(self) -> Literal[TypeKind.Array]:
+        return TypeKind.Array
 
     @functools.cached_property
     def _element_type_id(self) -> str:
@@ -520,7 +579,19 @@ class ArrayType(HomogeneousCollectionType):
 
 @struct
 class RangeType(HomogeneousCollectionType):
-    kind: Literal[TypeKind.Range]
+    is_object: Literal[False]
+    is_scalar: Literal[False]
+    is_array: Literal[False]
+    is_named_tuple: Literal[False]
+    is_tuple: Literal[False]
+    is_range: Literal[True]
+    is_multi_range: Literal[False]
+    is_pseudo: Literal[False]
+
+    @functools.cached_property
+    def kind(self) -> Literal[TypeKind.Range]:
+        return TypeKind.Range
+
     range_element_id: str
 
     @functools.cached_property
@@ -534,7 +605,19 @@ class RangeType(HomogeneousCollectionType):
 
 @struct
 class MultiRangeType(HomogeneousCollectionType):
-    kind: Literal[TypeKind.MultiRange]
+    is_object: Literal[False]
+    is_scalar: Literal[False]
+    is_array: Literal[False]
+    is_named_tuple: Literal[False]
+    is_tuple: Literal[False]
+    is_range: Literal[False]
+    is_multi_range: Literal[True]
+    is_pseudo: Literal[False]
+
+    @functools.cached_property
+    def kind(self) -> Literal[TypeKind.MultiRange]:
+        return TypeKind.MultiRange
+
     multirange_element_id: str
 
     @functools.cached_property
@@ -563,7 +646,18 @@ class _TupleType(HeterogeneousCollectionType):
 
 @struct
 class TupleType(_TupleType):
-    kind: Literal[TypeKind.Tuple]
+    is_object: Literal[False]
+    is_scalar: Literal[False]
+    is_array: Literal[False]
+    is_named_tuple: Literal[False]
+    is_tuple: Literal[True]
+    is_range: Literal[False]
+    is_multi_range: Literal[False]
+    is_pseudo: Literal[False]
+
+    @functools.cached_property
+    def kind(self) -> Literal[TypeKind.Tuple]:
+        return TypeKind.Tuple
 
     def get_id_and_name(
         self, element_types: tuple[Type, ...]
@@ -576,7 +670,18 @@ class TupleType(_TupleType):
 
 @struct
 class NamedTupleType(_TupleType):
-    kind: Literal[TypeKind.NamedTuple]
+    is_object: Literal[False]
+    is_scalar: Literal[False]
+    is_array: Literal[False]
+    is_named_tuple: Literal[True]
+    is_tuple: Literal[False]
+    is_range: Literal[False]
+    is_multi_range: Literal[False]
+    is_pseudo: Literal[False]
+
+    @functools.cached_property
+    def kind(self) -> Literal[TypeKind.NamedTuple]:
+        return TypeKind.NamedTuple
 
     def get_id_and_name(
         self, element_types: tuple[Type, ...]
@@ -661,7 +766,7 @@ PrimitiveType = (
     | MultiRangeType
 )
 
-AnyType = PrimitiveType | PseudoType | ObjectType
+AnyType = PrimitiveType | ObjectType | PseudoType
 
 Types = dict[str, Type]
 
@@ -722,6 +827,27 @@ def is_primitive_type(t: Type) -> TypeGuard[PrimitiveType]:
     return not isinstance(t, (ObjectType, PseudoType))
 
 
+def kind_of_type(ty: Type) -> TypeKind:
+    if ty.is_object:
+        return TypeKind.Object
+    elif ty.is_scalar:
+        return TypeKind.Scalar
+    elif ty.is_array:
+        return TypeKind.Array
+    elif ty.is_named_tuple:
+        return TypeKind.NamedTuple
+    elif ty.is_tuple:
+        return TypeKind.Tuple
+    elif ty.is_range:
+        return TypeKind.Range
+    elif ty.is_multi_range:
+        return TypeKind.MultiRange
+    elif ty.is_pseudo:
+        return TypeKind.Pseudo
+    else:
+        raise ValueError("unexpected type")
+
+
 @sobject
 class Pointer(SchemaObject):
     card: Cardinality
@@ -752,7 +878,7 @@ def fetch_types(
     types: list[Type] = db.query(_query.TYPES, builtin=builtin)
     result = {}
     for t in types:
-        cls = _kind_to_class[t.kind]
+        cls = _kind_to_class[kind_of_type(t)]
         replace: dict[str, Any] = {}
         if issubclass(cls, CollectionType):
             replace["name"] = _edgeql.unmangle_unqual_name(t.name)
