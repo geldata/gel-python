@@ -971,6 +971,10 @@ def make_plan(
             #   all of them.
             added = linked.__gel_get_added__()
             if prop.properties:
+                print(f'! make_plan')
+                print(f':   prop={prop}')
+                print(f':   linked._items={linked._items}')
+                print(f':   added={added}')
                 added_index = IDTracker[ProxyModel[GelModel], None]()
                 added_index.track_many(
                     cast("list[ProxyModel[GelModel]]", added)
@@ -1005,6 +1009,10 @@ def make_plan(
             # Simple case -- no link props!
             if not prop.properties or all(
                 not get_proxy_linkprops(link).__gel_get_changed_fields__()
+                and not any(
+                    lp_val == DEFAULT_VALUE
+                    for _, lp_val in get_proxy_linkprops(link)
+                )
                 for link in added_proxies
             ):
                 mch = MultiLinkAdd(
@@ -1015,6 +1023,15 @@ def make_plan(
                 )
                 push_change(requireds, sched, mch)
                 continue
+
+            print(f'. get_proxy_linkprops(link)')
+            print(
+                [
+                    (lp_name, lp_val)
+                    for link in added_proxies
+                    for lp_name, lp_val in get_proxy_linkprops(link)
+                ]
+            )
 
             # OK, we have to deal with link props
             #
@@ -1034,7 +1051,10 @@ def make_plan(
                 added_props=[
                     {
                         p: model_attr(link_lp, p, None)
-                        for p in (link_lp.__gel_get_changed_fields__())
+                        for p in (
+                            link_lp.__gel_get_changed_fields__()
+                            | {lp_name for lp_name, lp_val in link_lp if lp_val == DEFAULT_VALUE}
+                        )
                     }
                     for link_lp in (
                         get_proxy_linkprops(link)
@@ -1044,6 +1064,8 @@ def make_plan(
                 props_info={p.name: p for p in props_info},
                 replace=replace,
             )
+            print(f'.   {mch.added_props}')
+            print()
 
             push_change(requireds, sched, mch)
 
@@ -1253,6 +1275,8 @@ class QueryRefetch:
     shape: RefetchShape
 
     def record_refetched_data(self, obj_data: Iterable[GelModel]) -> None:
+        print(f'! record_refetched_data')
+        print(f':   {obj_data}')
         self.executor.refetched_data.append((self.shape, obj_data))
 
 
@@ -2158,13 +2182,13 @@ class SaveExecutor:
                     tuple_subt: list[str] | None = None
 
                     arg_casts = {
-                        k: arg_cast(ch.props_info[k].typexpr)
-                        for k in ch.props_info
+                        lp_name: arg_cast(ch.props_info[lp_name].typexpr)
+                        for lp_name in ch.props_info
                     }
 
                     tuple_subt = [
-                        f"tuple<std::bool, {arg_casts[k][0]}>"
-                        for k in ch.props_info
+                        f"tuple<std::bool, std::bool, {arg_casts[lp_name][0]}>"
+                        for lp_name in ch.props_info
                     ]
 
                     for addo, addp in zip(
@@ -2174,8 +2198,12 @@ class SaveExecutor:
                             (
                                 self._get_id(addo),
                                 *(
-                                    (k in addp, arg_casts[k][2](addp.get(k)))
-                                    for k in ch.props_info
+                                    (
+                                        lp_name in addp,
+                                        lp_info.has_default and addp.get(lp_name) == DEFAULT_VALUE,
+                                        arg_casts[lp_name][2](addp.get(lp_name)),
+                                    )
+                                    for lp_name, lp_info in ch.props_info.items()
                                 ),
                             )
                         )
@@ -2187,8 +2215,13 @@ class SaveExecutor:
 
                     if new_link:
                         lp_assign = ", ".join(
-                            f"@{quote_ident(p)} := "
-                            f"{arg_casts[p][1](f'__tup.{i + 1}.1')}"
+                            f"""
+                                @{quote_ident(p)} := (
+                                    {arg_casts[p][1](f'__tup.{i + 1}.2')}
+                                    if not __tup.{i + 1}.1 else
+                                    __default__
+                                )
+                            """
                             for i, p in enumerate(ch.props_info)
                         )
 
@@ -2210,12 +2243,14 @@ class SaveExecutor:
                             f"""
                                 @{quote_ident(p)} :=
                                 (
-                                    {arg_casts[p][1](f"__tup.{i + 1}.1")}
-                                    if __tup.{i + 1}.0 else
                                     (
                                         select std::array_unpack(__lprops.{i})
                                         limit 1
                                     )
+                                    if not __tup.{i + 1}.0 else
+                                    {arg_casts[p][1](f"__tup.{i + 1}.2")}
+                                    if not __tup.{i + 1}.1 else
+                                    __default__
                                 )
                             """
                             for i, p in enumerate(ch.props_info)

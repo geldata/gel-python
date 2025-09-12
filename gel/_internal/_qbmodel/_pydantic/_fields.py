@@ -247,6 +247,20 @@ OptionalProperty = TypeAliasType(
 )
 
 
+OptionalPropertyWithDefault = TypeAliasType(
+    "OptionalPropertyWithDefault",
+    Annotated[
+        _OptionalProperty[_ST_co, _BT_co],
+        PointerInfo(
+            default=pydantic_core.PydanticUndefined,
+            cardinality=_edgeql.Cardinality.AtMostOne,
+            kind=_edgeql.PointerKind.Property,
+        ),
+    ],
+    type_params=(_ST_co, _BT_co),
+)
+
+
 OptionalComputedProperty = TypeAliasType(
     "OptionalComputedProperty",
     Annotated[

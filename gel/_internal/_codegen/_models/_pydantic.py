@@ -1229,7 +1229,7 @@ class BaseGeneratedModule:
             _map_name(lambda s: f"{s}.__gel_reflection__", class_bases),
         ):
             self.write(f"name = {sp}({link.name!r})")
-            self._write_pointers_reflection(link.pointers, bases)
+            self._write_pointers_reflection(link.pointers, bases, is_linkprop=True)
 
         self.write()
 
@@ -1237,6 +1237,8 @@ class BaseGeneratedModule:
         self,
         pointers: Sequence[reflection.Pointer] | None,
         bases: list[str],
+        *,
+        is_linkprop: bool = False,
     ) -> None:
         dict_ = self.import_name(
             "builtins", "dict", import_time=ImportTime.typecheck
@@ -1267,6 +1269,9 @@ class BaseGeneratedModule:
                     "Cardinality": self.import_name(BASE_IMPL, "Cardinality"),
                     "PointerKind": self.import_name(BASE_IMPL, "PointerKind"),
                 }
+                if is_linkprop:
+                    classes["DefaultValue"] = self.import_name(BASE_IMPL, "DefaultValue")
+                    classes["DEFAULT_VALUE"] = self.import_name(BASE_IMPL, "DEFAULT_VALUE")
                 with self.indented():
                     for ptr in pointers:
                         r = self._reflect_pointer(ptr, classes)
@@ -4635,7 +4640,10 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             ttype = self._types[lprop.target_id]
             assert reflection.is_primitive_type(ttype)
             pytype = self._get_pytype_for_primitive_type(ttype)
-            lprop_line = f"{lprop.name}: {pytype} | None = None"
+            if lprop.has_default:
+                lprop_line = f"{lprop.name}: {pytype} | None | DefaultValue = DEFAULT_VALUE"
+            else:
+                lprop_line = f"{lprop.name}: {pytype} | None = None"
             lprops.append(lprop_line)
 
         with self._class_def(
@@ -5869,25 +5877,29 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                 cardinality.is_multi(),
                 cardinality.is_optional(),
                 prop.is_computed,
+                prop.has_default,
             ):
-                case True, _, False:
+                case True, _, False, _:
                     desc = self.import_name(BASE_IMPL, "MultiProperty")
                     pytype = f"{desc}[{narrow_type}, {broad_type}]"
-                case True, _, True:
+                case True, _, True, _:
                     desc = self.import_name(BASE_IMPL, "ComputedMultiProperty")
                     pytype = f"{desc}[{narrow_type}, {broad_type}]"
-                case False, True, False:
+                case False, True, False, False:
                     desc = self.import_name(BASE_IMPL, "OptionalProperty")
                     pytype = f"{desc}[{narrow_type}, {broad_type}]"
-                case False, True, True:
+                case False, True, False, True:
+                    desc = self.import_name(BASE_IMPL, "OptionalPropertyWithDefault")
+                    pytype = f"{desc}[{narrow_type}, {broad_type}]"
+                case False, True, True, _:
                     desc = self.import_name(
                         BASE_IMPL, "OptionalComputedProperty"
                     )
                     pytype = f"{desc}[{narrow_type}, {broad_type}]"
-                case False, False, True:
+                case False, False, True, _:
                     desc = self.import_name(BASE_IMPL, "ComputedProperty")
                     pytype = f"{desc}[{narrow_type}, {broad_type}]"
-                case False, False, False:
+                case False, False, False, _:
                     if prop.name == "id":
                         # short circuit id -- it's wrapped in IdProperty
                         return narrow_type

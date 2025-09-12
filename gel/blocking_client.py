@@ -702,16 +702,26 @@ class Client(
             with tx:
                 executor = make_executor()
 
+                print()
+                print('! BATCH')
+                print()
                 for batches in executor:
                     for batch in batches:
+                        print(batch.query)
+                        print(batch.args)
                         tx.send_query(batch.query, batch.args)
                     batch_ids = tx.wait()
                     for ids, batch in zip(batch_ids, batches, strict=True):
                         batch.record_inserted_data(ids)
 
                 if refetch:
+                    print()
+                    print('! REFETCH')
+                    print()
                     ref_queries = executor.get_refetch_queries()
                     for ref in ref_queries:
+                        print(ref.query)
+                        print(ref.args)
                         tx.send_query(
                             ref.query,
                             spec=ref.args.spec,
@@ -725,6 +735,8 @@ class Client(
                         refetch_data, ref_queries, strict=True
                     ):
                         ref.record_refetched_data(ref_data)
+
+                print()
 
         executor.commit()
 

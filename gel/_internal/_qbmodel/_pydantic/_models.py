@@ -1440,9 +1440,12 @@ class ProxyModel(
                 )
 
         self = cls.__new__(cls)
+        print(f'! link')
+        print(f':   {link_props}')
         lprops = cls.__linkprops__(**link_props)
         ll_setattr(self, "__linkprops__", lprops)
         ll_setattr(self, "_p__obj__", obj)
+        print(f'.   {self}')
         return self
 
     def __getattribute__(self, name: str) -> Any:
