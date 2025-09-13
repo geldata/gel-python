@@ -3491,12 +3491,10 @@ class TestModelGenerator(tb.ModelTestCase):
         # Test link props on multi links -- specifically that we support:
         #
         # - setting some of the props
+        # - updating one prop to a new value,
+        # - resetting one prop to None
         #
-        # - updating one prop with one value,
-        #   but the other props in the db must survive
-        #
-        # - resetting one prop to None - with it actually resetting to
-        #   an empty set in the DB and other props surviving
+        # Unspecified props are reset to None. This imitates python semantics.
 
         import json
         from typing import Any
@@ -3559,7 +3557,7 @@ class TestModelGenerator(tb.ModelTestCase):
         check(
             {
                 "members": [
-                    {"name": "Alice", "@rank": 1000, "@role": "lead"},
+                    {"name": "Alice", "@rank": 1000, "@role": None},
                     {"name": "Billie", "@rank": 2, "@role": None},
                 ]
             }
@@ -3578,7 +3576,7 @@ class TestModelGenerator(tb.ModelTestCase):
         check(
             {
                 "members": [
-                    {"name": "Alice", "@rank": None, "@role": "lead"},
+                    {"name": "Alice", "@rank": None, "@role": None},
                     {"name": "Billie", "@rank": 2, "@role": None},
                 ]
             }
@@ -5065,8 +5063,7 @@ class TestModelGenerator(tb.ModelTestCase):
 
         # Fetch the team
         team1 = self.client.get(default.Team.filter(name="Taco Wizards"))
-        # Merge this new link (rank is "unset", so we don't expect it to
-        # change)
+        # Merge this new link (rank is "unset", so we expect it to reset)
         team1.members.add(default.Team.members.link(u, role="sorceress"))
         self.client.save(team1)
 
@@ -5077,7 +5074,7 @@ class TestModelGenerator(tb.ModelTestCase):
 
         member = list(team2.members)[0]
         self.assertEqual(member.name, "Zoe")
-        self.assertEqual(member.__linkprops__.rank, 1)
+        self.assertEqual(member.__linkprops__.rank, None)
         self.assertEqual(member.__linkprops__.role, "sorceress")
 
     @tb.xfail
