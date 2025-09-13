@@ -1443,6 +1443,13 @@ class ProxyModel(
         lprops = cls.__linkprops__(**link_props)
         ll_setattr(self, "__linkprops__", lprops)
         ll_setattr(self, "_p__obj__", obj)
+
+        # Treat newly created link props as if they had all their values
+        # changed. Newly created proxy models will overwrite any existing
+        # link props.
+        lprop_names = set(self.__linkprops__.__dict__.keys())
+        ll_setattr(self.__linkprops__, '__gel_changed_fields__', lprop_names)
+
         return self
 
     def __getattribute__(self, name: str) -> Any:
