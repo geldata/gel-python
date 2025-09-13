@@ -2178,10 +2178,12 @@ class SaveExecutor:
                     tuple_subt: list[str] | None = None
 
                     arg_casts = {
-                        k: arg_cast(ch.props_info[k].typexpr)
-                        for k in ch.props_info
+                        lp_name: arg_cast(ch.props_info[lp_name].typexpr)
+                        for lp_name in ch.props_info
                     }
 
+                    # We are now rewriting all lprops, the extra bool param
+                    # is a placeholder for future __default__ handling.
                     tuple_subt = [
                         f"tuple<std::bool, {arg_casts[k][0]}>"
                         for k in ch.props_info
@@ -2190,13 +2192,17 @@ class SaveExecutor:
                     for addo, addp in zip(
                         ch.added, ch.added_props, strict=True
                     ):
+                        lp_args = (
+                            (
+                                addp.get(lp_name) == DEFAULT_VALUE,
+                                arg_casts[lp_name][2](addp.get(lp_name)),
+                            )
+                            for lp_name in ch.props_info
+                        )
                         link_args.append(
                             (
                                 self._get_id(addo),
-                                *(
-                                    (k in addp, arg_casts[k][2](addp.get(k)))
-                                    for k in ch.props_info
-                                ),
+                                *lp_args,
                             )
                         )
 
@@ -2207,9 +2213,14 @@ class SaveExecutor:
 
                     if new_link:
                         lp_assign = ", ".join(
-                            f"@{quote_ident(p)} := "
-                            f"{arg_casts[p][1](f'__tup.{i + 1}.1')}"
-                            for i, p in enumerate(ch.props_info)
+                            f"""
+                                @{quote_ident(lp_name)} := (
+                                    {arg_casts[lp_name][1](f'__tup.{i + 1}.1')}
+                                    if not __tup.{i + 1}.0 else
+                                    {{}}
+                                )
+                            """
+                            for i, lp_name in enumerate(ch.props_info)
                         )
 
                         shape_parts.append(
@@ -2231,33 +2242,18 @@ class SaveExecutor:
                                 @{quote_ident(p)} :=
                                 (
                                     {arg_casts[p][1](f"__tup.{i + 1}.1")}
-                                    if __tup.{i + 1}.0 else
-                                    (
-                                        select std::array_unpack(__lprops.{i})
-                                        limit 1
-                                    )
+                                    if not __tup.{i + 1}.0 else
+                                    {{}}
                                 )
                             """
                             for i, p in enumerate(ch.props_info)
                         )
 
-                        # Re `__lprops` below -- currently this is just about
-                        # the only way to "load" existing link properties on
-                        # the link and use them later.  We do that to support
-                        # "partial" updates to link props -- when only one
-                        # changed other should stay as is.
                         shape_parts.append(
                             f"""
                             {quote_ident(ch.name)} {assign_op}
                             assert_distinct((
                                 for __tup in array_unpack({arg}) union (
-                                    with __lprops := (
-                                        for __m in .{quote_ident(ch.name)}
-                                        select (
-                                            {lps_to_select_shape},
-                                        )
-                                        filter __m.id = __tup.0
-                                    )
                                     select (<{ch.info.typexpr}>__tup.0) {{
                                         {lp_assign_reload}
                                     }}
