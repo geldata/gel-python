@@ -3576,20 +3576,19 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
             ],
             [],
         )
-        # Fail, moved to test_model_sync_multi_link_02a
-        # self._testcase_assign(
-        #     default.SourceWithProp,
-        #     [
-        #         default.SourceWithProp.targets.link(target_a, lprop=1),
-        #         default.SourceWithProp.targets.link(target_b, lprop=2),
-        #         default.SourceWithProp.targets.link(target_c, lprop=3),
-        #     ],
-        #     [
-        #         default.SourceWithProp.targets.link(target_a),
-        #         default.SourceWithProp.targets.link(target_b),
-        #         default.SourceWithProp.targets.link(target_c),
-        #     ],
-        # )
+        self._testcase_assign(
+            default.SourceWithProp,
+            [
+                default.SourceWithProp.targets.link(target_a, lprop=1),
+                default.SourceWithProp.targets.link(target_b, lprop=2),
+                default.SourceWithProp.targets.link(target_c, lprop=3),
+            ],
+            [
+                default.SourceWithProp.targets.link(target_a),
+                default.SourceWithProp.targets.link(target_b),
+                default.SourceWithProp.targets.link(target_c),
+            ],
+        )
         self._testcase_assign(
             default.SourceWithProp,
             [
@@ -3676,31 +3675,6 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
             [
                 default.SourceWithProp.targets.link(target_c),
                 default.SourceWithProp.targets.link(target_d),
-            ],
-        )
-
-    @tb.xfail
-    def test_model_sync_multi_link_02a(self):
-        from models.TestModelSyncMultiLink import default
-
-        target_a = default.Target()
-        target_b = default.Target()
-        target_c = default.Target()
-        target_d = default.Target()
-        self.client.save(target_a, target_b, target_c, target_d)
-
-        # Fail, linkprop not reset
-        self._testcase_assign(
-            default.SourceWithProp,
-            [
-                default.SourceWithProp.targets.link(target_a, lprop=1),
-                default.SourceWithProp.targets.link(target_b, lprop=2),
-                default.SourceWithProp.targets.link(target_c, lprop=3),
-            ],
-            [
-                default.SourceWithProp.targets.link(target_a),
-                default.SourceWithProp.targets.link(target_b),
-                default.SourceWithProp.targets.link(target_c),
             ],
         )
 
@@ -4068,22 +4042,21 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
                 default.SourceWithProp.targets.link(target_b, lprop=2),
             ],
         )
-        # Fail, moved to test_model_sync_multi_link_04a
-        # self._testcase_update(
-        #     default.SourceWithProp,
-        #     [
-        #         default.SourceWithProp.targets.link(target_a, lprop=1),
-        #         default.SourceWithProp.targets.link(target_b, lprop=2),
-        #     ],
-        #     [
-        #         default.SourceWithProp.targets.link(target_a),
-        #         default.SourceWithProp.targets.link(target_b),
-        #     ],
-        #     [
-        #         default.SourceWithProp.targets.link(target_a),
-        #         default.SourceWithProp.targets.link(target_b),
-        #     ],
-        # )
+        self._testcase_update(
+            default.SourceWithProp,
+            [
+                default.SourceWithProp.targets.link(target_a, lprop=1),
+                default.SourceWithProp.targets.link(target_b, lprop=2),
+            ],
+            [
+                default.SourceWithProp.targets.link(target_a),
+                default.SourceWithProp.targets.link(target_b),
+            ],
+            [
+                default.SourceWithProp.targets.link(target_a),
+                default.SourceWithProp.targets.link(target_b),
+            ],
+        )
         self._testcase_update(
             default.SourceWithProp,
             [
@@ -4203,26 +4176,25 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
                 default.SourceWithProp.targets.link(target_d),
             ],
         )
-        # Fail, moved to test_model_sync_multi_link_04b
-        # self._testcase_update(
-        #     default.SourceWithProp,
-        #     [
-        #         default.SourceWithProp.targets.link(target_a, lprop=1),
-        #         default.SourceWithProp.targets.link(target_b, lprop=2),
-        #         default.SourceWithProp.targets.link(target_c, lprop=3),
-        #     ],
-        #     [
-        #         default.SourceWithProp.targets.link(target_b),
-        #         default.SourceWithProp.targets.link(target_c),
-        #         default.SourceWithProp.targets.link(target_d),
-        #     ],
-        #     [
-        #         default.SourceWithProp.targets.link(target_a, lprop=1),
-        #         default.SourceWithProp.targets.link(target_b),
-        #         default.SourceWithProp.targets.link(target_c),
-        #         default.SourceWithProp.targets.link(target_d),
-        #     ],
-        # )
+        self._testcase_update(
+            default.SourceWithProp,
+            [
+                default.SourceWithProp.targets.link(target_a, lprop=1),
+                default.SourceWithProp.targets.link(target_b, lprop=2),
+                default.SourceWithProp.targets.link(target_c, lprop=3),
+            ],
+            [
+                default.SourceWithProp.targets.link(target_b),
+                default.SourceWithProp.targets.link(target_c),
+                default.SourceWithProp.targets.link(target_d),
+            ],
+            [
+                default.SourceWithProp.targets.link(target_a, lprop=1),
+                default.SourceWithProp.targets.link(target_b),
+                default.SourceWithProp.targets.link(target_c),
+                default.SourceWithProp.targets.link(target_d),
+            ],
+        )
         self._testcase_update(
             default.SourceWithProp,
             [
@@ -4259,64 +4231,6 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
                 default.SourceWithProp.targets.link(target_b, lprop=4),
                 default.SourceWithProp.targets.link(target_c, lprop=5),
                 default.SourceWithProp.targets.link(target_d, lprop=6),
-            ],
-        )
-
-    @tb.xfail
-    def test_model_sync_multi_link_04a(self):
-        from models.TestModelSyncMultiLink import default
-
-        target_a = default.Target()
-        target_b = default.Target()
-        target_c = default.Target()
-        target_d = default.Target()
-        self.client.save(target_a, target_b, target_c, target_d)
-
-        self._testcase_update(
-            default.SourceWithProp,
-            [
-                default.SourceWithProp.targets.link(target_a, lprop=1),
-                default.SourceWithProp.targets.link(target_b, lprop=2),
-            ],
-            [
-                default.SourceWithProp.targets.link(target_a),
-                default.SourceWithProp.targets.link(target_b),
-            ],
-            [
-                # Fail, linkprops not reset
-                default.SourceWithProp.targets.link(target_a),
-                default.SourceWithProp.targets.link(target_b),
-            ],
-        )
-
-    @tb.xfail
-    def test_model_sync_multi_link_04b(self):
-        from models.TestModelSyncMultiLink import default
-
-        target_a = default.Target()
-        target_b = default.Target()
-        target_c = default.Target()
-        target_d = default.Target()
-        self.client.save(target_a, target_b, target_c, target_d)
-
-        self._testcase_update(
-            default.SourceWithProp,
-            [
-                default.SourceWithProp.targets.link(target_a, lprop=1),
-                default.SourceWithProp.targets.link(target_b, lprop=2),
-                default.SourceWithProp.targets.link(target_c, lprop=3),
-            ],
-            [
-                default.SourceWithProp.targets.link(target_b),
-                default.SourceWithProp.targets.link(target_c),
-                default.SourceWithProp.targets.link(target_d),
-            ],
-            [
-                # Fail, linkprops not reset
-                default.SourceWithProp.targets.link(target_a, lprop=1),
-                default.SourceWithProp.targets.link(target_b),
-                default.SourceWithProp.targets.link(target_c),
-                default.SourceWithProp.targets.link(target_d),
             ],
         )
 
@@ -4685,13 +4599,12 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
             [default.SourceWithProp.targets.link(target_a, lprop=1)],
         )
 
-        # Fail, moved to test_model_sync_multi_link_05a
-        # self._testcase_add(
-        #     default.SourceWithProp,
-        #     [default.SourceWithProp.targets.link(target_a, lprop=1)],
-        #     default.SourceWithProp.targets.link(target_a),
-        #     [default.SourceWithProp.targets.link(target_a)],
-        # )
+        self._testcase_add(
+            default.SourceWithProp,
+            [default.SourceWithProp.targets.link(target_a, lprop=1)],
+            default.SourceWithProp.targets.link(target_a),
+            [default.SourceWithProp.targets.link(target_a)],
+        )
         self._testcase_add(
             default.SourceWithProp,
             [default.SourceWithProp.targets.link(target_a, lprop=1)],
@@ -4749,24 +4662,6 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
                 default.SourceWithProp.targets.link(target_c),
                 default.SourceWithProp.targets.link(target_d, lprop=4),
             ],
-        )
-
-    @tb.xfail
-    def test_model_sync_multi_link_05a(self):
-        from models.TestModelSyncMultiLink import default
-
-        target_a = default.Target()
-        target_b = default.Target()
-        target_c = default.Target()
-        target_d = default.Target()
-        self.client.save(target_a, target_b, target_c, target_d)
-
-        # Fail, linkprop not reset
-        self._testcase_add(
-            default.SourceWithProp,
-            [default.SourceWithProp.targets.link(target_a, lprop=1)],
-            default.SourceWithProp.targets.link(target_a),
-            [default.SourceWithProp.targets.link(target_a)],
         )
 
     @tb.xfail  # multilink linkprops not refetched
@@ -5516,22 +5411,21 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
                 default.SourceWithProp.targets.link(target_b, lprop=2),
             ],
         )
-        # Fail, moved to test_model_sync_multi_link_08a
-        # self._testcase_op_iadd(
-        #     default.SourceWithProp,
-        #     [
-        #         default.SourceWithProp.targets.link(target_a, lprop=1),
-        #         default.SourceWithProp.targets.link(target_b, lprop=2),
-        #     ],
-        #     [
-        #         default.SourceWithProp.targets.link(target_a),
-        #         default.SourceWithProp.targets.link(target_b),
-        #     ],
-        #     [
-        #         default.SourceWithProp.targets.link(target_a),
-        #         default.SourceWithProp.targets.link(target_b),
-        #     ],
-        # )
+        self._testcase_op_iadd(
+            default.SourceWithProp,
+            [
+                default.SourceWithProp.targets.link(target_a, lprop=1),
+                default.SourceWithProp.targets.link(target_b, lprop=2),
+            ],
+            [
+                default.SourceWithProp.targets.link(target_a),
+                default.SourceWithProp.targets.link(target_b),
+            ],
+            [
+                default.SourceWithProp.targets.link(target_a),
+                default.SourceWithProp.targets.link(target_b),
+            ],
+        )
         self._testcase_op_iadd(
             default.SourceWithProp,
             [
@@ -5651,26 +5545,25 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
                 default.SourceWithProp.targets.link(target_d),
             ],
         )
-        # Fail, moved to test_model_sync_multi_link_08b
-        # self._testcase_op_iadd(
-        #     default.SourceWithProp,
-        #     [
-        #         default.SourceWithProp.targets.link(target_a, lprop=1),
-        #         default.SourceWithProp.targets.link(target_b, lprop=2),
-        #         default.SourceWithProp.targets.link(target_c, lprop=3),
-        #     ],
-        #     [
-        #         default.SourceWithProp.targets.link(target_b),
-        #         default.SourceWithProp.targets.link(target_c),
-        #         default.SourceWithProp.targets.link(target_d),
-        #     ],
-        #     [
-        #         default.SourceWithProp.targets.link(target_a, lprop=1),
-        #         default.SourceWithProp.targets.link(target_b),
-        #         default.SourceWithProp.targets.link(target_c),
-        #         default.SourceWithProp.targets.link(target_d),
-        #     ],
-        # )
+        self._testcase_op_iadd(
+            default.SourceWithProp,
+            [
+                default.SourceWithProp.targets.link(target_a, lprop=1),
+                default.SourceWithProp.targets.link(target_b, lprop=2),
+                default.SourceWithProp.targets.link(target_c, lprop=3),
+            ],
+            [
+                default.SourceWithProp.targets.link(target_b),
+                default.SourceWithProp.targets.link(target_c),
+                default.SourceWithProp.targets.link(target_d),
+            ],
+            [
+                default.SourceWithProp.targets.link(target_a, lprop=1),
+                default.SourceWithProp.targets.link(target_b),
+                default.SourceWithProp.targets.link(target_c),
+                default.SourceWithProp.targets.link(target_d),
+            ],
+        )
         self._testcase_op_iadd(
             default.SourceWithProp,
             [
@@ -5707,64 +5600,6 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
                 default.SourceWithProp.targets.link(target_b, lprop=4),
                 default.SourceWithProp.targets.link(target_c, lprop=5),
                 default.SourceWithProp.targets.link(target_d, lprop=6),
-            ],
-        )
-
-    @tb.xfail
-    def test_model_sync_multi_link_08a(self):
-        from models.TestModelSyncMultiLink import default
-
-        target_a = default.Target()
-        target_b = default.Target()
-        target_c = default.Target()
-        target_d = default.Target()
-        self.client.save(target_a, target_b, target_c, target_d)
-
-        # Fail, linkprop not reset
-        self._testcase_op_iadd(
-            default.SourceWithProp,
-            [
-                default.SourceWithProp.targets.link(target_a, lprop=1),
-                default.SourceWithProp.targets.link(target_b, lprop=2),
-            ],
-            [
-                default.SourceWithProp.targets.link(target_a),
-                default.SourceWithProp.targets.link(target_b),
-            ],
-            [
-                default.SourceWithProp.targets.link(target_a),
-                default.SourceWithProp.targets.link(target_b),
-            ],
-        )
-
-    @tb.xfail
-    def test_model_sync_multi_link_08b(self):
-        from models.TestModelSyncMultiLink import default
-
-        target_a = default.Target()
-        target_b = default.Target()
-        target_c = default.Target()
-        target_d = default.Target()
-        self.client.save(target_a, target_b, target_c, target_d)
-
-        # Fail, linkprop not reset
-        self._testcase_op_iadd(
-            default.SourceWithProp,
-            [
-                default.SourceWithProp.targets.link(target_a, lprop=1),
-                default.SourceWithProp.targets.link(target_b, lprop=2),
-                default.SourceWithProp.targets.link(target_c, lprop=3),
-            ],
-            [
-                default.SourceWithProp.targets.link(target_b),
-                default.SourceWithProp.targets.link(target_c),
-                default.SourceWithProp.targets.link(target_d),
-            ],
-            [
-                default.SourceWithProp.targets.link(target_a, lprop=1),
-                default.SourceWithProp.targets.link(target_b),
-                default.SourceWithProp.targets.link(target_c),
-                default.SourceWithProp.targets.link(target_d),
             ],
         )
 
