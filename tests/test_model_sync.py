@@ -2698,6 +2698,15 @@ class TestModelSyncSingleLink(tb.ModelTestCase):
                 default := (insert Target2);
             };
         };
+
+        type SourceWithManyProps {
+            target: Target {
+                a: int64;
+                b: int64;
+                c: int64;
+                d: int64;
+            };
+        };
     """
 
     def _check_links_equal(
@@ -2712,8 +2721,8 @@ class TestModelSyncSingleLink(tb.ModelTestCase):
         self.assertEqual(actual_has_lprop, expected_has_lprop)
         if actual_has_lprop and expected_has_lprop:
             self.assertEqual(
-                actual.__linkprops__.lprop,
-                expected.__linkprops__.lprop,
+                actual.__linkprops__,
+                expected.__linkprops__,
             )
 
     def test_model_sync_single_link_01(self):
@@ -3234,6 +3243,34 @@ class TestModelSyncSingleLink(tb.ModelTestCase):
         self.assertEqual(mirror_1.targets._mode, _tracked_list.Mode.Write)
         self.assertEqual(mirror_1.targets._items, [])
 
+    def test_model_sync_single_link_05(self):
+        # Updating linkprops without changing the proxy model objects
+
+        from models.TestModelSyncSingleLink import default
+
+        target_a = default.Target()
+        self.client.save(target_a)
+
+        initial_target = default.SourceWithManyProps.target.link(
+            target_a, a=1, b=2, c=3, d=4
+        )
+
+        original = default.SourceWithManyProps(target=initial_target)
+        self.client.save(original)
+
+        self._check_links_equal(original.target, initial_target)
+
+        # change some link props
+        original.target.__linkprops__.b = 9
+        original.target.__linkprops__.c = None
+
+        expected_target = default.SourceWithManyProps.target.link(
+            target_a, a=1, b=9, c=None, d=4
+        )
+
+        self.client.sync(original)
+        self._check_links_equal(original.target, expected_target)
+
 
 class TestModelSyncMultiLink(tb.ModelTestCase):
     ISOLATED_TEST_BRANCHES = True
@@ -3255,6 +3292,14 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
                 };
             };
         };
+        type SourceWithManyProps {
+            multi targets: Target {
+                a: int64;
+                b: int64;
+                c: int64;
+                d: int64;
+            };
+        };
     """
 
     def _check_multilinks_equal(
@@ -3266,9 +3311,9 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
 
         # Also check linkprops
         if isinstance(actual, _link_set.LinkWithPropsSet):
-            expected_lprops = {e.id: e.__linkprops__.lprop for e in expected}
+            expected_lprops = {e.id: e.__linkprops__ for e in expected}
             for a in actual:
-                self.assertEqual(a.__linkprops__.lprop, expected_lprops[a.id])
+                self.assertEqual(a.__linkprops__, expected_lprops[a.id])
 
     def _base_testcase(
         self,
@@ -7220,6 +7265,39 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
             [default.SourceWithProp.targets.link(changed_target_1)],
             [default.SourceWithProp.targets.link(changed_target_2)],
         )
+
+    def test_model_sync_multi_link_11(self):
+        # Updating linkprops without changing the proxy model objects
+
+        from models.TestModelSyncMultiLink import default
+
+        target_a = default.Target()
+        self.client.save(target_a)
+
+        initial_targets = [
+            default.SourceWithManyProps.targets.link(
+                target_a, a=1, b=2, c=3, d=4
+            )
+        ]
+
+        original = default.SourceWithManyProps(targets=initial_targets)
+        self.client.save(original)
+
+        self._check_multilinks_equal(original.targets, initial_targets)
+
+        # change some link props
+        for target in original.targets:
+            target.__linkprops__.b = 9
+            target.__linkprops__.c = None
+
+        expected_targets = [
+            default.SourceWithManyProps.targets.link(
+                target_a, a=1, b=9, c=None, d=4
+            )
+        ]
+
+        self.client.sync(original)
+        self._check_multilinks_equal(original.targets, expected_targets)
 
 
 class TestModelSyncRewrite(tb.ModelTestCase):
