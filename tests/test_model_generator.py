@@ -1595,11 +1595,11 @@ class TestModelGeneratorMain(tb.ModelTestCase):
             {"red", "green"},
         )
 
-    @tb.xfail('''
-        Broken because of inheritance.
-        It tries to deserialize a Content, which fails.
-        See issue #755.
-    ''')
+    # @tb.xfail('''
+    #     Broken because of inheritance.
+    #     It tries to deserialize a Content, which fails.
+    #     See issue #755.
+    # ''')
     def test_modelgen_pydantic_apis_21(self):
         # Test model_dump() and model_dump_json() on models;
         # test *inheritance*

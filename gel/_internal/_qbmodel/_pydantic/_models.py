@@ -897,6 +897,9 @@ class GelSourceModel(
 
     @classmethod
     def __gel_validate__(cls, value: Any) -> GelSourceModel:
+        key = 'tname_'
+        if isinstance(value, dict) and key in value:
+            cls: Any = cls.get_class_by_name(value[key])
         return cls.model_validate(value)
 
 
@@ -1002,17 +1005,17 @@ class GelModel(
 
         self.__gel_new__ = True
 
-    @pydantic.model_validator(mode='wrap')
-    @classmethod
-    def dispatch_to_subtypes(
-        cls, data: Any, handler: Any, info: pydantic.ValidationInfo
-    ) -> Any:
-        key = 'tname_'
-        if key in data:
-            ncls: Any = cls.get_class_by_name(data[key])
-            if ncls is not cls:
-                return ncls.model_validate(data, context=info.context)
-        return handler(data)
+    # @pydantic.model_validator(mode='wrap')
+    # @classmethod
+    # def dispatch_to_subtypes(
+    #     cls, data: Any, handler: Any, info: pydantic.ValidationInfo
+    # ) -> Any:
+    #     key = 'tname_'
+    #     if key in data:
+    #         ncls: Any = cls.get_class_by_name(data[key])
+    #         if ncls is not cls:
+    #             return ncls.model_validate(data, context=info.context)
+    #     return handler(data)
 
     def __getattr__(self, name: str) -> Any:
         cls = type(self)
