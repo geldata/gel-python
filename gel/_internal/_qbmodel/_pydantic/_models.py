@@ -911,6 +911,9 @@ class GelSourceModel(
 
                 if issubclass(cls, ProxyModel):
                     # XXX: cache!!
+                    core_schema = (
+                        ProxyModel.__dict__['__get_pydantic_core_schema__']
+                    )
                     # breakpoint()
                     new_proxy = type(cls)(
                         # XXX: name??
@@ -926,9 +929,10 @@ class GelSourceModel(
                                 '__qualname__'
                             )
                             if k in cls.__dict__
-                        } | {  # XXX: HACK: inherited from a custom serializer??
-                            '__get_pydantic_core_schema__':
-                            ProxyModel.__dict__['__get_pydantic_core_schema__']
+                        } | {
+                            # XXX: HACK: inherited from a custom serializer??
+                            '__get_pydantic_core_schema__': core_schema,
+                            '__gel_asdf__': True,
                         },
                     )
                     # breakpoint()
@@ -1408,6 +1412,8 @@ class _MergedModelBase(
     metaclass=_MergedModelMeta,
     __gel_root_class__=True,
 ):
+    __gel_merged_model__ = True
+
     # Used exclusively by ProxyModel.__gel_proxy_make_merged_model__.
     if TYPE_CHECKING:
         __gel_new__: bool
@@ -1431,11 +1437,7 @@ class _MergedModelBase(
         return handler(source_type)
 
     def model_dump(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
-        try:
-            return pydantic.BaseModel.model_dump(self, *args, **kwargs)
-        except TypeError:
-            breakpoint()
-            raise
+        return pydantic.BaseModel.model_dump(self, *args, **kwargs)
 
 
 class ProxyModel(
@@ -1595,8 +1597,8 @@ class ProxyModel(
         super().__pydantic_init_subclass__(**kwargs)
         generic_meta = cls.__pydantic_generic_metadata__
         if generic_meta["origin"] is ProxyModel and generic_meta["args"]:
-            # breakpoint()
             cls.__proxy_of__ = generic_meta["args"][0]
+            assert issubclass(cls.__proxy_of__, _abstract.AbstractGelModel)
 
     @classmethod
     def __make_merged_model(cls) -> type[_MergedModelBase]:
@@ -1667,6 +1669,7 @@ class ProxyModel(
             # breakpoint()
 
             def _validate(value: Any) -> Any:
+                # breakpoint()
                 if isinstance(value, cls.__gel_proxy_merged_model_cache__):
                     dct = value.__dict__
 

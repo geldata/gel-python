@@ -264,6 +264,18 @@ type TestSingleLinks {
     comp_opt_wprop_friend := .opt_wprop_friend;
 }
 
+type TestSingleLinksReqOnly {
+    required link req_wprop_friend: User {
+        strength: int32;
+    }
+}
+type TestSingleLinksOptOnly {
+    link opt_wprop_friend: User {
+        strength: int32;
+    }
+}
+
+
 type TestPropRewrites extending ExclusivelyNamed {
     required name_len: int64 {
         # This rewrite will keep the name_len in sync with the name.

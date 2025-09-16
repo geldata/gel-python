@@ -1110,7 +1110,7 @@ class TestModelGeneratorMain(tb.ModelTestCase):
         }
         self.assertPydanticSerializes(p, expected)
 
-    def test_modelgen_pydantic_apis_11(self):
+    def test_modelgen_pydantic_apis_11a(self):
         # Test model_dump() and model_dump_json() on models;
         # test *single required* link serialization in all combinations
 
@@ -1306,7 +1306,7 @@ class TestModelGeneratorMain(tb.ModelTestCase):
             },
         )
 
-    def test_modelgen_pydantic_apis_11a(self):
+    def test_modelgen_pydantic_apis_11b(self):
         # Test model_dump() and model_dump_json() on models;
         # test *single required* link serialization in all combinations
 
@@ -1324,22 +1324,39 @@ class TestModelGeneratorMain(tb.ModelTestCase):
         )
 
         self.assertPydanticPickles(t)
-        self.assertPydanticSerializes(
-            t,
-            # {
-            #     "opt_wprop_friend": {
-            #         "name": "aaa",
-            #         "nickname": None,
-            #         "__linkprops__": {"strength": 456},
-            #     },
-            #     "req_friend": {"name": "aaa", "nickname": None},
-            #     "req_wprop_friend": {
-            #         "name": "aaa",
-            #         "nickname": None,
-            #         "__linkprops__": {"strength": 123},
-            #     },
-            # },
+        self.assertPydanticSerializes(t)
+
+    def test_modelgen_pydantic_apis_11c(self):
+        # Test model_dump() and model_dump_json() on models;
+        # test *single required* link serialization in all combinations
+
+        from models.orm import default
+
+        u = default.User(name="aaa")
+        t = default.TestSingleLinksReqOnly(
+            req_wprop_friend=default.TestSingleLinks.req_wprop_friend.link(
+                u, strength=123
+            ),
         )
+
+        self.assertPydanticPickles(t)
+        self.assertPydanticSerializes(t)
+
+    def test_modelgen_pydantic_apis_11d(self):
+        # Test model_dump() and model_dump_json() on models;
+        # test *single required* link serialization in all combinations
+
+        from models.orm import default
+
+        u = default.User(name="aaa")
+        t = default.TestSingleLinksOptOnly(
+            opt_wprop_friend=default.TestSingleLinks.req_wprop_friend.link(
+                u, strength=123
+            ),
+        )
+
+        self.assertPydanticPickles(t)
+        self.assertPydanticSerializes(t)
 
     def test_modelgen_pydantic_apis_12(self):
         import uuid

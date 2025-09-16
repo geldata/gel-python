@@ -134,6 +134,7 @@ class ModelFieldDescriptor(_qb.AbstractFieldDescriptor):
                 not is_gel_type(t)
                 and self.__gel_name__ not in LITERAL_TAG_FIELDS
             ):
+                breakpoint()
                 raise AssertionError(
                     f"{self._fqname} type argument is not a GelType: {t}"
                 )

@@ -165,7 +165,12 @@ class AbstractGelModelMeta(GelTypeMeta):
             super().__new__(mcls, name, bases, namespace, **kwargs),
         )
         reflection = cls.__gel_reflection__
-        if (tname := getattr(reflection, "name", None)) is not None:
+        if (
+            (tname := getattr(reflection, "name", None)) is not None
+            and not issubclass(cls, AbstractGelLinkModel)
+            and not hasattr(cls, '__linkprops__')
+            and not hasattr(cls, '__gel_merged_model__')
+        ):
             mcls.__gel_class_registry__[str(tname)] = cls
         cls.__gel_shape__ = __gel_shape__
         return cls
