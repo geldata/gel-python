@@ -793,10 +793,8 @@ def make_plan(
                     link_prop_variant = False
                     if prop.properties:
                         assert isinstance(val, ProxyModel)
-                        link_prop_variant = bool(
-                            get_proxy_linkprops(
-                                val
-                            ).__gel_get_changed_fields__()
+                        link_prop_variant = _linkprops_have_changes(
+                            get_proxy_linkprops(val)
                         )
 
                     if link_prop_variant:
@@ -916,7 +914,7 @@ def make_plan(
                     continue
                 assert isinstance(val, ProxyModel)
                 lprops = get_proxy_linkprops(val)
-                if not lprops.__gel_changed_fields__:
+                if not _linkprops_have_changes(lprops):
                     continue
 
                 # An existing single link has updated link props.
@@ -2041,23 +2039,22 @@ class SaveExecutor:
                     # - whether the lprop is being set to the default value
                     # - the value being set if present
                     sl_subt = [
-                        f"tuple<std::bool, bool, {arg_casts[lp_name][0]}>"
+                        f"tuple<std::bool, std::bool, {arg_casts[lp_name][0]}>"
                         for lp_name in ch.props_info
                     ]
 
                     lprop_args = (
                         (
                             lp_name in ch.props,
-                            ch.props[lp_name] == DEFAULT_VALUE,
-                            (
+                            ch.props.get(lp_name) == DEFAULT_VALUE,
+                            arg_casts[lp_name][2](
                                 None
-                                if ch.props[lp_name] == DEFAULT_VALUE
-                                else arg_casts[lp_name][2](ch.props[lp_name])
+                                if ch.props.get(lp_name) == DEFAULT_VALUE
+                                else ch.props.get(lp_name)
                             ),
                         )
                         for lp_name in ch.props_info
                     )
-                    print(ch.props)
                     sl_args = [tid, *lprop_args]
 
                     arg = add_arg(
