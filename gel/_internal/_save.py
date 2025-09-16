@@ -12,7 +12,6 @@ from typing import (
     TYPE_CHECKING,
     Any,
     Literal,
-    NamedTuple,
     TypeGuard,
     TypeVar,
     Generic,
@@ -243,12 +242,13 @@ class ModelChange:
 ChangeBatch = TypeAliasType("ChangeBatch", list[ModelChange])
 
 
-class SavePlan(NamedTuple):
+@dataclasses.dataclass(frozen=True)
+class SavePlan:
     # Lists of lists of queries to create new objects.
     # Every list of query is safe to executute in a "batch" --
     # basically send them all at once. Follow up lists of queries
     # will use objects inserted by the previous batches.
-    insert_batches: list[ChangeBatch]
+    create_batches: list[ChangeBatch]
 
     # Optional links of newly inserted objects and changes to
     # links between existing objects.
@@ -1161,22 +1161,17 @@ def make_save_executor_constructor(
     warn_on_large_sync_set: bool = False,
     save_postcheck: bool = False,
 ) -> Callable[[], SaveExecutor]:
-    (
-        create_batches,
-        updates,
-        refetch_batch,
-        existing_objects,
-    ) = make_plan(
+    plan = make_plan(
         objs,
         refetch=refetch,
         warn_on_large_sync_set=warn_on_large_sync_set,
     )
     return lambda: SaveExecutor(
         objs=objs,
-        create_batches=create_batches,
-        updates=updates,
-        refetch_batch=refetch_batch,
-        existing_objects=existing_objects,
+        create_batches=plan.create_batches,
+        updates=plan.update_batch,
+        refetch_batch=plan.refetch_batch,
+        existing_objects=plan.existing_objects,
         refetch=refetch,
         save_postcheck=save_postcheck,
         warn_on_large_sync_set=warn_on_large_sync_set,
@@ -1891,12 +1886,12 @@ class SaveExecutor:
 
         # Final check: make sure that the save plan is empty
         # in case we've missed something in `_check_recursive()`.
-        create_batches, updates, _, _ = make_plan(
+        plan = make_plan(
             self.objs,
             refetch=self.refetch,
             warn_on_large_sync_set=False,
         )
-        if create_batches or updates:
+        if plan.create_batches or plan.update_batch:
             raise ValueError("non-empty save plan after save()")
 
     def _get_id(self, obj: GelModel) -> uuid.UUID:
