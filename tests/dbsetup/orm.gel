@@ -51,7 +51,9 @@ type User extending Named {
     groups := .<users[is UserGroup];
 }
 
-type CustomUser extending User;
+type CustomUser extending User {
+    code: str;
+}
 
 type Post {
     required body: str;

@@ -898,9 +898,53 @@ class GelSourceModel(
     @classmethod
     def __gel_validate__(cls, value: Any) -> GelSourceModel:
         key = 'tname_'
+        ocls = cls
         if isinstance(value, dict) and key in value:
-            cls: Any = cls.get_class_by_name(value[key])
-        return cls.model_validate(value)
+            ncls: Any = cls.get_class_by_name(value[key])
+            if cls is not ncls:
+                # XXX: check issubclass for type
+                # XXX: check __proxy_of__!
+                #
+                # oh, XXX: are we doing something correct for the
+                # *protocol* case
+                # if so, duplicate that, if not... fix it
+
+                if issubclass(cls, ProxyModel):
+                    # XXX: cache!!
+                    # breakpoint()
+                    new_proxy = type(cls)(
+                        # XXX: name??
+                        f'{cls.__name__}[{ncls.__name__}]',
+                        (ncls, ProxyModel[ncls]),
+                        {
+                            k: cls.__dict__[k]
+                            for k in
+                            (
+                                '__annotations__',
+                                '__linkprops__',
+                                '__module__',
+                                '__qualname__'
+                            )
+                            if k in cls.__dict__
+                        } | {  # XXX: HACK: inherited from a custom serializer??
+                            '__get_pydantic_core_schema__':
+                            ProxyModel.__dict__['__get_pydantic_core_schema__']
+                        },
+                    )
+                    # breakpoint()
+                    # del new_proxy.__pydantic_fields__
+                    new_proxy.model_rebuild()
+                    cls = new_proxy
+                else:
+                    cls = ncls
+
+            # print(cls, ncls, value[key])
+            # if '__links__' in str(cls):
+            #     breakpoint()
+        res = cls.model_validate(value)
+        # print("OUT", res, isinstance(res, ProxyModel))
+
+        return res
 
 
 class GelModel(
@@ -1231,6 +1275,9 @@ class GelModel(
         except KeyError:
             pass
 
+        # if cls.__name__ == 'req_wprop_friend':
+        #     breakpoint()
+
         new_cls: type[GelModel] = type(
             cls.__name__,
             (cls,),
@@ -1238,8 +1285,10 @@ class GelModel(
                 "__get_pydantic_core_schema__": classmethod(
                     lambda cls, source_type, handler: handler(source_type)
                 ),
+                "__gel_is_custom_serializer__": True,
             },
         )
+        # print("MADE", new_cls, "FOR", cls)
 
         ser = new_cls.__pydantic_serializer__
         cls.__gel_custom_serializer__ = ser
@@ -1382,7 +1431,11 @@ class _MergedModelBase(
         return handler(source_type)
 
     def model_dump(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
-        return pydantic.BaseModel.model_dump(self, *args, **kwargs)
+        try:
+            return pydantic.BaseModel.model_dump(self, *args, **kwargs)
+        except TypeError:
+            breakpoint()
+            raise
 
 
 class ProxyModel(
@@ -1542,6 +1595,7 @@ class ProxyModel(
         super().__pydantic_init_subclass__(**kwargs)
         generic_meta = cls.__pydantic_generic_metadata__
         if generic_meta["origin"] is ProxyModel and generic_meta["args"]:
+            # breakpoint()
             cls.__proxy_of__ = generic_meta["args"][0]
 
     @classmethod
@@ -1550,6 +1604,7 @@ class ProxyModel(
         # the `__linkprops__` field. This is by far the most robust way
         # (albeit maybe a resource demanding one) to implement
         # validation schema for ProxyModel.
+        # breakpoint()
         try:
             # Make sure we get the cached model for *this* class.
             return cast(
@@ -1565,18 +1620,27 @@ class ProxyModel(
         # _MergedModelBase has a custom metaclass, so we must
         # create a common subclass of that and whatever the
         # metaclass of the real type is.
-        metaclass = types.new_class(
-            f"{cls.__name__}Meta",
-            (_MergedModelMeta, type(cls.__proxy_of__)),
-        )
+        pmcls = type(cls.__proxy_of__)
+        if issubclass(pmcls, _MergedModelMeta):
+            metaclass = pmcls
+        else:
+            try:
+                metaclass = types.new_class(
+                    f"{cls.__name__}Meta",
+                    (_MergedModelMeta, pmcls),
+                )
+            except TypeError:
+                breakpoint()
+                raise
 
         merged = cast(
             "type[_MergedModelBase]",
             pydantic.create_model(
                 cls.__name__,
                 __base__=(
-                    _MergedModelBase,
+                    # _MergedModelBase,  # XXX
                     cls.__proxy_of__,
+                    _MergedModelBase,  # XXX
                 ),  # inherit all wrapped fields
                 __config__=DEFAULT_MODEL_CONFIG,
                 __cls_kwargs__={"metaclass": metaclass},
@@ -1586,6 +1650,7 @@ class ProxyModel(
                 ),
             ),
         )
+        # breakpoint()
 
         cls.__gel_proxy_merged_model_cache__ = merged
         return merged
@@ -1599,6 +1664,7 @@ class ProxyModel(
         if cls is ProxyModel:
             return handler(source_type)
         else:
+            # breakpoint()
 
             def _validate(value: Any) -> Any:
                 if isinstance(value, cls.__gel_proxy_merged_model_cache__):

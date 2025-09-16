@@ -3,7 +3,7 @@ insert User {name := 'Billie'};
 insert User {name := 'Cameron'};
 insert User {name := 'Dana'};
 insert User {name := 'Elsa'};
-insert User {name := 'Zoe'};
+insert CustomUser {name := 'Zoe', code := 'xyzzy'};
 
 insert UserGroup {
     name := 'red',
@@ -50,6 +50,15 @@ insert Post {
     author := assert_single((select User filter .name = 'Elsa')),
     body := '*magic stuff*',
 };
+
+insert Raid {
+    name := 'raid',
+    members := (
+      select User { @role := "Healer", @rank := 1 }
+      filter .name = 'Zoe'
+    )
+};
+
 
 insert Image {
     file := 'cat.jpg',

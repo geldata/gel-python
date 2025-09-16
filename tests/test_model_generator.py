@@ -254,6 +254,30 @@ class TestModelGeneratorMain(tb.ModelTestCase):
         ):
             set([default.Team.members.link(default.User(name="Xavier"))])
 
+    def test_modelgen_06(self):
+        from models.orm import default
+
+        raid = self.client.get(
+            default.Raid.select(
+                name=True,
+                members=True,
+            ).filter(name="raid")
+        )
+        print(raid.members)
+        user = next(iter(raid.members))
+
+        user2 = self.client.get(
+            default.User.select().filter(name=user.name)
+        )
+        # self.assertTrue(isinstance(user2, default.CustomUser))
+        # self.assertEqual(user2.code, 'xyzzy')
+
+        print(type(user))
+        print('subclasses', type(user).__subclasses__())
+        self.assertTrue(isinstance(user, default.User))
+        self.assertTrue(isinstance(user, default.CustomUser))
+        # self.assertEqual(user.code, 'xyzzy')
+
     def test_modelgen_data_unpack_1a(self):
         import gel
         from models.orm import default
@@ -1280,6 +1304,41 @@ class TestModelGeneratorMain(tb.ModelTestCase):
                     "__linkprops__": {"strength": 456},
                 },
             },
+        )
+
+    def test_modelgen_pydantic_apis_11a(self):
+        # Test model_dump() and model_dump_json() on models;
+        # test *single required* link serialization in all combinations
+
+        from models.orm import default
+
+        u = default.User(name="aaa")
+        t = default.TestSingleLinks(
+            req_wprop_friend=default.TestSingleLinks.req_wprop_friend.link(
+                u, strength=123
+            ),
+            opt_wprop_friend=default.TestSingleLinks.opt_wprop_friend.link(
+                u, strength=456
+            ),
+            req_friend=u,
+        )
+
+        self.assertPydanticPickles(t)
+        self.assertPydanticSerializes(
+            t,
+            # {
+            #     "opt_wprop_friend": {
+            #         "name": "aaa",
+            #         "nickname": None,
+            #         "__linkprops__": {"strength": 456},
+            #     },
+            #     "req_friend": {"name": "aaa", "nickname": None},
+            #     "req_wprop_friend": {
+            #         "name": "aaa",
+            #         "nickname": None,
+            #         "__linkprops__": {"strength": 123},
+            #     },
+            # },
         )
 
     def test_modelgen_pydantic_apis_12(self):
