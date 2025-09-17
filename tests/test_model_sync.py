@@ -300,29 +300,86 @@ class TestModelSyncSingleProp(tb.ModelTestCase):
         type I {
             val: tuple<str, array<tuple<str, int64>>>;
         };
+
+        type Az {
+            val: int64 {
+                default := -1;
+            };
+        };
+        type Bz {
+            val: array<int64> {
+                default := [-1];
+            };
+        };
+        type Cz {
+            val: tuple<str, int64> {
+                default := ('.', -1);
+            };
+        };
+        # save Dz for array<array<...>>
+        type Fz {
+            val: tuple<str, array<int64>> {
+                default := ('.', [-1]);
+            };
+        };
+        type Gz {
+            val: tuple<str, tuple<str, int64>> {
+                default := ('.', ('.', -1));
+            };
+        };
+
+        # type Ez {  # Causes ISE
+        #     val: array<tuple<str, int64>> {
+        #         default := [('.', -1)];
+        #     };
+        # };
+        # type Hz {  # Causes ISE
+        #     val: array<tuple<str, array<int64>>> {
+        #         default := [('.', [-1])];
+        #     };
+        # };
+        # type Iz {  # Causes ISE
+        #     val: tuple<str, array<tuple<str, int64>>> {
+        #         default := ('.', [('.', -1)]);
+        #     };
+        # };
     """
 
     def test_model_sync_single_prop_01(self):
         # Insert new object with single prop
 
-        from models.TestModelSyncSingleProp import default
-
         def _testcase(
             model_type: typing.Type[GelModel],
             val: typing.Any,
+            *,
+            default_val: typing.Any | None = None,
         ) -> None:
+            # sync one at a time
             with_val = model_type(val=val)
-            without_val = model_type()
+            self.client.sync(with_val)
+            self.assertEqual(with_val.val, val)
 
-            self.client.sync(with_val, without_val)
+            with_unset = model_type()
+            self.client.sync(with_unset)
+            self.assertEqual(with_unset.val, default_val)
+
+            with_none = model_type(val=None)
+            self.client.sync(with_none)
+            self.assertIsNone(with_none.val)
+
+            # sync all together
+            with_val = model_type(val=val)
+            with_unset = model_type()
+            with_none = model_type(val=None)
+
+            self.client.sync(with_val, with_unset, with_none)
 
             self.assertEqual(with_val.val, val)
-            self.assertIsNone(without_val.val)
+            self.assertEqual(with_unset.val, default_val)
+            self.assertIsNone(with_none.val)
 
-            # cleanup
-            self.client.query(model_type.delete())
+        from models.TestModelSyncSingleProp import default
 
-        _testcase(default.A, None)
         _testcase(default.A, 1)
         _testcase(default.B, [1, 2, 3])
         _testcase(default.C, ("x", 1))
@@ -336,6 +393,30 @@ class TestModelSyncSingleProp(tb.ModelTestCase):
         _testcase(
             default.I,
             ("w", [("x", 1), ("y", 2), ("z", 3)]),
+        )
+
+        _testcase(default.Az, 9, default_val=-1)
+        _testcase(default.Bz, [1, 2, 3], default_val=[-1])
+        _testcase(default.Cz, ("x", 1), default_val=(".", -1))
+        _testcase(default.Fz, ("x", [1, 2, 3]), default_val=(".", [-1]))
+        _testcase(default.Gz, ("x", ("x", 1)), default_val=(".", (".", -1)))
+
+    @tb.xfail  # Adding the types to the schema causes ISE
+    def test_model_sync_single_prop_01b(self):
+        from models.TestModelSyncSingleProp import default
+
+        self._testcase(
+            default.Ez, [("x", 1), ("y", 2), ("z", 3)], default_val=[(".", -1)]
+        )
+        self._testcase(
+            default.Hz,
+            [("x", [1, 2, 3]), ("y", [4, 5, 6]), ("z", [7, 8, 9])],
+            default_val=[(".", [-1])],
+        )
+        self._testcase(
+            default.Iz,
+            ("w", [("x", 1), ("y", 2), ("z", 3)]),
+            default_val=(".", [(".", -1)]),
         )
 
     def test_model_sync_single_prop_02(self):
@@ -1335,6 +1416,22 @@ class TestModelSyncMultiProp(tb.ModelTestCase):
         type C {
             multi val: tuple<str, int64>;
         };
+
+        type Az {
+            multi val: int64 {
+                default := {-1, -2, -3};
+            };
+        };
+        type Bz {
+            multi val: array<int64> {
+                default := {[-1], [-2, -2], [-3, -3, -3]};
+            };
+        };
+        type Cz {
+            multi val: tuple<str, int64> {
+                default := {('.', -1), ('.', -2), ('.', -3)};
+            };
+        };
     """
 
     def _base_change_testcase(
@@ -1388,26 +1485,54 @@ class TestModelSyncMultiProp(tb.ModelTestCase):
         def _testcase(
             model_type: typing.Type[GelModel],
             val: typing.Any,
+            *,
+            default_val: typing.Any | None = None,
         ) -> None:
-            with_val = model_type(val=val)
-            without_val = model_type()
+            if default_val is None:
+                default_val = []
 
-            self.client.sync(with_val, without_val)
+            # sync one at a time
+            with_val = model_type(val=val)
+            self.client.sync(with_val)
+            self.assertEqual(with_val.val, val)
+
+            with_unset = model_type()
+            self.client.sync(with_unset)
+            self.assertEqual(with_unset.val, default_val)
+
+            with_empty = model_type(val=[])
+            self.client.sync(with_empty)
+            self.assertEqual(with_empty.val, [])
+
+            # sync all together
+            with_val = model_type(val=val)
+            with_unset = model_type()
+            with_empty = model_type(val=[])
+
+            self.client.sync(with_val, with_unset, with_empty)
 
             self.assertEqual(with_val.val, val)
-            self.assertEqual(without_val.val, [])
+            self.assertEqual(with_unset.val, default_val)
+            self.assertEqual(with_empty.val, [])
 
             # cleanup
             self.client.query(model_type.delete())
 
-        _testcase(default.A, [])
-        _testcase(default.B, [])
-        _testcase(default.C, [])
-
         _testcase(default.A, [1, 2, 3])
-        _testcase(default.B, [[]])
         _testcase(default.B, [[1], [2, 2], [3, 3, 3]])
         _testcase(default.C, [("a", 1), ("b", 2), ("c", 3)])
+
+        _testcase(default.Az, [1, 2, 3], default_val=[-1, -2, -3])
+        _testcase(
+            default.Bz,
+            [[1], [2, 2], [3, 3, 3]],
+            default_val=[[-1], [-2, -2], [-3, -3, -3]],
+        )
+        _testcase(
+            default.Cz,
+            [("a", 1), ("b", 2), ("c", 3)],
+            default_val=[(".", -1), (".", -2), (".", -3)],
+        )
 
     def test_model_sync_multi_prop_02(self):
         # Updating existing objects with multi props
@@ -2548,12 +2673,31 @@ class TestModelSyncSingleLink(tb.ModelTestCase):
                 lprop: int64;
             };
         };
+        type SourceWithDefault {
+            target: Target {
+                default := (select Target limit 1);
+            };
+        };
+        type SourceWithDefaultAndProp {
+            target: Target {
+                default := (select Target limit 1);
+                lprop: int64;
+            };
+        };
+
+        type Target2 extending Target;
+        type SourceWithDmlDefault {
+            target: Target {
+                default := (insert Target2);
+            };
+        };
     """
 
     def _check_links_equal(
         self, actual: typing.Any, expected: typing.Any
     ) -> None:
         self.assertEqual(actual, expected)
+        self.assertEqual(type(actual), type(expected))
 
         # Also check linkprops
         actual_has_lprop = hasattr(actual, '__linkprops__')
@@ -2571,18 +2715,45 @@ class TestModelSyncSingleLink(tb.ModelTestCase):
         def _testcase(
             model_type: typing.Type[GelModel],
             initial_target: typing.Any,
+            *,
             expected_target: typing.Any | None = None,
+            default_target: typing.Any | None = None,
+            dml_default_type: type[GelModel] | None = None,
         ) -> None:
             if expected_target is None:
                 expected_target = initial_target
 
+            # sync one at a type
             with_target = model_type(target=initial_target)
-            without_target = model_type()
+            self.client.sync(with_target)
+            self._check_links_equal(with_target.target, expected_target)
 
-            self.client.sync(with_target, without_target)
+            with_none = model_type(target=None)
+            self.client.sync(with_none)
+            self._check_links_equal(with_none.target, None)
+
+            with_unset = model_type()
+            self.client.sync(with_unset)
+            if dml_default_type:
+                self.assertNotEqual(with_unset.target, expected_target)
+                self.assertEqual(type(with_unset.target), dml_default_type)
+            else:
+                self._check_links_equal(with_unset.target, default_target)
+
+            # sync all together
+            with_target = model_type(target=initial_target)
+            with_none = model_type(target=None)
+            with_unset = model_type()
+
+            self.client.sync(with_target, with_none, with_unset)
 
             self._check_links_equal(with_target.target, expected_target)
-            self._check_links_equal(without_target.target, None)
+            self._check_links_equal(with_none.target, None)
+            if dml_default_type:
+                self.assertNotEqual(with_unset.target, expected_target)
+                self.assertEqual(type(with_unset.target), dml_default_type)
+            else:
+                self._check_links_equal(with_unset.target, default_target)
 
             # cleanup
             self.client.query(model_type.delete())
@@ -2592,10 +2763,8 @@ class TestModelSyncSingleLink(tb.ModelTestCase):
         target = default.Target()
         self.client.save(target)
 
-        _testcase(default.Source, None)
         _testcase(default.Source, target)
 
-        _testcase(default.SourceWithProp, None)
         _testcase(
             default.SourceWithProp,
             default.SourceWithProp.target.link(target),
@@ -2610,7 +2779,40 @@ class TestModelSyncSingleLink(tb.ModelTestCase):
         _testcase(
             default.SourceWithProp,
             target,
-            default.SourceWithProp.target.link(target),
+            expected_target=default.SourceWithProp.target.link(target),
+        )
+
+        _testcase(default.SourceWithDefault, target, default_target=target)
+
+        _testcase(
+            default.SourceWithDefaultAndProp,
+            default.SourceWithDefaultAndProp.target.link(target),
+            default_target=default.SourceWithDefaultAndProp.target.link(
+                target
+            ),
+        )
+        _testcase(
+            default.SourceWithDefaultAndProp,
+            default.SourceWithDefaultAndProp.target.link(target, lprop=1),
+            default_target=default.SourceWithDefaultAndProp.target.link(
+                target
+            ),
+        )
+        _testcase(
+            default.SourceWithDefaultAndProp,
+            target,
+            expected_target=default.SourceWithDefaultAndProp.target.link(
+                target
+            ),
+            default_target=default.SourceWithDefaultAndProp.target.link(
+                target
+            ),
+        )
+
+        _testcase(
+            default.SourceWithDmlDefault,
+            target,
+            dml_default_type=default.Target2,
         )
 
     def test_model_sync_single_link_02(self):
@@ -5191,7 +5393,6 @@ class TestModelSyncRewrite(tb.ModelTestCase):
         _testcase(1, None, 2)
         _testcase(1, 0, 2)
 
-    @tb.xfail  # rewritten link is not refetched
     def test_model_sync_rewrite_insert_02(self):
         # Insert, link with rewrite
 
@@ -5207,7 +5408,14 @@ class TestModelSyncRewrite(tb.ModelTestCase):
 
             self.assertNotEqual(original.target, insert_target)
             assert original.target is not None
-            self.assertEqual(original.target.n, expected_val)
+            self.assertFalse(hasattr(original.target, 'n'))
+
+            rewritten_target = self.client.query_required_single(
+                default.Target.select(n=True)
+                .filter(id=original.target.id)
+                .limit(1)
+            )
+            self.assertEqual(rewritten_target.n, expected_val)
 
             # cleanup
             self.client.query(default.SingleLink.delete())
@@ -5216,8 +5424,13 @@ class TestModelSyncRewrite(tb.ModelTestCase):
         self.client.save(target_zero)
 
         _testcase(None, None, None)
-        _testcase(1, None, 2)
-        _testcase(1, target_zero, 2)
+
+        # Normally we might expect the rewrite to be 1+1 because this is an
+        # insert. However, sync currently splits adding links to a separate
+        # batch query, making it an update. This is surprising, but everything
+        # about rewrites is surprising.
+        _testcase(1, None, 3)
+        _testcase(1, target_zero, 3)
 
     def test_model_sync_rewrite_update_01(self):
         # Update, property with rewrite
@@ -5277,7 +5490,6 @@ class TestModelSyncRewrite(tb.ModelTestCase):
         _testcase(1, 1, 3)
         _testcase(1, 9, 11)
 
-    @tb.xfail  # rewritten link is not refetched
     def test_model_sync_rewrite_update_03(self):
         # Update, link with rewrite
         # Only update the rewrite field
@@ -5306,7 +5518,14 @@ class TestModelSyncRewrite(tb.ModelTestCase):
             self.assertNotEqual(original.target, insert_target)
             self.assertNotEqual(original.target, update_target)
             assert original.target is not None
-            self.assertEqual(original.target.n, expected_val)
+            self.assertFalse(hasattr(original.target, 'n'))
+
+            rewritten_target = self.client.query_required_single(
+                default.Target.select(n=True)
+                .filter(id=original.target.id)
+                .limit(1)
+            )
+            self.assertEqual(rewritten_target.n, expected_val)
 
             # cleanup
             self.client.query(default.SingleLink.delete())
@@ -5317,7 +5536,6 @@ class TestModelSyncRewrite(tb.ModelTestCase):
         _testcase(1, None, 3)
         _testcase(1, target_one, 3)
 
-    @tb.xfail  # rewritten link is not refetched
     def test_model_sync_rewrite_update_04(self):
         # Update, link with rewrite
         # Only update other field
@@ -5345,7 +5563,14 @@ class TestModelSyncRewrite(tb.ModelTestCase):
 
             self.assertNotEqual(original.target, insert_target)
             assert original.target is not None
-            self.assertEqual(original.target.n, expected_val)
+            self.assertFalse(hasattr(original.target, 'n'))
+
+            rewritten_target = self.client.query_required_single(
+                default.Target.select(n=True)
+                .filter(id=original.target.id)
+                .limit(1)
+            )
+            self.assertEqual(rewritten_target.n, expected_val)
 
             # cleanup
             self.client.query(default.SingleLink.delete())

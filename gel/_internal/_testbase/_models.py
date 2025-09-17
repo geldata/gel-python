@@ -358,7 +358,13 @@ class BaseModelTestCase(BranchTestCase):
         models_dir = test_dir / "models"
         models_dir.mkdir(exist_ok=True)
         # Make sure the base "models" directory has an __init__.py
-        (models_dir / "__init__.py").touch()
+        (models_dir / "__init__.py").write_text(
+            textwrap.dedent('''\
+            # Prevent unittest from recursing into the models
+            def load_tests(*args, **kwargs):
+                return None
+        ''')
+        )
         # and py.typed
         (models_dir / "py.typed").touch()
 

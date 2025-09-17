@@ -12,7 +12,6 @@ from typing import (
     TYPE_CHECKING,
     Any,
     Literal,
-    NamedTuple,
     TypeGuard,
     TypeVar,
     Generic,
@@ -40,8 +39,9 @@ from gel._internal._qbmodel._pydantic._models import (
 from gel._internal._tracked_list import (
     AbstractCollection,
     AbstractTrackedList,
-    TrackedList,
     DowncastingTrackedList,
+    Mode,
+    TrackedList,
 )
 from gel._internal._edgeql import PointerKind, quote_ident
 
@@ -242,12 +242,13 @@ class ModelChange:
 ChangeBatch = TypeAliasType("ChangeBatch", list[ModelChange])
 
 
-class SavePlan(NamedTuple):
+@dataclasses.dataclass(frozen=True)
+class SavePlan:
     # Lists of lists of queries to create new objects.
     # Every list of query is safe to executute in a "batch" --
     # basically send them all at once. Follow up lists of queries
     # will use objects inserted by the previous batches.
-    insert_batches: list[ChangeBatch]
+    create_batches: list[ChangeBatch]
 
     # Optional links of newly inserted objects and changes to
     # links between existing objects.
@@ -639,12 +640,18 @@ def _add_refetch_shape(
             ref_shape.fields[field_name] = ptr_info
 
     if obj.__gel_new__:
-        # New objects should additionally refetch any computed properties
         for ptr_name, ptr_info in tp_pointers.items():
-            if not ptr_info.computed or ptr_info.kind != PointerKind.Property:
-                continue
+            # New objects should refetch computed properties
+            if ptr_info.kind == PointerKind.Property and ptr_info.computed:
+                ref_shape.fields[ptr_name] = ptr_info
 
-            ref_shape.fields[ptr_name] = ptr_info
+            # New objects should refetch single links
+            if (
+                ptr_info.kind == PointerKind.Link
+                and not ptr_info.cardinality.is_multi()
+                and ptr_name != "__type__"
+            ):
+                ref_shape.fields[ptr_name] = ptr_info
 
 
 def push_refetch_new(
@@ -818,7 +825,26 @@ def make_plan(
 
                 assert is_prop_list(val)
 
-                if mp_added := val.__gel_get_added__():
+                if (
+                    (mp_added := val.__gel_get_added__())
+                    # Even if there are no added values, push the change if
+                    # there is a default value we want to override.
+                    or (
+                        is_new
+                        and prop.has_default
+                        and not (
+                            # Pydantic should ensure unset tracked lists will
+                            # have these flags.
+                            # We do this in:
+                            # - GelSourceModel.model_construct
+                            # - GelSourceModel.__getattr__
+                            # - GelSourceModel.__init__
+                            #   - via _MultiProperty._validate
+                            val._mode == Mode.Write
+                            and not val.__gel_overwrite_data__
+                        )
+                    )
+                ):
                     push_change(
                         requireds,
                         sched,
@@ -1135,22 +1161,17 @@ def make_save_executor_constructor(
     warn_on_large_sync_set: bool = False,
     save_postcheck: bool = False,
 ) -> Callable[[], SaveExecutor]:
-    (
-        create_batches,
-        updates,
-        refetch_batch,
-        existing_objects,
-    ) = make_plan(
+    plan = make_plan(
         objs,
         refetch=refetch,
         warn_on_large_sync_set=warn_on_large_sync_set,
     )
     return lambda: SaveExecutor(
         objs=objs,
-        create_batches=create_batches,
-        updates=updates,
-        refetch_batch=refetch_batch,
-        existing_objects=existing_objects,
+        create_batches=plan.create_batches,
+        updates=plan.update_batch,
+        refetch_batch=plan.refetch_batch,
+        existing_objects=plan.existing_objects,
         refetch=refetch,
         save_postcheck=save_postcheck,
         warn_on_large_sync_set=warn_on_large_sync_set,
@@ -1327,13 +1348,17 @@ class SaveExecutor:
                     link_arg_order.append(ptr.name)
                     link_num = len(link_arg_order) - 1
 
+                    link_shape_elems: list[str] = []
+                    if not ptr.cardinality.is_multi():
+                        link_shape_elems += ["id"]
                     if ptr.properties:
-                        props = ",".join(
+                        link_shape_elems += [
                             f"@{quote_ident(p)}" for p in ptr.properties
-                        )
-                        props = f"{{ {props} }}"
-                    else:
-                        props = ""
+                        ]
+
+                    link_shape = ""
+                    if link_shape_elems:
+                        link_shape = f"{{ {','.join(link_shape_elems)} }}"
 
                     maybe_assert = maybe_assert_end = ""
 
@@ -1345,25 +1370,34 @@ class SaveExecutor:
                     if ptr.computed:
                         computed_filter = "or .id in __existing"
 
-                    # The logic of the `filter` clause is:
-                    # - first test if the link was fetched for this object
-                    #   at all - if not - we don't need to update it
-                    # - if the link was fetched for this particular GelModel --
-                    #   filter it by all existing objects prior to sync() in
-                    #   this link PLUS all new objects that were inserted
-                    #   during sync().
-                    select_shape.append(f"""
-                        {quote_ident(ptr.name)} := {maybe_assert}(
-                            with
-                                __link := __obj_data.1[{link_num}]
-                            select .{quote_ident(ptr.name)} {props}
-                            filter __link.0 and (
-                                .id in array_unpack(__link.1)
-                                or .id in __new
-                                {computed_filter}
-                            )
-                        ){maybe_assert_end}
-                    """)
+                    if ptr.cardinality.is_multi():
+                        # The logic of the `filter` clause is:
+                        # - first test if the link was fetched for this object
+                        #   at all - if not - we don't need to update it
+                        # - if the link was fetched for this particular
+                        #   GelModel -- filter it by all existing objects prior
+                        #   to sync() in this link PLUS all new objects that
+                        #   were inserted during sync().
+                        select_shape.append(f"""
+                            {quote_ident(ptr.name)} := {maybe_assert}(
+                                with
+                                    __link := __obj_data.1[{link_num}]
+                                select .{quote_ident(ptr.name)} {link_shape}
+                                filter __link.0 and (
+                                    .id in array_unpack(__link.1)
+                                    or .id in __new
+                                    {computed_filter}
+                                )
+                            ){maybe_assert_end}
+                        """)
+
+                    else:
+                        # Single links should always refetch the link
+                        select_shape.append(f"""
+                            {quote_ident(ptr.name)} := {maybe_assert}(
+                                .{quote_ident(ptr.name)} {link_shape}
+                            ){maybe_assert_end}
+                        """)
 
                 else:
                     select_shape.append(quote_ident(ptr.name))
@@ -1548,6 +1582,8 @@ class SaveExecutor:
 
             model_or_models: GelModel | IDTracker[GelModel, None]
             if gel_id in self.new_objects:
+                # For new objects, update the data we got back from the batch
+                # queries.
                 model_or_models = self.new_objects[gel_id]
             else:
                 model_or_models = self.existing_objects[gel_id]
@@ -1573,65 +1609,85 @@ class SaveExecutor:
                     continue
 
                 shape_field = shape.fields[field]
-                is_multi = shape_field.cardinality.is_multi()
-                is_link = shape_field.kind.is_link()
 
                 for model in models:
                     assert model.id == gel_id
-                    model_dict = model.__dict__
 
-                    model.__pydantic_fields_set__.add(field)
-
-                    if is_link and is_multi:
-                        link = model_dict.get(field)
-                        if link is None:
-                            # This instance never had this link, but
-                            # now it will.
-                            # TODO: this needs to be optimized.
-                            link = copy.copy(new_value)
-                            model_dict[field] = link
-                            link.__gel_replace_with_empty__()
-
-                        assert is_link_abstract_dlist(link)
-                        assert type(new_value) is type(link)
-                        model_dict[field] = link.__gel_reconcile__(
-                            # no need to copy `new_value`,
-                            # it will only be iterated over
-                            new_value,
-                            self.existing_objects,  # type: ignore [arg-type]
-                            self.new_objects,  # type: ignore [arg-type]
-                        )
-
-                    elif is_link:
-                        if new_value is None:
-                            model_dict[field] = new_value
-                        elif shape_field.properties:
-                            model_dict[field] = reconcile_proxy_link(
-                                existing=model_dict.get(field),
-                                refetched=new_value,  # pyright: ignore [reportArgumentType]
-                                existing_objects=self.existing_objects,  # type: ignore [arg-type]
-                                new_objects=self.new_objects,
-                            )
-                        else:
-                            model_dict[field] = reconcile_link(
-                                existing=model_dict.get(field),
-                                refetched=new_value,
-                                existing_objects=self.existing_objects,  # type: ignore [arg-type]
-                                new_objects=self.new_objects,
-                            )
-
-                    elif not is_link:
-                        # could be a multi prop, could be a single prop
-                        # with an array value
-                        if shape_field.mutable:
-                            model_dict[field] = deepcopy(new_value)
-                        else:
-                            model_dict[field] = new_value
+                    self._apply_refetched_field_to_model(
+                        shape_field, new_value, model, deepcopy
+                    )
 
             # Let's be extra cautious and help GC a bit here. `obj` can
             # have recursive references to other objects via links and
             # computed backlinks.
             obj.__dict__.clear()
+
+    def _apply_refetched_field_to_model(
+        self,
+        shape_field: GelPointerReflection,
+        new_value: Any,
+        model: GelModel,
+        deepcopy: Callable[[T], T],
+    ) -> None:
+        field = shape_field.name
+        is_multi = shape_field.cardinality.is_multi()
+        is_link = shape_field.kind.is_link()
+
+        model_dict = model.__dict__
+
+        model.__pydantic_fields_set__.add(field)
+
+        if is_link and is_multi:
+            link = model_dict.get(field)
+            assert isinstance(new_value, AbstractCollection)
+            if link is None:
+                # This instance never had this link, but
+                # now it will.
+                # TODO: this needs to be optimized.
+                link = copy.copy(new_value)
+                model_dict[field] = link
+                link.__gel_replace_with_empty__()
+
+            assert is_link_abstract_dlist(link)
+            assert type(new_value) is type(link)
+            model_dict[field] = link.__gel_reconcile__(
+                # no need to copy `new_value`,
+                # it will only be iterated over
+                new_value,  # type: ignore [arg-type]
+                self.existing_objects,  # type: ignore [arg-type]
+                self.new_objects,  # type: ignore [arg-type]
+            )
+
+        elif is_link:
+            existing = model_dict.get(field)
+            if (
+                new_value is None
+                or existing is None
+                or existing is DEFAULT_VALUE
+            ):
+                model_dict[field] = new_value
+            elif shape_field.properties:
+                model_dict[field] = reconcile_proxy_link(
+                    existing=existing,
+                    refetched=new_value,  # pyright: ignore [reportArgumentType]
+                    existing_objects=self.existing_objects,  # type: ignore [arg-type]
+                    new_objects=self.new_objects,
+                )
+            else:
+                model_dict[field] = reconcile_link(
+                    existing=existing,
+                    refetched=new_value,
+                    existing_objects=self.existing_objects,  # type: ignore [arg-type]
+                    new_objects=self.new_objects,
+                )
+
+        elif not is_link:
+            # could be a multi prop, could be a single prop
+            # with an array value
+            if shape_field.mutable:
+                model_dict[field] = deepcopy(new_value)
+            else:
+                model_dict[field] = new_value
 
     def _commit(self) -> None:
         for obj, new_id in self.new_object_ids.items():
@@ -1642,11 +1698,20 @@ class SaveExecutor:
         if self.refetch:
             self._apply_refetched_data()
 
+            # Apply refetched data to new objects.
+            #
+            # There are 3 instances of a newly synced object:
+            # - The user instance
+            # - The batch instance
+            # - The refetch instance
+            #
+            # In _apply_refetched_data, the batch instance will be updated
+            # using data from the refetech instance. Here, we finally update
+            # the user's copy.
             for obj, new_id in self.new_object_ids.items():
                 assert new_id is not None
 
                 updated = self.new_objects[new_id]
-                pydantic_set_fields = obj.__pydantic_fields_set__
 
                 for prop in get_pointers(type(obj)):
                     if (
@@ -1654,13 +1719,15 @@ class SaveExecutor:
                         prop.name == "id"
                         # prop not refetched
                         or prop.name not in updated.__dict__
-                        # TODO: Refetching links for new objects
-                        or prop.kind == PointerKind.Link
                     ):
                         continue
 
-                    obj.__dict__[prop.name] = updated.__dict__[prop.name]
-                    pydantic_set_fields.add(prop.name)
+                    self._apply_refetched_field_to_model(
+                        prop,
+                        updated.__dict__[prop.name],
+                        obj,
+                        _identity_func,
+                    )
 
         self._commit_recursive()
 
@@ -1819,12 +1886,12 @@ class SaveExecutor:
 
         # Final check: make sure that the save plan is empty
         # in case we've missed something in `_check_recursive()`.
-        create_batches, updates, _, _ = make_plan(
+        plan = make_plan(
             self.objs,
             refetch=self.refetch,
             warn_on_large_sync_set=False,
         )
-        if create_batches or updates:
+        if plan.create_batches or plan.update_batch:
             raise ValueError("non-empty save plan after save()")
 
     def _get_id(self, obj: GelModel) -> uuid.UUID:
