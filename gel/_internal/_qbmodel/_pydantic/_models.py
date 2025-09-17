@@ -1717,12 +1717,14 @@ class ProxyModel(
         *,
         linked: bool = False,
     ) -> Self:
-        pnv = cls.__gel_model_construct__(None)
+        ncls = cls._get_subtype_proxy(type(obj))
+
+        pnv = ncls.__gel_model_construct__(None)
         assert not isinstance(obj, ProxyModel)
         ll_setattr(pnv, "_p__obj__", obj)
 
         if type(lprops) is dict:
-            lp_obj = cls.__linkprops__.__gel_model_construct__(lprops)
+            lp_obj = ncls.__linkprops__.__gel_model_construct__(lprops)
         else:
             lp_obj = lprops  # type: ignore [assignment]
 
