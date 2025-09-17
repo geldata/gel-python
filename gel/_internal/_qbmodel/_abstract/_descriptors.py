@@ -134,12 +134,11 @@ class ModelFieldDescriptor(_qb.AbstractFieldDescriptor):
                 not is_gel_type(t)
                 and self.__gel_name__ not in LITERAL_TAG_FIELDS
             ):
-                breakpoint()
                 raise AssertionError(
                     f"{self._fqname} type argument is not a GelType: {t}"
                 )
 
-            self.__gel_resolved_type__ = t
+            self.__gel_resolved_type__ = cast('type[GelType]', t)
 
         return t
 
@@ -613,9 +612,9 @@ class GelLinkModelDescriptor(
 
 class AbstractGelProxyModel(AbstractGelModel, Generic[_MT_co, _LM_co]):
     __linkprops__: GelLinkModelDescriptor[_LM_co]
-    __gel_dynamic_proxy_base__ : (
-        ClassVar[type[AbstractGelProxyModel[Any, Any]] | None]
-    ) = None
+    __gel_dynamic_proxy_base__: ClassVar[
+        type[AbstractGelProxyModel[Any, Any]] | None
+    ] = None
 
     if TYPE_CHECKING:
         _p__obj__: _MT_co

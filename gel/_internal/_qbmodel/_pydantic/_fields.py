@@ -436,7 +436,7 @@ class _AnyLink(Generic[_MT_co, _BMT_co]):
                 )
 
         # defer to Pydantic
-        return mt.__gel_validate__(value)  # type: ignore
+        return mt.__gel_validate__(value)  # type: ignore[return-value]
 
 
 class _AnyLinkWithProps(Generic[_PT_co, _BMT_co]):

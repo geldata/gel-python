@@ -69,7 +69,7 @@ __all__ = (
     "to_be_fixed",
     "typecheck",
     "xfail",
-    "xfail_unimplemented"
+    "xfail_unimplemented",
 )
 
 if TYPE_CHECKING:
@@ -496,9 +496,6 @@ class BaseModelTestCase(BranchTestCase):
                 context=context,
             )
         )
-        # if hasattr(model, 'req_wprop_friend'):
-        #     print('!!!', getattr(model.req_wprop_friend, '__linkprops__', None))
-        #     print('!!!', getattr(new.req_wprop_friend, '__linkprops__', None))
         self.assertEqual(
             new.model_dump(context=new_context),
             model.model_dump(context=context),

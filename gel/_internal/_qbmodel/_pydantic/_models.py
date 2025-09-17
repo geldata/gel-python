@@ -42,7 +42,6 @@ from pydantic._internal import _core_utils as _pydantic_core_utils  # noqa: PLC2
 from gel._internal import _qb
 from gel._internal import _tracked_list
 from gel._internal import _typing_inspect
-from gel._internal import _typing_parametric
 from gel._internal import _utils
 from gel._internal._unsetid import UNSET_UUID
 
@@ -900,27 +899,16 @@ class GelSourceModel(
     @classmethod
     def __gel_validate__(cls, value: Any) -> GelSourceModel:
         key = 'tname_'
-        ocls = cls
+        ccls = cls
         if isinstance(value, dict) and key in value:
             ncls: Any = cls.get_class_by_name(value[key])
-            if cls is not ncls:
-                # XXX: check issubclass for type
-                # XXX: check __proxy_of__!
-                #
-                # oh, XXX: are we doing something correct for the
-                # *protocol* case
-                # if so, duplicate that, if not... fix it
-
-                if issubclass(cls, ProxyModel):
-                    cls = cls._get_subtype_proxy(ncls)
+            if ccls is not ncls:
+                if issubclass(ccls, ProxyModel):
+                    ccls = ccls._get_subtype_proxy(ncls)
                 else:
-                    cls = ncls
+                    ccls = ncls
 
-            # print(cls, ncls, value[key])
-            # if '__links__' in str(cls):
-            #     breakpoint()
-        res = cls.model_validate(value)
-        # print("OUT", res, isinstance(res, ProxyModel))
+        res = ccls.model_validate(value)
 
         return res
 
@@ -1026,18 +1014,6 @@ class GelModel(
             super().__init__(**kwargs)
 
         self.__gel_new__ = True
-
-    # @pydantic.model_validator(mode='wrap')
-    # @classmethod
-    # def dispatch_to_subtypes(
-    #     cls, data: Any, handler: Any, info: pydantic.ValidationInfo
-    # ) -> Any:
-    #     key = 'tname_'
-    #     if key in data:
-    #         ncls: Any = cls.get_class_by_name(data[key])
-    #         if ncls is not cls:
-    #             return ncls.model_validate(data, context=info.context)
-    #     return handler(data)
 
     def __getattr__(self, name: str) -> Any:
         cls = type(self)
@@ -1253,9 +1229,6 @@ class GelModel(
         except KeyError:
             pass
 
-        # if cls.__name__ == 'req_wprop_friend':
-        #     breakpoint()
-
         new_cls: type[GelModel] = type(
             cls.__name__,
             (cls,),
@@ -1266,7 +1239,6 @@ class GelModel(
                 "__gel_is_custom_serializer__": True,
             },
         )
-        # print("MADE", new_cls, "FOR", cls)
 
         ser = new_cls.__pydantic_serializer__
         cls.__gel_custom_serializer__ = ser
@@ -1488,38 +1460,28 @@ class ProxyModel(
         if ncls is cls.__proxy_of__:
             return cls
 
-        # breakpoint()
-
         # XXX: cache!!
-        core_schema = (
-            ProxyModel.__dict__['__get_pydantic_core_schema__']
-        )
-        # breakpoint()
-        # XXX: That is false! Maybe!
-        # N.B: We don't make this a subtype of *this* ProxyModel...
-        # Maybe we should???
-        # breakpoint()
+        core_schema = ProxyModel.__dict__['__get_pydantic_core_schema__']
         new_proxy = type(cls)(  # type: ignore[misc]
             # XXX: name??
             f'{cls.__name__}[{ncls.__name__}]',
             (ncls, ProxyModel[ncls], cls),  # type: ignore[valid-type]
             {
                 k: cls.__dict__[k]
-                for k in
-                (
+                for k in (
                     # '__annotations__',
                     # '__linkprops__',
                     '__module__',
-                    '__qualname__'
+                    '__qualname__',
                 )
                 if k in cls.__dict__
-            } | {
+            }
+            | {
                 # XXX: HACK: inherited from a custom serializer??
                 '__get_pydantic_core_schema__': core_schema,
                 '__gel_dynamic_proxy_base__': cls,
             },
         )
-        # breakpoint()
         new_proxy.model_rebuild()
         return cast('type[Self]', new_proxy)
 
@@ -1553,10 +1515,10 @@ class ProxyModel(
                     f"are allowed, got {type(obj).__name__}",
                 )
 
-        cls = cls._get_subtype_proxy(type(obj))
+        ncls = cls._get_subtype_proxy(type(obj))
 
-        self = cls.__new__(cls)
-        lprops = cls.__linkprops__(**link_props)
+        self = ncls.__new__(ncls)
+        lprops = ncls.__linkprops__(**link_props)
         ll_setattr(self, "__linkprops__", lprops)
         assert not isinstance(obj, ProxyModel)
         ll_setattr(self, "_p__obj__", obj)
@@ -1646,7 +1608,6 @@ class ProxyModel(
         # the `__linkprops__` field. This is by far the most robust way
         # (albeit maybe a resource demanding one) to implement
         # validation schema for ProxyModel.
-        # breakpoint()
         try:
             # Make sure we get the cached model for *this* class.
             return cast(
@@ -1666,14 +1627,10 @@ class ProxyModel(
         if issubclass(pmcls, _MergedModelMeta):
             metaclass = pmcls
         else:
-            try:
-                metaclass = types.new_class(
-                    f"{cls.__name__}Meta",
-                    (_MergedModelMeta, pmcls),
-                )
-            except TypeError:
-                breakpoint()
-                raise
+            metaclass = types.new_class(
+                f"{cls.__name__}Meta",
+                (_MergedModelMeta, pmcls),
+            )
 
         merged = cast(
             "type[_MergedModelBase]",
@@ -1692,7 +1649,6 @@ class ProxyModel(
                 ),
             ),
         )
-        # breakpoint()
 
         cls.__gel_proxy_merged_model_cache__ = merged
         return merged
@@ -1706,10 +1662,8 @@ class ProxyModel(
         if cls is ProxyModel:
             return handler(source_type)
         else:
-            # breakpoint()
 
             def _validate(value: Any) -> Any:
-                # breakpoint()
                 if isinstance(value, cls.__gel_proxy_merged_model_cache__):
                     dct = value.__dict__
 

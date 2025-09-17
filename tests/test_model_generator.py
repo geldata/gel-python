@@ -266,7 +266,7 @@ class TestModelGeneratorMain(tb.ModelTestCase):
         print(raid.members)
         user = next(iter(raid.members))
 
-        user2 = self.client.get(
+        self.client.get(
             default.User.select().filter(name=user.name)
         )
         # self.assertTrue(isinstance(user2, default.CustomUser))
@@ -1311,7 +1311,6 @@ class TestModelGeneratorMain(tb.ModelTestCase):
         # test *single required* link serialization in all combinations
 
         from models.orm import default
-        self.maxDiff = None
 
         u = default.CustomUser(name="aaa", code="xyzzy")
         t = default.TestSingleLinks(
@@ -1672,11 +1671,6 @@ class TestModelGeneratorMain(tb.ModelTestCase):
             {"red", "green"},
         )
 
-    # @tb.xfail('''
-    #     Broken because of inheritance.
-    #     It tries to deserialize a Content, which fails.
-    #     See issue #755.
-    # ''')
     def test_modelgen_pydantic_apis_21(self):
         # Test model_dump() and model_dump_json() on models;
         # test *inheritance*
@@ -5523,7 +5517,6 @@ class TestModelGeneratorMain(tb.ModelTestCase):
                 indent=2,
             )
         )
-        self.maxDiff = None
 
         self.assertEqual(
             schema.strip(),
