@@ -44,6 +44,7 @@ from gel._internal._tracked_list import (
     TrackedList,
 )
 from gel._internal._edgeql import PointerKind, quote_ident
+import operator
 
 if TYPE_CHECKING:
     from collections.abc import (
@@ -1343,7 +1344,10 @@ class SaveExecutor:
 
             total_refetch_obj_count += len(shape.models)
 
-            for ptr in shape.fields.values():
+            # sort pointers for determinism
+            for _, ptr in sorted(
+                shape.fields.items(), key=operator.itemgetter(0)
+            ):
                 if ptr.kind.is_link():
                     link_arg_order.append(ptr.name)
                     link_num = len(link_arg_order) - 1
