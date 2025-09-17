@@ -263,20 +263,14 @@ class TestModelGeneratorMain(tb.ModelTestCase):
                 members=True,
             ).filter(name="raid")
         )
-        print(raid.members)
         user = next(iter(raid.members))
 
         self.client.get(
             default.User.select().filter(name=user.name)
         )
-        # self.assertTrue(isinstance(user2, default.CustomUser))
-        # self.assertEqual(user2.code, 'xyzzy')
 
-        print(type(user))
-        print('subclasses', type(user).__subclasses__())
         self.assertTrue(isinstance(user, default.User))
         self.assertTrue(isinstance(user, default.CustomUser))
-        # self.assertEqual(user.code, 'xyzzy')
 
     def test_modelgen_data_unpack_1a(self):
         import gel
