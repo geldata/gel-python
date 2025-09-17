@@ -159,6 +159,10 @@ Query arguments are assembled into a `__data` (or `__all_data` for multi)
 argument which is a tuple any new data for that object, including the object id
 for updates.
 
+Since tuples don't allow optional arguments, `__data` uses arrays of length 0
+or 1. In `_save.SaveExecutor._compile_change`, the local `arg_cast` function
+helps convert python data and types into the appropriate edgeql.
+
 The compiled queries are grouped by their query string into `QueryBatch`s.
 
 Finally the results of executed queries is stored using
