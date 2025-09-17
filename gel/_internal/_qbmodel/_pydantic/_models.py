@@ -1408,6 +1408,10 @@ class ProxyModel(
     if TYPE_CHECKING:
         __gel_proxy_merged_model_cache__: ClassVar[type[_MergedModelBase]]
 
+    __gel_subtype_proxy_cache__: ClassVar[
+        dict[type[GelModel], type[ProxyModel[Any]]] | None
+    ] = None
+
     # NB: __linkprops__ is not in slots because it is managed by
     #     GelLinkModelDescriptor.
 
@@ -1460,7 +1464,12 @@ class ProxyModel(
         if ncls is cls.__proxy_of__:
             return cls
 
-        # XXX: cache!!
+        if cls.__gel_subtype_proxy_cache__ is None:
+            cls.__gel_subtype_proxy_cache__ = {}
+
+        if cached := cls.__gel_subtype_proxy_cache__.get(ncls):
+            return cast('type[Self]', cached)
+
         core_schema = ProxyModel.__dict__['__get_pydantic_core_schema__']
         new_proxy = type(cls)(  # type: ignore[misc]
             # XXX: name??
@@ -1483,6 +1492,7 @@ class ProxyModel(
             },
         )
         new_proxy.model_rebuild()
+        cls.__gel_subtype_proxy_cache__[ncls] = new_proxy
         return cast('type[Self]', new_proxy)
 
     @classmethod
