@@ -1469,6 +1469,7 @@ class ProxyModel(
         # We want ProxyModel to be a trasparent wrapper, so we
         # forward the constructor arguments to the wrapped object.
         wrapped = self.__proxy_of__(**kwargs)
+        assert not isinstance(wrapped, ProxyModel)
         ll_setattr(self, "_p__obj__", wrapped)
         # __linkprops__ is written into __dict__ by GelLinkModelDescriptor
 
@@ -1487,24 +1488,27 @@ class ProxyModel(
         if ncls is cls.__proxy_of__:
             return cls
 
+        # breakpoint()
+
         # XXX: cache!!
         core_schema = (
             ProxyModel.__dict__['__get_pydantic_core_schema__']
         )
         # breakpoint()
+        # XXX: That is false! Maybe!
         # N.B: We don't make this a subtype of *this* ProxyModel...
         # Maybe we should???
         # breakpoint()
-        new_proxy = type(cls)(
+        new_proxy = type(cls)(  # type: ignore[misc]
             # XXX: name??
             f'{cls.__name__}[{ncls.__name__}]',
-            (ncls, ProxyModel[ncls]),
+            (ncls, ProxyModel[ncls], cls),  # type: ignore[valid-type]
             {
                 k: cls.__dict__[k]
                 for k in
                 (
-                    '__annotations__',
-                    '__linkprops__',
+                    # '__annotations__',
+                    # '__linkprops__',
                     '__module__',
                     '__qualname__'
                 )
@@ -1517,7 +1521,7 @@ class ProxyModel(
         )
         # breakpoint()
         new_proxy.model_rebuild()
-        return new_proxy
+        return cast('type[Self]', new_proxy)
 
     @classmethod
     def link(cls, obj: _MT_co, /, **link_props: Any) -> Self:  # type: ignore [misc]
@@ -1554,6 +1558,7 @@ class ProxyModel(
         self = cls.__new__(cls)
         lprops = cls.__linkprops__(**link_props)
         ll_setattr(self, "__linkprops__", lprops)
+        assert not isinstance(obj, ProxyModel)
         ll_setattr(self, "_p__obj__", obj)
 
         # Treat newly created link props as if they had all their values
@@ -1759,6 +1764,7 @@ class ProxyModel(
         linked: bool = False,
     ) -> Self:
         pnv = cls.__gel_model_construct__(None)
+        assert not isinstance(obj, ProxyModel)
         ll_setattr(pnv, "_p__obj__", obj)
 
         if type(lprops) is dict:

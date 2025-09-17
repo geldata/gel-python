@@ -291,6 +291,7 @@ cdef class ObjectCodec(BaseNamedRecordCodec):
                 current_ret_type = tname_map[tname]
             except KeyError:
                 pass
+        assert not hasattr(current_ret_type, '__proxy_of__'), current_ret_type
 
         if return_type_proxy is not None:
             nested = current_ret_type.__gel_model_construct__(result_dict)
@@ -351,6 +352,7 @@ cdef class ObjectCodec(BaseNamedRecordCodec):
         if proxy is not None:
             self.cached_return_type_proxy = return_type
             self.cached_return_type = proxy
+            assert not hasattr(proxy, '__proxy_of__')
             lprops_type = return_type.__linkprops__
         else:
             self.cached_return_type = return_type
@@ -365,9 +367,9 @@ cdef class ObjectCodec(BaseNamedRecordCodec):
         # then default.Content.__subclasses__() will contain
         # CustomContent, which we don't want to be there.
 
-        tname_map = {str(refl.name): return_type}
+        tname_map = {str(refl.name): self.cached_return_type}
 
-        for ch in return_type.__subclasses__():
+        for ch in self.cached_return_type.__subclasses__():
             try:
                 sub_name = ch.__gel_reflection__.name
             except AttributeError:

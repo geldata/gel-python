@@ -410,14 +410,7 @@ class _AnyLink(Generic[_MT_co, _BMT_co]):
                 return value
         else:
             # link or optional link *with* props
-            if (
-                isinstance(value, mt)
-                or (
-                    isinstance(value, ProxyModel)
-                    and issubclass(mt, ProxyModel)
-                    and issubclass(value.__proxy_of__, mt.__proxy_of__)
-                )
-            ):
+            if isinstance(value, mt):
                 mt_val = cast("ProxyModel[_MT_co]", value)
                 if mt_val.__gel_linked__:
                     # Proxy is coming from another link -- reset linkprops
@@ -443,7 +436,7 @@ class _AnyLink(Generic[_MT_co, _BMT_co]):
                 )
 
         # defer to Pydantic
-        return mt.__gel_validate__(value)
+        return mt.__gel_validate__(value)  # type: ignore
 
 
 class _AnyLinkWithProps(Generic[_PT_co, _BMT_co]):

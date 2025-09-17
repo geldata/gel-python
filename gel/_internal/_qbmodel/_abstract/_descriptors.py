@@ -613,6 +613,9 @@ class GelLinkModelDescriptor(
 
 class AbstractGelProxyModel(AbstractGelModel, Generic[_MT_co, _LM_co]):
     __linkprops__: GelLinkModelDescriptor[_LM_co]
+    __gel_dynamic_proxy_base__ : (
+        ClassVar[type[AbstractGelProxyModel[Any, Any]] | None]
+    ) = None
 
     if TYPE_CHECKING:
         _p__obj__: _MT_co
@@ -835,7 +838,7 @@ def proxy_link(
 ) -> AbstractGelProxyModel[_MT_co, _LM_co]:
     tp_new = type(new)
 
-    if tp_new is proxy_type:
+    if tp_new is proxy_type or issubclass(tp_new, proxy_type):
         # Fast path for the same proxy type.
 
         new_proxy = cast("AbstractGelProxyModel[_MT_co, _LM_co]", new)
