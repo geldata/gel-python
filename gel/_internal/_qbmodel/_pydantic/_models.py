@@ -18,6 +18,7 @@ from typing_extensions import (
     Self,
 )
 
+import copyreg
 import inspect
 import itertools
 import types
@@ -41,6 +42,7 @@ from pydantic._internal import _core_utils as _pydantic_core_utils  # noqa: PLC2
 from gel._internal import _qb
 from gel._internal import _tracked_list
 from gel._internal import _typing_inspect
+from gel._internal import _typing_parametric
 from gel._internal import _utils
 from gel._internal._unsetid import UNSET_UUID
 
@@ -910,35 +912,7 @@ class GelSourceModel(
                 # if so, duplicate that, if not... fix it
 
                 if issubclass(cls, ProxyModel):
-                    # XXX: cache!!
-                    core_schema = (
-                        ProxyModel.__dict__['__get_pydantic_core_schema__']
-                    )
-                    # breakpoint()
-                    new_proxy = type(cls)(
-                        # XXX: name??
-                        f'{cls.__name__}[{ncls.__name__}]',
-                        (ncls, ProxyModel[ncls]),
-                        {
-                            k: cls.__dict__[k]
-                            for k in
-                            (
-                                '__annotations__',
-                                '__linkprops__',
-                                '__module__',
-                                '__qualname__'
-                            )
-                            if k in cls.__dict__
-                        } | {
-                            # XXX: HACK: inherited from a custom serializer??
-                            '__get_pydantic_core_schema__': core_schema,
-                            '__gel_asdf__': True,
-                        },
-                    )
-                    # breakpoint()
-                    # del new_proxy.__pydantic_fields__
-                    new_proxy.model_rebuild()
-                    cls = new_proxy
+                    cls = cls._get_subtype_proxy(ncls)
                 else:
                     cls = ncls
 
@@ -1440,6 +1414,18 @@ class _MergedModelBase(
         return pydantic.BaseModel.model_dump(self, *args, **kwargs)
 
 
+def _pickle_dynamic_proxy_model(cls: Any) -> Any:
+    # See discussion in _typing_parametric. We do the same tricks as
+    # PickleableClassParametricType, basically.
+    if "__gel_dynamic_proxy_base__" in cls.__dict__:
+        base = cls.__dict__["__gel_dynamic_proxy_base__"]
+        return base._get_subtype_proxy, (cls.__proxy_of__,)
+    else:
+        # If it is not one of our dynamic things, we return the
+        # classname and pickle goes and does something useful.
+        return cls.__qualname__
+
+
 class ProxyModel(
     GelModel,
     _abstract.AbstractGelProxyModel[_MT_co, GelLinkModel],
@@ -1486,6 +1472,53 @@ class ProxyModel(
         ll_setattr(self, "_p__obj__", wrapped)
         # __linkprops__ is written into __dict__ by GelLinkModelDescriptor
 
+    def __init_subclass__(cls) -> None:
+        super().__init_subclass__()
+
+        # Register a custom reducer for every *metaclass*
+        # of ProxyModels. Shouldn't be many.
+        copyreg.pickle(
+            type(cls),
+            _pickle_dynamic_proxy_model,  # pyright: ignore [reportArgumentType]
+        )
+
+    @classmethod
+    def _get_subtype_proxy(cls, ncls: type[GelModel]) -> type[Self]:
+        if ncls is cls.__proxy_of__:
+            return cls
+
+        # XXX: cache!!
+        core_schema = (
+            ProxyModel.__dict__['__get_pydantic_core_schema__']
+        )
+        # breakpoint()
+        # N.B: We don't make this a subtype of *this* ProxyModel...
+        # Maybe we should???
+        # breakpoint()
+        new_proxy = type(cls)(
+            # XXX: name??
+            f'{cls.__name__}[{ncls.__name__}]',
+            (ncls, ProxyModel[ncls]),
+            {
+                k: cls.__dict__[k]
+                for k in
+                (
+                    '__annotations__',
+                    '__linkprops__',
+                    '__module__',
+                    '__qualname__'
+                )
+                if k in cls.__dict__
+            } | {
+                # XXX: HACK: inherited from a custom serializer??
+                '__get_pydantic_core_schema__': core_schema,
+                '__gel_dynamic_proxy_base__': cls,
+            },
+        )
+        # breakpoint()
+        new_proxy.model_rebuild()
+        return new_proxy
+
     @classmethod
     def link(cls, obj: _MT_co, /, **link_props: Any) -> Self:  # type: ignore [misc]
         proxy_of = ll_type_getattr(cls, "__proxy_of__")
@@ -1515,6 +1548,8 @@ class ProxyModel(
                     f"only instances of {proxy_of.__name__} "
                     f"are allowed, got {type(obj).__name__}",
                 )
+
+        cls = cls._get_subtype_proxy(type(obj))
 
         self = cls.__new__(cls)
         lprops = cls.__linkprops__(**link_props)

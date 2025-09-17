@@ -1311,8 +1311,9 @@ class TestModelGeneratorMain(tb.ModelTestCase):
         # test *single required* link serialization in all combinations
 
         from models.orm import default
+        self.maxDiff = None
 
-        u = default.User(name="aaa")
+        u = default.CustomUser(name="aaa", code="xyzzy")
         t = default.TestSingleLinks(
             req_wprop_friend=default.TestSingleLinks.req_wprop_friend.link(
                 u, strength=123
