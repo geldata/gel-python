@@ -35,7 +35,7 @@ T = TypeVar("T")
 T_co = TypeVar("T_co", covariant=True)
 
 
-LITERAL_TAG_FIELDS = ('tname_',)
+LITERAL_TAG_FIELDS = ('tname__',)
 
 
 if TYPE_CHECKING:

@@ -667,7 +667,7 @@ class GelSourceModel(
             ll_setattr(self, "__pydantic_private__", None)
             ll_setattr(self, "__gel_changed_fields__", None)
 
-        ll_setattr(self, "tname_", str(cls.__gel_reflection__.name))
+        ll_setattr(self, "tname__", str(cls.__gel_reflection__.name))
 
         if cls.__gel_has_id_field__:
             mid = self.__dict__.get("id", _unset)

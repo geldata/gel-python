@@ -85,7 +85,7 @@ _P = ParamSpec("_P")
 _R = TypeVar("_R", covariant=True)
 _ModelTestCase_T = TypeVar("_ModelTestCase_T", bound="BaseModelTestCase")
 TNAME = "__tname__"
-TNAME_PY = "tname_"
+TNAME_PY = "tname__"
 
 
 MYPY_INI = """\

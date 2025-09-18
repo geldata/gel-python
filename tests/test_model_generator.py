@@ -1268,7 +1268,7 @@ class TestModelGeneratorMain(tb.ModelTestCase):
                 "comp_opt_wprop_friend",
                 "comp_req_friend",
                 "comp_req_wprop_friend",
-                "tname_",
+                tb.TNAME_PY,
             },
         )
 
@@ -6495,7 +6495,7 @@ class TestModelGeneratorMain(tb.ModelTestCase):
                 "name",
                 "name_len",
                 "upper_name",
-                'tname_',
+                tb.TNAME_PY,
             },
         )
         self.assertEqual(

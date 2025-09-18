@@ -4719,7 +4719,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             literal = self.import_name("typing", "Literal")
             field = self.import_name("pydantic", "Field")
             self._write_model_attribute(
-                "tname_",
+                "tname__",
                 f'{literal}["{type_name}"] = {field}('
                 f'"{type_name}", alias="__tname__")',
             )

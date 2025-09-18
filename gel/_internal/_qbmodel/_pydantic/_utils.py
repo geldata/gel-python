@@ -29,8 +29,10 @@ if TYPE_CHECKING:
     from ._models import GelModel
 
 
+# The real field name is tname__, and we need to manually apply the
+# alias in some places.
 GEL_ALIASES = {
-    "__tname__": "tname_",
+    "__tname__": "tname__",
 }
 
 
