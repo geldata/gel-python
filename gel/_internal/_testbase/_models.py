@@ -10,8 +10,8 @@ from typing import (
     TypeVar,
     TYPE_CHECKING,
 )
-from typing_extensions import Self
 from collections.abc import Awaitable
+from typing_extensions import Self
 
 import argparse
 import base64
@@ -26,6 +26,7 @@ import os
 import pathlib
 import pickle  # noqa: S403
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -294,11 +295,13 @@ class BaseModelTestCase(BranchTestCase):
     DEFAULT_MODULE = "default"
 
     orm_debug: ClassVar[bool]
-    tmp_model_dir: ClassVar[str]
     gen: ClassVar[Any]
 
     std: ClassVar[StdReflectionFixture] = StdReflectionFixture()
     sys_path_ctx: ClassVar[contextlib.ExitStack | None] = None
+
+    _mypy_errors: ClassVar[dict[str, str]]
+    _pyright_errors: ClassVar[dict[str, str]]
 
     @classmethod
     def setUpClass(cls) -> None:
@@ -340,18 +343,6 @@ class BaseModelTestCase(BranchTestCase):
     @classmethod
     async def set_up_class_once(cls, ui: UI) -> None:
         await super().set_up_class_once(ui)
-        orm_debug = os.environ.get("GEL_PYTHON_TEST_ORM") in {"1", "true"}
-
-        td_kwargs: dict[str, Any] = {}
-        if sys.version_info >= (3, 12):
-            td_kwargs["delete"] = not orm_debug
-
-        tmp_model_dir = tempfile.TemporaryDirectory(**td_kwargs)
-        cls.add_class_cleanup_once(
-            lambda: tmp_model_dir.cleanup() if not orm_debug else None
-        )
-
-        cls.update_shared_data(tmp_model_dir=tmp_model_dir.name)
 
         base_dbname = cls.get_base_database_name()
         test_dir = _get_test_class_dir(cls)
@@ -559,6 +550,7 @@ class AsyncModelTestCase(AsyncQueryTestCase, BaseModelTestCase):  # pyright: ign
 
 
 def _typecheck(
+    cls: type[_ModelTestCase_T],  # XXX
     func: Callable[Concatenate[_ModelTestCase_T, _P], _R],
     *,
     xfail: bool = False,
@@ -566,6 +558,92 @@ def _typecheck(
     wrapped: Callable[Concatenate[_ModelTestCase_T, _P], _R] = inspect.unwrap(
         func
     )
+    is_async = inspect.iscoroutinefunction(wrapped)
+
+    # def run(self: ModelTestCase) -> Any:
+    def run(
+        self: _ModelTestCase_T, *args: _P.args, **kwargs: _P.kwargs
+    ) -> _R | Awaitable[_R]:
+        # We already ran the typechecker on everything, so now inspect
+        # the results for this test.
+
+        mypy_output = cls._mypy_errors.get(func.__name__, '')
+        mypy_error = 'error:' in mypy_output
+
+        pyright_output = cls._pyright_errors.get(func.__name__, '')
+        pyright_error = '- error:' in pyright_output
+
+        if mypy_error or pyright_error:
+            source_code = _get_file_code(func)
+            lines = source_code.split("\n")
+            pad_width = max(2, len(str(len(lines))))
+            source_code_numbered = "\n".join(
+                f"{i + 1:0{pad_width}d}: {line}"
+                for i, line in enumerate(lines)
+            )
+
+            if mypy_error:
+                raise RuntimeError(
+                    f"mypy check failed for {func.__name__} "
+                    f"\n\ntest code:\n{source_code_numbered}"
+                    f"\n\nmypy stdout:\n{mypy_output}"
+                )
+
+            if pyright_error:
+                raise RuntimeError(
+                    f"pyright check failed for {func.__name__} "
+                    f"\n\ntest code:\n{source_code_numbered}"
+                    f"\n\npyright stdout:\n{pyright_output}"
+                )
+
+        types = [
+            m.group("name")
+            for line in mypy_output.split("\n")
+            if (m := re.match(r'.*Revealed type is "(?P<name>[^"]+)".*', line))
+        ]
+
+        def reveal_type(
+            _: Any,
+            *,
+            ncalls: list[int] = [0],  # noqa: B006
+            types: list[str] = types,
+        ) -> str | None:
+            ncalls[0] += 1
+            try:
+                return types[ncalls[0] - 1]
+            except IndexError:
+                return None
+
+        if is_async:
+            # `func` is the result of `TestCaseMeta.wrap()`, so we
+            # want to use the coroutine function that was there in
+            # the beginning, so let's use `wrapped`
+            wrapped.__globals__["reveal_type"] = reveal_type
+            return wrapped(self, *args, **kwargs)
+        else:
+            func.__globals__["reveal_type"] = reveal_type
+            return func(self, *args, **kwargs)
+
+    if is_async:
+
+        @functools.wraps(wrapped)
+        async def runner(
+            self: _ModelTestCase_T, *args: _P.args, **kwargs: _P.kwargs
+        ) -> _R:
+            coro = run(self, *args, **kwargs)
+            assert isinstance(coro, Awaitable)
+            return await coro
+
+        rewrapped = TestCaseMeta.wrap(runner)  # type: ignore [arg-type]
+        return unittest.expectedFailure(rewrapped) if xfail else rewrapped
+
+    else:
+        run = functools.wraps(func)(run)
+        return unittest.expectedFailure(run) if xfail else run  # type: ignore [return-value]
+
+
+def _get_file_code(func: Callable[_P, _R]) -> str:
+    wrapped = inspect.unwrap(func)
     is_async = inspect.iscoroutinefunction(wrapped)
 
     source_code = inspect.getsource(wrapped)
@@ -591,159 +669,179 @@ import gel
 from gel._internal._testbase import _models as tb
 
 if not typing.TYPE_CHECKING:
-    def reveal_type(_: Any) -> str:
+    def reveal_type(_: typing.Any) -> str:
         return ''
 
 class TestModel(tb.{base_class_name}):
+
     {"async " if is_async else ""}def {wrapped.__name__}(self) -> None:
 {textwrap.indent(dedented_body, "    " * 2)}
     """
 
-    def run(
-        self: _ModelTestCase_T, *args: _P.args, **kwargs: _P.kwargs
-    ) -> _R | Awaitable[_R]:
-        cls = type(self)
+    return source_code
+
+
+def _typecheck_class(
+    cls: type[_ModelTestCase_T],
+    funcs: Sequence[Callable[Concatenate[_ModelTestCase_T, _P], _R]],
+) -> None:
+    """Extract all the typecheckable functions from a class and typecheck.
+
+    Run both mypy and pyright, then stash the results where the
+    individual functions will deal with them.
+    """
+
+    contents = [(func.__name__, _get_file_code(func)) for func in funcs]
+    cls._mypy_errors = {}
+    cls._pyright_errors = {}
+
+    orig_setupclass = cls.setUpClass
+
+    def _setUp(cls: type[_ModelTestCase_T]) -> None:
+        orig_setupclass()
+
+        orm_debug = os.environ.get("GEL_PYTHON_TEST_ORM") in {"1", "true"}
+
+        td_kwargs: dict[str, Any] = {}
+        if sys.version_info >= (3, 12):
+            td_kwargs["delete"] = not orm_debug
+
+        tmp_model_dir = tempfile.TemporaryDirectory(**td_kwargs)
+        cls.add_class_cleanup_once(
+            lambda: tmp_model_dir.cleanup() if not orm_debug else None
+        )
+
         test_dir = _get_test_class_dir(cls)
-        test_file = sys.modules[cls.__module__].__file__
-        assert test_file
-        root_dir = get_test_source_root()
-        if root_dir is None:
-            root_dir = test_dir.parent
-        models_dir = test_dir / "models"
-        cache_dir = models_dir / ".mypy_cache"
 
-        with tempfile.TemporaryDirectory() as td:
-            d = pathlib.Path(td)
-            testfn = d / "test_shadow.py"
-            inifn = d / "mypy.ini"
+        d = tmp_model_dir.name
+        inifn = pathlib.Path(d) / "mypy.ini"
+        tdir = pathlib.Path(d) / "tests"
+        os.mkdir(tdir)
 
-            testfn.write_text(source_code)
-            inifn.write_text(MYPY_INI)
+        name: str | None
+        for name, code in contents:
+            testfn = tdir / (name + ".py")
+            with open(testfn, "w", encoding="utf-8") as f:
+                f.write(code)
 
-            env = {**os.environ}
-            if pypath := env.get("PYTHONPATH"):
-                pypath = f"{test_dir}{os.pathsep}{pypath}"
-            else:
-                pypath = str(test_dir)
-            env["PYTHONPATH"] = pypath
+        with open(inifn, "w", encoding="utf-8") as f:
+            f.write(
+                textwrap.dedent("""\
+                [mypy]
+                strict = True
+                ignore_errors = False
+                follow_imports = normal
+                show_error_codes = True
+                local_partial_types = True
 
-            mypy_cmd = [
+                # This is very intentional as it allows us to type check things
+                # that must be flagged as an error by the type checker.
+                # Don't "type: ignore" unless it's part of the test.
+                warn_unused_ignores = True
+            """)
+            )
+
+        env = {**os.environ}
+        if pypath := env.get("PYTHONPATH"):
+            pypath = f"{test_dir}{os.pathsep}{pypath}"
+        else:
+            pypath = str(test_dir)
+        env["PYTHONPATH"] = pypath
+
+        try:
+            cmd = [
                 sys.executable,
                 "-m",
                 "mypy",
                 "--strict",
                 "--no-strict-equality",
-                "--no-exclude-gitignore",
-                f"--config-file={inifn}",
-                f"--cache-dir={cache_dir}",
-                f"--module={cls.__module__}",
-                "--shadow-file",
-                test_file,
-                str(testfn),
+                "--config-file",
+                str(inifn),
+                "--cache-dir",
+                str(pathlib.Path(__file__).parent.parent / ".mypy_cache"),
+                str(tdir),
             ]
-
             res = subprocess.run(
-                mypy_cmd,
+                cmd,
                 capture_output=True,
                 check=False,
-                cwd=root_dir,
+                cwd=inifn.parent,
                 env=env,
             )
 
-        if res.returncode != 0:
-            lines = source_code.split("\n")
-            pad_width = max(2, len(str(len(lines))))
-            source_code_numbered = "\n".join(
-                f"{i + 1:0{pad_width}d}: {line}"
-                for i, line in enumerate(lines)
+            cmd = [
+                sys.executable,
+                "-m",
+                "pyright",
+                str(tdir),
+            ]
+
+            pyright_res = subprocess.run(
+                cmd,
+                capture_output=True,
+                check=False,
+                cwd=inifn.parent,
+                env=env,  # work??
+            )
+        finally:
+            inifn.unlink()
+            shutil.rmtree(tdir)
+
+        # Parse out mypy errors and assign them to test cases.
+        # mypy lines are all prefixed with file name
+        start = 'tests' + os.sep
+        for line in res.stdout.decode('utf-8').split('\n'):
+            if not (start in line and '.py' in line):
+                continue
+            name = line.split(start)[1].split('.')[0]
+            cls._mypy_errors[name] = (
+                cls._mypy_errors.get(name, '') + line + '\n'
             )
 
-            raise RuntimeError(
-                f"mypy check failed for {func.__name__} "
-                f"\n\ntest code:\n{source_code_numbered}"
-                f"\n\nmypy stdout:\n{res.stdout.decode()}"
-                f"\n\nmypy stderr:\n{res.stderr.decode()}"
-            )
-
-        types = []
-
-        out = res.stdout.decode().split("\n")
-        for line in out:
-            if m := re.match(r'.*Revealed type is "(?P<name>[^"]+)".*', line):
-                types.append(m.group("name"))  # noqa: PERF401
-
-        def reveal_type(
-            _: Any,
-            *,
-            ncalls: list[int] = [0],  # noqa: B006
-            types: list[str] = types,
-        ) -> str | None:
-            ncalls[0] += 1
-            try:
-                revealed = types[ncalls[0] - 1]
-            except IndexError:
-                return None
+        # Parse out mypy errors and assign them to test cases.
+        # Pyright lines have file name groups started by the name, and
+        # then subsequent lines are indented. Messages can be
+        # multiline.  They have a --outputjson mode that oculd save us
+        # trouble here but would give us some more trouble on the
+        # formatting side so whatever.
+        name = None
+        cur_lines = ''
+        for line in pyright_res.stdout.decode('utf-8').split('\n'):
+            if line.startswith('/'):
+                if name:
+                    cls._pyright_errors[name] = cur_lines
+                cur_lines = ''
+                name = line.split(start)[1].split('.')[0]
             else:
-                # Patch up re-exported std types to pretend
-                # they are not really re-exported.
-                return revealed.replace(
-                    "models.__sharedstd__",
-                    f"models.{cls.get_model_package()}",
-                )
+                cur_lines += line + '\n'
+        if name:
+            cls._pyright_errors[name] = cur_lines
 
-        with _import_extras.sys_path(str(test_dir)):
-            if is_async:
-                # `func` is the result of `TestCaseMeta.wrap()`, so we
-                # want to use the coroutine function that was there in
-                # the beginning, so let's use `wrapped`
-                wrapped.__globals__["reveal_type"] = reveal_type
-                return wrapped(self, *args, **kwargs)
-            else:
-                func.__globals__["reveal_type"] = reveal_type
-                return func(self, *args, **kwargs)
-
-    if is_async:
-
-        @functools.wraps(wrapped)
-        async def runner(
-            self: _ModelTestCase_T, *args: _P.args, **kwargs: _P.kwargs
-        ) -> _R:
-            coro = run(self, *args, **kwargs)
-            assert isinstance(coro, Awaitable)
-            return await coro
-
-        rewrapped = TestCaseMeta.wrap(runner)  # type: ignore [arg-type]
-        return unittest.expectedFailure(rewrapped) if xfail else rewrapped
-
-    else:
-        run = functools.wraps(func)(run)
-        return unittest.expectedFailure(run) if xfail else run  # type: ignore [return-value]
+    cls.setUpClass = classmethod(_setUp)  # type: ignore[method-assign, assignment]
 
 
-def typecheck(
-    arg: type | Callable[Concatenate[_ModelTestCase_T, _P], _R],
-) -> type | Callable[Concatenate[_ModelTestCase_T, _P], _R]:
+def typecheck(arg: type[_ModelTestCase_T]) -> type[_ModelTestCase_T]:
     """Type-check one test of the entire test cases class.
 
     This is designed to type check unit tests that work with reflected Gel
     schemas and the query builder APIs.
     """
     # Please don't add arguments to this decorator, thank you.
-    if isinstance(arg, type):
-        for func in arg.__dict__.values():
-            if not isinstance(func, types.FunctionType):
-                continue
-            if not func.__name__.startswith("test_"):
-                continue
-            new_func = typecheck(func)
-            setattr(arg, func.__name__, new_func)
-        arg._typechecked = True  # type: ignore [attr-defined]
-        return arg
-    else:
-        assert isinstance(arg, types.FunctionType)
-        if hasattr(arg, "_typecheck_skipped"):
-            return arg
-        return _typecheck(arg)
+    assert isinstance(arg, type)
+    all_checked = []
+    for func in arg.__dict__.values():
+        if not isinstance(func, types.FunctionType):
+            continue
+        if not func.__name__.startswith("test_"):
+            continue
+        if hasattr(func, "_typecheck_skipped"):
+            continue
+        all_checked.append(func)
+        new_func = _typecheck(arg, func)
+        setattr(arg, func.__name__, new_func)
+
+    _typecheck_class(arg, all_checked)
+    return arg
 
 
 def skip_typecheck(arg: Callable[_P, _R]) -> Callable[_P, _R]:
