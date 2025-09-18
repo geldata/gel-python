@@ -5424,7 +5424,6 @@ class TestModelGeneratorMain(tb.ModelTestCase):
         from models.orm import default
         from gel._internal._testbase._jsonschema import render_schema_from_json
 
-        self.maxDiff = None
         schema = render_schema_from_json(
             json.dumps(
                 default.User.model_json_schema(mode="serialization"),
