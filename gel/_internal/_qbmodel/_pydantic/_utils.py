@@ -208,7 +208,7 @@ def massage_model_dump_kwargs(
     except KeyError:
         exclude = kwargs["exclude"] = set()
 
-    # HACK
+    # HACK: Handle exclude for internal gel aliases, since pydantic won't.b
     for from_, to_ in GEL_ALIASES.items():
         if from_ in exclude:
             if isinstance(exclude, dict):
