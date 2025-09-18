@@ -22,6 +22,7 @@ from typing_extensions import TypeAliasType, dataclass_transform
 from gel._internal._qbmodel._abstract import (
     DEFAULT_VALUE,
     AbstractLinkSet,
+    AbstractGelLinkModel,
     AbstractMutableLinkSet,
     LinkSet,
     LinkWithPropsSet,
@@ -684,6 +685,18 @@ def push_refetch_existing(
             existing_objects[obj.id] = IDTracker([elst, obj])
 
 
+def _linkprops_have_changes(lprops: AbstractGelLinkModel) -> bool:
+    """Determine whether the link props have any changes.
+    This allows for simpler queries when updating links with properties.
+
+    For this purpose, DEFAULT_VALUE is considered not to be a change.
+    """
+    return bool(lprops.__gel_changed_fields__) and not all(
+        model_attr(lprops, lp_name, None) == DEFAULT_VALUE
+        for lp_name in (lprops.__gel_get_changed_fields__())
+    )
+
+
 def make_plan(
     objs: Iterable[GelModel],
     /,
@@ -780,10 +793,8 @@ def make_plan(
                     link_prop_variant = False
                     if prop.properties:
                         assert isinstance(val, ProxyModel)
-                        link_prop_variant = bool(
-                            get_proxy_linkprops(
-                                val
-                            ).__gel_get_changed_fields__()
+                        link_prop_variant = _linkprops_have_changes(
+                            get_proxy_linkprops(val)
                         )
 
                     if link_prop_variant:
@@ -903,7 +914,7 @@ def make_plan(
                     continue
                 assert isinstance(val, ProxyModel)
                 lprops = get_proxy_linkprops(val)
-                if not lprops.__gel_changed_fields__:
+                if not _linkprops_have_changes(lprops):
                     continue
 
                 # An existing single link has updated link props.
@@ -1023,8 +1034,8 @@ def make_plan(
             added_proxies: Sequence[ProxyModel[GelModel]] = added  # type: ignore [assignment]
 
             # Simple case -- no link props!
-            if not prop.properties or all(
-                not get_proxy_linkprops(link).__gel_get_changed_fields__()
+            if not prop.properties or not any(
+                _linkprops_have_changes(get_proxy_linkprops(link))
                 for link in added_proxies
             ):
                 mch = MultiLinkAdd(
@@ -2023,34 +2034,56 @@ class SaveExecutor:
                         for k in ch.props_info
                     }
 
+                    # A tuple of:
+                    # - whether the lprop is being set
+                    # - whether the lprop is being set to the default value
+                    # - the value being set if present
+                    sl_subt = [
+                        f"tuple<std::bool, std::bool, {arg_casts[lp_name][0]}>"
+                        for lp_name in ch.props_info
+                    ]
+
+                    lprop_args = (
+                        (
+                            lp_name in ch.props,
+                            ch.props.get(lp_name) == DEFAULT_VALUE,
+                            arg_casts[lp_name][2](
+                                None
+                                if ch.props.get(lp_name) == DEFAULT_VALUE
+                                else ch.props.get(lp_name)
+                            ),
+                        )
+                        for lp_name in ch.props_info
+                    )
+                    sl_args = [tid, *lprop_args]
+
+                    arg = add_arg(
+                        f"tuple<std::uuid, {','.join(sl_subt)}>",
+                        sl_args,
+                    )
+
                     if ch.props.keys() == ch.props_info.keys() or for_insert:
                         # Simple case -- we overwrite all link props
 
-                        sl_subt = [arg_casts[k][0] for k in ch.props_info]
-
-                        sl_args = [
-                            tid,
-                            *(
-                                arg_casts[k][2](ch.props[k])
-                                for k in ch.props_info
-                            ),
-                        ]
-
-                        arg = add_arg(
-                            f"tuple<std::uuid, {','.join(sl_subt)}>",
-                            sl_args,
+                        # Currently we don't support __default__
+                        # Use a placeholder {}
+                        lp_assign = ", ".join(
+                            f"""
+                                @{quote_ident(lp_name)} := (
+                                    {{}}
+                                    if not {arg}.{i + 1}.0 else
+                                    {arg_casts[lp_name][1](f"{arg}.{i + 1}.2")}
+                                    if not {arg}.{i + 1}.1 else
+                                    {{}}
+                                )
+                            """
+                            for i, lp_name in enumerate(ch.props_info)
                         )
-
-                        subq_shape = [
-                            f"@{quote_ident(pname)} := "
-                            f"{arg_casts[pname][1](f'{arg}.{i}')}"
-                            for i, pname in enumerate(ch.props_info, 1)
-                        ]
 
                         shape_parts.append(
                             f"{quote_ident(ch.name)} := "
                             f"(select (<{linked_name}>{arg}.0) {{ "
-                            f"  {', '.join(subq_shape)}"
+                            f"  {lp_assign}"
                             f"}})"
                         )
 
@@ -2059,51 +2092,34 @@ class SaveExecutor:
                         # that those props that we don't update must retain
                         # their set value in the DB.
 
-                        sl_subt = [
-                            f"tuple<std::bool, {arg_casts[k][0]}>"
-                            for k in ch.props_info
-                        ]
-
-                        sl_args = [
-                            tid,
-                            *(
-                                (
-                                    k in ch.props,
-                                    arg_casts[k][2](ch.props.get(k)),
-                                )
-                                for k in ch.props_info
-                            ),
-                        ]
-
-                        arg = add_arg(
-                            f"tuple<std::uuid, {','.join(sl_subt)}>",
-                            sl_args,
-                        )
-
                         lps_to_select_shape = ",".join(
-                            f"__{quote_ident(k)} := "
-                            f"std::array_agg(@{quote_ident(k)})"
-                            for k in ch.props_info
+                            f"__{quote_ident(lp_name)} := "
+                            f"std::array_agg(@{quote_ident(lp_name)})"
+                            for lp_name in ch.props_info
                         )
 
                         lps_to_select_shape_tup = ",".join(
-                            f"__m.{quote_ident(ch.name)}.__{quote_ident(k)}"
-                            for k in ch.props_info
+                            f"__m.{quote_ident(ch.name)}.__{quote_ident(lp_name)}"
+                            for lp_name in ch.props_info
                         )
 
+                        # Currently we don't support __default__
+                        # Use a placeholder {}
                         lp_assign_reload = ", ".join(
                             f"""
-                                @{quote_ident(p)} :=
+                                @{quote_ident(lp_name)} :=
                                 (
-                                    {arg_casts[p][1](f"{arg}.{i + 1}.1")}
-                                    if {arg}.{i + 1}.0 else
                                     (
                                         select std::array_unpack(__lprops.{i})
                                         limit 1
                                     )
+                                    if not {arg}.{i + 1}.0 else
+                                    {arg_casts[lp_name][1](f"{arg}.{i + 1}.2")}
+                                    if not {arg}.{i + 1}.1 else
+                                    {{}}
                                 )
                             """
-                            for i, p in enumerate(ch.props_info)
+                            for i, lp_name in enumerate(ch.props_info)
                         )
 
                         shape_parts.append(
@@ -2173,27 +2189,35 @@ class SaveExecutor:
                     tuple_subt: list[str] | None = None
 
                     arg_casts = {
-                        k: arg_cast(ch.props_info[k].typexpr)
-                        for k in ch.props_info
+                        lp_name: arg_cast(ch.props_info[lp_name].typexpr)
+                        for lp_name in ch.props_info
                     }
 
+                    # A tuple of:
+                    # - whether the lprop is being set
+                    # - whether the lprop is being set to the default value
+                    # - the value being set if present
                     tuple_subt = [
-                        f"tuple<std::bool, {arg_casts[k][0]}>"
-                        for k in ch.props_info
+                        f"tuple<std::bool, std::bool, {arg_casts[lp_name][0]}>"
+                        for lp_name in ch.props_info
                     ]
 
                     for addo, addp in zip(
                         ch.added, ch.added_props, strict=True
                     ):
-                        link_args.append(
+                        lprop_args = (
                             (
-                                self._get_id(addo),
-                                *(
-                                    (k in addp, arg_casts[k][2](addp.get(k)))
-                                    for k in ch.props_info
+                                lp_name in addp,
+                                addp.get(lp_name) == DEFAULT_VALUE,
+                                arg_casts[lp_name][2](
+                                    None
+                                    if addp.get(lp_name) == DEFAULT_VALUE
+                                    else addp.get(lp_name)
                                 ),
                             )
+                            for lp_name in ch.props_info
                         )
+                        link_args.append((self._get_id(addo), *lprop_args))
 
                     arg = add_arg(
                         f"array<tuple<std::uuid, {','.join(tuple_subt)}>>",
@@ -2201,10 +2225,19 @@ class SaveExecutor:
                     )
 
                     if new_link:
+                        # Currently we don't support __default__
+                        # Use a placeholder {}
                         lp_assign = ", ".join(
-                            f"@{quote_ident(p)} := "
-                            f"{arg_casts[p][1](f'__tup.{i + 1}.1')}"
-                            for i, p in enumerate(ch.props_info)
+                            f"""
+                                @{quote_ident(lp_name)} := (
+                                    {{}}
+                                    if not __tup.{i + 1}.0 else
+                                    {arg_casts[lp_name][1](f"__tup.{i + 1}.2")}
+                                    if not __tup.{i + 1}.1 else
+                                    {{}}
+                                )
+                            """
+                            for i, lp_name in enumerate(ch.props_info)
                         )
 
                         shape_parts.append(
@@ -2215,25 +2248,29 @@ class SaveExecutor:
                             f"{lp_assign}"
                             f"}})))"
                         )
+
                     else:
                         lps_to_select_shape = ",".join(
-                            f"std::array_agg(__m@{quote_ident(k)})"
-                            for k in ch.props_info
+                            f"std::array_agg(__m@{quote_ident(lp_name)})"
+                            for lp_name in ch.props_info
                         )
 
+                        # Currently we don't support __default__
+                        # Use a placeholder {}
                         lp_assign_reload = ", ".join(
                             f"""
-                                @{quote_ident(p)} :=
-                                (
-                                    {arg_casts[p][1](f"__tup.{i + 1}.1")}
-                                    if __tup.{i + 1}.0 else
+                                @{quote_ident(lp_name)} := (
                                     (
                                         select std::array_unpack(__lprops.{i})
                                         limit 1
                                     )
+                                    if not __tup.{i + 1}.0 else
+                                    {arg_casts[lp_name][1](f"__tup.{i + 1}.2")}
+                                    if not __tup.{i + 1}.1 else
+                                    {{}}
                                 )
                             """
-                            for i, p in enumerate(ch.props_info)
+                            for i, lp_name in enumerate(ch.props_info)
                         )
 
                         # Re `__lprops` below -- currently this is just about
