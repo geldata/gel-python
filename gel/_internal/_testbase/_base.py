@@ -764,7 +764,7 @@ class BranchTestCase(InstanceTestCase):
         instance: _server.BaseInstance,
         connection_class: type[blocking_client.BlockingIOConnection]
         | None = None,
-        **kwargs: str,
+        **kwargs: Any,
     ) -> TestClient:
         if connection_class is None:
             connection_class = blocking_client.BlockingIOConnection
@@ -806,7 +806,7 @@ class BranchTestCase(InstanceTestCase):
         *,
         instance: _server.BaseInstance,
         connection_class: type[asyncio_client.AsyncIOConnection] | None = None,
-        **kwargs: str,
+        **kwargs: Any,
     ) -> TestAsyncIOClient:
         if connection_class is None:
             connection_class = asyncio_client.AsyncIOConnection
