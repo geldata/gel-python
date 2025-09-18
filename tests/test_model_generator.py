@@ -1683,6 +1683,7 @@ class TestModelGeneratorMain(tb.ModelTestCase):
         self.assertPydanticSerializes(
             t,
         )
+        self.assertEqual(t.__tname__, 'content::Account')
 
     def test_modelgen_data_unpack_polymorphic(self):
         from models.orm import default

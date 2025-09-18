@@ -675,6 +675,10 @@ class GelSourceModel(
 
         return self
 
+    @property
+    def __tname__(self) -> str:
+        return self.tname__  # type: ignore[no-any-return, attr-defined]
+
     @classmethod
     def model_construct(
         cls,
