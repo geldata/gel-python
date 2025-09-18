@@ -59,6 +59,7 @@ from ._base import (
 
 __all__ = (
     "TNAME",
+    "TNAME_PY",
     "AsyncModelTestCase",
     "ModelTestCase",
     "must_fail",
@@ -83,7 +84,8 @@ _T = TypeVar("_T")
 _P = ParamSpec("_P")
 _R = TypeVar("_R", covariant=True)
 _ModelTestCase_T = TypeVar("_ModelTestCase_T", bound="BaseModelTestCase")
-TNAME = "tname_"
+TNAME = "__tname__"
+TNAME_PY = "tname_"
 
 
 MYPY_INI = """\
@@ -491,11 +493,10 @@ class BaseModelTestCase(BranchTestCase):
         new_context = context.copy()
         new_context["gel_allow_unsaved"] = True
 
-        new = type(model).model_validate(
-            model.model_dump(
-                context=context,
-            )
+        dumped = model.model_dump(
+            context=context,
         )
+        new = type(model).model_validate(dumped)
         self.assertEqual(
             new.model_dump(context=new_context),
             model.model_dump(context=context),

@@ -4717,9 +4717,11 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             self.write(f'"""type {objtype.name}"""')
             self.write()
             literal = self.import_name("typing", "Literal")
+            field = self.import_name("pydantic", "Field")
             self._write_model_attribute(
                 "tname_",
-                f'{literal}["{type_name}"] = "{type_name}"',
+                f'{literal}["{type_name}"] = {field}('
+                f'"{type_name}", alias="__tname__")',
             )
             pointers = _get_object_type_body(objtype)
             if pointers:

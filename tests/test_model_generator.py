@@ -516,7 +516,6 @@ class TestModelGeneratorMain(tb.ModelTestCase):
                 user_dct,
                 {
                     "name": user.name,
-                    # tb.TNAME: "default::User",
                 },
             )
 
@@ -686,11 +685,12 @@ class TestModelGeneratorMain(tb.ModelTestCase):
             expected,
         )
 
+        # Argh! exclude works based on the *non-aliased* name...
         self.assertEqual(
             sl.model_dump(exclude={
                 "id": True,
-                tb.TNAME: True,
-                "owner": {"id": True, tb.TNAME: True},
+                tb.TNAME_PY: True,
+                "owner": {"id": True, tb.TNAME_PY: True},
             }),
             expected,
         )
@@ -705,8 +705,8 @@ class TestModelGeneratorMain(tb.ModelTestCase):
         self.assertEqual(
             sl.model_dump_json(exclude={
                 "id": True,
-                tb.TNAME: True,
-                "owner": {"id": True, tb.TNAME: True},
+                tb.TNAME_PY: True,
+                "owner": {"id": True, tb.TNAME_PY: True},
             }),
             json.dumps(expected, separators=(",", ":")),
         )
@@ -1640,7 +1640,7 @@ class TestModelGeneratorMain(tb.ModelTestCase):
         )
         self.assertEqual(
             g.model_dump_json(context={"gel_allow_unsaved": True}),
-            '{"tname_":"default::GameSession","num":1,"players":[],'
+            '{"__tname__":"default::GameSession","num":1,"players":[],'
             '"public":true}',
         )
 
@@ -5424,6 +5424,7 @@ class TestModelGeneratorMain(tb.ModelTestCase):
         from models.orm import default
         from gel._internal._testbase._jsonschema import render_schema_from_json
 
+        self.maxDiff = None
         schema = render_schema_from_json(
             json.dumps(
                 default.User.model_json_schema(mode="serialization"),
@@ -5436,23 +5437,23 @@ class TestModelGeneratorMain(tb.ModelTestCase):
             textwrap.dedent(
                 """\
                 class User:
+                    __tname__: Literal['default::User'] = 'default::User'
                     groups: list[UserGroup]  # readonly
                     id: UUID
                     name: str
                     name_len: Any  # readonly
                     nickname: None | str = None
                     nickname_len: None | int  # readonly
-                    tname_: Literal['default::User'] = 'default::User'
 
                 class UserGroup:
+                    __tname__: Literal['default::UserGroup'] \
+= 'default::UserGroup'
                     id: UUID
                     mascot: None | str = None
                     name: str
                     name_len: Any  # readonly
                     nickname: None | str = None
                     nickname_len: None | int  # readonly
-                    tname_: Literal['default::UserGroup'] \
-= 'default::UserGroup'
                     users: list[User] = ..."""
             ),
         )
@@ -5469,10 +5470,10 @@ class TestModelGeneratorMain(tb.ModelTestCase):
             textwrap.dedent(
                 """\
                 class User:
+                    __tname__: Literal['default::User'] = 'default::User'
                     id: UUID
                     name: str
-                    nickname: None | str = None
-                    tname_: Literal['default::User'] = 'default::User'"""
+                    nickname: None | str = None"""
             ),
         )
 
@@ -5525,23 +5526,23 @@ class TestModelGeneratorMain(tb.ModelTestCase):
                     nickname_len: None | int  # readonly
 
                 class User:
+                    __tname__: Literal['default::User'] = 'default::User'
                     groups: list[UserGroup]  # readonly
                     id: UUID
                     name: str
                     name_len: Any  # readonly
                     nickname: None | str = None
                     nickname_len: None | int  # readonly
-                    tname_: Literal['default::User'] = 'default::User'
 
                 class UserGroup:
+                    __tname__: Literal['default::UserGroup'] \
+= 'default::UserGroup'
                     id: UUID
                     mascot: None | str = None
                     name: str
                     name_len: Any  # readonly
                     nickname: None | str = None
                     nickname_len: None | int  # readonly
-                    tname_: Literal['default::UserGroup'] \
-= 'default::UserGroup'
                     users: list[User] = ..."""
             ),
         )
@@ -6494,7 +6495,7 @@ class TestModelGeneratorMain(tb.ModelTestCase):
                 "name",
                 "name_len",
                 "upper_name",
-                tb.TNAME,
+                'tname_',
             },
         )
         self.assertEqual(

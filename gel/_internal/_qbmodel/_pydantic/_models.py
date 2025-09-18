@@ -594,6 +594,8 @@ DEFAULT_MODEL_CONFIG = pydantic.ConfigDict(
     validate_assignment=True,
     defer_build=True,
     extra="forbid",
+    serialize_by_alias=True,
+    validate_by_name=False,
 )
 
 
@@ -898,7 +900,7 @@ class GelSourceModel(
 
     @classmethod
     def __gel_validate__(cls, value: Any) -> GelSourceModel:
-        key = 'tname_'
+        key = '__tname__'
         ccls = cls
         if isinstance(value, dict) and key in value:
             ncls: Any = cls.get_class_by_name(value[key])
@@ -970,6 +972,7 @@ class GelModel(
 
         validator = cls.__pydantic_validator__
         for arg, value in kwargs.items():
+            arg = _pydantic_utils.GEL_ALIASES.get(arg, arg)  # noqa: PLW2901  # ignoring it in ruff.toml failed?
             # Faster than setattr()
             validator.validate_assignment(self, arg, value)
 
