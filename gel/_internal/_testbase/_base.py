@@ -630,6 +630,10 @@ class BranchTestCase(InstanceTestCase):
     BASE_TEST_CLASS = True
     TEARDOWN_RETRY_DROP_DB = 1
 
+    # The windows test runners were timing out when it was the default
+    # of 10s.
+    DEFAULT_CONNECT_TIMEOUT = 30
+
     client: ClassVar[TestClient | TestAsyncIOClient]
 
     @classmethod
@@ -779,6 +783,7 @@ class BranchTestCase(InstanceTestCase):
         instance: _server.BaseInstance | None = None,
         connection_class: type[blocking_client.BlockingIOConnection]
         | None = None,
+        timeout: float = DEFAULT_CONNECT_TIMEOUT,
         **kwargs: Any,
     ) -> Iterator[TestClient]:
         if instance is None:
@@ -786,6 +791,7 @@ class BranchTestCase(InstanceTestCase):
         client = cls.make_blocking_test_client(
             instance=instance,
             connection_class=connection_class,
+            timeout=timeout,
             **kwargs,
         )
         client.ensure_connected()
@@ -818,6 +824,7 @@ class BranchTestCase(InstanceTestCase):
         *,
         instance: _server.BaseInstance | None = None,
         connection_class: type[asyncio_client.AsyncIOConnection] | None = None,
+        timeout: float = DEFAULT_CONNECT_TIMEOUT,
         **kwargs: Any,
     ) -> AsyncIterator[TestAsyncIOClient]:
         if instance is None:
@@ -825,6 +832,7 @@ class BranchTestCase(InstanceTestCase):
         client = cls.make_async_test_client(
             instance=instance,
             connection_class=connection_class,
+            timeout=timeout,
             **kwargs,
         )
         await client.ensure_connected()
