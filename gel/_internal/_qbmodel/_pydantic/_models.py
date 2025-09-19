@@ -1369,10 +1369,6 @@ class _MergedModelBase(
     metaclass=_MergedModelMeta,
     __gel_root_class__=True,
 ):
-    # A hint to the base metaclass to not include this class in the
-    # name->class registry.
-    __gel_merged_model__ = True
-
     # Used exclusively by ProxyModel.__gel_proxy_make_merged_model__.
     if TYPE_CHECKING:
         __gel_new__: bool

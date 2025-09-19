@@ -166,10 +166,10 @@ class AbstractGelModelMeta(GelTypeMeta):
         )
         reflection = cls.__gel_reflection__
         if (
+            # The class registry only tracks the canonical base instances,
+            # which are the ones that directly declare 'tname__'
             (tname := getattr(reflection, "name", None)) is not None
-            and not issubclass(cls, AbstractGelLinkModel)
-            and not hasattr(cls, '__linkprops__')
-            and not hasattr(cls, '__gel_merged_model__')
+            and 'tname__' in namespace
         ):
             mcls.__gel_class_registry__[str(tname)] = cls
         cls.__gel_shape__ = __gel_shape__

@@ -375,6 +375,8 @@ cdef class ObjectCodec(BaseNamedRecordCodec):
             except AttributeError:
                 pass
             else:
+                # setdefault only sets it if isn't set already, so
+                # custom subtypes won't be picked up.
                 tname_map.setdefault(str(sub_name), ch)
 
         subs = []

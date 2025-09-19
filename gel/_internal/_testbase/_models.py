@@ -462,6 +462,8 @@ class BaseModelTestCase(BranchTestCase):
         self,
         model: pydantic.BaseModel,
         expected: Any = _unset,
+        *,
+        test_pickle: bool = True,
     ) -> None:
         context = {}
         try:
@@ -501,6 +503,8 @@ class BaseModelTestCase(BranchTestCase):
             new.model_dump(context=new_context),
             model.model_dump(context=context),
         )
+        if test_pickle:
+            repickle(new)
 
         new = type(model)(**model.model_dump(context=context))
         self.assertEqual(
