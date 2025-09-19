@@ -17,6 +17,7 @@
 #
 
 import typing
+import typing_extensions
 import dataclasses
 
 import csv
@@ -276,14 +277,41 @@ class ProfilingData:
             writer.writerows(csv_data)
 
 
+CleanupObjects = typing_extensions.TypeAliasType(
+    "CleanupObjects",
+    dict[type[GelModel], typing.Sequence[GelModel]],
+)
+
+
+OperationResult = typing_extensions.TypeAliasType(
+    "OperationResult",
+    tuple[
+        dict[str, typing.Sequence[GelModel]],
+        CleanupObjects,
+    ],
+)
+
+
+def cleanup_operation(
+    client: ProfilingTestClient,
+    objects: CleanupObjects,
+) -> None:
+    cleanup_ids = [o.id for _, t_objs in objects.items() for o in t_objs]
+    client.query(
+        "delete Object filter .id in array_unpack(<array<uuid>>$0)",
+        cleanup_ids,
+    )
+
+
 def profile_operation(
     client: ProfilingTestClient,
-    operation: typing.Callable[[int], dict[str, typing.Sequence[GelModel]]],
+    operation: typing.Callable[[int], OperationResult],
     count_max: int = 400,
 ) -> ProfilingData:
     # Get the number of batches and refetches
     # This also "warms up" the system
-    object_labels = operation(1)
+    object_labels, clenaup_objects = operation(1)
+    cleanup_operation(client, clenaup_objects)
 
     # Prepare profiling data
     batch_labels, refetch_labels = client.get_profiling_query_labels(
@@ -293,7 +321,7 @@ def profile_operation(
 
     # Profiling with increasing object count
     for count in range(5, count_max + 1, 5):
-        operation(count)
+        _, clenaup_objects = operation(count)
 
         data.records.append(
             ProfilingRecord(
@@ -302,6 +330,8 @@ def profile_operation(
                 refetch_data=client.refetch_query_times,
             )
         )
+
+        cleanup_operation(client, clenaup_objects)
 
     return data
 
@@ -346,16 +376,21 @@ class TestProfilingSimple(BaseProfilingTestCase):
         # Isolated objects
         from models.TestProfilingSimple import default
 
-        def _operation(count: int) -> dict[str, typing.Sequence[GelModel]]:
+        def _operation(count: int) -> OperationResult:
             print(f'_operation._operation({count})')
 
             objs = [default.Obj_01() for _ in range(count)]
 
             self.client.sync(*objs, warn_on_large_sync=False)
 
-            return {
-                "object": objs,
-            }
+            return (
+                {
+                    "object": objs,
+                },
+                {
+                    default.Obj_01: objs,
+                },
+            )
 
         data = profile_operation(self.get_profiling_client(), _operation)
         data.write_csv("profiling_simple_01.csv")
@@ -366,16 +401,21 @@ class TestProfilingSimple(BaseProfilingTestCase):
 
         def _operation_value(
             count: int,
-        ) -> dict[str, typing.Sequence[GelModel]]:
+        ) -> OperationResult:
             print(f'test_profiling_simple_02._operation_value({count})')
 
             objs = [default.Obj_02(prop=1) for _ in range(count)]
 
             self.client.sync(*objs, warn_on_large_sync=False)
 
-            return {
-                "object": objs,
-            }
+            return (
+                {
+                    "object": objs,
+                },
+                {
+                    default.Obj_02: objs,
+                },
+            )
 
         data = profile_operation(self.get_profiling_client(), _operation_value)
         data.write_csv("profiling_simple_02_value.csv")
@@ -386,16 +426,21 @@ class TestProfilingSimple(BaseProfilingTestCase):
 
         def _operation_default(
             count: int,
-        ) -> dict[str, typing.Sequence[GelModel]]:
+        ) -> OperationResult:
             print(f'test_profiling_simple_02._operation_default({count})')
 
             objs = [default.Obj_02() for _ in range(count)]
 
             self.client.sync(*objs, warn_on_large_sync=False)
 
-            return {
-                "object": objs,
-            }
+            return (
+                {
+                    "object": objs,
+                },
+                {
+                    default.Obj_02: objs,
+                },
+            )
 
         data = profile_operation(
             self.get_profiling_client(), _operation_default
@@ -408,16 +453,21 @@ class TestProfilingSimple(BaseProfilingTestCase):
 
         def _operation_none(
             count: int,
-        ) -> dict[str, typing.Sequence[GelModel]]:
+        ) -> OperationResult:
             print(f'test_profiling_simple_02._operation_none({count})')
 
             objs = [default.Obj_02(prop=None) for _ in range(count)]
 
             self.client.sync(*objs, warn_on_large_sync=False)
 
-            return {
-                "object": objs,
-            }
+            return (
+                {
+                    "object": objs,
+                },
+                {
+                    default.Obj_02: objs,
+                },
+            )
 
         data = profile_operation(self.get_profiling_client(), _operation_none)
         data.write_csv("profiling_simple_02_none.csv")
@@ -428,16 +478,21 @@ class TestProfilingSimple(BaseProfilingTestCase):
 
         def _operation_value(
             count: int,
-        ) -> dict[str, typing.Sequence[GelModel]]:
+        ) -> OperationResult:
             print(f'test_profiling_simple_03._operation_value({count})')
 
             objs = [default.Obj_03(prop=1) for _ in range(count)]
 
             self.client.sync(*objs, warn_on_large_sync=False)
 
-            return {
-                "object": objs,
-            }
+            return (
+                {
+                    "object": objs,
+                },
+                {
+                    default.Obj_03: objs,
+                },
+            )
 
         data = profile_operation(self.get_profiling_client(), _operation_value)
         data.write_csv("profiling_simple_03_value.csv")
@@ -448,16 +503,21 @@ class TestProfilingSimple(BaseProfilingTestCase):
 
         def _operation_default(
             count: int,
-        ) -> dict[str, typing.Sequence[GelModel]]:
+        ) -> OperationResult:
             print(f'test_profiling_simple_03._operation_default({count})')
 
             objs = [default.Obj_03() for _ in range(count)]
 
             self.client.sync(*objs, warn_on_large_sync=False)
 
-            return {
-                "object": objs,
-            }
+            return (
+                {
+                    "object": objs,
+                },
+                {
+                    default.Obj_03: objs,
+                },
+            )
 
         data = profile_operation(
             self.get_profiling_client(), _operation_default
@@ -470,16 +530,21 @@ class TestProfilingSimple(BaseProfilingTestCase):
 
         def _operation_none(
             count: int,
-        ) -> dict[str, typing.Sequence[GelModel]]:
+        ) -> OperationResult:
             print(f'test_profiling_simple_03._operation_none({count})')
 
             objs = [default.Obj_03(prop=None) for _ in range(count)]
 
             self.client.sync(*objs, warn_on_large_sync=False)
 
-            return {
-                "object": objs,
-            }
+            return (
+                {
+                    "object": objs,
+                },
+                {
+                    default.Obj_03: objs,
+                },
+            )
 
         data = profile_operation(self.get_profiling_client(), _operation_none)
         data.write_csv("profiling_simple_03_none.csv")
@@ -492,17 +557,22 @@ class TestProfilingSimple(BaseProfilingTestCase):
         target = default.Target_04()
         self.client.save(target)
 
-        def _operation(count: int) -> dict[str, typing.Sequence[GelModel]]:
+        def _operation(count: int) -> OperationResult:
             print(f'test_profiling_simple_04._operation({count})')
 
             sources = [default.Source_04(target=target) for _ in range(count)]
 
             self.client.sync(target, *sources, warn_on_large_sync=False)
 
-            return {
-                "target": [target],
-                "sources": sources,
-            }
+            return (
+                {
+                    "target": [target],
+                    "sources": sources,
+                },
+                {
+                    default.Source_04: sources,
+                },
+            )
 
         data = profile_operation(self.get_profiling_client(), _operation)
         data.write_csv("profiling_simple_04.csv")
@@ -517,7 +587,7 @@ class TestProfilingSimple(BaseProfilingTestCase):
 
         def _operation_value(
             count: int,
-        ) -> dict[str, typing.Sequence[GelModel]]:
+        ) -> OperationResult:
             print(f'test_profiling_simple_05._operation_value({count})')
 
             sources = [
@@ -529,10 +599,15 @@ class TestProfilingSimple(BaseProfilingTestCase):
 
             self.client.sync(target, *sources, warn_on_large_sync=False)
 
-            return {
-                "target": [target],
-                "sources": sources,
-            }
+            return (
+                {
+                    "target": [target],
+                    "sources": sources,
+                },
+                {
+                    default.Source_05: sources,
+                },
+            )
 
         data = profile_operation(self.get_profiling_client(), _operation_value)
         data.write_csv("profiling_simple_05_value.csv")
@@ -547,7 +622,7 @@ class TestProfilingSimple(BaseProfilingTestCase):
 
         def _operation_default(
             count: int,
-        ) -> dict[str, typing.Sequence[GelModel]]:
+        ) -> OperationResult:
             print(f'test_profiling_simple_05._operation_default({count})')
 
             sources = [
@@ -557,10 +632,15 @@ class TestProfilingSimple(BaseProfilingTestCase):
 
             self.client.sync(target, *sources, warn_on_large_sync=False)
 
-            return {
-                "target": [target],
-                "sources": sources,
-            }
+            return (
+                {
+                    "target": [target],
+                    "sources": sources,
+                },
+                {
+                    default.Source_05: sources,
+                },
+            )
 
         data = profile_operation(
             self.get_profiling_client(), _operation_default
@@ -577,7 +657,7 @@ class TestProfilingSimple(BaseProfilingTestCase):
 
         def _operation_none(
             count: int,
-        ) -> dict[str, typing.Sequence[GelModel]]:
+        ) -> OperationResult:
             print(f'test_profiling_simple_05._operation_none({count})')
 
             sources = [
@@ -589,10 +669,15 @@ class TestProfilingSimple(BaseProfilingTestCase):
 
             self.client.sync(target, *sources, warn_on_large_sync=False)
 
-            return {
-                "target": [target],
-                "sources": sources,
-            }
+            return (
+                {
+                    "target": [target],
+                    "sources": sources,
+                },
+                {
+                    default.Source_05: sources,
+                },
+            )
 
         data = profile_operation(self.get_profiling_client(), _operation_none)
         data.write_csv("profiling_simple_05_none.csv")
@@ -607,7 +692,7 @@ class TestProfilingSimple(BaseProfilingTestCase):
 
         def _operation_value(
             count: int,
-        ) -> dict[str, typing.Sequence[GelModel]]:
+        ) -> OperationResult:
             print(f'test_profiling_simple_06._operation_value({count})')
 
             sources = [
@@ -619,10 +704,15 @@ class TestProfilingSimple(BaseProfilingTestCase):
 
             self.client.sync(target, *sources, warn_on_large_sync=False)
 
-            return {
-                "target": [target],
-                "sources": sources,
-            }
+            return (
+                {
+                    "target": [target],
+                    "sources": sources,
+                },
+                {
+                    default.Source_06: sources,
+                },
+            )
 
         data = profile_operation(self.get_profiling_client(), _operation_value)
         data.write_csv("profiling_simple_06_value.csv")
@@ -637,7 +727,7 @@ class TestProfilingSimple(BaseProfilingTestCase):
 
         def _operation_default(
             count: int,
-        ) -> dict[str, typing.Sequence[GelModel]]:
+        ) -> OperationResult:
             print(f'test_profiling_simple_06._operation_default({count})')
 
             sources = [
@@ -647,10 +737,15 @@ class TestProfilingSimple(BaseProfilingTestCase):
 
             self.client.sync(target, *sources, warn_on_large_sync=False)
 
-            return {
-                "target": [target],
-                "sources": sources,
-            }
+            return (
+                {
+                    "target": [target],
+                    "sources": sources,
+                },
+                {
+                    default.Source_06: sources,
+                },
+            )
 
         data = profile_operation(
             self.get_profiling_client(), _operation_default
@@ -667,7 +762,7 @@ class TestProfilingSimple(BaseProfilingTestCase):
 
         def _operation_none(
             count: int,
-        ) -> dict[str, typing.Sequence[GelModel]]:
+        ) -> OperationResult:
             print(f'test_profiling_simple_06._operation_none({count})')
 
             sources = [
@@ -679,10 +774,15 @@ class TestProfilingSimple(BaseProfilingTestCase):
 
             self.client.sync(target, *sources, warn_on_large_sync=False)
 
-            return {
-                "target": [target],
-                "sources": sources,
-            }
+            return (
+                {
+                    "target": [target],
+                    "sources": sources,
+                },
+                {
+                    default.Source_06: sources,
+                },
+            )
 
         data = profile_operation(self.get_profiling_client(), _operation_none)
         data.write_csv("profiling_simple_06_none.csv")
@@ -701,16 +801,21 @@ class TestProfilingChemistry(BaseProfilingTestCase):
         # Adding objects with no links
         from models.chemistry import default
 
-        def _operation(count: int) -> dict[str, typing.Sequence[GelModel]]:
+        def _operation(count: int) -> OperationResult:
             # Create reactors
             reactors = [default.Reactor() for _ in range(count)]
 
             # Sync
             self.client.sync(*reactors, warn_on_large_sync=False)
 
-            return {
-                "reactors": reactors,
-            }
+            return (
+                {
+                    "reactors": reactors,
+                },
+                {
+                    default.Reactor: reactors,
+                },
+            )
 
         data = profile_operation(self.get_profiling_client(), _operation)
         data.write_csv("profiling_chemistry_01.csv")
@@ -723,7 +828,7 @@ class TestProfilingChemistry(BaseProfilingTestCase):
             default.Element.filter(symbol="He").limit(1)
         )
 
-        def _operation(count: int) -> dict[str, typing.Sequence[GelModel]]:
+        def _operation(count: int) -> OperationResult:
             # Create new reactor and atoms
             reactor = default.Reactor()
             atoms = [
@@ -734,11 +839,17 @@ class TestProfilingChemistry(BaseProfilingTestCase):
             # Sync
             self.client.sync(reactor, *atoms, warn_on_large_sync=False)
 
-            return {
-                "helium": [helium],
-                "reactor": [reactor],
-                "atoms": atoms,
-            }
+            return (
+                {
+                    "helium": [helium],
+                    "reactor": [reactor],
+                    "atoms": atoms,
+                },
+                {
+                    default.Reactor: [reactor],
+                    default.Atom: atoms,
+                },
+            )
 
         data = profile_operation(self.get_profiling_client(), _operation)
         data.write_csv("profiling_chemistry_02.csv")
@@ -752,7 +863,7 @@ class TestProfilingChemistry(BaseProfilingTestCase):
             default.Element.filter(symbol="He").limit(1)
         )
 
-        def _operation(count: int) -> dict[str, typing.Sequence[GelModel]]:
+        def _operation(count: int) -> OperationResult:
             # Create two reactors
             reactor_1 = default.Reactor()
             reactor_2 = default.Reactor()
@@ -775,12 +886,18 @@ class TestProfilingChemistry(BaseProfilingTestCase):
             # Sync the move operation
             self.client.sync(*atoms, warn_on_large_sync=False)
 
-            return {
-                "helium": [helium],
-                "reactor_1": [reactor_1],
-                "reactor_2": [reactor_2],
-                "atoms": atoms,
-            }
+            return (
+                {
+                    "helium": [helium],
+                    "reactor_1": [reactor_1],
+                    "reactor_2": [reactor_2],
+                    "atoms": atoms,
+                },
+                {
+                    default.Reactor: [reactor_1, reactor_2],
+                    default.Atom: atoms,
+                },
+            )
 
         data = profile_operation(self.get_profiling_client(), _operation)
         data.write_csv("profiling_chemistry_03.csv")
@@ -793,7 +910,7 @@ class TestProfilingChemistry(BaseProfilingTestCase):
             default.Element.filter(symbol="He").limit(1)
         )
 
-        def _operation(count: int) -> dict[str, typing.Sequence[GelModel]]:
+        def _operation(count: int) -> OperationResult:
             # Create RefAtoms with helium element
             ref_atoms = [default.RefAtom(element=helium) for _ in range(count)]
 
@@ -805,11 +922,17 @@ class TestProfilingChemistry(BaseProfilingTestCase):
             # Sync - create all objects
             self.client.sync(*ref_atoms, compound, warn_on_large_sync=False)
 
-            return {
-                "helium": [helium],
-                "ref_atoms": ref_atoms,
-                "compound": [compound],
-            }
+            return (
+                {
+                    "helium": [helium],
+                    "ref_atoms": ref_atoms,
+                    "compound": [compound],
+                },
+                {
+                    default.RefAtom: ref_atoms,
+                    default.Compound: [compound],
+                },
+            )
 
         data = profile_operation(self.get_profiling_client(), _operation)
         data.write_csv("profiling_chemistry_04.csv")
@@ -822,7 +945,7 @@ class TestProfilingChemistry(BaseProfilingTestCase):
             default.Element.filter(symbol="He").limit(1)
         )
 
-        def _operation(count: int) -> dict[str, typing.Sequence[GelModel]]:
+        def _operation(count: int) -> OperationResult:
             # Create RefAtoms with helium element
             ref_atoms = [default.RefAtom(element=helium) for _ in range(count)]
 
@@ -840,11 +963,17 @@ class TestProfilingChemistry(BaseProfilingTestCase):
             # Sync the clear operation
             self.client.sync(compound, warn_on_large_sync=False)
 
-            return {
-                "helium": [helium],
-                "ref_atoms": ref_atoms,
-                "compound": [compound],
-            }
+            return (
+                {
+                    "helium": [helium],
+                    "ref_atoms": ref_atoms,
+                    "compound": [compound],
+                },
+                {
+                    default.RefAtom: ref_atoms,
+                    default.Compound: [compound],
+                },
+            )
 
         data = profile_operation(self.get_profiling_client(), _operation)
         data.write_csv("profiling_chemistry_05.csv")
