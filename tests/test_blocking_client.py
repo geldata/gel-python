@@ -195,11 +195,18 @@ class TestBlockingClient(tb.SyncQueryTestCase):
             client.execute("SELECT {1, 2, 3, 4}")
             q.put(1)
 
+        def wrapper(func, client, q):
+            try:
+                func(client, q)
+            except Exception as e:
+                q.put(e)
+                raise
+
         def run(N, meth):
             with self.create_client(max_concurrency=10) as client:
                 q = queue.Queue()
                 coros = [
-                    threading.Thread(target=meth, args=(client, q))
+                    threading.Thread(target=wrapper, args=(meth, client, q))
                     for _ in range(N)
                 ]
                 for coro in coros:
@@ -209,6 +216,9 @@ class TestBlockingClient(tb.SyncQueryTestCase):
                 res = []
                 while not q.empty():
                     res.append(q.get_nowait())
+                for el in res:
+                    if isinstance(el, Exception):
+                        raise el
                 self.assertEqual(res, [1] * N)
 
         methods = [
