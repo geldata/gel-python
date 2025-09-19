@@ -36,6 +36,7 @@ from ._base import (
     AbstractGelLinkModel,
     is_gel_type,
     maybe_collapse_object_type_variant_union,
+    LITERAL_TAG_FIELDS,
 )
 
 
@@ -116,7 +117,9 @@ class ModelFieldDescriptor(_qb.AbstractFieldDescriptor):
         if (
             t is not None
             and _typing_inspect.is_generic_alias(t)
-            and issubclass(typing.get_origin(t), PointerDescriptor)
+            and (origin := typing.get_origin(t))
+            and isinstance(origin, type)
+            and issubclass(origin, PointerDescriptor)
         ):
             self.__gel_resolved_descriptor__ = t
             t = typing.get_args(t)[0]
@@ -127,12 +130,15 @@ class ModelFieldDescriptor(_qb.AbstractFieldDescriptor):
                 if collapsed is not None:
                     t = collapsed
 
-            if not is_gel_type(t):
+            if (
+                not is_gel_type(t)
+                and self.__gel_name__ not in LITERAL_TAG_FIELDS
+            ):
                 raise AssertionError(
                     f"{self._fqname} type argument is not a GelType: {t}"
                 )
 
-            self.__gel_resolved_type__ = t
+            self.__gel_resolved_type__ = cast('type[GelType]', t)
 
         return t
 
@@ -606,6 +612,9 @@ class GelLinkModelDescriptor(
 
 class AbstractGelProxyModel(AbstractGelModel, Generic[_MT_co, _LM_co]):
     __linkprops__: GelLinkModelDescriptor[_LM_co]
+    __gel_dynamic_proxy_base__: ClassVar[
+        type[AbstractGelProxyModel[Any, Any]] | None
+    ] = None
 
     if TYPE_CHECKING:
         _p__obj__: _MT_co
@@ -828,7 +837,7 @@ def proxy_link(
 ) -> AbstractGelProxyModel[_MT_co, _LM_co]:
     tp_new = type(new)
 
-    if tp_new is proxy_type:
+    if tp_new is proxy_type or issubclass(tp_new, proxy_type):
         # Fast path for the same proxy type.
 
         new_proxy = cast("AbstractGelProxyModel[_MT_co, _LM_co]", new)

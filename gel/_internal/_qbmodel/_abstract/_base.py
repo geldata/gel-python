@@ -35,6 +35,9 @@ T = TypeVar("T")
 T_co = TypeVar("T_co", covariant=True)
 
 
+LITERAL_TAG_FIELDS = ('tname__',)
+
+
 if TYPE_CHECKING:
 
     class GelTypeMeta(abc.ABCMeta):
@@ -162,8 +165,13 @@ class AbstractGelModelMeta(GelTypeMeta):
             super().__new__(mcls, name, bases, namespace, **kwargs),
         )
         reflection = cls.__gel_reflection__
-        if (tname := getattr(reflection, "name", None)) is not None:
-            mcls.__gel_class_registry__[tname] = cls
+        if (
+            # The class registry only tracks the canonical base instances,
+            # which are the ones that directly declare 'tname__'
+            (tname := getattr(reflection, "name", None)) is not None
+            and 'tname__' in namespace
+        ):
+            mcls.__gel_class_registry__[str(tname)] = cls
         cls.__gel_shape__ = __gel_shape__
         return cls
 

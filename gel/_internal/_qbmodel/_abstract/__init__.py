@@ -15,6 +15,7 @@ from ._base import (
     DefaultValue,
     GelType,
     GelTypeMeta,
+    LITERAL_TAG_FIELDS,
 )
 
 from ._descriptors import (
@@ -110,6 +111,7 @@ from ._primitive import (
 
 __all__ = (
     "DEFAULT_VALUE",
+    "LITERAL_TAG_FIELDS",
     "MODEL_SUBSTRATE_MODULE",
     "AbstractGelLinkModel",
     "AbstractGelModel",
