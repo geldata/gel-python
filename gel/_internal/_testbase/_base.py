@@ -356,9 +356,17 @@ class InstanceFixture:
         if self._instance is not None:
             return
 
-        if self._server_addr is not None:
+        server_addr = self._server_addr
+        if server_addr is None:
+            server_addr = {
+                "host": "localhost",
+                "port": 5656,
+                "tls_ca_file": "/home/dnwpark/work/dev-3.12/edgedb/tmp/devdatadir/edbtlscert.pem",
+            }
+
+        if server_addr is not None:
             await self._set_up_running_instance(
-                self._server_addr,
+                server_addr,
                 self._server_version,
             )
         else:

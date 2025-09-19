@@ -338,6 +338,8 @@ def profile_operation(
 
 class TestProfilingSimple(BaseProfilingTestCase):
     SCHEMA = """
+    using future simple_scoping;
+    module default {
     type Obj_01;
 
     type Obj_02 {
@@ -370,6 +372,7 @@ class TestProfilingSimple(BaseProfilingTestCase):
             };
         };
     };
+    }
     """
 
     def test_profiling_simple_01(self) -> None:
@@ -619,6 +622,12 @@ class TestProfilingSimple(BaseProfilingTestCase):
 
         target = default.Target_05()
         self.client.save(target)
+
+        noise = [
+            default.Source_05(target=default.Source_05.target.link(target))
+            for _ in range(50000)
+        ]
+        self.client.save(*noise)
 
         def _operation_default(
             count: int,
