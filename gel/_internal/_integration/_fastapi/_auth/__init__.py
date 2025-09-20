@@ -31,12 +31,12 @@ if TYPE_CHECKING:
     from ._oidc import OpenIDConnect
 
 
-_BUILTIN_OIDC_PROVIDERS = {
+_BUILTIN_OAUTH2_PROVIDERS = {
     "apple": "builtin::oauth_apple",
     "azure": "builtin::oauth_azure",
-    "discord": "builtin::oauth_discord",  # actually OAuth2 without id_token
+    "discord": "builtin::oauth_discord",
     "slack": "builtin::oauth_slack",
-    "github": "builtin::oauth_github",  # actually OAuth2 without id_token
+    "github": "builtin::oauth_github",
     "google": "builtin::oauth_google",
 }
 
@@ -266,7 +266,7 @@ class GelAuth(client_mod.Extension):
         self._auto_builtin_ui = False
         return self
 
-    def openid_connect(self, name: str) -> OpenIDConnect:
+    def openid_provider(self, name: str) -> OpenIDConnect:
         if name in self._oidc_providers:
             provider = self._oidc_providers[name]
         else:
@@ -279,13 +279,13 @@ class GelAuth(client_mod.Extension):
             self._oidc_providers[name] = provider
         return provider
 
-    def with_openid_connect(self, name: str, **kwargs: Any) -> Self:
-        provider = self.openid_connect(name)
+    def with_openid_provider(self, name: str, **kwargs: Any) -> Self:
+        provider = self.openid_provider(name)
         for key, value in kwargs.items():
             getattr(provider, key)(value)
         return self
 
-    def without_openid_connect(self, name: str) -> Self:
+    def without_openid_provider(self, name: str) -> Self:
         if self.installed:
             raise ValueError("Cannot remove OIDC provider after installation")
 
@@ -296,15 +296,15 @@ class GelAuth(client_mod.Extension):
 
     def __getattr__(self, item: str) -> Any:
         if item.startswith("with_"):
-            name = _BUILTIN_OIDC_PROVIDERS.get(item.removeprefix("with_"))
+            name = _BUILTIN_OAUTH2_PROVIDERS.get(item.removeprefix("with_"))
             if name is not None:
-                return functools.partial(self.with_openid_connect, name)
+                return functools.partial(self.with_openid_provider, name)
         elif item.startswith("without_"):
-            name = _BUILTIN_OIDC_PROVIDERS.get(item.removeprefix("without_"))
+            name = _BUILTIN_OAUTH2_PROVIDERS.get(item.removeprefix("without_"))
             if name is not None:
-                return functools.partial(self.without_openid_connect, name)
-        elif item in _BUILTIN_OIDC_PROVIDERS:
-            return self.openid_connect(_BUILTIN_OIDC_PROVIDERS[item])
+                return functools.partial(self.without_openid_provider, name)
+        elif item in _BUILTIN_OAUTH2_PROVIDERS:
+            return self.openid_provider(_BUILTIN_OAUTH2_PROVIDERS[item])
         raise AttributeError(
             f"{type(self).__name__!r} has no attribute {item!r}"
         )
@@ -330,14 +330,14 @@ class GelAuth(client_mod.Extension):
             if config:
                 for provider in config.providers:
                     if (
-                        provider.name in _BUILTIN_OIDC_PROVIDERS.values()
+                        provider.name in _BUILTIN_OAUTH2_PROVIDERS.values()
                         or provider.type == "ext::auth::OpenIDConnectProvider"
                     ):
                         if (
                             provider.name not in self._manual_oidc_providers
                             and provider.name not in self._oidc_providers
                         ):
-                            self.openid_connect(provider.name)
+                            self.openid_provider(provider.name)
                         continue
 
                     match provider.name:
