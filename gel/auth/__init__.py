@@ -19,10 +19,12 @@ else:
 
     from . import builtin_ui
     from . import email_password
+    from . import oauth
 
 __all__ = [
     "builtin_ui",
     "email_password",
+    "oauth",
     "TokenData",
     "PKCE",
     "generate_pkce",
