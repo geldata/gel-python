@@ -68,7 +68,7 @@ class MockPointer(typing.NamedTuple):
 
 
 @tb.typecheck
-class TestModelGenerator(tb.ModelTestCase):
+class TestModelGeneratorMain(tb.ModelTestCase):
     SCHEMA = os.path.join(os.path.dirname(__file__), "dbsetup", "orm.gel")
 
     SETUP = os.path.join(os.path.dirname(__file__), "dbsetup", "orm.edgeql")
@@ -182,7 +182,7 @@ class TestModelGenerator(tb.ModelTestCase):
 
         self.assertEqual(
             reveal_type(default.User.name),
-            "type[models.orm.__shapes__.std.str]",
+            "type[models.__sharedstd__.__shapes__.std.str]",
         )
 
         self.assertEqual(
@@ -1606,7 +1606,8 @@ class TestModelGenerator(tb.ModelTestCase):
 
         q = default.Named.select(
             "*",
-            *default.UserGroup,
+            # FIXME: pyright fails here
+            *default.UserGroup,  # pyright: ignore
         )
 
         for item in self.client.query(q):
@@ -1857,7 +1858,8 @@ class TestModelGenerator(tb.ModelTestCase):
 
         pq = (
             default.Post.select(
-                *default.Post,
+                # FIXME: pyright fails here
+                *default.Post,  # pyright: ignore
                 author=True,
             )
             .filter(lambda p: p.body == "I'm Alice")
@@ -3491,12 +3493,10 @@ class TestModelGenerator(tb.ModelTestCase):
         # Test link props on multi links -- specifically that we support:
         #
         # - setting some of the props
+        # - updating one prop to a new value,
+        # - resetting one prop to None
         #
-        # - updating one prop with one value,
-        #   but the other props in the db must survive
-        #
-        # - resetting one prop to None - with it actually resetting to
-        #   an empty set in the DB and other props surviving
+        # Unspecified props are reset to None. This imitates python semantics.
 
         import json
         from typing import Any
@@ -3559,7 +3559,7 @@ class TestModelGenerator(tb.ModelTestCase):
         check(
             {
                 "members": [
-                    {"name": "Alice", "@rank": 1000, "@role": "lead"},
+                    {"name": "Alice", "@rank": 1000, "@role": None},
                     {"name": "Billie", "@rank": 2, "@role": None},
                 ]
             }
@@ -3578,7 +3578,7 @@ class TestModelGenerator(tb.ModelTestCase):
         check(
             {
                 "members": [
-                    {"name": "Alice", "@rank": None, "@role": "lead"},
+                    {"name": "Alice", "@rank": None, "@role": None},
                     {"name": "Billie", "@rank": 2, "@role": None},
                 ]
             }
@@ -4159,6 +4159,7 @@ class TestModelGenerator(tb.ModelTestCase):
 
         self.assertEqual({u.name for u in g.users}, {"0", "1", "2"})
 
+        u = None
         for u in g.users:
             u.name += "aaa"
 
@@ -4168,6 +4169,8 @@ class TestModelGenerator(tb.ModelTestCase):
 
         for u in g.users:
             u.name += "bbb"
+
+        assert u
 
         g.users.remove(u)
         g.users.add(default.User(name="new"))
@@ -5065,8 +5068,7 @@ class TestModelGenerator(tb.ModelTestCase):
 
         # Fetch the team
         team1 = self.client.get(default.Team.filter(name="Taco Wizards"))
-        # Merge this new link (rank is "unset", so we don't expect it to
-        # change)
+        # Merge this new link (rank is "unset", so we expect it to reset)
         team1.members.add(default.Team.members.link(u, role="sorceress"))
         self.client.save(team1)
 
@@ -5077,7 +5079,7 @@ class TestModelGenerator(tb.ModelTestCase):
 
         member = list(team2.members)[0]
         self.assertEqual(member.name, "Zoe")
-        self.assertEqual(member.__linkprops__.rank, 1)
+        self.assertEqual(member.__linkprops__.rank, None)
         self.assertEqual(member.__linkprops__.role, "sorceress")
 
     @tb.xfail
@@ -5115,6 +5117,7 @@ class TestModelGenerator(tb.ModelTestCase):
         gs = self.client.get(
             default.GameSession.select("*", players=True).filter(num=123)
         )
+        alice = None
         for p in gs.players:
             if p.name == "Alice":
                 alice = p
@@ -5122,6 +5125,7 @@ class TestModelGenerator(tb.ModelTestCase):
                 alice.__linkprops__.is_tall_enough = True
 
         self.client.sync(gs)
+        assert alice
         self.assertEqual(alice.__linkprops__.is_tall_enough, True)
 
     def test_modelgen_globals_01(self):
@@ -5130,7 +5134,7 @@ class TestModelGenerator(tb.ModelTestCase):
 
         self.assertEqual(
             reveal_type(default.current_game_session_num),
-            "type[models.orm.__shapes__.std.int64]",
+            "type[models.__sharedstd__.__shapes__.std.int64]",
         )
 
         sess_num = 988

@@ -2684,11 +2684,27 @@ class TestModelSyncSingleLink(tb.ModelTestCase):
                 lprop: int64;
             };
         };
+        type SourceWithPropWithDefault {
+            target: Target {
+                lprop: int64 {
+                    default := -1;
+                };
+            };
+        };
 
         type Target2 extending Target;
         type SourceWithDmlDefault {
             target: Target {
                 default := (insert Target2);
+            };
+        };
+
+        type SourceWithManyProps {
+            target: Target {
+                a: int64;
+                b: int64;
+                c: int64;
+                d: int64;
             };
         };
     """
@@ -2705,8 +2721,8 @@ class TestModelSyncSingleLink(tb.ModelTestCase):
         self.assertEqual(actual_has_lprop, expected_has_lprop)
         if actual_has_lprop and expected_has_lprop:
             self.assertEqual(
-                actual.__linkprops__.lprop,
-                expected.__linkprops__.lprop,
+                actual.__linkprops__,
+                expected.__linkprops__,
             )
 
     def test_model_sync_single_link_01(self):
@@ -2813,6 +2829,36 @@ class TestModelSyncSingleLink(tb.ModelTestCase):
             default.SourceWithDmlDefault,
             target,
             dml_default_type=default.Target2,
+        )
+
+        # Linkprop with default
+        _testcase(
+            default.SourceWithPropWithDefault,
+            target,
+            expected_target=default.SourceWithPropWithDefault.target.link(
+                target, lprop=-1
+            ),
+        )
+        _testcase(
+            default.SourceWithPropWithDefault,
+            default.SourceWithPropWithDefault.target.link(target),
+            expected_target=default.SourceWithPropWithDefault.target.link(
+                target, lprop=-1
+            ),
+        )
+        _testcase(
+            default.SourceWithPropWithDefault,
+            default.SourceWithPropWithDefault.target.link(target, lprop=None),
+            expected_target=default.SourceWithPropWithDefault.target.link(
+                target, lprop=None
+            ),
+        )
+        _testcase(
+            default.SourceWithPropWithDefault,
+            default.SourceWithPropWithDefault.target.link(target, lprop=1),
+            expected_target=default.SourceWithPropWithDefault.target.link(
+                target, lprop=1
+            ),
         )
 
     def test_model_sync_single_link_02(self):
@@ -2959,6 +3005,92 @@ class TestModelSyncSingleLink(tb.ModelTestCase):
             default.SourceWithProp,
             default.SourceWithProp.target.link(target_a, lprop=1),
             default.SourceWithProp.target.link(target_a, lprop=1),
+        )
+
+        # Linkprop with default
+        _testcase(
+            default.SourceWithPropWithDefault,
+            None,
+            target_a,
+            default.SourceWithPropWithDefault.target.link(target_a, lprop=-1),
+        )
+        _testcase(
+            default.SourceWithPropWithDefault,
+            None,
+            default.SourceWithPropWithDefault.target.link(target_a),
+            default.SourceWithPropWithDefault.target.link(target_a, lprop=-1),
+        )
+        _testcase(
+            default.SourceWithPropWithDefault,
+            None,
+            default.SourceWithPropWithDefault.target.link(
+                target_a, lprop=None
+            ),
+            default.SourceWithPropWithDefault.target.link(
+                target_a, lprop=None
+            ),
+        )
+        _testcase(
+            default.SourceWithPropWithDefault,
+            None,
+            default.SourceWithPropWithDefault.target.link(target_a, lprop=1),
+            default.SourceWithPropWithDefault.target.link(target_a, lprop=1),
+        )
+        _testcase(
+            default.SourceWithPropWithDefault,
+            default.SourceWithPropWithDefault.target.link(target_a, lprop=9),
+            target_a,
+            default.SourceWithPropWithDefault.target.link(target_a, lprop=-1),
+        )
+        _testcase(
+            default.SourceWithPropWithDefault,
+            default.SourceWithPropWithDefault.target.link(target_a, lprop=9),
+            default.SourceWithPropWithDefault.target.link(target_a),
+            default.SourceWithPropWithDefault.target.link(target_a, lprop=-1),
+        )
+        _testcase(
+            default.SourceWithPropWithDefault,
+            default.SourceWithPropWithDefault.target.link(target_a, lprop=9),
+            default.SourceWithPropWithDefault.target.link(
+                target_a, lprop=None
+            ),
+            default.SourceWithPropWithDefault.target.link(
+                target_a, lprop=None
+            ),
+        )
+        _testcase(
+            default.SourceWithPropWithDefault,
+            default.SourceWithPropWithDefault.target.link(target_a, lprop=9),
+            default.SourceWithPropWithDefault.target.link(target_a, lprop=1),
+            default.SourceWithPropWithDefault.target.link(target_a, lprop=1),
+        )
+        _testcase(
+            default.SourceWithPropWithDefault,
+            default.SourceWithPropWithDefault.target.link(target_a, lprop=9),
+            target_b,
+            default.SourceWithPropWithDefault.target.link(target_b, lprop=-1),
+        )
+        _testcase(
+            default.SourceWithPropWithDefault,
+            default.SourceWithPropWithDefault.target.link(target_a, lprop=9),
+            default.SourceWithPropWithDefault.target.link(target_b),
+            default.SourceWithPropWithDefault.target.link(target_b, lprop=-1),
+        )
+        _testcase(
+            default.SourceWithPropWithDefault,
+            default.SourceWithPropWithDefault.target.link(target_a, lprop=9),
+            default.SourceWithPropWithDefault.target.link(
+                target_b, lprop=None
+            ),
+            default.SourceWithPropWithDefault.target.link(
+                target_b, lprop=None
+            ),
+        )
+        _testcase(
+            default.SourceWithPropWithDefault,
+            default.SourceWithPropWithDefault.target.link(target_a, lprop=9),
+            default.SourceWithPropWithDefault.target.link(target_b, lprop=1),
+            default.SourceWithPropWithDefault.target.link(target_b, lprop=1),
         )
 
     def _testcase_03(
@@ -3111,6 +3243,34 @@ class TestModelSyncSingleLink(tb.ModelTestCase):
         self.assertEqual(mirror_1.targets._mode, _tracked_list.Mode.Write)
         self.assertEqual(mirror_1.targets._items, [])
 
+    def test_model_sync_single_link_05(self):
+        # Updating linkprops without changing the proxy model objects
+
+        from models.TestModelSyncSingleLink import default
+
+        target_a = default.Target()
+        self.client.save(target_a)
+
+        initial_target = default.SourceWithManyProps.target.link(
+            target_a, a=1, b=2, c=3, d=4
+        )
+
+        original = default.SourceWithManyProps(target=initial_target)
+        self.client.save(original)
+
+        self._check_links_equal(original.target, initial_target)
+
+        # change some link props
+        original.target.__linkprops__.b = 9
+        original.target.__linkprops__.c = None
+
+        expected_target = default.SourceWithManyProps.target.link(
+            target_a, a=1, b=9, c=None, d=4
+        )
+
+        self.client.sync(original)
+        self._check_links_equal(original.target, expected_target)
+
 
 class TestModelSyncMultiLink(tb.ModelTestCase):
     ISOLATED_TEST_BRANCHES = True
@@ -3125,6 +3285,21 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
                 lprop: int64;
             };
         };
+        type SourceWithPropWithDefault {
+            multi targets: Target {
+                lprop: int64 {
+                    default := -1;
+                };
+            };
+        };
+        type SourceWithManyProps {
+            multi targets: Target {
+                a: int64;
+                b: int64;
+                c: int64;
+                d: int64;
+            };
+        };
     """
 
     def _check_multilinks_equal(
@@ -3136,9 +3311,9 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
 
         # Also check linkprops
         if isinstance(actual, _link_set.LinkWithPropsSet):
-            expected_lprops = {e.id: e.__linkprops__.lprop for e in expected}
+            expected_lprops = {e.id: e.__linkprops__ for e in expected}
             for a in actual:
-                self.assertEqual(a.__linkprops__.lprop, expected_lprops[a.id])
+                self.assertEqual(a.__linkprops__, expected_lprops[a.id])
 
     def _base_testcase(
         self,
@@ -3166,6 +3341,26 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
         # cleanup
         self.client.query(model_type.delete())
 
+    def _testcase_init(
+        self,
+        model_type: typing.Type[GelModel],
+        initial_targets: typing.Collection[typing.Any],
+        expected_targets: typing.Collection[typing.Any] | None = None,
+    ) -> None:
+        if expected_targets is None:
+            expected_targets = initial_targets
+
+        with_targets = model_type(targets=initial_targets)
+        without_targets = model_type()
+
+        self.client.sync(with_targets, without_targets)
+
+        self._check_multilinks_equal(with_targets.targets, expected_targets)
+        self._check_multilinks_equal(without_targets.targets, [])
+
+        # cleanup
+        self.client.query(model_type.delete())
+
     def test_model_sync_multi_link_01(self):
         # Insert new object with multi link
 
@@ -3176,34 +3371,13 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
         target_c = default.Target()
         self.client.save(target_a, target_b, target_c)
 
-        def _testcase(
-            model_type: typing.Type[GelModel],
-            initial_targets: typing.Collection[typing.Any],
-            expected_targets: typing.Collection[typing.Any] | None = None,
-        ) -> None:
-            if expected_targets is None:
-                expected_targets = initial_targets
-
-            with_targets = model_type(targets=initial_targets)
-            without_targets = model_type()
-
-            self.client.sync(with_targets, without_targets)
-
-            self._check_multilinks_equal(
-                with_targets.targets, expected_targets
-            )
-            self._check_multilinks_equal(without_targets.targets, [])
-
-            # cleanup
-            self.client.query(model_type.delete())
-
         # No linkprops
-        _testcase(default.Source, [])
-        _testcase(default.Source, [target_a, target_b, target_c])
+        self._testcase_init(default.Source, [])
+        self._testcase_init(default.Source, [target_a, target_b, target_c])
 
         # With linkprops
-        _testcase(default.SourceWithProp, [])
-        _testcase(
+        self._testcase_init(default.SourceWithProp, [])
+        self._testcase_init(
             default.SourceWithProp,
             [target_a, target_b, target_c],
             [
@@ -3212,7 +3386,7 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
                 default.SourceWithProp.targets.link(target_c),
             ],
         )
-        _testcase(
+        self._testcase_init(
             default.SourceWithProp,
             [
                 default.SourceWithProp.targets.link(target_a),
@@ -3220,12 +3394,120 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
                 default.SourceWithProp.targets.link(target_c),
             ],
         )
-        _testcase(
+        self._testcase_init(
             default.SourceWithProp,
             [
                 default.SourceWithProp.targets.link(target_a, lprop=1),
                 default.SourceWithProp.targets.link(target_b, lprop=2),
                 default.SourceWithProp.targets.link(target_c, lprop=3),
+            ],
+        )
+
+    @tb.xfail  # multilink linkprops not refetched
+    def test_model_sync_multi_link_01a(self):
+        # With linkprop with default
+        from models.TestModelSyncMultiLink import default
+
+        target_a = default.Target()
+        target_b = default.Target()
+        target_c = default.Target()
+        self.client.save(target_a, target_b, target_c)
+
+        self._testcase_init(default.SourceWithPropWithDefault, [])
+        self._testcase_init(
+            default.SourceWithPropWithDefault,
+            [target_a, target_b, target_c],
+            [
+                default.SourceWithPropWithDefault.targets.link(
+                    target_a, lprop=-1
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_b, lprop=-1
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_c, lprop=-1
+                ),
+            ],
+        )
+        self._testcase_init(
+            default.SourceWithPropWithDefault,
+            [
+                default.SourceWithPropWithDefault.targets.link(target_a),
+                default.SourceWithPropWithDefault.targets.link(target_b),
+                default.SourceWithPropWithDefault.targets.link(target_c),
+            ],
+            [
+                default.SourceWithPropWithDefault.targets.link(
+                    target_a, lprop=-1
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_b, lprop=-1
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_c, lprop=-1
+                ),
+            ],
+        )
+        self._testcase_init(
+            default.SourceWithPropWithDefault,
+            [
+                default.SourceWithPropWithDefault.targets.link(
+                    target_a, lprop=None
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_b, lprop=None
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_c, lprop=None
+                ),
+            ],
+            [
+                default.SourceWithPropWithDefault.targets.link(
+                    target_a, lprop=None
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_b, lprop=None
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_c, lprop=None
+                ),
+            ],
+        )
+        self._testcase_init(
+            default.SourceWithPropWithDefault,
+            [
+                default.SourceWithPropWithDefault.targets.link(
+                    target_a, lprop=1
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_b, lprop=2
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_c, lprop=3
+                ),
+            ],
+        )
+        self._testcase_init(
+            default.SourceWithPropWithDefault,
+            [
+                default.SourceWithPropWithDefault.targets.link(target_a),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_b, lprop=None
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_c, lprop=1
+                ),
+            ],
+            [
+                default.SourceWithPropWithDefault.targets.link(
+                    target_a, lprop=-1
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_b, lprop=None
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_c, lprop=1
+                ),
             ],
         )
 
@@ -3397,20 +3679,19 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
             ],
             [],
         )
-        # Fail, moved to test_model_sync_multi_link_02a
-        # self._testcase_assign(
-        #     default.SourceWithProp,
-        #     [
-        #         default.SourceWithProp.targets.link(target_a, lprop=1),
-        #         default.SourceWithProp.targets.link(target_b, lprop=2),
-        #         default.SourceWithProp.targets.link(target_c, lprop=3),
-        #     ],
-        #     [
-        #         default.SourceWithProp.targets.link(target_a),
-        #         default.SourceWithProp.targets.link(target_b),
-        #         default.SourceWithProp.targets.link(target_c),
-        #     ],
-        # )
+        self._testcase_assign(
+            default.SourceWithProp,
+            [
+                default.SourceWithProp.targets.link(target_a, lprop=1),
+                default.SourceWithProp.targets.link(target_b, lprop=2),
+                default.SourceWithProp.targets.link(target_c, lprop=3),
+            ],
+            [
+                default.SourceWithProp.targets.link(target_a),
+                default.SourceWithProp.targets.link(target_b),
+                default.SourceWithProp.targets.link(target_c),
+            ],
+        )
         self._testcase_assign(
             default.SourceWithProp,
             [
@@ -3500,8 +3781,10 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
             ],
         )
 
-    @tb.xfail
-    def test_model_sync_multi_link_02a(self):
+    @tb.xfail  # multilink linkprops not refetched
+    def test_model_sync_multi_link_02b(self):
+        # With linkprop with default
+
         from models.TestModelSyncMultiLink import default
 
         target_a = default.Target()
@@ -3510,20 +3793,158 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
         target_d = default.Target()
         self.client.save(target_a, target_b, target_c, target_d)
 
-        # Fail, linkprop not reset
-        self._testcase_assign(
-            default.SourceWithProp,
+        initials: list[list[typing.Any]] = [
+            [],
             [
-                default.SourceWithProp.targets.link(target_a, lprop=1),
-                default.SourceWithProp.targets.link(target_b, lprop=2),
-                default.SourceWithProp.targets.link(target_c, lprop=3),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_a, lprop=None
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_b, lprop=None
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_c, lprop=None
+                ),
             ],
             [
-                default.SourceWithProp.targets.link(target_a),
-                default.SourceWithProp.targets.link(target_b),
-                default.SourceWithProp.targets.link(target_c),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_a, lprop=1
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_b, lprop=2
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_c, lprop=3
+                ),
             ],
-        )
+        ]
+        changes: list[tuple[list[typing.Any], ...]] = [
+            ([],),
+            (
+                [target_a, target_b, target_c],
+                [
+                    default.SourceWithPropWithDefault.targets.link(
+                        target_a, lprop=-1
+                    ),
+                    default.SourceWithPropWithDefault.targets.link(
+                        target_b, lprop=-1
+                    ),
+                    default.SourceWithPropWithDefault.targets.link(
+                        target_c, lprop=-1
+                    ),
+                ],
+            ),
+            (
+                [
+                    default.SourceWithPropWithDefault.targets.link(target_a),
+                    default.SourceWithPropWithDefault.targets.link(target_b),
+                    default.SourceWithPropWithDefault.targets.link(target_c),
+                ],
+                [
+                    default.SourceWithPropWithDefault.targets.link(
+                        target_a, lprop=-1
+                    ),
+                    default.SourceWithPropWithDefault.targets.link(
+                        target_b, lprop=-1
+                    ),
+                    default.SourceWithPropWithDefault.targets.link(
+                        target_c, lprop=-1
+                    ),
+                ],
+            ),
+            (
+                [
+                    default.SourceWithPropWithDefault.targets.link(target_a),
+                    default.SourceWithPropWithDefault.targets.link(
+                        target_b, lprop=None
+                    ),
+                    default.SourceWithPropWithDefault.targets.link(
+                        target_c, lprop=1
+                    ),
+                ],
+                [
+                    default.SourceWithPropWithDefault.targets.link(
+                        target_a, lprop=-1
+                    ),
+                    default.SourceWithPropWithDefault.targets.link(
+                        target_b, lprop=None
+                    ),
+                    default.SourceWithPropWithDefault.targets.link(
+                        target_c, lprop=1
+                    ),
+                ],
+            ),
+            (
+                [
+                    default.SourceWithPropWithDefault.targets.link(
+                        target_a, lprop=1
+                    ),
+                    default.SourceWithPropWithDefault.targets.link(
+                        target_b, lprop=2
+                    ),
+                    default.SourceWithPropWithDefault.targets.link(
+                        target_c, lprop=3
+                    ),
+                ],
+            ),
+            (
+                [
+                    default.SourceWithPropWithDefault.targets.link(
+                        target_a, lprop=4
+                    ),
+                    default.SourceWithPropWithDefault.targets.link(
+                        target_b, lprop=5
+                    ),
+                    default.SourceWithPropWithDefault.targets.link(
+                        target_c, lprop=6
+                    ),
+                ],
+            ),
+            (
+                [
+                    default.SourceWithPropWithDefault.targets.link(target_b),
+                    default.SourceWithPropWithDefault.targets.link(target_c),
+                    default.SourceWithPropWithDefault.targets.link(target_d),
+                ],
+                [
+                    default.SourceWithPropWithDefault.targets.link(
+                        target_b, lprop=-1
+                    ),
+                    default.SourceWithPropWithDefault.targets.link(
+                        target_c, lprop=-1
+                    ),
+                    default.SourceWithPropWithDefault.targets.link(
+                        target_d, lprop=-1
+                    ),
+                ],
+            ),
+            (
+                [
+                    default.SourceWithPropWithDefault.targets.link(
+                        target_b, lprop=4
+                    ),
+                    default.SourceWithPropWithDefault.targets.link(
+                        target_c, lprop=5
+                    ),
+                    default.SourceWithPropWithDefault.targets.link(
+                        target_d, lprop=6
+                    ),
+                ],
+            ),
+        ]
+        for initial_targets in initials:
+            for change in changes:
+                changed_targets = change[0]
+                expected_targets = None
+                if len(change) > 1:
+                    expected_targets = change[1]
+
+                self._testcase_assign(
+                    default.SourceWithPropWithDefault,
+                    initial_targets,
+                    changed_targets,
+                    expected_targets,
+                )
 
     def test_model_sync_multi_link_03(self):
         # Updating existing objects with multi props
@@ -3576,6 +3997,37 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
                 default.SourceWithProp.targets.link(target_a, lprop=1),
                 default.SourceWithProp.targets.link(target_b, lprop=2),
                 default.SourceWithProp.targets.link(target_c, lprop=3),
+            ],
+        )
+
+        # With linkprop with default
+        _testcase_clear(default.SourceWithPropWithDefault, [])
+        _testcase_clear(
+            default.SourceWithPropWithDefault,
+            [
+                default.SourceWithPropWithDefault.targets.link(
+                    target_a, lprop=None
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_b, lprop=None
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_c, lprop=None
+                ),
+            ],
+        )
+        _testcase_clear(
+            default.SourceWithPropWithDefault,
+            [
+                default.SourceWithPropWithDefault.targets.link(
+                    target_a, lprop=1
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_b, lprop=2
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_c, lprop=3
+                ),
             ],
         )
 
@@ -3766,22 +4218,21 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
                 default.SourceWithProp.targets.link(target_b, lprop=2),
             ],
         )
-        # Fail, moved to test_model_sync_multi_link_04a
-        # self._testcase_update(
-        #     default.SourceWithProp,
-        #     [
-        #         default.SourceWithProp.targets.link(target_a, lprop=1),
-        #         default.SourceWithProp.targets.link(target_b, lprop=2),
-        #     ],
-        #     [
-        #         default.SourceWithProp.targets.link(target_a),
-        #         default.SourceWithProp.targets.link(target_b),
-        #     ],
-        #     [
-        #         default.SourceWithProp.targets.link(target_a),
-        #         default.SourceWithProp.targets.link(target_b),
-        #     ],
-        # )
+        self._testcase_update(
+            default.SourceWithProp,
+            [
+                default.SourceWithProp.targets.link(target_a, lprop=1),
+                default.SourceWithProp.targets.link(target_b, lprop=2),
+            ],
+            [
+                default.SourceWithProp.targets.link(target_a),
+                default.SourceWithProp.targets.link(target_b),
+            ],
+            [
+                default.SourceWithProp.targets.link(target_a),
+                default.SourceWithProp.targets.link(target_b),
+            ],
+        )
         self._testcase_update(
             default.SourceWithProp,
             [
@@ -3901,26 +4352,25 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
                 default.SourceWithProp.targets.link(target_d),
             ],
         )
-        # Fail, moved to test_model_sync_multi_link_04b
-        # self._testcase_update(
-        #     default.SourceWithProp,
-        #     [
-        #         default.SourceWithProp.targets.link(target_a, lprop=1),
-        #         default.SourceWithProp.targets.link(target_b, lprop=2),
-        #         default.SourceWithProp.targets.link(target_c, lprop=3),
-        #     ],
-        #     [
-        #         default.SourceWithProp.targets.link(target_b),
-        #         default.SourceWithProp.targets.link(target_c),
-        #         default.SourceWithProp.targets.link(target_d),
-        #     ],
-        #     [
-        #         default.SourceWithProp.targets.link(target_a, lprop=1),
-        #         default.SourceWithProp.targets.link(target_b),
-        #         default.SourceWithProp.targets.link(target_c),
-        #         default.SourceWithProp.targets.link(target_d),
-        #     ],
-        # )
+        self._testcase_update(
+            default.SourceWithProp,
+            [
+                default.SourceWithProp.targets.link(target_a, lprop=1),
+                default.SourceWithProp.targets.link(target_b, lprop=2),
+                default.SourceWithProp.targets.link(target_c, lprop=3),
+            ],
+            [
+                default.SourceWithProp.targets.link(target_b),
+                default.SourceWithProp.targets.link(target_c),
+                default.SourceWithProp.targets.link(target_d),
+            ],
+            [
+                default.SourceWithProp.targets.link(target_a, lprop=1),
+                default.SourceWithProp.targets.link(target_b),
+                default.SourceWithProp.targets.link(target_c),
+                default.SourceWithProp.targets.link(target_d),
+            ],
+        )
         self._testcase_update(
             default.SourceWithProp,
             [
@@ -3960,8 +4410,9 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
             ],
         )
 
-    @tb.xfail
-    def test_model_sync_multi_link_04a(self):
+    @tb.xfail  # multilink linkprops not refetched
+    def test_model_sync_multi_link_04c(self):
+        # With linkprop with default
         from models.TestModelSyncMultiLink import default
 
         target_a = default.Target()
@@ -3970,51 +4421,479 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
         target_d = default.Target()
         self.client.save(target_a, target_b, target_c, target_d)
 
+        self._testcase_update(default.SourceWithPropWithDefault, [], [], [])
         self._testcase_update(
-            default.SourceWithProp,
+            default.SourceWithPropWithDefault,
+            [],
+            [target_a, target_b, target_c],
             [
-                default.SourceWithProp.targets.link(target_a, lprop=1),
-                default.SourceWithProp.targets.link(target_b, lprop=2),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_a, lprop=-1
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_b, lprop=-1
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_c, lprop=-1
+                ),
+            ],
+        )
+        self._testcase_update(
+            default.SourceWithPropWithDefault,
+            [],
+            [
+                default.SourceWithPropWithDefault.targets.link(target_a),
+                default.SourceWithPropWithDefault.targets.link(target_b),
+                default.SourceWithPropWithDefault.targets.link(target_c),
             ],
             [
-                default.SourceWithProp.targets.link(target_a),
-                default.SourceWithProp.targets.link(target_b),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_a, lprop=-1
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_b, lprop=-1
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_c, lprop=-1
+                ),
+            ],
+        )
+        self._testcase_update(
+            default.SourceWithPropWithDefault,
+            [],
+            [
+                default.SourceWithPropWithDefault.targets.link(
+                    target_a, lprop=None
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_b, lprop=None
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_c, lprop=None
+                ),
             ],
             [
-                # Fail, linkprops not reset
-                default.SourceWithProp.targets.link(target_a),
-                default.SourceWithProp.targets.link(target_b),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_a, lprop=None
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_b, lprop=None
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_c, lprop=None
+                ),
+            ],
+        )
+        self._testcase_update(
+            default.SourceWithPropWithDefault,
+            [],
+            [
+                default.SourceWithPropWithDefault.targets.link(
+                    target_a, lprop=1
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_b, lprop=2
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_c, lprop=3
+                ),
+            ],
+            [
+                default.SourceWithPropWithDefault.targets.link(
+                    target_a, lprop=1
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_b, lprop=2
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_c, lprop=3
+                ),
+            ],
+        )
+        self._testcase_update(
+            default.SourceWithPropWithDefault,
+            [],
+            [
+                default.SourceWithPropWithDefault.targets.link(target_a),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_b, lprop=None
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_c, lprop=1
+                ),
+            ],
+            [
+                default.SourceWithPropWithDefault.targets.link(
+                    target_a, lprop=-1
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_b, lprop=None
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_c, lprop=1
+                ),
             ],
         )
 
-    @tb.xfail
-    def test_model_sync_multi_link_04b(self):
-        from models.TestModelSyncMultiLink import default
-
-        target_a = default.Target()
-        target_b = default.Target()
-        target_c = default.Target()
-        target_d = default.Target()
-        self.client.save(target_a, target_b, target_c, target_d)
+        self._testcase_update(
+            default.SourceWithPropWithDefault,
+            [
+                default.SourceWithPropWithDefault.targets.link(
+                    target_a, lprop=None
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_b, lprop=None
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_c, lprop=None
+                ),
+            ],
+            [target_a, target_b, target_c],
+            [
+                default.SourceWithPropWithDefault.targets.link(
+                    target_a, lprop=-1
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_b, lprop=-1
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_c, lprop=-1
+                ),
+            ],
+        )
+        self._testcase_update(
+            default.SourceWithPropWithDefault,
+            [
+                default.SourceWithPropWithDefault.targets.link(
+                    target_a, lprop=None
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_b, lprop=None
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_c, lprop=None
+                ),
+            ],
+            [
+                default.SourceWithPropWithDefault.targets.link(target_a),
+                default.SourceWithPropWithDefault.targets.link(target_b),
+                default.SourceWithPropWithDefault.targets.link(target_c),
+            ],
+            [
+                default.SourceWithPropWithDefault.targets.link(
+                    target_a, lprop=-1
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_b, lprop=-1
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_c, lprop=-1
+                ),
+            ],
+        )
+        self._testcase_update(
+            default.SourceWithPropWithDefault,
+            [
+                default.SourceWithPropWithDefault.targets.link(
+                    target_a, lprop=None
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_b, lprop=None
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_c, lprop=None
+                ),
+            ],
+            [
+                default.SourceWithPropWithDefault.targets.link(
+                    target_a, lprop=None
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_b, lprop=None
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_c, lprop=None
+                ),
+            ],
+            [
+                default.SourceWithPropWithDefault.targets.link(
+                    target_a, lprop=None
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_b, lprop=None
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_c, lprop=None
+                ),
+            ],
+        )
+        self._testcase_update(
+            default.SourceWithPropWithDefault,
+            [
+                default.SourceWithPropWithDefault.targets.link(
+                    target_a, lprop=None
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_b, lprop=None
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_c, lprop=None
+                ),
+            ],
+            [
+                default.SourceWithPropWithDefault.targets.link(
+                    target_a, lprop=1
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_b, lprop=2
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_c, lprop=3
+                ),
+            ],
+            [
+                default.SourceWithPropWithDefault.targets.link(
+                    target_a, lprop=1
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_b, lprop=2
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_c, lprop=3
+                ),
+            ],
+        )
+        self._testcase_update(
+            default.SourceWithPropWithDefault,
+            [
+                default.SourceWithPropWithDefault.targets.link(
+                    target_a, lprop=None
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_b, lprop=None
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_c, lprop=None
+                ),
+            ],
+            [
+                default.SourceWithPropWithDefault.targets.link(target_a),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_b, lprop=None
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_c, lprop=1
+                ),
+            ],
+            [
+                default.SourceWithPropWithDefault.targets.link(
+                    target_a, lprop=-1
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_b, lprop=None
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_c, lprop=1
+                ),
+            ],
+        )
 
         self._testcase_update(
-            default.SourceWithProp,
+            default.SourceWithPropWithDefault,
             [
-                default.SourceWithProp.targets.link(target_a, lprop=1),
-                default.SourceWithProp.targets.link(target_b, lprop=2),
-                default.SourceWithProp.targets.link(target_c, lprop=3),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_a, lprop=1
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_b, lprop=2
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_c, lprop=3
+                ),
+            ],
+            [target_a, target_b, target_c],
+            [
+                default.SourceWithPropWithDefault.targets.link(
+                    target_a, lprop=-1
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_b, lprop=-1
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_c, lprop=-1
+                ),
+            ],
+        )
+        self._testcase_update(
+            default.SourceWithPropWithDefault,
+            [
+                default.SourceWithPropWithDefault.targets.link(
+                    target_a, lprop=1
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_b, lprop=2
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_c, lprop=3
+                ),
             ],
             [
-                default.SourceWithProp.targets.link(target_b),
-                default.SourceWithProp.targets.link(target_c),
-                default.SourceWithProp.targets.link(target_d),
+                default.SourceWithPropWithDefault.targets.link(target_a),
+                default.SourceWithPropWithDefault.targets.link(target_b),
+                default.SourceWithPropWithDefault.targets.link(target_c),
             ],
             [
-                # Fail, linkprops not reset
-                default.SourceWithProp.targets.link(target_a, lprop=1),
-                default.SourceWithProp.targets.link(target_b),
-                default.SourceWithProp.targets.link(target_c),
-                default.SourceWithProp.targets.link(target_d),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_a, lprop=-1
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_b, lprop=-1
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_c, lprop=-1
+                ),
+            ],
+        )
+        self._testcase_update(
+            default.SourceWithPropWithDefault,
+            [
+                default.SourceWithPropWithDefault.targets.link(
+                    target_a, lprop=1
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_b, lprop=2
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_c, lprop=3
+                ),
+            ],
+            [
+                default.SourceWithPropWithDefault.targets.link(
+                    target_a, lprop=None
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_b, lprop=None
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_c, lprop=None
+                ),
+            ],
+            [
+                default.SourceWithPropWithDefault.targets.link(
+                    target_a, lprop=None
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_b, lprop=None
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_c, lprop=None
+                ),
+            ],
+        )
+        self._testcase_update(
+            default.SourceWithPropWithDefault,
+            [
+                default.SourceWithPropWithDefault.targets.link(
+                    target_a, lprop=1
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_b, lprop=2
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_c, lprop=3
+                ),
+            ],
+            [
+                default.SourceWithPropWithDefault.targets.link(
+                    target_a, lprop=1
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_b, lprop=2
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_c, lprop=3
+                ),
+            ],
+            [
+                default.SourceWithPropWithDefault.targets.link(
+                    target_a, lprop=1
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_b, lprop=2
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_c, lprop=3
+                ),
+            ],
+        )
+        self._testcase_update(
+            default.SourceWithPropWithDefault,
+            [
+                default.SourceWithPropWithDefault.targets.link(
+                    target_a, lprop=1
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_b, lprop=2
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_c, lprop=3
+                ),
+            ],
+            [
+                default.SourceWithPropWithDefault.targets.link(target_a),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_b, lprop=None
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_c, lprop=1
+                ),
+            ],
+            [
+                default.SourceWithPropWithDefault.targets.link(
+                    target_a, lprop=-1
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_b, lprop=None
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_c, lprop=1
+                ),
+            ],
+        )
+        self._testcase_update(
+            default.SourceWithPropWithDefault,
+            [
+                default.SourceWithPropWithDefault.targets.link(
+                    target_a, lprop=1
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_b, lprop=2
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_c, lprop=3
+                ),
+            ],
+            [
+                default.SourceWithPropWithDefault.targets.link(
+                    target_a, lprop=4
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_b, lprop=5
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_c, lprop=6
+                ),
+            ],
+            [
+                default.SourceWithPropWithDefault.targets.link(
+                    target_a, lprop=4
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_b, lprop=5
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_c, lprop=6
+                ),
             ],
         )
 
@@ -4112,13 +4991,12 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
             [default.SourceWithProp.targets.link(target_a, lprop=1)],
         )
 
-        # Fail, moved to test_model_sync_multi_link_05a
-        # self._testcase_add(
-        #     default.SourceWithProp,
-        #     [default.SourceWithProp.targets.link(target_a, lprop=1)],
-        #     default.SourceWithProp.targets.link(target_a),
-        #     [default.SourceWithProp.targets.link(target_a)],
-        # )
+        self._testcase_add(
+            default.SourceWithProp,
+            [default.SourceWithProp.targets.link(target_a, lprop=1)],
+            default.SourceWithProp.targets.link(target_a),
+            [default.SourceWithProp.targets.link(target_a)],
+        )
         self._testcase_add(
             default.SourceWithProp,
             [default.SourceWithProp.targets.link(target_a, lprop=1)],
@@ -4178,8 +5056,9 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
             ],
         )
 
-    @tb.xfail
-    def test_model_sync_multi_link_05a(self):
+    @tb.xfail  # multilink linkprops not refetched
+    def test_model_sync_multi_link_05b(self):
+        # With linkprop with default
         from models.TestModelSyncMultiLink import default
 
         target_a = default.Target()
@@ -4188,12 +5067,252 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
         target_d = default.Target()
         self.client.save(target_a, target_b, target_c, target_d)
 
-        # Fail, linkprop not reset
         self._testcase_add(
-            default.SourceWithProp,
-            [default.SourceWithProp.targets.link(target_a, lprop=1)],
-            default.SourceWithProp.targets.link(target_a),
-            [default.SourceWithProp.targets.link(target_a)],
+            default.SourceWithPropWithDefault,
+            [],
+            target_a,
+            [
+                default.SourceWithPropWithDefault.targets.link(
+                    target_a, lprop=-1
+                )
+            ],
+        )
+        self._testcase_add(
+            default.SourceWithPropWithDefault,
+            [],
+            default.SourceWithPropWithDefault.targets.link(target_a),
+            [
+                default.SourceWithPropWithDefault.targets.link(
+                    target_a, lprop=-1
+                )
+            ],
+        )
+        self._testcase_add(
+            default.SourceWithPropWithDefault,
+            [],
+            default.SourceWithPropWithDefault.targets.link(
+                target_a, lprop=None
+            ),
+            [
+                default.SourceWithPropWithDefault.targets.link(
+                    target_a, lprop=None
+                )
+            ],
+        )
+        self._testcase_add(
+            default.SourceWithPropWithDefault,
+            [],
+            default.SourceWithPropWithDefault.targets.link(target_a, lprop=1),
+            [
+                default.SourceWithPropWithDefault.targets.link(
+                    target_a, lprop=1
+                )
+            ],
+        )
+        self._testcase_add(
+            default.SourceWithPropWithDefault,
+            [
+                default.SourceWithPropWithDefault.targets.link(
+                    target_a, lprop=None
+                )
+            ],
+            target_a,
+            [
+                default.SourceWithPropWithDefault.targets.link(
+                    target_a, lprop=-1
+                )
+            ],
+        )
+        self._testcase_add(
+            default.SourceWithPropWithDefault,
+            [
+                default.SourceWithPropWithDefault.targets.link(
+                    target_a, lprop=None
+                )
+            ],
+            default.SourceWithPropWithDefault.targets.link(target_a),
+            [
+                default.SourceWithPropWithDefault.targets.link(
+                    target_a, lprop=-1
+                )
+            ],
+        )
+        self._testcase_add(
+            default.SourceWithPropWithDefault,
+            [
+                default.SourceWithPropWithDefault.targets.link(
+                    target_a, lprop=None
+                )
+            ],
+            default.SourceWithPropWithDefault.targets.link(
+                target_a, lprop=None
+            ),
+            [
+                default.SourceWithPropWithDefault.targets.link(
+                    target_a, lprop=None
+                )
+            ],
+        )
+        self._testcase_add(
+            default.SourceWithPropWithDefault,
+            [
+                default.SourceWithPropWithDefault.targets.link(
+                    target_a, lprop=None
+                )
+            ],
+            default.SourceWithPropWithDefault.targets.link(target_a, lprop=1),
+            [
+                default.SourceWithPropWithDefault.targets.link(
+                    target_a, lprop=1
+                )
+            ],
+        )
+        self._testcase_add(
+            default.SourceWithPropWithDefault,
+            [
+                default.SourceWithPropWithDefault.targets.link(
+                    target_a, lprop=9
+                )
+            ],
+            target_a,
+            [
+                default.SourceWithPropWithDefault.targets.link(
+                    target_a, lprop=-1
+                )
+            ],
+        )
+        self._testcase_add(
+            default.SourceWithPropWithDefault,
+            [
+                default.SourceWithPropWithDefault.targets.link(
+                    target_a, lprop=9
+                )
+            ],
+            default.SourceWithPropWithDefault.targets.link(target_a),
+            [
+                default.SourceWithPropWithDefault.targets.link(
+                    target_a, lprop=-1
+                )
+            ],
+        )
+        self._testcase_add(
+            default.SourceWithPropWithDefault,
+            [
+                default.SourceWithPropWithDefault.targets.link(
+                    target_a, lprop=9
+                )
+            ],
+            default.SourceWithPropWithDefault.targets.link(
+                target_a, lprop=None
+            ),
+            [
+                default.SourceWithPropWithDefault.targets.link(
+                    target_a, lprop=None
+                )
+            ],
+        )
+        self._testcase_add(
+            default.SourceWithPropWithDefault,
+            [
+                default.SourceWithPropWithDefault.targets.link(
+                    target_a, lprop=9
+                )
+            ],
+            default.SourceWithPropWithDefault.targets.link(target_a, lprop=1),
+            [
+                default.SourceWithPropWithDefault.targets.link(
+                    target_a, lprop=1
+                )
+            ],
+        )
+        self._testcase_add(
+            default.SourceWithPropWithDefault,
+            [
+                default.SourceWithPropWithDefault.targets.link(
+                    target_a, lprop=1
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_b, lprop=2
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_c, lprop=3
+                ),
+            ],
+            default.SourceWithPropWithDefault.targets.link(target_d),
+            [
+                default.SourceWithPropWithDefault.targets.link(
+                    target_a, lprop=1
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_b, lprop=2
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_c, lprop=3
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_d, lprop=-1
+                ),
+            ],
+        )
+        self._testcase_add(
+            default.SourceWithPropWithDefault,
+            [
+                default.SourceWithPropWithDefault.targets.link(
+                    target_a, lprop=1
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_b, lprop=2
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_c, lprop=3
+                ),
+            ],
+            default.SourceWithPropWithDefault.targets.link(
+                target_d, lprop=None
+            ),
+            [
+                default.SourceWithPropWithDefault.targets.link(
+                    target_a, lprop=1
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_b, lprop=2
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_c, lprop=3
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_d, lprop=None
+                ),
+            ],
+        )
+        self._testcase_add(
+            default.SourceWithPropWithDefault,
+            [
+                default.SourceWithPropWithDefault.targets.link(
+                    target_a, lprop=1
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_b, lprop=2
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_c, lprop=3
+                ),
+            ],
+            default.SourceWithPropWithDefault.targets.link(target_d, lprop=4),
+            [
+                default.SourceWithPropWithDefault.targets.link(
+                    target_a, lprop=1
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_b, lprop=2
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_c, lprop=3
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_d, lprop=4
+                ),
+            ],
         )
 
     def test_model_sync_multi_link_06(self):
@@ -4359,6 +5478,50 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
                 default.SourceWithProp.targets.link(target_a, lprop=1),
                 default.SourceWithProp.targets.link(target_b, lprop=2),
             ],
+        )
+
+        # With linkprop with default
+        _testcase_discard(
+            default.SourceWithPropWithDefault,
+            [
+                default.SourceWithPropWithDefault.targets.link(
+                    target_a, lprop=9
+                )
+            ],
+            target_a,
+            [],
+        )
+        _testcase_discard(
+            default.SourceWithPropWithDefault,
+            [
+                default.SourceWithPropWithDefault.targets.link(
+                    target_a, lprop=9
+                )
+            ],
+            default.SourceWithPropWithDefault.targets.link(target_a),
+            [],
+        )
+        _testcase_discard(
+            default.SourceWithPropWithDefault,
+            [
+                default.SourceWithPropWithDefault.targets.link(
+                    target_a, lprop=9
+                )
+            ],
+            default.SourceWithPropWithDefault.targets.link(
+                target_a, lprop=None
+            ),
+            [],
+        )
+        _testcase_discard(
+            default.SourceWithPropWithDefault,
+            [
+                default.SourceWithPropWithDefault.targets.link(
+                    target_a, lprop=9
+                )
+            ],
+            default.SourceWithPropWithDefault.targets.link(target_a, lprop=1),
+            [],
         )
 
         # Discarding non-member items does nothing
@@ -4575,6 +5738,50 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
             ],
         )
 
+        # With linkprop with default
+        _testcase_remove(
+            default.SourceWithPropWithDefault,
+            [
+                default.SourceWithPropWithDefault.targets.link(
+                    target_a, lprop=9
+                )
+            ],
+            target_a,
+            [],
+        )
+        _testcase_remove(
+            default.SourceWithPropWithDefault,
+            [
+                default.SourceWithPropWithDefault.targets.link(
+                    target_a, lprop=9
+                )
+            ],
+            default.SourceWithPropWithDefault.targets.link(target_a),
+            [],
+        )
+        _testcase_remove(
+            default.SourceWithPropWithDefault,
+            [
+                default.SourceWithPropWithDefault.targets.link(
+                    target_a, lprop=9
+                )
+            ],
+            default.SourceWithPropWithDefault.targets.link(
+                target_a, lprop=None
+            ),
+            [],
+        )
+        _testcase_remove(
+            default.SourceWithPropWithDefault,
+            [
+                default.SourceWithPropWithDefault.targets.link(
+                    target_a, lprop=9
+                )
+            ],
+            default.SourceWithPropWithDefault.targets.link(target_a, lprop=1),
+            [],
+        )
+
     def _get_op_iadd_targets_func(
         self,
         op_iadd_targets: typing.Collection[typing.Any],
@@ -4762,22 +5969,21 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
                 default.SourceWithProp.targets.link(target_b, lprop=2),
             ],
         )
-        # Fail, moved to test_model_sync_multi_link_08a
-        # self._testcase_op_iadd(
-        #     default.SourceWithProp,
-        #     [
-        #         default.SourceWithProp.targets.link(target_a, lprop=1),
-        #         default.SourceWithProp.targets.link(target_b, lprop=2),
-        #     ],
-        #     [
-        #         default.SourceWithProp.targets.link(target_a),
-        #         default.SourceWithProp.targets.link(target_b),
-        #     ],
-        #     [
-        #         default.SourceWithProp.targets.link(target_a),
-        #         default.SourceWithProp.targets.link(target_b),
-        #     ],
-        # )
+        self._testcase_op_iadd(
+            default.SourceWithProp,
+            [
+                default.SourceWithProp.targets.link(target_a, lprop=1),
+                default.SourceWithProp.targets.link(target_b, lprop=2),
+            ],
+            [
+                default.SourceWithProp.targets.link(target_a),
+                default.SourceWithProp.targets.link(target_b),
+            ],
+            [
+                default.SourceWithProp.targets.link(target_a),
+                default.SourceWithProp.targets.link(target_b),
+            ],
+        )
         self._testcase_op_iadd(
             default.SourceWithProp,
             [
@@ -4897,26 +6103,25 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
                 default.SourceWithProp.targets.link(target_d),
             ],
         )
-        # Fail, moved to test_model_sync_multi_link_08b
-        # self._testcase_op_iadd(
-        #     default.SourceWithProp,
-        #     [
-        #         default.SourceWithProp.targets.link(target_a, lprop=1),
-        #         default.SourceWithProp.targets.link(target_b, lprop=2),
-        #         default.SourceWithProp.targets.link(target_c, lprop=3),
-        #     ],
-        #     [
-        #         default.SourceWithProp.targets.link(target_b),
-        #         default.SourceWithProp.targets.link(target_c),
-        #         default.SourceWithProp.targets.link(target_d),
-        #     ],
-        #     [
-        #         default.SourceWithProp.targets.link(target_a, lprop=1),
-        #         default.SourceWithProp.targets.link(target_b),
-        #         default.SourceWithProp.targets.link(target_c),
-        #         default.SourceWithProp.targets.link(target_d),
-        #     ],
-        # )
+        self._testcase_op_iadd(
+            default.SourceWithProp,
+            [
+                default.SourceWithProp.targets.link(target_a, lprop=1),
+                default.SourceWithProp.targets.link(target_b, lprop=2),
+                default.SourceWithProp.targets.link(target_c, lprop=3),
+            ],
+            [
+                default.SourceWithProp.targets.link(target_b),
+                default.SourceWithProp.targets.link(target_c),
+                default.SourceWithProp.targets.link(target_d),
+            ],
+            [
+                default.SourceWithProp.targets.link(target_a, lprop=1),
+                default.SourceWithProp.targets.link(target_b),
+                default.SourceWithProp.targets.link(target_c),
+                default.SourceWithProp.targets.link(target_d),
+            ],
+        )
         self._testcase_op_iadd(
             default.SourceWithProp,
             [
@@ -4956,8 +6161,10 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
             ],
         )
 
-    @tb.xfail
-    def test_model_sync_multi_link_08a(self):
+    @tb.xfail  # multilink linkprops not refetched
+    def test_model_sync_multi_link_08c(self):
+        # With linkprop with default
+
         from models.TestModelSyncMultiLink import default
 
         target_a = default.Target()
@@ -4966,51 +6173,479 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
         target_d = default.Target()
         self.client.save(target_a, target_b, target_c, target_d)
 
-        # Fail, linkprop not reset
+        self._testcase_op_iadd(default.SourceWithPropWithDefault, [], [], [])
         self._testcase_op_iadd(
-            default.SourceWithProp,
+            default.SourceWithPropWithDefault,
+            [],
+            [target_a, target_b, target_c],
             [
-                default.SourceWithProp.targets.link(target_a, lprop=1),
-                default.SourceWithProp.targets.link(target_b, lprop=2),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_a, lprop=-1
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_b, lprop=-1
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_c, lprop=-1
+                ),
+            ],
+        )
+        self._testcase_op_iadd(
+            default.SourceWithPropWithDefault,
+            [],
+            [
+                default.SourceWithPropWithDefault.targets.link(target_a),
+                default.SourceWithPropWithDefault.targets.link(target_b),
+                default.SourceWithPropWithDefault.targets.link(target_c),
             ],
             [
-                default.SourceWithProp.targets.link(target_a),
-                default.SourceWithProp.targets.link(target_b),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_a, lprop=-1
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_b, lprop=-1
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_c, lprop=-1
+                ),
+            ],
+        )
+        self._testcase_op_iadd(
+            default.SourceWithPropWithDefault,
+            [],
+            [
+                default.SourceWithPropWithDefault.targets.link(
+                    target_a, lprop=None
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_b, lprop=None
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_c, lprop=None
+                ),
             ],
             [
-                default.SourceWithProp.targets.link(target_a),
-                default.SourceWithProp.targets.link(target_b),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_a, lprop=None
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_b, lprop=None
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_c, lprop=None
+                ),
+            ],
+        )
+        self._testcase_op_iadd(
+            default.SourceWithPropWithDefault,
+            [],
+            [
+                default.SourceWithPropWithDefault.targets.link(
+                    target_a, lprop=1
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_b, lprop=2
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_c, lprop=3
+                ),
+            ],
+            [
+                default.SourceWithPropWithDefault.targets.link(
+                    target_a, lprop=1
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_b, lprop=2
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_c, lprop=3
+                ),
+            ],
+        )
+        self._testcase_op_iadd(
+            default.SourceWithPropWithDefault,
+            [],
+            [
+                default.SourceWithPropWithDefault.targets.link(target_a),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_b, lprop=None
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_c, lprop=1
+                ),
+            ],
+            [
+                default.SourceWithPropWithDefault.targets.link(
+                    target_a, lprop=-1
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_b, lprop=None
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_c, lprop=1
+                ),
             ],
         )
 
-    @tb.xfail
-    def test_model_sync_multi_link_08b(self):
-        from models.TestModelSyncMultiLink import default
-
-        target_a = default.Target()
-        target_b = default.Target()
-        target_c = default.Target()
-        target_d = default.Target()
-        self.client.save(target_a, target_b, target_c, target_d)
-
-        # Fail, linkprop not reset
         self._testcase_op_iadd(
-            default.SourceWithProp,
+            default.SourceWithPropWithDefault,
             [
-                default.SourceWithProp.targets.link(target_a, lprop=1),
-                default.SourceWithProp.targets.link(target_b, lprop=2),
-                default.SourceWithProp.targets.link(target_c, lprop=3),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_a, lprop=None
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_b, lprop=None
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_c, lprop=None
+                ),
+            ],
+            [target_a, target_b, target_c],
+            [
+                default.SourceWithPropWithDefault.targets.link(
+                    target_a, lprop=-1
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_b, lprop=-1
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_c, lprop=-1
+                ),
+            ],
+        )
+        self._testcase_op_iadd(
+            default.SourceWithPropWithDefault,
+            [
+                default.SourceWithPropWithDefault.targets.link(
+                    target_a, lprop=None
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_b, lprop=None
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_c, lprop=None
+                ),
             ],
             [
-                default.SourceWithProp.targets.link(target_b),
-                default.SourceWithProp.targets.link(target_c),
-                default.SourceWithProp.targets.link(target_d),
+                default.SourceWithPropWithDefault.targets.link(target_a),
+                default.SourceWithPropWithDefault.targets.link(target_b),
+                default.SourceWithPropWithDefault.targets.link(target_c),
             ],
             [
-                default.SourceWithProp.targets.link(target_a, lprop=1),
-                default.SourceWithProp.targets.link(target_b),
-                default.SourceWithProp.targets.link(target_c),
-                default.SourceWithProp.targets.link(target_d),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_a, lprop=-1
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_b, lprop=-1
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_c, lprop=-1
+                ),
+            ],
+        )
+        self._testcase_op_iadd(
+            default.SourceWithPropWithDefault,
+            [
+                default.SourceWithPropWithDefault.targets.link(
+                    target_a, lprop=None
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_b, lprop=None
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_c, lprop=None
+                ),
+            ],
+            [
+                default.SourceWithPropWithDefault.targets.link(
+                    target_a, lprop=None
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_b, lprop=None
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_c, lprop=None
+                ),
+            ],
+            [
+                default.SourceWithPropWithDefault.targets.link(
+                    target_a, lprop=None
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_b, lprop=None
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_c, lprop=None
+                ),
+            ],
+        )
+        self._testcase_op_iadd(
+            default.SourceWithPropWithDefault,
+            [
+                default.SourceWithPropWithDefault.targets.link(
+                    target_a, lprop=None
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_b, lprop=None
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_c, lprop=None
+                ),
+            ],
+            [
+                default.SourceWithPropWithDefault.targets.link(
+                    target_a, lprop=1
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_b, lprop=2
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_c, lprop=3
+                ),
+            ],
+            [
+                default.SourceWithPropWithDefault.targets.link(
+                    target_a, lprop=1
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_b, lprop=2
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_c, lprop=3
+                ),
+            ],
+        )
+        self._testcase_op_iadd(
+            default.SourceWithPropWithDefault,
+            [
+                default.SourceWithPropWithDefault.targets.link(
+                    target_a, lprop=None
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_b, lprop=None
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_c, lprop=None
+                ),
+            ],
+            [
+                default.SourceWithPropWithDefault.targets.link(target_a),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_b, lprop=None
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_c, lprop=-1
+                ),
+            ],
+            [
+                default.SourceWithPropWithDefault.targets.link(
+                    target_a, lprop=-1
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_b, lprop=None
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_c, lprop=1
+                ),
+            ],
+        )
+
+        self._testcase_op_iadd(
+            default.SourceWithPropWithDefault,
+            [
+                default.SourceWithPropWithDefault.targets.link(
+                    target_a, lprop=1
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_b, lprop=2
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_c, lprop=3
+                ),
+            ],
+            [target_a, target_b, target_c],
+            [
+                default.SourceWithPropWithDefault.targets.link(
+                    target_a, lprop=-1
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_b, lprop=-1
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_c, lprop=-1
+                ),
+            ],
+        )
+        self._testcase_op_iadd(
+            default.SourceWithPropWithDefault,
+            [
+                default.SourceWithPropWithDefault.targets.link(
+                    target_a, lprop=1
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_b, lprop=2
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_c, lprop=3
+                ),
+            ],
+            [
+                default.SourceWithPropWithDefault.targets.link(target_a),
+                default.SourceWithPropWithDefault.targets.link(target_b),
+                default.SourceWithPropWithDefault.targets.link(target_c),
+            ],
+            [
+                default.SourceWithPropWithDefault.targets.link(
+                    target_a, lprop=-1
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_b, lprop=-1
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_c, lprop=-1
+                ),
+            ],
+        )
+        self._testcase_op_iadd(
+            default.SourceWithPropWithDefault,
+            [
+                default.SourceWithPropWithDefault.targets.link(
+                    target_a, lprop=1
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_b, lprop=2
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_c, lprop=3
+                ),
+            ],
+            [
+                default.SourceWithPropWithDefault.targets.link(
+                    target_a, lprop=None
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_b, lprop=None
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_c, lprop=None
+                ),
+            ],
+            [
+                default.SourceWithPropWithDefault.targets.link(
+                    target_a, lprop=None
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_b, lprop=None
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_c, lprop=None
+                ),
+            ],
+        )
+        self._testcase_op_iadd(
+            default.SourceWithPropWithDefault,
+            [
+                default.SourceWithPropWithDefault.targets.link(
+                    target_a, lprop=1
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_b, lprop=2
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_c, lprop=3
+                ),
+            ],
+            [
+                default.SourceWithPropWithDefault.targets.link(
+                    target_a, lprop=1
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_b, lprop=2
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_c, lprop=3
+                ),
+            ],
+            [
+                default.SourceWithPropWithDefault.targets.link(
+                    target_a, lprop=1
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_b, lprop=2
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_c, lprop=3
+                ),
+            ],
+        )
+        self._testcase_op_iadd(
+            default.SourceWithPropWithDefault,
+            [
+                default.SourceWithPropWithDefault.targets.link(
+                    target_a, lprop=1
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_b, lprop=2
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_c, lprop=3
+                ),
+            ],
+            [
+                default.SourceWithPropWithDefault.targets.link(target_a),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_b, lprop=None
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_c, lprop=1
+                ),
+            ],
+            [
+                default.SourceWithPropWithDefault.targets.link(
+                    target_a, lprop=-1
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_b, lprop=None
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_c, lprop=1
+                ),
+            ],
+        )
+        self._testcase_op_iadd(
+            default.SourceWithPropWithDefault,
+            [
+                default.SourceWithPropWithDefault.targets.link(
+                    target_a, lprop=1
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_b, lprop=2
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_c, lprop=3
+                ),
+            ],
+            [
+                default.SourceWithPropWithDefault.targets.link(
+                    target_a, lprop=4
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_b, lprop=5
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_c, lprop=6
+                ),
+            ],
+            [
+                default.SourceWithPropWithDefault.targets.link(
+                    target_a, lprop=4
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_b, lprop=5
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_c, lprop=6
+                ),
             ],
         )
 
@@ -5266,6 +6901,132 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
             ],
         )
 
+        # With linkprop with default
+        _testcase_op_isub(default.SourceWithPropWithDefault, [], [], [])
+        _testcase_op_isub(
+            default.SourceWithPropWithDefault,
+            [],
+            [target_a],
+            [],
+        )
+        _testcase_op_isub(
+            default.SourceWithPropWithDefault,
+            [],
+            [default.SourceWithPropWithDefault.targets.link(target_a)],
+            [],
+        )
+        _testcase_op_isub(
+            default.SourceWithPropWithDefault,
+            [],
+            [
+                default.SourceWithPropWithDefault.targets.link(
+                    target_a, lprop=None
+                )
+            ],
+            [],
+        )
+        _testcase_op_isub(
+            default.SourceWithPropWithDefault,
+            [],
+            [
+                default.SourceWithPropWithDefault.targets.link(
+                    target_a, lprop=1
+                )
+            ],
+            [],
+        )
+
+        _testcase_op_isub(
+            default.SourceWithPropWithDefault,
+            [
+                default.SourceWithPropWithDefault.targets.link(
+                    target_a, lprop=9
+                )
+            ],
+            [],
+            [
+                default.SourceWithPropWithDefault.targets.link(
+                    target_a, lprop=9
+                )
+            ],
+        )
+        _testcase_op_isub(
+            default.SourceWithPropWithDefault,
+            [
+                default.SourceWithPropWithDefault.targets.link(
+                    target_a, lprop=9
+                )
+            ],
+            [target_a],
+            [],
+        )
+        _testcase_op_isub(
+            default.SourceWithPropWithDefault,
+            [
+                default.SourceWithPropWithDefault.targets.link(
+                    target_a, lprop=9
+                )
+            ],
+            [default.SourceWithPropWithDefault.targets.link(target_a)],
+            [],
+        )
+        _testcase_op_isub(
+            default.SourceWithPropWithDefault,
+            [
+                default.SourceWithPropWithDefault.targets.link(
+                    target_a, lprop=9
+                )
+            ],
+            [
+                default.SourceWithPropWithDefault.targets.link(
+                    target_a, lprop=None
+                )
+            ],
+            [],
+        )
+        _testcase_op_isub(
+            default.SourceWithPropWithDefault,
+            [
+                default.SourceWithPropWithDefault.targets.link(
+                    target_a, lprop=9
+                )
+            ],
+            [
+                default.SourceWithPropWithDefault.targets.link(
+                    target_a, lprop=1
+                )
+            ],
+            [],
+        )
+        _testcase_op_isub(
+            default.SourceWithPropWithDefault,
+            [
+                default.SourceWithPropWithDefault.targets.link(
+                    target_a, lprop=9
+                )
+            ],
+            [target_b],
+            [
+                default.SourceWithPropWithDefault.targets.link(
+                    target_a, lprop=9
+                )
+            ],
+        )
+        _testcase_op_isub(
+            default.SourceWithPropWithDefault,
+            [
+                default.SourceWithPropWithDefault.targets.link(
+                    target_a, lprop=9
+                )
+            ],
+            [default.SourceWithPropWithDefault.targets.link(target_b)],
+            [
+                default.SourceWithPropWithDefault.targets.link(
+                    target_a, lprop=9
+                )
+            ],
+        )
+
     @tb.xfail
     def test_model_sync_multi_link_10(self):
         # Existing object without link should not have it fetched
@@ -5339,6 +7100,39 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
             [default.SourceWithProp.targets.link(changed_target_1)],
             [default.SourceWithProp.targets.link(changed_target_2)],
         )
+
+    def test_model_sync_multi_link_11(self):
+        # Updating linkprops without changing the proxy model objects
+
+        from models.TestModelSyncMultiLink import default
+
+        target_a = default.Target()
+        self.client.save(target_a)
+
+        initial_targets = [
+            default.SourceWithManyProps.targets.link(
+                target_a, a=1, b=2, c=3, d=4
+            )
+        ]
+
+        original = default.SourceWithManyProps(targets=initial_targets)
+        self.client.save(original)
+
+        self._check_multilinks_equal(original.targets, initial_targets)
+
+        # change some link props
+        for target in original.targets:
+            target.__linkprops__.b = 9
+            target.__linkprops__.c = None
+
+        expected_targets = [
+            default.SourceWithManyProps.targets.link(
+                target_a, a=1, b=9, c=None, d=4
+            )
+        ]
+
+        self.client.sync(original)
+        self._check_multilinks_equal(original.targets, expected_targets)
 
 
 class TestModelSyncRewrite(tb.ModelTestCase):
