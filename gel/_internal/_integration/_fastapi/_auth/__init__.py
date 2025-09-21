@@ -3,6 +3,8 @@
 # SPDX-FileCopyrightText: Copyright Gel Data Inc. and the contributors.
 
 from __future__ import annotations
+
+import functools
 from typing import Any, cast, Optional, TYPE_CHECKING
 from typing_extensions import Self
 
@@ -26,6 +28,17 @@ if TYPE_CHECKING:
     import gel
     from ._email_password import EmailPassword
     from ._builtin_ui import BuiltinUI
+    from ._oidc import OpenIDConnect
+
+
+_BUILTIN_OAUTH2_PROVIDERS = {
+    "apple": "builtin::oauth_apple",
+    "azure": "builtin::oauth_azure",
+    "discord": "builtin::oauth_discord",
+    "slack": "builtin::oauth_slack",
+    "github": "builtin::oauth_github",
+    "google": "builtin::oauth_google",
+}
 
 
 class Installable:
@@ -53,11 +66,14 @@ class GelAuth(client_mod.Extension):
     secure_cookie = utils.Config(True)  # noqa: FBT003
     redirect_to: utils.Config[Optional[str]] = utils.Config("/")
     redirect_to_page_name: utils.Config[Optional[str]] = utils.Config(None)
+    error_page_name = utils.Config("error_page")
 
     _email_password: Optional[EmailPassword] = None
     _auto_email_password: bool = True
     _builtin_ui: Optional[BuiltinUI] = None
     _auto_builtin_ui: bool = True
+    _manual_oidc_providers: list[str]
+    _oidc_providers: dict[str, OpenIDConnect]
 
     _on_new_identity_path = utils.Config("/")
     _on_new_identity_name = utils.Config("gel.fastapi.auth.on_new_identity")
@@ -71,6 +87,11 @@ class GelAuth(client_mod.Extension):
     _pkce_verifier: Optional[security.APIKeyCookie] = None
     _maybe_auth_token: params.Depends
     _auth_token: params.Depends
+
+    def __init__(self, lifespan: client_mod.GelLifespan) -> None:
+        super().__init__(lifespan)
+        self._manual_oidc_providers = []
+        self._oidc_providers = {}
 
     def get_unchecked_exp(self, token: str) -> Optional[datetime.datetime]:
         jwt_payload = jwt.decode(token, options={"verify_signature": False})
@@ -245,6 +266,49 @@ class GelAuth(client_mod.Extension):
         self._auto_builtin_ui = False
         return self
 
+    def openid_provider(self, name: str) -> OpenIDConnect:
+        if name in self._oidc_providers:
+            provider = self._oidc_providers[name]
+        else:
+            if self.installed:
+                raise ValueError("Cannot add OIDC provider after installation")
+
+            from ._oidc import OpenIDConnect  # noqa: PLC0415
+
+            provider = OpenIDConnect(self, provider_name=name)
+            self._oidc_providers[name] = provider
+        return provider
+
+    def with_openid_provider(self, name: str, **kwargs: Any) -> Self:
+        provider = self.openid_provider(name)
+        for key, value in kwargs.items():
+            getattr(provider, key)(value)
+        return self
+
+    def without_openid_provider(self, name: str) -> Self:
+        if self.installed:
+            raise ValueError("Cannot remove OIDC provider after installation")
+
+        if name in self._oidc_providers:
+            del self._oidc_providers[name]
+        self._manual_oidc_providers.append(name)
+        return self
+
+    def __getattr__(self, item: str) -> Any:
+        if item.startswith("with_"):
+            name = _BUILTIN_OAUTH2_PROVIDERS.get(item.removeprefix("with_"))
+            if name is not None:
+                return functools.partial(self.with_openid_provider, name)
+        elif item.startswith("without_"):
+            name = _BUILTIN_OAUTH2_PROVIDERS.get(item.removeprefix("without_"))
+            if name is not None:
+                return functools.partial(self.without_openid_provider, name)
+        elif item in _BUILTIN_OAUTH2_PROVIDERS:
+            return self.openid_provider(_BUILTIN_OAUTH2_PROVIDERS[item])
+        raise AttributeError(
+            f"{type(self).__name__!r} has no attribute {item!r}"
+        )
+
     async def on_startup(self, app: fastapi.FastAPI) -> None:
         router = fastapi.APIRouter(
             prefix=self.auth_path_prefix.value,
@@ -258,13 +322,24 @@ class GelAuth(client_mod.Extension):
                 select assert_single(
                     cfg::Config.extensions[is ext::auth::AuthConfig]
                 ) {
-                    providers: { id, name },
+                    providers: { id, name, type := .__type__.name },
                     ui,
                 }
                 """
             )
             if config:
                 for provider in config.providers:
+                    if (
+                        provider.name in _BUILTIN_OAUTH2_PROVIDERS.values()
+                        or provider.type == "ext::auth::OpenIDConnectProvider"
+                    ):
+                        if (
+                            provider.name not in self._manual_oidc_providers
+                            and provider.name not in self._oidc_providers
+                        ):
+                            self.openid_provider(provider.name)
+                        continue
+
                     match provider.name:
                         case "builtin::local_emailpassword":
                             if (
@@ -281,6 +356,7 @@ class GelAuth(client_mod.Extension):
                     _ = self.builtin_ui
 
         insts.extend([self._email_password, self._builtin_ui])
+        insts.extend(self._oidc_providers.values())
         for inst in insts:
             if inst is not None:
                 await inst.install(router)

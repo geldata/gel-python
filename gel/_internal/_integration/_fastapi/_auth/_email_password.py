@@ -46,7 +46,6 @@ class ResetPasswordBody(pydantic.BaseModel):
 
 
 class EmailPassword(Installable):
-    error_page_name = utils.Config("error_page")
     sign_in_page_name = utils.Config("sign_in_page")
     reset_password_page_name = utils.Config("reset_password_page")
 
@@ -202,7 +201,7 @@ class EmailPassword(Installable):
         ).value
         return response_class(
             url=request.url_for(
-                self.error_page_name.value
+                self._auth.error_page_name.value
             ).include_query_params(**query_params),
             status_code=getattr(self, f"{key}_default_status_code").value,
         )
