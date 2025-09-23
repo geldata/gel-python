@@ -95,7 +95,7 @@ _unset = object()
 _missing_arg = object()
 
 _STOP_LINK_TRAVERSAL = (None, _unset, DEFAULT_VALUE)
-_STOP_FIELDS_NO_ID = ("__tid__", "__tname__")
+_STOP_FIELDS_NO_ID = ("__tid__", "__tname__", "tname__")
 _STOP_FIELDS = ("id", *_STOP_FIELDS_NO_ID)
 
 _sorted_pointers_cache: weakref.WeakKeyDictionary[

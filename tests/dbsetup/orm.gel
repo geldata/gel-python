@@ -51,7 +51,9 @@ type User extending Named {
     groups := .<users[is UserGroup];
 }
 
-type CustomUser extending User;
+type CustomUser extending User {
+    code: str;
+}
 
 type Post {
     required body: str;
@@ -261,6 +263,18 @@ type TestSingleLinks {
     };
     comp_opt_wprop_friend := .opt_wprop_friend;
 }
+
+type TestSingleLinksReqOnly {
+    required link req_wprop_friend: User {
+        strength: int32;
+    }
+}
+type TestSingleLinksOptOnly {
+    link opt_wprop_friend: User {
+        strength: int32;
+    }
+}
+
 
 type TestPropRewrites extending ExclusivelyNamed {
     required name_len: int64 {
@@ -513,11 +527,13 @@ type TVShow extending Content {
 type Account {
   required username: str;
   multi watchlist: Content;
+  favorite: Content;
 }
 
 type NoobAccount {
   required username: str;
   multi watchlist: Movie;
+  favorite: Movie;
 }
 
 }

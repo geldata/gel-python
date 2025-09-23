@@ -254,9 +254,31 @@ class TestModelGeneratorMain(tb.ModelTestCase):
         ):
             set([default.Team.members.link(default.User(name="Xavier"))])
 
+    def test_modelgen_06(self):
+        from models.orm import default
+
+        raid = self.client.get(
+            default.Raid.select(
+                name=True,
+                members=True,
+            ).filter(name="raid")
+        )
+        user = next(iter(raid.members))
+
+        self.client.get(
+            default.User.select().filter(name=user.name)
+        )
+
+        self.assertIsInstance(user, default.User)
+        self.assertIsInstance(user, default.CustomUser)
+
     def test_modelgen_data_unpack_1a(self):
         import gel
         from models.orm import default
+
+        # Make sure having a subtype doesn't mess up the type
+        class DummyUser(default.User):
+            pass
 
         q = gel.expr(
             default.Post,
@@ -279,6 +301,8 @@ class TestModelGeneratorMain(tb.ModelTestCase):
         self.assertEqual(d.body, "Hello")
         self.assertIsInstance(d.author, default.User)
         self.assertEqual(d.author.name, "Alice")
+
+        self.assertEqual(type(d.author), default.User)
 
     @unittest.skipIf(
         sys.version_info < (3, 11),
@@ -542,7 +566,11 @@ class TestModelGeneratorMain(tb.ModelTestCase):
 
         self.assertEqual(
             user_loaded.model_dump(),
-            {"id": user_loaded.id, "name": "Alice"},
+            {
+                "id": user_loaded.id,
+                "name": "Alice",
+                tb.TNAME: "default::User",
+            },
         )
 
         with self.assertRaisesRegex(
@@ -572,7 +600,7 @@ class TestModelGeneratorMain(tb.ModelTestCase):
             user_new.model_dump(
                 context={"gel_allow_unsaved": True},
             ),
-            {"name": "Bob", "nickname": None},
+            {"name": "Bob", "nickname": None, tb.TNAME: "default::User"},
         )
 
         self.assertEqual(
@@ -580,7 +608,7 @@ class TestModelGeneratorMain(tb.ModelTestCase):
                 exclude={"nickname"},
                 context={"gel_allow_unsaved": True},
             ),
-            {"name": "Bob"},
+            {"name": "Bob", tb.TNAME: "default::User"},
         )
 
         self.assertEqual(
@@ -588,13 +616,14 @@ class TestModelGeneratorMain(tb.ModelTestCase):
                 exclude={"nickname": True},
                 context={"gel_allow_unsaved": True},
             ),
-            {"name": "Bob"},
+            {"name": "Bob", tb.TNAME: "default::User"},
         )
 
         self.assertEqual(
             user_loaded.model_dump_json(),
             json.dumps(
-                {"id": str(user_loaded.id), "name": "Alice"},
+                {"id": str(user_loaded.id), "name": "Alice",
+                 tb.TNAME: "default::User"},
                 separators=(",", ":"),
             ),
         )
@@ -622,7 +651,8 @@ class TestModelGeneratorMain(tb.ModelTestCase):
                 context={"gel_allow_unsaved": True},
             ),
             json.dumps(
-                {"id": str(user_loaded.id), "name": "Alice..."},
+                {"id": str(user_loaded.id), "name": "Alice...",
+                 tb.TNAME: "default::User"},
                 separators=(",", ":"),
             ),
         )
@@ -661,8 +691,13 @@ class TestModelGeneratorMain(tb.ModelTestCase):
             expected,
         )
 
+        # Argh! exclude works based on the *non-aliased* name...
         self.assertEqual(
-            sl.model_dump(exclude={"id": True, "owner": {"id": True}}),
+            sl.model_dump(exclude={
+                "id": True,
+                tb.TNAME_PY: True,
+                "owner": {"id": True, tb.TNAME_PY: True},
+            }),
             expected,
         )
 
@@ -674,7 +709,11 @@ class TestModelGeneratorMain(tb.ModelTestCase):
         )
 
         self.assertEqual(
-            sl.model_dump_json(exclude={"id": True, "owner": {"id": True}}),
+            sl.model_dump_json(exclude={
+                "id": True,
+                tb.TNAME_PY: True,
+                "owner": {"id": True, tb.TNAME_PY: True},
+            }),
             json.dumps(expected, separators=(",", ":")),
         )
 
@@ -1071,7 +1110,7 @@ class TestModelGeneratorMain(tb.ModelTestCase):
         }
         self.assertPydanticSerializes(p, expected)
 
-    def test_modelgen_pydantic_apis_11(self):
+    def test_modelgen_pydantic_apis_11a(self):
         # Test model_dump() and model_dump_json() on models;
         # test *single required* link serialization in all combinations
 
@@ -1235,6 +1274,7 @@ class TestModelGeneratorMain(tb.ModelTestCase):
                 "comp_opt_wprop_friend",
                 "comp_req_friend",
                 "comp_req_wprop_friend",
+                tb.TNAME_PY,
             },
         )
 
@@ -1265,6 +1305,58 @@ class TestModelGeneratorMain(tb.ModelTestCase):
                 },
             },
         )
+
+    def test_modelgen_pydantic_apis_11b(self):
+        # Test model_dump() and model_dump_json() on models;
+        # test *single required* link serialization in all combinations
+
+        from models.orm import default
+
+        u = default.CustomUser(name="aaa", code="xyzzy")
+        t = default.TestSingleLinks(
+            req_wprop_friend=default.TestSingleLinks.req_wprop_friend.link(
+                u, strength=123
+            ),
+            opt_wprop_friend=default.TestSingleLinks.opt_wprop_friend.link(
+                u, strength=456
+            ),
+            req_friend=u,
+        )
+
+        self.assertPydanticPickles(t)
+        self.assertPydanticSerializes(t)
+
+    def test_modelgen_pydantic_apis_11c(self):
+        # Test model_dump() and model_dump_json() on models;
+        # test *single required* link serialization in all combinations
+
+        from models.orm import default
+
+        u = default.User(name="aaa")
+        t = default.TestSingleLinksReqOnly(
+            req_wprop_friend=default.TestSingleLinks.req_wprop_friend.link(
+                u, strength=123
+            ),
+        )
+
+        self.assertPydanticPickles(t)
+        self.assertPydanticSerializes(t)
+
+    def test_modelgen_pydantic_apis_11d(self):
+        # Test model_dump() and model_dump_json() on models;
+        # test *single required* link serialization in all combinations
+
+        from models.orm import default
+
+        u = default.User(name="aaa")
+        t = default.TestSingleLinksOptOnly(
+            opt_wprop_friend=default.TestSingleLinks.req_wprop_friend.link(
+                u, strength=123
+            ),
+        )
+
+        self.assertPydanticPickles(t)
+        self.assertPydanticSerializes(t)
 
     def test_modelgen_pydantic_apis_12(self):
         import uuid
@@ -1549,11 +1641,13 @@ class TestModelGeneratorMain(tb.ModelTestCase):
         g = default.GameSession(num=1, public=True)
         self.assertEqual(
             g.model_dump(context={"gel_allow_unsaved": True}),
-            {"num": 1, "public": True, "players": []},
+            {"num": 1, "public": True, "players": [],
+             tb.TNAME: "default::GameSession"},
         )
         self.assertEqual(
             g.model_dump_json(context={"gel_allow_unsaved": True}),
-            '{"num":1,"players":[],"public":true}',
+            '{"__tname__":"default::GameSession","num":1,"players":[],'
+            '"public":true}',
         )
 
     def test_modelgen_pydantic_apis_20(self):
@@ -1577,16 +1671,14 @@ class TestModelGeneratorMain(tb.ModelTestCase):
             {"red", "green"},
         )
 
-    @tb.xfail('''
-        Broken because of inheritance.
-        It tries to deserialize a Content, which fails.
-        See issue #755.
-    ''')
     def test_modelgen_pydantic_apis_21(self):
         # Test model_dump() and model_dump_json() on models;
         # test *inheritance*
 
         from models.orm import content
+
+        class DummyMovie(content.Movie):
+            pass
 
         t = content.Account(
             username='p.emarg',
@@ -1600,6 +1692,7 @@ class TestModelGeneratorMain(tb.ModelTestCase):
         self.assertPydanticSerializes(
             t,
         )
+        self.assertEqual(t.__tname__, 'content::Account')
 
     def test_modelgen_data_unpack_polymorphic(self):
         from models.orm import default
@@ -4747,8 +4840,9 @@ class TestModelGeneratorMain(tb.ModelTestCase):
             Range(dt.date(2025, 1, 6), dt.date(2025, 2, 17)),
         )
 
-        self.assertPydanticSerializes(r)
-        self.assertPydanticSerializes(r2)
+        # FIXME: pickle is broken for ranges
+        self.assertPydanticSerializes(r, test_pickle=False)
+        self.assertPydanticSerializes(r2, test_pickle=False)
 
     def test_modelgen_save_range_02(self):
         import datetime as dt
@@ -5353,6 +5447,7 @@ class TestModelGeneratorMain(tb.ModelTestCase):
             textwrap.dedent(
                 """\
                 class User:
+                    __tname__: Literal['default::User'] = 'default::User'
                     groups: list[UserGroup]  # readonly
                     id: UUID
                     name: str
@@ -5361,6 +5456,8 @@ class TestModelGeneratorMain(tb.ModelTestCase):
                     nickname_len: None | int  # readonly
 
                 class UserGroup:
+                    __tname__: Literal['default::UserGroup'] \
+= 'default::UserGroup'
                     id: UUID
                     mascot: None | str = None
                     name: str
@@ -5383,6 +5480,7 @@ class TestModelGeneratorMain(tb.ModelTestCase):
             textwrap.dedent(
                 """\
                 class User:
+                    __tname__: Literal['default::User'] = 'default::User'
                     id: UUID
                     name: str
                     nickname: None | str = None"""
@@ -5438,6 +5536,7 @@ class TestModelGeneratorMain(tb.ModelTestCase):
                     nickname_len: None | int  # readonly
 
                 class User:
+                    __tname__: Literal['default::User'] = 'default::User'
                     groups: list[UserGroup]  # readonly
                     id: UUID
                     name: str
@@ -5446,6 +5545,8 @@ class TestModelGeneratorMain(tb.ModelTestCase):
                     nickname_len: None | int  # readonly
 
                 class UserGroup:
+                    __tname__: Literal['default::UserGroup'] \
+= 'default::UserGroup'
                     id: UUID
                     mascot: None | str = None
                     name: str
@@ -6404,6 +6505,7 @@ class TestModelGeneratorMain(tb.ModelTestCase):
                 "name",
                 "name_len",
                 "upper_name",
+                tb.TNAME_PY,
             },
         )
         self.assertEqual(

@@ -58,6 +58,8 @@ from ._base import (
 )
 
 __all__ = (
+    "TNAME",
+    "TNAME_PY",
     "AsyncModelTestCase",
     "ModelTestCase",
     "must_fail",
@@ -82,6 +84,8 @@ _T = TypeVar("_T")
 _P = ParamSpec("_P")
 _R = TypeVar("_R", covariant=True)
 _ModelTestCase_T = TypeVar("_ModelTestCase_T", bound="BaseModelTestCase")
+TNAME = "__tname__"
+TNAME_PY = "tname__"
 
 
 MYPY_INI = """\
@@ -458,6 +462,8 @@ class BaseModelTestCase(BranchTestCase):
         self,
         model: pydantic.BaseModel,
         expected: Any = _unset,
+        *,
+        test_pickle: bool = True,
     ) -> None:
         context = {}
         try:
@@ -489,15 +495,16 @@ class BaseModelTestCase(BranchTestCase):
         new_context = context.copy()
         new_context["gel_allow_unsaved"] = True
 
-        new = type(model).model_validate(
-            model.model_dump(
-                context=context,
-            )
+        dumped = model.model_dump(
+            context=context,
         )
+        new = type(model).model_validate(dumped)
         self.assertEqual(
             new.model_dump(context=new_context),
             model.model_dump(context=context),
         )
+        if test_pickle:
+            repickle(new)
 
         new = type(model)(**model.model_dump(context=context))
         self.assertEqual(
@@ -875,6 +882,7 @@ def pop_ids(dct: Any) -> Any:
     else:
         assert isinstance(dct, dict)
         dct.pop("id", None)
+        dct.pop(TNAME, None)
         for k, v in dct.items():
             if isinstance(v, list):
                 for item in v:

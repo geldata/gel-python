@@ -568,6 +568,7 @@ class TestQueryBuilder(tb.ModelTestCase):
             res.model_dump(exclude={"id"}),
             {
                 "name": "Billie",
+                tb.TNAME: "default::User",
             },
         )
 

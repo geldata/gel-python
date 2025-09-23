@@ -29,6 +29,13 @@ if TYPE_CHECKING:
     from ._models import GelModel
 
 
+# The real field name is tname__, and we need to manually apply the
+# alias in some places.
+GEL_ALIASES = {
+    "__tname__": "tname__",
+}
+
+
 # TypeAliasType does not support recursive types. mypy errors out with:
 #    error: Cannot resolve name "IncEx" (possible cyclic definition)  [misc]
 #
@@ -200,6 +207,14 @@ def massage_model_dump_kwargs(
         exclude = kwargs["exclude"]
     except KeyError:
         exclude = kwargs["exclude"] = set()
+
+    # HACK: Handle exclude for internal gel aliases, since pydantic won't.b
+    for from_, to_ in GEL_ALIASES.items():
+        if from_ in exclude:
+            if isinstance(exclude, dict):
+                exclude[to_] = exclude[from_]
+            elif isinstance(exclude, set):
+                exclude.add(to_)
 
     if model.__gel_has_id_field__ and model.__gel_new__:
         # You're generally not supposed to dump an unsaved model,
