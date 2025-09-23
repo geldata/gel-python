@@ -35,18 +35,168 @@ import typing
 
 import copy
 import os
+import sys
 
 from gel._internal import _tracked_list
 from gel._internal._qbmodel._abstract import _link_set
 from gel._internal._qbmodel._pydantic._models import GelModel
 from gel._internal._testbase import _models as tb
+from gel._internal._testbase._base import TestAsyncIOClient, TestClient
 
 from tests import nested_collections
 
-_T = typing.TypeVar("_T")
+if typing.TYPE_CHECKING:
+    from gel.abstract import Queryable, _T_ql
 
 
-class TestModelSync(tb.ModelTestCase):
+# Helpers to replicate tests as both blocking and async
+
+
+class TestBlockingModelSyncBase(tb.ModelTestCase):
+    # Implement functions as async so that the interface is the same as the
+    # async version.
+    #
+    # Add the overloads too to help the type checker.
+
+    async def _save(
+        self,
+        *objs: GelModel,
+        warn_on_large_sync: bool = True,
+    ) -> None:
+        self.client.save(*objs)
+
+    async def _sync(
+        self,
+        *objs: GelModel,
+        warn_on_large_sync: bool = True,
+    ) -> None:
+        self.client.sync(*objs, warn_on_large_sync=warn_on_large_sync)
+
+    async def _sync_with_client(
+        self,
+        client: TestClient,
+        *objs: GelModel,
+        warn_on_large_sync: bool = True,
+    ) -> None:
+        client.sync(*objs, warn_on_large_sync=warn_on_large_sync)
+
+    @typing.overload
+    async def _query(
+        self,
+        query: Queryable[_T_ql],
+        /,
+        **kwargs: typing.Any,
+    ) -> list[_T_ql]: ...
+
+    @typing.overload
+    async def _query(
+        self,
+        query: str,
+        /,
+        *args: typing.Any,
+        **kwargs: typing.Any,
+    ) -> list[typing.Any]: ...
+
+    async def _query(
+        self,
+        query: str | Queryable[_T_ql],
+        /,
+        *args: typing.Any,
+        **kwargs: typing.Any,
+    ) -> list[typing.Any] | list[_T_ql]:
+        return self.client.query(query, *args, **kwargs)
+
+    @typing.overload
+    async def _query_required_single(
+        self, query: Queryable[_T_ql], **kwargs: typing.Any
+    ) -> _T_ql: ...
+
+    @typing.overload
+    async def _query_required_single(
+        self, query: str, *args: typing.Any, **kwargs: typing.Any
+    ) -> typing.Any: ...
+
+    async def _query_required_single(
+        self,
+        query: str | Queryable[_T_ql],
+        *args: typing.Any,
+        **kwargs: typing.Any,
+    ) -> _T_ql | typing.Any:
+        return self.client.query_required_single(query, *args, **kwargs)
+
+
+class TestAsyncModelSyncBase(tb.AsyncModelTestCase):
+
+    async def _save(
+        self,
+        *objs: GelModel,
+        warn_on_large_sync: bool = True,
+    ) -> None:
+        await self.client.save(*objs)
+
+    async def _sync(
+        self,
+        *objs: GelModel,
+        warn_on_large_sync: bool = True,
+    ) -> None:
+        await self.client.sync(*objs, warn_on_large_sync=warn_on_large_sync)
+
+    async def _sync_with_client(
+        self,
+        client: TestAsyncIOClient,
+        *objs: GelModel,
+        warn_on_large_sync: bool = True,
+    ) -> None:
+        await client.sync(*objs, warn_on_large_sync=warn_on_large_sync)
+
+    async def _query(
+        self,
+        query: str | Queryable[_T_ql],
+        /,
+        *args: typing.Any,
+        **kwargs: typing.Any,
+    ) -> list[typing.Any] | list[_T_ql]:
+        return await self.client.query(query, *args, **kwargs)
+
+    async def _query_required_single(
+        self,
+        query: str | Queryable[_T_ql],
+        *args: typing.Any,
+        **kwargs: typing.Any,
+    ) -> _T_ql | typing.Any:
+        return await self.client.query_required_single(query, *args, **kwargs)
+
+
+def make_async_tests(
+    cls: type[TestBlockingModelSyncBase]
+) -> type[TestBlockingModelSyncBase]:
+    """Create a copy of a blocking test case which uses an async client."""
+
+    new_name = "TestAsync" + cls.__name__[4:]
+
+    new_bases = tuple(
+        TestAsyncModelSyncBase if base is TestBlockingModelSyncBase else base
+        for base in cls.__bases__
+    )
+
+    new_attrs = {}
+    for name, value in vars(cls).items():
+        if callable(value) and name.startswith("test_"):
+            new_attrs["test_async_" + name[5:]] = value
+        else:
+            new_attrs[name] = value
+
+    new_cls = type(new_name, new_bases, new_attrs)
+    setattr(sys.modules[cls.__module__], new_name, new_cls)
+
+    return cls
+
+
+# Start of tests
+
+
+@make_async_tests
+class TestModelSync(TestBlockingModelSyncBase):
     ISOLATED_TEST_BRANCHES = True
 
     SCHEMA = os.path.join(
@@ -57,7 +207,7 @@ class TestModelSync(tb.ModelTestCase):
         os.path.dirname(__file__), "dbsetup", "chemistry.esdl"
     )
 
-    def test_model_sync_new_obj_computed_01(self):
+    async def test_model_sync_new_obj_computed_01(self):
         # Computeds from backlinks but no links set
 
         from models.chemistry import default
@@ -66,36 +216,36 @@ class TestModelSync(tb.ModelTestCase):
         reactor = default.Reactor()
 
         # Sync
-        self.client.sync(reactor)
+        await self._sync(reactor)
 
         # Check that value is initialized
         self.assertEqual(reactor.total_weight, 0)
         self.assertEqual(reactor.atom_weights, ())
 
-    def test_model_sync_new_obj_computed_02(self):
+    async def test_model_sync_new_obj_computed_02(self):
         # Computeds from links to existing object
 
         from models.chemistry import default
 
         # Create new objects
-        hydrogen = self.client.query_required_single(
+        hydrogen = await self._query_required_single(
             default.Element.filter(symbol="H").limit(1)
         )
         ref_atom = default.RefAtom(element=hydrogen)
 
         # Sync
-        self.client.sync(ref_atom)
+        await self._sync(ref_atom)
 
         # Check that computed values are fetched
         self.assertEqual(ref_atom.weight, 1.008)
 
-    def test_model_sync_new_obj_computed_03(self):
+    async def test_model_sync_new_obj_computed_03(self):
         # Computed from links to existing and new items
 
         from models.chemistry import default
 
         # Existing objects
-        helium = self.client.query_required_single(
+        helium = await self._query_required_single(
             default.Element.filter(symbol="He").limit(1)
         )
 
@@ -104,7 +254,7 @@ class TestModelSync(tb.ModelTestCase):
         new_atom = default.Atom(reactor=reactor, element=helium)
 
         # Sync
-        self.client.sync(reactor, new_atom)
+        await self._sync(reactor, new_atom)
 
         # Check that values are fetched
         self.assertEqual(new_atom.weight, 4.0026)
@@ -113,16 +263,16 @@ class TestModelSync(tb.ModelTestCase):
         self.assertEqual(reactor.total_weight, 4.0026)
         self.assertEqual(reactor.atom_weights, (4.0026,))
 
-    def test_model_sync_new_obj_computed_04(self):
+    async def test_model_sync_new_obj_computed_04(self):
         # Computed from links to existing and new items
 
         from models.chemistry import default
 
         # Existing objects
-        hydrogen = self.client.query_required_single(
+        hydrogen = await self._query_required_single(
             default.Element.select(weight=True).filter(symbol="H").limit(1)
         )
-        oxygen = self.client.query_required_single(
+        oxygen = await self._query_required_single(
             default.Element.select(weight=True).filter(symbol="O").limit(1)
         )
 
@@ -143,7 +293,7 @@ class TestModelSync(tb.ModelTestCase):
         oxygen_atoms = [o_1]
 
         # Sync
-        self.client.sync(*hydrogen_atoms, *oxygen_atoms)
+        await self._sync(*hydrogen_atoms, *oxygen_atoms)
 
         # Check that values are fetched
         self.assertEqual(
@@ -182,7 +332,8 @@ class TestModelSync(tb.ModelTestCase):
         )
 
 
-class TestModelSyncBasic(tb.ModelTestCase):
+@make_async_tests
+class TestModelSyncBasic(TestBlockingModelSyncBase):
     ISOLATED_TEST_BRANCHES = True
 
     SCHEMA = """
@@ -197,7 +348,7 @@ class TestModelSyncBasic(tb.ModelTestCase):
         };
     """
 
-    def test_model_sync_basic_01(self):
+    async def test_model_sync_basic_01(self):
         # Sync applies ids to new objects
 
         from models.TestModelSyncBasic import default
@@ -205,12 +356,12 @@ class TestModelSyncBasic(tb.ModelTestCase):
         synced = default.O()
         unsynced = default.O()
 
-        self.client.sync(synced)
+        await self._sync(synced)
 
         self.assertTrue(hasattr(synced, "id"))
         self.assertFalse(hasattr(unsynced, "id"))
 
-    def test_model_sync_basic_02(self):
+    async def test_model_sync_basic_02(self):
         # Sync applies ids to new objects in graph
 
         from models.TestModelSyncBasic import default
@@ -222,7 +373,7 @@ class TestModelSyncBasic(tb.ModelTestCase):
         b = default.B(a=a)
         c = default.C(b=b)
 
-        self.client.sync(a, b, c)
+        await self._sync(a, b, c)
 
         self.assertTrue(hasattr(a, "id"))
         self.assertTrue(hasattr(b, "id"))
@@ -235,7 +386,7 @@ class TestModelSyncBasic(tb.ModelTestCase):
         b = default.B(a=a)
         c = default.C(b=b)
 
-        self.client.sync(c)
+        await self._sync(c)
 
         self.assertTrue(hasattr(a, "id"))
         self.assertTrue(hasattr(b, "id"))
@@ -248,7 +399,7 @@ class TestModelSyncBasic(tb.ModelTestCase):
         b = default.B(a=a)
         c = default.C(b=b)
 
-        self.client.sync(a)
+        await self._sync(a)
 
         self.assertTrue(hasattr(a, "id"))
         self.assertFalse(hasattr(b, "id"))
@@ -258,20 +409,21 @@ class TestModelSyncBasic(tb.ModelTestCase):
         # sync only C
         # A and C get ids
         b = default.B()
-        self.client.save(b)
+        await self._save(b)
         self.assertTrue(hasattr(b, "id"))
 
         a = default.A()
         b.a = a
         c = default.C(b=b)
 
-        self.client.sync(c)
+        await self._sync(c)
 
         self.assertTrue(hasattr(a, "id"))
         self.assertTrue(hasattr(c, "id"))
 
 
-class TestModelSyncSingleProp(tb.ModelTestCase):
+@make_async_tests
+class TestModelSyncSingleProp(TestBlockingModelSyncBase):
     ISOLATED_TEST_BRANCHES = True
 
     SCHEMA = """
@@ -345,10 +497,10 @@ class TestModelSyncSingleProp(tb.ModelTestCase):
         # };
     """
 
-    def test_model_sync_single_prop_01(self):
+    async def test_model_sync_single_prop_01(self):
         # Insert new object with single prop
 
-        def _testcase(
+        async def _testcase(
             model_type: typing.Type[GelModel],
             val: typing.Any,
             *,
@@ -356,15 +508,15 @@ class TestModelSyncSingleProp(tb.ModelTestCase):
         ) -> None:
             # sync one at a time
             with_val = model_type(val=val)
-            self.client.sync(with_val)
+            await self._sync(with_val)
             self.assertEqual(with_val.val, val)
 
             with_unset = model_type()
-            self.client.sync(with_unset)
+            await self._sync(with_unset)
             self.assertEqual(with_unset.val, default_val)
 
             with_none = model_type(val=None)
-            self.client.sync(with_none)
+            await self._sync(with_none)
             self.assertIsNone(with_none.val)
 
             # sync all together
@@ -372,7 +524,7 @@ class TestModelSyncSingleProp(tb.ModelTestCase):
             with_unset = model_type()
             with_none = model_type(val=None)
 
-            self.client.sync(with_val, with_unset, with_none)
+            await self._sync(with_val, with_unset, with_none)
 
             self.assertEqual(with_val.val, val)
             self.assertEqual(with_unset.val, default_val)
@@ -380,29 +532,29 @@ class TestModelSyncSingleProp(tb.ModelTestCase):
 
         from models.TestModelSyncSingleProp import default
 
-        _testcase(default.A, 1)
-        _testcase(default.B, [1, 2, 3])
-        _testcase(default.C, ("x", 1))
-        _testcase(default.E, [("x", 1), ("y", 2), ("z", 3)])
-        _testcase(default.F, ("x", [1, 2, 3]))
-        _testcase(default.G, ("x", ("x", 1)))
-        _testcase(
+        await _testcase(default.A, 1)
+        await _testcase(default.B, [1, 2, 3])
+        await _testcase(default.C, ("x", 1))
+        await _testcase(default.E, [("x", 1), ("y", 2), ("z", 3)])
+        await _testcase(default.F, ("x", [1, 2, 3]))
+        await _testcase(default.G, ("x", ("x", 1)))
+        await _testcase(
             default.H,
             [("x", [1, 2, 3]), ("y", [4, 5, 6]), ("z", [7, 8, 9])],
         )
-        _testcase(
+        await _testcase(
             default.I,
             ("w", [("x", 1), ("y", 2), ("z", 3)]),
         )
 
-        _testcase(default.Az, 9, default_val=-1)
-        _testcase(default.Bz, [1, 2, 3], default_val=[-1])
-        _testcase(default.Cz, ("x", 1), default_val=(".", -1))
-        _testcase(default.Fz, ("x", [1, 2, 3]), default_val=(".", [-1]))
-        _testcase(default.Gz, ("x", ("x", 1)), default_val=(".", (".", -1)))
+        await _testcase(default.Az, 9, default_val=-1)
+        await _testcase(default.Bz, [1, 2, 3], default_val=[-1])
+        await _testcase(default.Cz, ("x", 1), default_val=(".", -1))
+        await _testcase(default.Fz, ("x", [1, 2, 3]), default_val=(".", [-1]))
+        await _testcase(default.Gz, ("x", ("x", 1)), default_val=(".", (".", -1)))
 
     @tb.xfail  # Adding the types to the schema causes ISE
-    def test_model_sync_single_prop_01b(self):
+    async def test_model_sync_single_prop_01b(self):
         from models.TestModelSyncSingleProp import default
 
         self._testcase(
@@ -419,26 +571,26 @@ class TestModelSyncSingleProp(tb.ModelTestCase):
             default_val=(".", [(".", -1)]),
         )
 
-    def test_model_sync_single_prop_02(self):
+    async def test_model_sync_single_prop_02(self):
         # Updating existing objects with single props
 
         from models.TestModelSyncSingleProp import default
 
-        def _testcase(
+        async def _testcase(
             model_type: typing.Type[GelModel],
             initial_val: typing.Any,
             changed_val: typing.Any,
         ) -> None:
             original = model_type(val=initial_val)
-            self.client.save(original)
+            await self._save(original)
 
-            mirror_1 = self.client.query_required_single(
+            mirror_1 = await self._query_required_single(
                 model_type.select(val=True).limit(1)
             )
-            mirror_2 = self.client.query_required_single(
+            mirror_2 = await self._query_required_single(
                 model_type.select(val=True).limit(1)
             )
-            mirror_3 = self.client.query_required_single(
+            mirror_3 = await self._query_required_single(
                 model_type.select(val=False).limit(1)
             )
 
@@ -451,7 +603,7 @@ class TestModelSyncSingleProp(tb.ModelTestCase):
             original.val = changed_val
 
             # sync some of the objects
-            self.client.sync(original, mirror_1, mirror_3)
+            await self._sync(original, mirror_1, mirror_3)
 
             # only synced objects with value set get update
             self.assertEqual(original.val, changed_val)
@@ -460,64 +612,64 @@ class TestModelSyncSingleProp(tb.ModelTestCase):
             # self.assertFalse(hasattr(mirror_3, 'val'))  # Fail
 
             # cleanup
-            self.client.query(model_type.delete())
+            await self._query(model_type.delete())
 
         # Change to a new value
-        _testcase(default.A, 1, 2)
-        _testcase(default.B, [1], [2])
-        _testcase(default.C, ("a", 1), ("b", 2))
-        _testcase(default.E, [("a", 1)], [("b", 2)])
-        _testcase(default.F, ("a", [1]), ("b", [2]))
-        _testcase(default.G, ("a", ("a", 1)), ("b", ("b", 2)))
-        _testcase(default.H, [("a", [1])], [("b", [2])])
-        _testcase(default.I, ("a", [("a", 1)]), ("b", [("b", 2)]))
+        await _testcase(default.A, 1, 2)
+        await _testcase(default.B, [1], [2])
+        await _testcase(default.C, ("a", 1), ("b", 2))
+        await _testcase(default.E, [("a", 1)], [("b", 2)])
+        await _testcase(default.F, ("a", [1]), ("b", [2]))
+        await _testcase(default.G, ("a", ("a", 1)), ("b", ("b", 2)))
+        await _testcase(default.H, [("a", [1])], [("b", [2])])
+        await _testcase(default.I, ("a", [("a", 1)]), ("b", [("b", 2)]))
 
         # Change to the same value
-        _testcase(default.A, 1, 1)
-        _testcase(default.B, [1], [1])
-        _testcase(default.C, ("a", 1), ("a", 1))
-        _testcase(default.E, [("a", 1)], [("a", 1)])
-        _testcase(default.F, ("a", [1]), ("a", [1]))
-        _testcase(default.G, ("a", ("a", 1)), ("a", ("a", 1)))
-        _testcase(default.H, [("a", [1])], [("a", [1])])
-        _testcase(default.I, ("a", [("a", 1)]), ("a", [("a", 1)]))
+        await _testcase(default.A, 1, 1)
+        await _testcase(default.B, [1], [1])
+        await _testcase(default.C, ("a", 1), ("a", 1))
+        await _testcase(default.E, [("a", 1)], [("a", 1)])
+        await _testcase(default.F, ("a", [1]), ("a", [1]))
+        await _testcase(default.G, ("a", ("a", 1)), ("a", ("a", 1)))
+        await _testcase(default.H, [("a", [1])], [("a", [1])])
+        await _testcase(default.I, ("a", [("a", 1)]), ("a", [("a", 1)]))
 
         # Change from None to value
-        _testcase(default.A, None, 1)
-        _testcase(default.B, None, [1])
-        _testcase(default.C, None, ("a", 1))
-        _testcase(default.E, None, [("a", 1)])
-        _testcase(default.F, None, ("a", [1]))
-        _testcase(default.G, None, ("a", ("a", 1)))
-        _testcase(default.H, None, [("a", [1])])
-        _testcase(default.I, None, ("a", [("a", 1)]))
+        await _testcase(default.A, None, 1)
+        await _testcase(default.B, None, [1])
+        await _testcase(default.C, None, ("a", 1))
+        await _testcase(default.E, None, [("a", 1)])
+        await _testcase(default.F, None, ("a", [1]))
+        await _testcase(default.G, None, ("a", ("a", 1)))
+        await _testcase(default.H, None, [("a", [1])])
+        await _testcase(default.I, None, ("a", [("a", 1)]))
 
         # Change from value to None
-        _testcase(default.A, 1, None)
-        _testcase(default.B, [1], None)
-        _testcase(default.C, ("a", 1), None)
-        _testcase(default.E, [("a", 1)], None)
-        _testcase(default.F, ("a", [1]), None)
-        _testcase(default.G, ("a", ("a", 1)), None)
-        _testcase(default.H, [("a", [1])], None)
-        _testcase(default.I, ("a", [("a", 1)]), None)
+        await _testcase(default.A, 1, None)
+        await _testcase(default.B, [1], None)
+        await _testcase(default.C, ("a", 1), None)
+        await _testcase(default.E, [("a", 1)], None)
+        await _testcase(default.F, ("a", [1]), None)
+        await _testcase(default.G, ("a", ("a", 1)), None)
+        await _testcase(default.H, [("a", [1])], None)
+        await _testcase(default.I, ("a", [("a", 1)]), None)
 
         # Change from None to None
-        _testcase(default.A, None, None)
-        _testcase(default.B, None, None)
-        _testcase(default.C, None, None)
-        _testcase(default.E, None, None)
-        _testcase(default.F, None, None)
-        _testcase(default.G, None, None)
-        _testcase(default.H, None, None)
-        _testcase(default.I, None, None)
+        await _testcase(default.A, None, None)
+        await _testcase(default.B, None, None)
+        await _testcase(default.C, None, None)
+        await _testcase(default.E, None, None)
+        await _testcase(default.F, None, None)
+        await _testcase(default.G, None, None)
+        await _testcase(default.H, None, None)
+        await _testcase(default.I, None, None)
 
-    def test_model_sync_single_prop_03(self):
+    async def test_model_sync_single_prop_03(self):
         # Reconciling different changes to single props
 
         from models.TestModelSyncSingleProp import default
 
-        def _testcase(
+        async def _testcase(
             model_type: typing.Type[GelModel],
             initial_val: typing.Any,
             changed_val_0: typing.Any,
@@ -525,15 +677,15 @@ class TestModelSyncSingleProp(tb.ModelTestCase):
             changed_val_2: typing.Any,
         ) -> None:
             original = model_type(val=initial_val)
-            self.client.save(original)
+            await self._save(original)
 
-            mirror_1 = self.client.query_required_single(
+            mirror_1 = await self._query_required_single(
                 model_type.select(val=True).limit(1)
             )
-            mirror_2 = self.client.query_required_single(
+            mirror_2 = await self._query_required_single(
                 model_type.select(val=True).limit(1)
             )
-            mirror_3 = self.client.query_required_single(
+            mirror_3 = await self._query_required_single(
                 model_type.select(val=False).limit(1)
             )
 
@@ -548,7 +700,7 @@ class TestModelSyncSingleProp(tb.ModelTestCase):
             mirror_2.val = changed_val_2
 
             # sync some of the objects
-            self.client.sync(original, mirror_1, mirror_3)
+            await self._sync(original, mirror_1, mirror_3)
 
             # only synced objects are updated
             self.assertEqual(original.val, changed_val_0)
@@ -557,28 +709,32 @@ class TestModelSyncSingleProp(tb.ModelTestCase):
             # self.assertFalse(hasattr(mirror_3, 'val'))  # Fail
 
             # cleanup
-            self.client.query(model_type.delete())
+            await self._query(model_type.delete())
 
-        _testcase(default.A, 1, 2, 3, 4)
-        _testcase(default.B, [1], [2], [3], [4])
-        _testcase(default.C, ("a", 1), ("b", 2), ("c", 3), ("d", 4))
-        _testcase(default.E, [("a", 1)], [("b", 2)], [("c", 3)], [("d", 4)])
-        _testcase(default.F, ("a", [1]), ("b", [2]), ("c", [3]), ("d", [4]))
-        _testcase(
+        await _testcase(default.A, 1, 2, 3, 4)
+        await _testcase(default.B, [1], [2], [3], [4])
+        await _testcase(default.C, ("a", 1), ("b", 2), ("c", 3), ("d", 4))
+        await _testcase(
+            default.E, [("a", 1)], [("b", 2)], [("c", 3)], [("d", 4)]
+        )
+        await _testcase(
+            default.F, ("a", [1]), ("b", [2]), ("c", [3]), ("d", [4])
+        )
+        await _testcase(
             default.G,
             ("a", ("a", 1)),
             ("b", ("b", 2)),
             ("c", ("c", 3)),
             ("d", ("d", 4)),
         )
-        _testcase(
+        await _testcase(
             default.H,
             [("a", [1])],
             [("b", [2])],
             [("c", [3])],
             [("d", [4])],
         )
-        _testcase(
+        await _testcase(
             default.I,
             ("a", [("a", 1)]),
             ("b", [("b", 2)]),
@@ -587,20 +743,20 @@ class TestModelSyncSingleProp(tb.ModelTestCase):
         )
 
     @tb.xfail
-    def test_model_sync_single_prop_04(self):
+    async def test_model_sync_single_prop_04(self):
         # Changing elements of collection single props
         # Checks deeply nested collections as well
 
         from models.TestModelSyncSingleProp import default
 
-        def _testcase(
+        async def _testcase(
             model_type: typing.Type[GelModel],
             initial_val: typing.Any,
         ) -> None:
             original = model_type(val=initial_val)
-            self.client.save(original)
+            await self._save(original)
 
-            mirror_1 = self.client.query_required_single(
+            mirror_1 = await self._query_required_single(
                 model_type.select(val=True).limit(1)
             )
 
@@ -645,7 +801,7 @@ class TestModelSyncSingleProp(tb.ModelTestCase):
                 )
 
                 # sync and check objects are updated
-                self.client.sync(original, mirror_1)
+                await self._sync(original, mirror_1)
                 self.assertEqual(original.val, expected_val)
                 self.assertEqual(mirror_1.val, expected_val)
 
@@ -655,50 +811,51 @@ class TestModelSyncSingleProp(tb.ModelTestCase):
                 )
 
             # cleanup
-            self.client.query(model_type.delete())
+            await self._query(model_type.delete())
 
-        _testcase(default.B, [1, 2, 3])
-        _testcase(default.C, ("x", 1))
-        _testcase(default.E, [("x", 1), ("y", 2), ("z", 3)])
-        _testcase(default.F, ("x", [1, 2, 3]))  # Fail
-        _testcase(default.G, ("x", ("x", 1)))
-        _testcase(
+        await _testcase(default.B, [1, 2, 3])
+        await _testcase(default.C, ("x", 1))
+        await _testcase(default.E, [("x", 1), ("y", 2), ("z", 3)])
+        await _testcase(default.F, ("x", [1, 2, 3]))  # Fail
+        await _testcase(default.G, ("x", ("x", 1)))
+        await _testcase(
             default.H,
             [("x", [1, 2, 3]), ("y", [4, 5, 6]), ("z", [7, 8, 9])],
         )  # Fail
-        _testcase(
+        await _testcase(
             default.I,
             ("w", [("x", 1), ("y", 2), ("z", 3)]),
         )  # Fail
 
     @tb.xfail
-    def test_model_sync_single_prop_05(self):
+    async def test_model_sync_single_prop_05(self):
         # Existing object without prop should not have it fetched
 
         from models.TestModelSyncSingleProp import default
 
         original = default.A(val=1)
-        self.client.save(original)
+        await self._save(original)
 
-        mirror_1 = self.client.query_required_single(
+        mirror_1 = await self._query_required_single(
             default.A.select(val=False).limit(1)
         )
         original.val = 2
-        self.client.save(original)
-        self.client.sync(mirror_1)
+        await self._save(original)
+        await self._sync(mirror_1)
         self.assertFalse(hasattr(mirror_1, "val"))
 
         # Sync alongside another object with the prop set
-        mirror_2 = self.client.query_required_single(
+        mirror_2 = await self._query_required_single(
             default.A.select(val=True).limit(1)
         )
         original.val = 3
-        self.client.save(original)
-        self.client.sync(mirror_1, mirror_2)
+        await self._save(original)
+        await self._sync(mirror_1, mirror_2)
         self.assertFalse(hasattr(mirror_1, "val"))  # Fail
 
 
-class TestModelSyncComputedSingleProp(tb.ModelTestCase):
+@make_async_tests
+class TestModelSyncComputedSingleProp(TestBlockingModelSyncBase):
     ISOLATED_TEST_BRANCHES = True
 
     SCHEMA = """
@@ -756,254 +913,254 @@ class TestModelSyncComputedSingleProp(tb.ModelTestCase):
         };
     """
 
-    def test_model_sync_computed_single_prop_constant_01(self):
+    async def test_model_sync_computed_single_prop_constant_01(self):
         # Create new
 
         from models.TestModelSyncComputedSingleProp import default
 
         original = default.FromConstant()
-        self.client.sync(original)
+        await self._sync(original)
 
         self.assertEqual(original.val, 1)
 
-    def test_model_sync_computed_single_prop_constant_02(self):
+    async def test_model_sync_computed_single_prop_constant_02(self):
         # Update without val set does not fetch it
 
         from models.TestModelSyncComputedSingleProp import default
 
-        self.client.sync(default.FromConstant())
-        mirror = self.client.query_required_single(
+        await self._sync(default.FromConstant())
+        mirror = await self._query_required_single(
             default.FromConstant.select(val=False).limit(1)
         )
-        self.client.sync(mirror)
+        await self._sync(mirror)
 
         self.assertFalse(hasattr(mirror, 'val'))
 
-    def test_model_sync_computed_single_prop_from_single_prop_01(self):
+    async def test_model_sync_computed_single_prop_from_single_prop_01(self):
         # Create new, expr prop is None
 
         from models.TestModelSyncComputedSingleProp import default
 
         original = default.FromSingleProp()
-        self.client.sync(original)
+        await self._sync(original)
 
         self.assertEqual(original.val, None)
 
-    def test_model_sync_computed_single_prop_from_single_prop_02(self):
+    async def test_model_sync_computed_single_prop_from_single_prop_02(self):
         # Create new, expr prop has value
 
         from models.TestModelSyncComputedSingleProp import default
 
         original = default.FromSingleProp(n=1)
-        self.client.sync(original)
+        await self._sync(original)
 
         self.assertEqual(original.val, 2)
 
-    def test_model_sync_computed_single_prop_from_single_prop_03(self):
+    async def test_model_sync_computed_single_prop_from_single_prop_03(self):
         # Update without val set does not fetch it
 
         from models.TestModelSyncComputedSingleProp import default
 
-        self.client.sync(default.FromSingleProp())
-        mirror = self.client.query_required_single(
+        await self._sync(default.FromSingleProp())
+        mirror = await self._query_required_single(
             default.FromSingleProp.select(val=False).limit(1)
         )
-        self.client.sync(mirror)
+        await self._sync(mirror)
 
         self.assertFalse(hasattr(mirror, 'val'))
 
-    def test_model_sync_computed_single_prop_from_single_prop_04(self):
+    async def test_model_sync_computed_single_prop_from_single_prop_04(self):
         # Update with val set, initially None
 
         from models.TestModelSyncComputedSingleProp import default
 
         original = default.FromSingleProp()
-        self.client.sync(original)
+        await self._sync(original)
 
         original.n = 9
-        self.client.sync(original)
+        await self._sync(original)
 
         self.assertEqual(original.val, 10)
 
-    def test_model_sync_computed_single_prop_from_single_prop_05(self):
+    async def test_model_sync_computed_single_prop_from_single_prop_05(self):
         # Update with val set, initially not None
 
         from models.TestModelSyncComputedSingleProp import default
 
         original = default.FromSingleProp(n=1)
-        self.client.sync(original)
+        await self._sync(original)
 
         original.n = 9
-        self.client.sync(original)
+        await self._sync(original)
 
         self.assertEqual(original.val, 10)
 
-    def test_model_sync_computed_single_prop_from_multi_prop_01(self):
+    async def test_model_sync_computed_single_prop_from_multi_prop_01(self):
         # Create new, expr prop is empty
 
         from models.TestModelSyncComputedSingleProp import default
 
         original = default.FromMultiProp()
-        self.client.sync(original)
+        await self._sync(original)
 
         self.assertEqual(original.val, 1)
 
-    def test_model_sync_computed_single_prop_from_multi_prop_02(self):
+    async def test_model_sync_computed_single_prop_from_multi_prop_02(self):
         # Create new, expr prop has values
 
         from models.TestModelSyncComputedSingleProp import default
 
         original = default.FromMultiProp(n=[1, 2, 3])
-        self.client.sync(original)
+        await self._sync(original)
 
         self.assertEqual(original.val, 7)
 
-    def test_model_sync_computed_single_prop_from_multi_prop_03(self):
+    async def test_model_sync_computed_single_prop_from_multi_prop_03(self):
         # Update without val set does not fetch it
 
         from models.TestModelSyncComputedSingleProp import default
 
-        self.client.sync(default.FromMultiProp())
-        mirror = self.client.query_required_single(
+        await self._sync(default.FromMultiProp())
+        mirror = await self._query_required_single(
             default.FromMultiProp.select(val=False).limit(1)
         )
-        self.client.sync(mirror)
+        await self._sync(mirror)
 
         self.assertFalse(hasattr(mirror, 'val'))
 
-    def test_model_sync_computed_single_prop_from_multi_prop_04(self):
+    async def test_model_sync_computed_single_prop_from_multi_prop_04(self):
         # Update with val set, initially empty
 
         from models.TestModelSyncComputedSingleProp import default
 
         original = default.FromMultiProp()
-        self.client.sync(original)
+        await self._sync(original)
 
         original.n = [7, 8, 9]
-        self.client.sync(original)
+        await self._sync(original)
 
         self.assertEqual(original.val, 25)
 
-    def test_model_sync_computed_single_prop_from_multi_prop_05(self):
+    async def test_model_sync_computed_single_prop_from_multi_prop_05(self):
         # Update with val set, initially has values
 
         from models.TestModelSyncComputedSingleProp import default
 
         original = default.FromMultiProp(n=[1, 2, 3])
-        self.client.sync(original)
+        await self._sync(original)
 
         original.n = [7, 8, 9]
-        self.client.sync(original)
+        await self._sync(original)
 
         self.assertEqual(original.val, 25)
 
-    def test_model_sync_computed_single_prop_from_single_link_01(self):
+    async def test_model_sync_computed_single_prop_from_single_link_01(self):
         # Create new, expr prop is None
 
         from models.TestModelSyncComputedSingleProp import default
 
         original = default.FromSingleLink()
-        self.client.sync(original)
+        await self._sync(original)
 
         self.assertEqual(original.val, None)
 
-    def test_model_sync_computed_single_prop_from_single_link_02(self):
+    async def test_model_sync_computed_single_prop_from_single_link_02(self):
         # Create new, target already exists
 
         from models.TestModelSyncComputedSingleProp import default
 
         target = default.Target(val=1)
-        self.client.save(target)
+        await self._save(target)
 
         original = default.FromSingleLink(target=target)
-        self.client.sync(original)
+        await self._sync(original)
 
         self.assertEqual(original.val, 2)
 
-    def test_model_sync_computed_single_prop_from_single_link_03(self):
+    async def test_model_sync_computed_single_prop_from_single_link_03(self):
         # Create new, target created alongside object
 
         from models.TestModelSyncComputedSingleProp import default
 
         target = default.Target(val=1)
         original = default.FromSingleLink(target=target)
-        self.client.sync(original, target)
+        await self._sync(original, target)
 
         self.assertEqual(original.val, 2)
 
-    def test_model_sync_computed_single_prop_from_single_link_04(self):
+    async def test_model_sync_computed_single_prop_from_single_link_04(self):
         # Update without val set does not fetch it
 
         from models.TestModelSyncComputedSingleProp import default
 
-        self.client.sync(default.FromSingleLink())
-        mirror = self.client.query_required_single(
+        await self._sync(default.FromSingleLink())
+        mirror = await self._query_required_single(
             default.FromSingleLink.select(val=False).limit(1)
         )
-        self.client.sync(mirror)
+        await self._sync(mirror)
 
         self.assertFalse(hasattr(mirror, 'val'))
 
-    def test_model_sync_computed_single_prop_from_single_link_05(self):
+    async def test_model_sync_computed_single_prop_from_single_link_05(self):
         # Update with val set, initially target is None
 
         from models.TestModelSyncComputedSingleProp import default
 
         target = default.Target(val=9)
         original = default.FromSingleLink()
-        self.client.sync(original, target)
+        await self._sync(original, target)
 
         original.target = target
-        self.client.sync(original)
+        await self._sync(original)
 
         self.assertEqual(original.val, 10)
 
-    def test_model_sync_computed_single_prop_from_single_link_06(self):
+    async def test_model_sync_computed_single_prop_from_single_link_06(self):
         # Update with val set, initially target is set
         # target val changes
 
         from models.TestModelSyncComputedSingleProp import default
 
         target = default.Target(val=1)
-        self.client.save(target)
+        await self._save(target)
 
         original = default.FromSingleLink(target=target)
-        self.client.sync(original)
+        await self._sync(original)
 
         target.val = 9
-        self.client.sync(original, target)
+        await self._sync(original, target)
 
         self.assertEqual(original.val, 10)
 
-    def test_model_sync_computed_single_prop_from_single_link_07(self):
+    async def test_model_sync_computed_single_prop_from_single_link_07(self):
         # Update with val set, initially target is set
         # target changes
 
         from models.TestModelSyncComputedSingleProp import default
 
         target_a = default.Target(val=1)
-        self.client.save(target_a)
+        await self._save(target_a)
 
         original = default.FromSingleLink(target=target_a)
-        self.client.sync(original)
+        await self._sync(original)
 
         target_b = default.Target(val=9)
         original.target = target_b
-        self.client.sync(original, target_b)
+        await self._sync(original, target_b)
 
         self.assertEqual(original.val, 10)
 
-    def test_model_sync_computed_multi_prop_from_multi_link_01(self):
+    async def test_model_sync_computed_multi_prop_from_multi_link_01(self):
         # Create new, expr prop is None
 
         from models.TestModelSyncComputedSingleProp import default
 
         original = default.FromMultiLink()
-        self.client.sync(original)
+        await self._sync(original)
 
         self.assertEqual(original.val, 1)
 
-    def test_model_sync_computed_multi_prop_from_multi_link_02(self):
+    async def test_model_sync_computed_multi_prop_from_multi_link_02(self):
         # Create new, target already exists
 
         from models.TestModelSyncComputedSingleProp import default
@@ -1011,14 +1168,14 @@ class TestModelSyncComputedSingleProp(tb.ModelTestCase):
         target_a = default.Target(val=1)
         target_b = default.Target(val=2)
         target_c = default.Target(val=3)
-        self.client.save(target_a, target_b, target_c)
+        await self._save(target_a, target_b, target_c)
 
         original = default.FromMultiLink(target=[target_a, target_b, target_c])
-        self.client.sync(original)
+        await self._sync(original)
 
         self.assertEqual(original.val, 7)
 
-    def test_model_sync_computed_multi_prop_from_multi_link_03(self):
+    async def test_model_sync_computed_multi_prop_from_multi_link_03(self):
         # Create new, target created alongside object
 
         from models.TestModelSyncComputedSingleProp import default
@@ -1027,24 +1184,24 @@ class TestModelSyncComputedSingleProp(tb.ModelTestCase):
         target_b = default.Target(val=2)
         target_c = default.Target(val=3)
         original = default.FromMultiLink(target=[target_a, target_b, target_c])
-        self.client.sync(original, target_a, target_b, target_c)
+        await self._sync(original, target_a, target_b, target_c)
 
         self.assertEqual(original.val, 7)
 
-    def test_model_sync_computed_multi_prop_from_multi_link_04(self):
+    async def test_model_sync_computed_multi_prop_from_multi_link_04(self):
         # Update without val set does not fetch it
 
         from models.TestModelSyncComputedSingleProp import default
 
-        self.client.sync(default.FromMultiLink())
-        mirror = self.client.query_required_single(
+        await self._sync(default.FromMultiLink())
+        mirror = await self._query_required_single(
             default.FromMultiLink.select(val=False).limit(1)
         )
-        self.client.sync(mirror)
+        await self._sync(mirror)
 
         self.assertFalse(hasattr(mirror, 'val'))
 
-    def test_model_sync_computed_multi_prop_from_multi_link_05(self):
+    async def test_model_sync_computed_multi_prop_from_multi_link_05(self):
         # Update with val set, initially target is empty
 
         from models.TestModelSyncComputedSingleProp import default
@@ -1052,17 +1209,17 @@ class TestModelSyncComputedSingleProp(tb.ModelTestCase):
         target_a = default.Target(val=7)
         target_b = default.Target(val=8)
         target_c = default.Target(val=9)
-        self.client.save(target_a, target_b, target_c)
+        await self._save(target_a, target_b, target_c)
 
         original = default.FromMultiLink()
-        self.client.sync(original)
+        await self._sync(original)
 
         original.target = [target_a, target_b, target_c]
-        self.client.sync(original)
+        await self._sync(original)
 
         self.assertEqual(original.val, 25)
 
-    def test_model_sync_computed_multi_prop_from_multi_link_06(self):
+    async def test_model_sync_computed_multi_prop_from_multi_link_06(self):
         # Update with val set, initially target has values
         # target val changes
 
@@ -1071,19 +1228,19 @@ class TestModelSyncComputedSingleProp(tb.ModelTestCase):
         target_a = default.Target(val=1)
         target_b = default.Target(val=2)
         target_c = default.Target(val=3)
-        self.client.save(target_a, target_b, target_c)
+        await self._save(target_a, target_b, target_c)
 
         original = default.FromMultiLink(target=[target_a, target_b, target_c])
-        self.client.sync(original)
+        await self._sync(original)
 
         target_a.val = 7
         target_b.val = 8
         target_c.val = 9
-        self.client.sync(original)
+        await self._sync(original)
 
         self.assertEqual(original.val, 25)
 
-    def test_model_sync_computed_multi_prop_from_multi_link_07(self):
+    async def test_model_sync_computed_multi_prop_from_multi_link_07(self):
         # Update with val set, initially target has values
         # target changes
 
@@ -1092,84 +1249,96 @@ class TestModelSyncComputedSingleProp(tb.ModelTestCase):
         target_a = default.Target(val=1)
         target_b = default.Target(val=2)
         target_c = default.Target(val=3)
-        self.client.save(target_a, target_b, target_c)
+        await self._save(target_a, target_b, target_c)
 
         original = default.FromMultiLink(target=[target_a, target_b, target_c])
-        self.client.sync(original)
+        await self._sync(original)
 
         target_d = default.Target(val=7)
         target_e = default.Target(val=8)
         target_f = default.Target(val=9)
         original.target = [target_d, target_e, target_f]
-        self.client.sync(original, target_d, target_e, target_f)
+        await self._sync(original, target_d, target_e, target_f)
 
         self.assertEqual(original.val, 25)
 
-    def test_model_sync_computed_single_prop_from_exclusive_backlink_01(self):
+    async def test_model_sync_computed_single_prop_from_exclusive_backlink_01(
+        self,
+    ):
         # Create new, no source
 
         from models.TestModelSyncComputedSingleProp import default
 
         original = default.FromExclusiveBacklink()
-        self.client.sync(original)
+        await self._sync(original)
 
         self.assertEqual(original.val, None)
 
-    def test_model_sync_computed_single_prop_from_exclusive_backlink_02(self):
+    async def test_model_sync_computed_single_prop_from_exclusive_backlink_02(
+        self,
+    ):
         # Create new, source already exists
 
         from models.TestModelSyncComputedSingleProp import default
 
         source = default.ExclusiveSource(val=1)
-        self.client.save(source)
+        await self._save(source)
 
         original = default.FromExclusiveBacklink()
         source.target = original
-        self.client.sync(original, source)
+        await self._sync(original, source)
 
         self.assertEqual(original.val, 2)
 
-    def test_model_sync_computed_single_prop_from_exclusive_backlink_03(self):
+    async def test_model_sync_computed_single_prop_from_exclusive_backlink_03(
+        self,
+    ):
         # Create new, source created alongside object
 
         from models.TestModelSyncComputedSingleProp import default
 
         original = default.FromExclusiveBacklink()
         source = default.ExclusiveSource(val=1, target=original)
-        self.client.sync(original, source)
+        await self._sync(original, source)
 
         self.assertEqual(original.val, 2)
 
-    def test_model_sync_computed_single_prop_from_exclusive_backlink_04(self):
+    async def test_model_sync_computed_single_prop_from_exclusive_backlink_04(
+        self,
+    ):
         # Update without val set does not fetch it
 
         from models.TestModelSyncComputedSingleProp import default
 
-        self.client.sync(default.FromExclusiveBacklink())
-        mirror = self.client.query_required_single(
+        await self._sync(default.FromExclusiveBacklink())
+        mirror = await self._query_required_single(
             default.FromExclusiveBacklink.select(val=False).limit(1)
         )
-        self.client.sync(mirror)
+        await self._sync(mirror)
 
         self.assertFalse(hasattr(mirror, 'val'))
 
-    def test_model_sync_computed_single_prop_from_exclusive_backlink_05(self):
+    async def test_model_sync_computed_single_prop_from_exclusive_backlink_05(
+        self,
+    ):
         # Update with val set, initially no source
 
         from models.TestModelSyncComputedSingleProp import default
 
         source = default.ExclusiveSource(val=9)
-        self.client.save(source)
+        await self._save(source)
 
         original = default.FromExclusiveBacklink()
-        self.client.sync(original)
+        await self._sync(original)
 
         source.target = original
-        self.client.sync(original, source)
+        await self._sync(original, source)
 
         self.assertEqual(original.val, 10)
 
-    def test_model_sync_computed_single_prop_from_exclusive_backlink_06(self):
+    async def test_model_sync_computed_single_prop_from_exclusive_backlink_06(
+        self,
+    ):
         # Update with val set, initially no source
         # source val changes
 
@@ -1177,14 +1346,16 @@ class TestModelSyncComputedSingleProp(tb.ModelTestCase):
 
         original = default.FromExclusiveBacklink()
         source = default.ExclusiveSource(val=1, target=original)
-        self.client.sync(original, source)
+        await self._sync(original, source)
 
         source.val = 9
-        self.client.sync(original, source)
+        await self._sync(original, source)
 
         self.assertEqual(original.val, 10)
 
-    def test_model_sync_computed_single_prop_from_exclusive_backlink_07(self):
+    async def test_model_sync_computed_single_prop_from_exclusive_backlink_07(
+        self,
+    ):
         # Update with val set, initially has source
         # source changes
 
@@ -1192,26 +1363,30 @@ class TestModelSyncComputedSingleProp(tb.ModelTestCase):
 
         original = default.FromExclusiveBacklink()
         source_a = default.ExclusiveSource(val=1, target=original)
-        self.client.sync(original, source_a)
+        await self._sync(original, source_a)
 
         source_a.target = None
-        self.client.sync(source_a)
+        await self._sync(source_a)
         source_b = default.ExclusiveSource(val=9, target=original)
-        self.client.sync(original, source_b)
+        await self._sync(original, source_b)
 
         self.assertEqual(original.val, 10)
 
-    def test_model_sync_computed_single_prop_from_single_backlink_01(self):
+    async def test_model_sync_computed_single_prop_from_single_backlink_01(
+        self,
+    ):
         # Create new, no sources
 
         from models.TestModelSyncComputedSingleProp import default
 
         original = default.FromSingleBacklink()
-        self.client.sync(original)
+        await self._sync(original)
 
         self.assertEqual(original.val, 1)
 
-    def test_model_sync_computed_single_prop_from_single_backlink_02(self):
+    async def test_model_sync_computed_single_prop_from_single_backlink_02(
+        self,
+    ):
         # Create new, sources already exists
 
         from models.TestModelSyncComputedSingleProp import default
@@ -1219,17 +1394,19 @@ class TestModelSyncComputedSingleProp(tb.ModelTestCase):
         source_a = default.SingleSource(val=1)
         source_b = default.SingleSource(val=2)
         source_c = default.SingleSource(val=3)
-        self.client.save(source_a, source_b, source_c)
+        await self._save(source_a, source_b, source_c)
 
         original = default.FromSingleBacklink()
         source_a.target = original
         source_b.target = original
         source_c.target = original
-        self.client.sync(original, source_a, source_b, source_c)
+        await self._sync(original, source_a, source_b, source_c)
 
         self.assertEqual(original.val, 7)
 
-    def test_model_sync_computed_single_prop_from_single_backlink_03(self):
+    async def test_model_sync_computed_single_prop_from_single_backlink_03(
+        self,
+    ):
         # Create new, sources created alongside object
 
         from models.TestModelSyncComputedSingleProp import default
@@ -1238,24 +1415,28 @@ class TestModelSyncComputedSingleProp(tb.ModelTestCase):
         source_a = default.SingleSource(val=1, target=original)
         source_b = default.SingleSource(val=2, target=original)
         source_c = default.SingleSource(val=3, target=original)
-        self.client.sync(original, source_a, source_b, source_c)
+        await self._sync(original, source_a, source_b, source_c)
 
         self.assertEqual(original.val, 7)
 
-    def test_model_sync_computed_single_prop_from_single_backlink_04(self):
+    async def test_model_sync_computed_single_prop_from_single_backlink_04(
+        self,
+    ):
         # Update without val set does not fetch it
 
         from models.TestModelSyncComputedSingleProp import default
 
-        self.client.sync(default.FromSingleBacklink())
-        mirror = self.client.query_required_single(
+        await self._sync(default.FromSingleBacklink())
+        mirror = await self._query_required_single(
             default.FromSingleBacklink.select(val=False).limit(1)
         )
-        self.client.sync(mirror)
+        await self._sync(mirror)
 
         self.assertFalse(hasattr(mirror, 'val'))
 
-    def test_model_sync_computed_single_prop_from_single_backlink_05(self):
+    async def test_model_sync_computed_single_prop_from_single_backlink_05(
+        self,
+    ):
         # Update with val set, initially no sources
 
         from models.TestModelSyncComputedSingleProp import default
@@ -1263,19 +1444,21 @@ class TestModelSyncComputedSingleProp(tb.ModelTestCase):
         source_a = default.SingleSource(val=7)
         source_b = default.SingleSource(val=8)
         source_c = default.SingleSource(val=9)
-        self.client.save(source_a, source_b, source_c)
+        await self._save(source_a, source_b, source_c)
 
         original = default.FromSingleBacklink()
-        self.client.sync(original)
+        await self._sync(original)
 
         source_a.target = original
         source_b.target = original
         source_c.target = original
-        self.client.sync(original, source_a, source_b, source_c)
+        await self._sync(original, source_a, source_b, source_c)
 
         self.assertEqual(original.val, 25)
 
-    def test_model_sync_computed_single_prop_from_single_backlink_06(self):
+    async def test_model_sync_computed_single_prop_from_single_backlink_06(
+        self,
+    ):
         # Update with val set, initially no sources
         # source vals changes
 
@@ -1285,16 +1468,18 @@ class TestModelSyncComputedSingleProp(tb.ModelTestCase):
         source_a = default.SingleSource(val=1, target=original)
         source_b = default.SingleSource(val=2, target=original)
         source_c = default.SingleSource(val=3, target=original)
-        self.client.sync(original, source_a, source_b, source_c)
+        await self._sync(original, source_a, source_b, source_c)
 
         source_a.val = 7
         source_b.val = 8
         source_c.val = 9
-        self.client.sync(original, source_a, source_b, source_c)
+        await self._sync(original, source_a, source_b, source_c)
 
         self.assertEqual(original.val, 25)
 
-    def test_model_sync_computed_single_prop_from_single_backlink_07(self):
+    async def test_model_sync_computed_single_prop_from_single_backlink_07(
+        self,
+    ):
         # Update with val set, initially has sources
         # sources change
 
@@ -1304,106 +1489,107 @@ class TestModelSyncComputedSingleProp(tb.ModelTestCase):
         source_a = default.SingleSource(val=1)
         source_b = default.SingleSource(val=2)
         source_c = default.SingleSource(val=3)
-        self.client.sync(original, source_a, source_b, source_c)
+        await self._sync(original, source_a, source_b, source_c)
 
         source_a.target = None
         source_b.target = None
         source_c.target = None
-        self.client.sync(source_a, source_b, source_c)
+        await self._sync(source_a, source_b, source_c)
         source_d = default.SingleSource(val=7, target=original)
         source_e = default.SingleSource(val=8, target=original)
         source_f = default.SingleSource(val=9, target=original)
-        self.client.sync(original, source_d, source_e, source_f)
+        await self._sync(original, source_d, source_e, source_f)
 
         self.assertEqual(original.val, 25)
 
-    def test_model_sync_computed_single_prop_from_stable_expr_01(self):
+    async def test_model_sync_computed_single_prop_from_stable_expr_01(self):
         # Create new, expr prop is None
 
         from models.TestModelSyncComputedSingleProp import default
 
         original = default.FromStableExpr()
-        self.client.sync(original)
+        await self._sync(original)
 
         self.assertEqual(original.val, 1)
 
-    def test_model_sync_computed_single_prop_from_stable_expr_02(self):
+    async def test_model_sync_computed_single_prop_from_stable_expr_02(self):
         # Update without val set does not fetch it
 
         from models.TestModelSyncComputedSingleProp import default
 
-        self.client.sync(default.FromStableExpr())
-        mirror = self.client.query_required_single(
+        await self._sync(default.FromStableExpr())
+        mirror = await self._query_required_single(
             default.FromStableExpr.select(val=False).limit(1)
         )
-        self.client.sync(mirror)
+        await self._sync(mirror)
 
         self.assertFalse(hasattr(mirror, 'val'))
 
-    def test_model_sync_computed_single_prop_from_stable_expr_03(self):
+    async def test_model_sync_computed_single_prop_from_stable_expr_03(self):
         # Update with val set, initially None
 
         from models.TestModelSyncComputedSingleProp import default
 
         original = default.FromStableExpr()
-        self.client.sync(original)
+        await self._sync(original)
 
         # This increments val by 1
         other = default.FromStableExpr()
-        self.client.sync(original, other)
+        await self._sync(original, other)
 
         self.assertEqual(original.val, 2)
 
-    def test_model_sync_computed_single_prop_from_global_01(self):
+    async def test_model_sync_computed_single_prop_from_global_01(self):
         # Create new, global is None
 
         from models.TestModelSyncComputedSingleProp import default
 
         original = default.FromGlobal()
-        self.client.sync(original)
+        await self._sync(original)
 
         self.assertEqual(original.val, None)
 
-    def test_model_sync_computed_single_prop_from_global_02(self):
+    async def test_model_sync_computed_single_prop_from_global_02(self):
         # Create new, global has value
 
         from models.TestModelSyncComputedSingleProp import default
 
         sess_client = self.client.with_globals({"default::SomeGlobal": 1})
         original = default.FromGlobal()
-        sess_client.sync(original)
+        await self._sync_with_client(sess_client, original)
 
         self.assertEqual(original.val, 2)
 
-    def test_model_sync_computed_single_prop_from_global_03(self):
+    async def test_model_sync_computed_single_prop_from_global_03(self):
         # Update without val set does not fetch it
 
         from models.TestModelSyncComputedSingleProp import default
 
-        self.client.sync(default.FromGlobal())
-        mirror = self.client.query_required_single(
+        await self._sync(default.FromGlobal())
+        mirror = await self._query_required_single(
             default.FromGlobal.select(val=False).limit(1)
         )
-        self.client.sync(mirror)
+        await self._sync(mirror)
 
         self.assertFalse(hasattr(mirror, 'val'))
 
-    def test_model_sync_computed_single_prop_from_global_04(self):
+    async def test_model_sync_computed_single_prop_from_global_04(self):
         # Update with val set, initially None
 
         from models.TestModelSyncComputedSingleProp import default
 
         sess_client = self.client.with_globals({"default::SomeGlobal": 1})
         original = default.FromGlobal()
-        sess_client.sync(original)
+        await self._sync_with_client(sess_client, original)
 
         sess_client = self.client.with_globals({"default::SomeGlobal": 9})
-        sess_client.sync(original)
+        await self._sync_with_client(sess_client, original)
 
         self.assertEqual(original.val, 10)
 
 
-class TestModelSyncMultiProp(tb.ModelTestCase):
+@make_async_tests
+class TestModelSyncMultiProp(TestBlockingModelSyncBase):
     ISOLATED_TEST_BRANCHES = True
 
     SCHEMA = """
@@ -1434,7 +1620,7 @@ class TestModelSyncMultiProp(tb.ModelTestCase):
         };
     """
 
-    def _base_change_testcase(
+    async def _base_change_testcase(
         self,
         model_type: typing.Type[GelModel],
         initial_val: typing.Collection[typing.Any],
@@ -1444,15 +1630,15 @@ class TestModelSyncMultiProp(tb.ModelTestCase):
         expected_val = copy.deepcopy(expected_val)
 
         original = model_type(val=initial_val)
-        self.client.save(original)
+        await self._save(original)
 
-        mirror_1 = self.client.query_required_single(
+        mirror_1 = await self._query_required_single(
             model_type.select(val=True).limit(1)
         )
-        mirror_2 = self.client.query_required_single(
+        mirror_2 = await self._query_required_single(
             model_type.select(val=True).limit(1)
         )
-        mirror_3 = self.client.query_required_single(
+        mirror_3 = await self._query_required_single(
             model_type.select(val=False).limit(1)
         )
 
@@ -1466,7 +1652,7 @@ class TestModelSyncMultiProp(tb.ModelTestCase):
         change_original(original)
 
         # sync some of the objects
-        self.client.sync(original, mirror_1, mirror_3)
+        await self._sync(original, mirror_1, mirror_3)
 
         # only synced objects with value set get update
         self.assertEqual(original.val, expected_val)
@@ -1475,14 +1661,14 @@ class TestModelSyncMultiProp(tb.ModelTestCase):
         # self.assertEqual(mirror_3.val, [])  # Fail
 
         # cleanup
-        self.client.query(model_type.delete())
+        await self._query(model_type.delete())
 
-    def test_model_sync_multi_prop_01(self):
+    async def test_model_sync_multi_prop_01(self):
         # Insert new object with multi prop
 
         from models.TestModelSyncMultiProp import default
 
-        def _testcase(
+        async def _testcase(
             model_type: typing.Type[GelModel],
             val: typing.Any,
             *,
@@ -1493,15 +1679,15 @@ class TestModelSyncMultiProp(tb.ModelTestCase):
 
             # sync one at a time
             with_val = model_type(val=val)
-            self.client.sync(with_val)
+            await self._sync(with_val)
             self.assertEqual(with_val.val, val)
 
             with_unset = model_type()
-            self.client.sync(with_unset)
+            await self._sync(with_unset)
             self.assertEqual(with_unset.val, default_val)
 
             with_empty = model_type(val=[])
-            self.client.sync(with_empty)
+            await self._sync(with_empty)
             self.assertEqual(with_empty.val, [])
 
             # sync all together
@@ -1509,32 +1695,32 @@ class TestModelSyncMultiProp(tb.ModelTestCase):
             with_unset = model_type()
             with_empty = model_type(val=[])
 
-            self.client.sync(with_val, with_unset, with_empty)
+            await self._sync(with_val, with_unset, with_empty)
 
             self.assertEqual(with_val.val, val)
             self.assertEqual(with_unset.val, default_val)
             self.assertEqual(with_empty.val, [])
 
             # cleanup
-            self.client.query(model_type.delete())
+            await self._query(model_type.delete())
 
-        _testcase(default.A, [1, 2, 3])
-        _testcase(default.B, [[1], [2, 2], [3, 3, 3]])
-        _testcase(default.C, [("a", 1), ("b", 2), ("c", 3)])
+        await _testcase(default.A, [1, 2, 3])
+        await _testcase(default.B, [[1], [2, 2], [3, 3, 3]])
+        await _testcase(default.C, [("a", 1), ("b", 2), ("c", 3)])
 
-        _testcase(default.Az, [1, 2, 3], default_val=[-1, -2, -3])
-        _testcase(
+        await _testcase(default.Az, [1, 2, 3], default_val=[-1, -2, -3])
+        await _testcase(
             default.Bz,
             [[1], [2, 2], [3, 3, 3]],
             default_val=[[-1], [-2, -2], [-3, -3, -3]],
         )
-        _testcase(
+        await _testcase(
             default.Cz,
             [("a", 1), ("b", 2), ("c", 3)],
             default_val=[(".", -1), (".", -2), (".", -3)],
         )
 
-    def test_model_sync_multi_prop_02(self):
+    async def test_model_sync_multi_prop_02(self):
         # Updating existing objects with multi props
         # Set prop to new value
 
@@ -1546,12 +1732,12 @@ class TestModelSyncMultiProp(tb.ModelTestCase):
 
             return change
 
-        def _testcase(
+        async def _testcase(
             model_type: typing.Type[GelModel],
             initial_val: typing.Collection[typing.Any],
             changed_val: typing.Collection[typing.Any],
         ) -> None:
-            self._base_change_testcase(
+            await self._base_change_testcase(
                 model_type,
                 initial_val,
                 _get_assign_val_func(changed_val),
@@ -1560,43 +1746,43 @@ class TestModelSyncMultiProp(tb.ModelTestCase):
 
         from models.TestModelSyncMultiProp import default
 
-        _testcase(default.A, [], [])
-        _testcase(default.A, [], [1, 2, 3])
-        _testcase(default.A, [1, 2, 3], [])
-        _testcase(default.A, [1, 2, 3], [2, 3, 4])
-        _testcase(default.A, [1, 2, 3], [4, 5, 6])
+        await _testcase(default.A, [], [])
+        await _testcase(default.A, [], [1, 2, 3])
+        await _testcase(default.A, [1, 2, 3], [])
+        await _testcase(default.A, [1, 2, 3], [2, 3, 4])
+        await _testcase(default.A, [1, 2, 3], [4, 5, 6])
 
-        _testcase(default.B, [], [])
-        _testcase(default.B, [], [[]])
-        _testcase(default.B, [], [[1], [2, 2], [3, 3, 3]])
-        _testcase(default.B, [[1], [2, 2], [3, 3, 3]], [])
-        _testcase(default.B, [[1], [2, 2], [3, 3, 3]], [[]])
-        _testcase(
+        await _testcase(default.B, [], [])
+        await _testcase(default.B, [], [[]])
+        await _testcase(default.B, [], [[1], [2, 2], [3, 3, 3]])
+        await _testcase(default.B, [[1], [2, 2], [3, 3, 3]], [])
+        await _testcase(default.B, [[1], [2, 2], [3, 3, 3]], [[]])
+        await _testcase(
             default.B,
             [[1], [2, 2], [3, 3, 3]],
             [[2, 2], [3, 3, 3], [4, 4, 4, 4]],
         )
-        _testcase(
+        await _testcase(
             default.B,
             [[1], [2, 2], [3, 3, 3]],
             [[4], [5, 5], [6, 6, 6]],
         )
 
-        _testcase(default.C, [], [])
-        _testcase(default.C, [], [("a", 1), ("b", 2), ("c", 3)])
-        _testcase(default.C, [("a", 1), ("b", 2), ("c", 3)], [])
-        _testcase(
+        await _testcase(default.C, [], [])
+        await _testcase(default.C, [], [("a", 1), ("b", 2), ("c", 3)])
+        await _testcase(default.C, [("a", 1), ("b", 2), ("c", 3)], [])
+        await _testcase(
             default.C,
             [("a", 1), ("b", 2), ("c", 3)],
             [("b", 2), ("c", 3), ("d", 4)],
         )
-        _testcase(
+        await _testcase(
             default.C,
             [("a", 1), ("b", 2), ("c", 3)],
             [("d", 4), ("e", 5), ("f", 6)],
         )
 
-    def test_model_sync_multi_prop_03(self):
+    async def test_model_sync_multi_prop_03(self):
         # Updating existing objects with multi props
         # Tracked list insert
 
@@ -1609,14 +1795,14 @@ class TestModelSyncMultiProp(tb.ModelTestCase):
 
             return change
 
-        def _testcase(
+        async def _testcase(
             model_type: typing.Type[GelModel],
             initial_val: typing.Collection[typing.Any],
             insert_pos: int,
             insert_val: typing.Any,
             expected_val: typing.Collection[typing.Any],
         ) -> None:
-            self._base_change_testcase(
+            await self._base_change_testcase(
                 model_type,
                 initial_val,
                 _get_insert_val_func(insert_pos, insert_val),
@@ -1625,19 +1811,19 @@ class TestModelSyncMultiProp(tb.ModelTestCase):
 
         from models.TestModelSyncMultiProp import default
 
-        _testcase(default.A, [], 0, 9, [9])
-        _testcase(default.A, [1, 2, 3], 2, 9, [1, 2, 3, 9])
+        await _testcase(default.A, [], 0, 9, [9])
+        await _testcase(default.A, [1, 2, 3], 2, 9, [1, 2, 3, 9])
 
-        _testcase(default.B, [], 0, [], [[]])
-        _testcase(default.B, [], 0, [9], [[9]])
-        _testcase(
+        await _testcase(default.B, [], 0, [], [[]])
+        await _testcase(default.B, [], 0, [9], [[9]])
+        await _testcase(
             default.B,
             [[1], [2, 2], [3, 3, 3]],
             2,
             [],
             [[1], [2, 2], [3, 3, 3], []],
         )
-        _testcase(
+        await _testcase(
             default.B,
             [[1], [2, 2], [3, 3, 3]],
             2,
@@ -1645,8 +1831,8 @@ class TestModelSyncMultiProp(tb.ModelTestCase):
             [[1], [2, 2], [3, 3, 3], [9]],
         )
 
-        _testcase(default.C, [], 0, ("i", 9), [("i", 9)])
-        _testcase(
+        await _testcase(default.C, [], 0, ("i", 9), [("i", 9)])
+        await _testcase(
             default.C,
             [("a", 1), ("b", 2), ("c", 3)],
             2,
@@ -1654,7 +1840,7 @@ class TestModelSyncMultiProp(tb.ModelTestCase):
             [("a", 1), ("b", 2), ("c", 3), ("i", 9)],
         )
 
-    def test_model_sync_multi_prop_04(self):
+    async def test_model_sync_multi_prop_04(self):
         # Updating existing objects with multi props
         # Tracked list extend
 
@@ -1666,13 +1852,13 @@ class TestModelSyncMultiProp(tb.ModelTestCase):
 
             return change
 
-        def _testcase(
+        async def _testcase(
             model_type: typing.Type[GelModel],
             initial_val: typing.Collection[typing.Any],
             extend_vals: typing.Collection[typing.Any],
             expected_val: typing.Collection[typing.Any],
         ) -> None:
-            self._base_change_testcase(
+            await self._base_change_testcase(
                 model_type,
                 initial_val,
                 _get_extend_val_func(extend_vals),
@@ -1681,75 +1867,75 @@ class TestModelSyncMultiProp(tb.ModelTestCase):
 
         from models.TestModelSyncMultiProp import default
 
-        _testcase(default.A, [], [], [])
-        _testcase(default.A, [], [1], [1])
-        _testcase(default.A, [1, 2, 3], [], [1, 2, 3])
-        _testcase(default.A, [1, 2, 3], [1, 2, 3], [1, 2, 3, 1, 2, 3])
-        _testcase(default.A, [1, 2, 3], [2, 3, 4], [1, 2, 3, 2, 3, 4])
-        _testcase(default.A, [1, 2, 3], [4, 5, 6], [1, 2, 3, 4, 5, 6])
+        await _testcase(default.A, [], [], [])
+        await _testcase(default.A, [], [1], [1])
+        await _testcase(default.A, [1, 2, 3], [], [1, 2, 3])
+        await _testcase(default.A, [1, 2, 3], [1, 2, 3], [1, 2, 3, 1, 2, 3])
+        await _testcase(default.A, [1, 2, 3], [2, 3, 4], [1, 2, 3, 2, 3, 4])
+        await _testcase(default.A, [1, 2, 3], [4, 5, 6], [1, 2, 3, 4, 5, 6])
 
-        _testcase(default.B, [], [], [])
-        _testcase(default.B, [], [[]], [[]])
-        _testcase(default.B, [], [[1]], [[1]])
-        _testcase(
+        await _testcase(default.B, [], [], [])
+        await _testcase(default.B, [], [[]], [[]])
+        await _testcase(default.B, [], [[1]], [[1]])
+        await _testcase(
             default.B,
             [[1], [2, 2], [3, 3, 3]],
             [],
             [[1], [2, 2], [3, 3, 3]],
         )
-        _testcase(
+        await _testcase(
             default.B,
             [[1], [2, 2], [3, 3, 3]],
             [[]],
             [[1], [2, 2], [3, 3, 3], []],
         )
-        _testcase(
+        await _testcase(
             default.B,
             [[1], [2, 2], [3, 3, 3]],
             [[1], [2, 2], [3, 3, 3]],
             [[1], [2, 2], [3, 3, 3], [1], [2, 2], [3, 3, 3]],
         )
-        _testcase(
+        await _testcase(
             default.B,
             [[1], [2, 2], [3, 3, 3]],
             [[2, 2], [3, 3, 3], [4, 4, 4, 4]],
             [[1], [2, 2], [3, 3, 3], [2, 2], [3, 3, 3], [4, 4, 4, 4]],
         )
-        _testcase(
+        await _testcase(
             default.B,
             [[1], [2, 2], [3, 3, 3]],
             [[4], [5], [6]],
             [[1], [2, 2], [3, 3, 3], [4], [5], [6]],
         )
 
-        _testcase(default.C, [], [], [])
-        _testcase(default.C, [], [("a", 1)], [("a", 1)])
-        _testcase(
+        await _testcase(default.C, [], [], [])
+        await _testcase(default.C, [], [("a", 1)], [("a", 1)])
+        await _testcase(
             default.C,
             [("a", 1), ("b", 2), ("c", 3)],
             [],
             [("a", 1), ("b", 2), ("c", 3)],
         )
-        _testcase(
+        await _testcase(
             default.C,
             [("a", 1), ("b", 2), ("c", 3)],
             [("a", 1), ("b", 2), ("c", 3)],
             [("a", 1), ("b", 2), ("c", 3), ("a", 1), ("b", 2), ("c", 3)],
         )
-        _testcase(
+        await _testcase(
             default.C,
             [("a", 1), ("b", 2), ("c", 3)],
             [("b", 2), ("c", 3), ("d", 4)],
             [("a", 1), ("b", 2), ("c", 3), ("b", 2), ("c", 3), ("d", 4)],
         )
-        _testcase(
+        await _testcase(
             default.C,
             [("a", 1), ("b", 2), ("c", 3)],
             [("d", 4), ("e", 5), ("f", 6)],
             [("a", 1), ("b", 2), ("c", 3), ("d", 4), ("e", 5), ("f", 6)],
         )
 
-    def test_model_sync_multi_prop_05(self):
+    async def test_model_sync_multi_prop_05(self):
         # Updating existing objects with multi props
         # Tracked list append
 
@@ -1761,13 +1947,13 @@ class TestModelSyncMultiProp(tb.ModelTestCase):
 
             return change
 
-        def _testcase(
+        async def _testcase(
             model_type: typing.Type[GelModel],
             initial_val: typing.Collection[typing.Any],
             append_val: typing.Any,
             expected_val: typing.Collection[typing.Any],
         ) -> None:
-            self._base_change_testcase(
+            await self._base_change_testcase(
                 model_type,
                 initial_val,
                 _get_append_val_func(append_val),
@@ -1776,61 +1962,61 @@ class TestModelSyncMultiProp(tb.ModelTestCase):
 
         from models.TestModelSyncMultiProp import default
 
-        _testcase(default.A, [], 1, [1])
-        _testcase(default.A, [1, 2, 3], 2, [1, 2, 3, 2])
-        _testcase(default.A, [1, 2, 3], 4, [1, 2, 3, 4])
+        await _testcase(default.A, [], 1, [1])
+        await _testcase(default.A, [1, 2, 3], 2, [1, 2, 3, 2])
+        await _testcase(default.A, [1, 2, 3], 4, [1, 2, 3, 4])
 
-        _testcase(
+        await _testcase(
             default.B,
             [],
             [],
             [[]],
         )
-        _testcase(
+        await _testcase(
             default.B,
             [],
             [1],
             [[1]],
         )
-        _testcase(
+        await _testcase(
             default.B,
             [[1], [2, 2], [3, 3, 3]],
             [],
             [[1], [2, 2], [3, 3, 3], []],
         )
-        _testcase(
+        await _testcase(
             default.B,
             [[1], [2, 2], [3, 3, 3]],
             [2, 2],
             [[1], [2, 2], [3, 3, 3], [2, 2]],
         )
-        _testcase(
+        await _testcase(
             default.B,
             [[1], [2, 2], [3, 3, 3]],
             [4, 4, 4, 4],
             [[1], [2, 2], [3, 3, 3], [4, 4, 4, 4]],
         )
 
-        _testcase(
+        await _testcase(
             default.C,
             [],
             ("a", 1),
             [("a", 1)],
         )
-        _testcase(
+        await _testcase(
             default.C,
             [("a", 1), ("b", 2), ("c", 3)],
             ("b", 2),
             [("a", 1), ("b", 2), ("c", 3), ("b", 2)],
         )
-        _testcase(
+        await _testcase(
             default.C,
             [("a", 1), ("b", 2), ("c", 3)],
             ("d", 4),
             [("a", 1), ("b", 2), ("c", 3), ("d", 4)],
         )
 
-    def test_model_sync_multi_prop_06(self):
+    async def test_model_sync_multi_prop_06(self):
         # Updating existing objects with multi props
         # Tracked list pop
 
@@ -1840,12 +2026,12 @@ class TestModelSyncMultiProp(tb.ModelTestCase):
 
             return change
 
-        def _testcase(
+        async def _testcase(
             model_type: typing.Type[GelModel],
             initial_val: typing.Collection[typing.Any],
             expected_val: typing.Collection[typing.Any],
         ) -> None:
-            self._base_change_testcase(
+            await self._base_change_testcase(
                 model_type,
                 initial_val,
                 _get_pop_val_func(),
@@ -1854,17 +2040,17 @@ class TestModelSyncMultiProp(tb.ModelTestCase):
 
         from models.TestModelSyncMultiProp import default
 
-        _testcase(default.A, [1, 2, 3], [1, 2])
+        await _testcase(default.A, [1, 2, 3], [1, 2])
 
-        _testcase(default.B, [[1], [2, 2], [3, 3, 3]], [[1], [2, 2]])
+        await _testcase(default.B, [[1], [2, 2], [3, 3, 3]], [[1], [2, 2]])
 
-        _testcase(
+        await _testcase(
             default.C,
             [("a", 1), ("b", 2), ("c", 3)],
             [("a", 1), ("b", 2)],
         )
 
-    def test_model_sync_multi_prop_07(self):
+    async def test_model_sync_multi_prop_07(self):
         # Updating existing objects with single props
         # Clear prop
 
@@ -1874,11 +2060,11 @@ class TestModelSyncMultiProp(tb.ModelTestCase):
 
             return change
 
-        def _testcase(
+        async def _testcase(
             model_type: typing.Type[GelModel],
             initial_val: typing.Collection[typing.Any],
         ) -> None:
-            self._base_change_testcase(
+            await self._base_change_testcase(
                 model_type,
                 initial_val,
                 _get_clear_val_func(),
@@ -1887,20 +2073,20 @@ class TestModelSyncMultiProp(tb.ModelTestCase):
 
         from models.TestModelSyncMultiProp import default
 
-        _testcase(default.A, [])
-        _testcase(default.A, [1, 2, 3])
+        await _testcase(default.A, [])
+        await _testcase(default.A, [1, 2, 3])
 
-        _testcase(default.B, [])
-        _testcase(default.B, [[1], [2, 2], [3, 3, 3]])
+        await _testcase(default.B, [])
+        await _testcase(default.B, [[1], [2, 2], [3, 3, 3]])
 
-        _testcase(default.C, [])
-        _testcase(default.C, [("a", 1), ("b", 2), ("c", 3)])
+        await _testcase(default.C, [])
+        await _testcase(default.C, [("a", 1), ("b", 2), ("c", 3)])
 
     @tb.xfail
-    def test_model_sync_multi_prop_08(self):
+    async def test_model_sync_multi_prop_08(self):
         # Existing object without prop should not have it fetched
 
-        def _testcase(
+        async def _testcase(
             model_type: typing.Type[GelModel],
             initial_val: typing.Any,
             changed_val_0: typing.Any,
@@ -1908,48 +2094,53 @@ class TestModelSyncMultiProp(tb.ModelTestCase):
             changed_val_2: typing.Any,
         ):
             original = model_type(val=initial_val)
-            self.client.save(original)
+            await self._save(original)
 
-            mirror_1 = self.client.query_required_single(
+            mirror_1 = await self._query_required_single(
                 model_type.select(val=False).limit(1)
             )
             original.val = changed_val_0
-            self.client.save(original)
-            self.client.sync(mirror_1)
+            await self._save(original)
+            await self._sync(mirror_1)
             self.assertEqual(mirror_1.val._mode, _tracked_list.Mode.Write)
             self.assertEqual(mirror_1.val._items, [])
 
             # Sync alongside another object with the prop set
-            mirror_2 = self.client.query_required_single(
+            mirror_2 = await self._query_required_single(
                 model_type.select(val=True).limit(1)
             )
             original.val = changed_val_1
-            self.client.save(original)
-            self.client.sync(mirror_1, mirror_2)
+            await self._save(original)
+            await self._sync(mirror_1, mirror_2)
             self.assertEqual(mirror_1.val._mode, _tracked_list.Mode.Write)
             self.assertEqual(mirror_1.val._items, [])
 
             # Sync alongside another object with the prop changed
-            mirror_2 = self.client.query_required_single(
+            mirror_2 = await self._query_required_single(
                 model_type.select(targets=True).limit(1)
             )
             mirror_2.val = changed_val_2
-            self.client.save(original)
-            self.client.sync(mirror_1, mirror_2)
+            await self._save(original)
+            await self._sync(mirror_1, mirror_2)
             self.assertEqual(mirror_1.targets._mode, _tracked_list.Mode.Write)
             self.assertEqual(mirror_1.targets._items, [])  # Fail
 
             # cleanup
-            self.client.query(model_type.delete())
+            await self._query(model_type.delete())
 
         from models.TestModelSyncMultiProp import default
 
-        _testcase(default.A, [1], [2], [3], [4])
-        _testcase(default.B, [[1]], [[2, 2]], [[3, 3, 3]], [[4, 4, 4, 4]])
-        _testcase(default.C, [("a", 1)], [("b", 2)], [("c", 3)], [("d", 4)])
+        await _testcase(default.A, [1], [2], [3], [4])
+        await _testcase(
+            default.B, [[1]], [[2, 2]], [[3, 3, 3]], [[4, 4, 4, 4]]
+        )
+        await _testcase(
+            default.C, [("a", 1)], [("b", 2)], [("c", 3)], [("d", 4)]
+        )
 
 
-class TestModelSyncComputedMultiProp(tb.ModelTestCase):
+@make_async_tests
+class TestModelSyncComputedMultiProp(TestBlockingModelSyncBase):
     ISOLATED_TEST_BRANCHES = True
 
     SCHEMA = """
@@ -2013,254 +2204,254 @@ class TestModelSyncComputedMultiProp(tb.ModelTestCase):
         };
     """
 
-    def test_model_sync_computed_multi_prop_constant_01(self):
+    async def test_model_sync_computed_multi_prop_constant_01(self):
         # Create new
 
         from models.TestModelSyncComputedMultiProp import default
 
         original = default.FromConstant()
-        self.client.sync(original)
+        await self._sync(original)
 
         self.assertEqual(original.val, (1, 2, 3))
 
-    def test_model_sync_computed_multi_prop_constant_02(self):
+    async def test_model_sync_computed_multi_prop_constant_02(self):
         # Update without val set does not fetch it
 
         from models.TestModelSyncComputedMultiProp import default
 
-        self.client.sync(default.FromConstant())
-        mirror = self.client.query_required_single(
+        await self._sync(default.FromConstant())
+        mirror = await self._query_required_single(
             default.FromConstant.select(val=False).limit(1)
         )
-        self.client.sync(mirror)
+        await self._sync(mirror)
 
         self.assertFalse(hasattr(mirror, 'val'))
 
-    def test_model_sync_computed_multi_prop_from_single_prop_01(self):
+    async def test_model_sync_computed_multi_prop_from_single_prop_01(self):
         # Create new, expr prop is None
 
         from models.TestModelSyncComputedMultiProp import default
 
         original = default.FromSingleProp()
-        self.client.sync(original)
+        await self._sync(original)
 
         self.assertEqual(original.val, ())
 
-    def test_model_sync_computed_multi_prop_from_single_prop_02(self):
+    async def test_model_sync_computed_multi_prop_from_single_prop_02(self):
         # Create new, expr prop has value
 
         from models.TestModelSyncComputedMultiProp import default
 
         original = default.FromSingleProp(n=1)
-        self.client.sync(original)
+        await self._sync(original)
 
         self.assertEqual(original.val, (9,) * 2)
 
-    def test_model_sync_computed_multi_prop_from_single_prop_03(self):
+    async def test_model_sync_computed_multi_prop_from_single_prop_03(self):
         # Update without val set does not fetch it
 
         from models.TestModelSyncComputedMultiProp import default
 
-        self.client.sync(default.FromSingleProp())
-        mirror = self.client.query_required_single(
+        await self._sync(default.FromSingleProp())
+        mirror = await self._query_required_single(
             default.FromSingleProp.select(val=False).limit(1)
         )
-        self.client.sync(mirror)
+        await self._sync(mirror)
 
         self.assertFalse(hasattr(mirror, 'val'))
 
-    def test_model_sync_computed_multi_prop_from_single_prop_04(self):
+    async def test_model_sync_computed_multi_prop_from_single_prop_04(self):
         # Update with val set, initially None
 
         from models.TestModelSyncComputedMultiProp import default
 
         original = default.FromSingleProp()
-        self.client.sync(original)
+        await self._sync(original)
 
         original.n = 9
-        self.client.sync(original)
+        await self._sync(original)
 
         self.assertEqual(original.val, (9,) * 10)
 
-    def test_model_sync_computed_multi_prop_from_single_prop_05(self):
+    async def test_model_sync_computed_multi_prop_from_single_prop_05(self):
         # Update with val set, initially not None
 
         from models.TestModelSyncComputedMultiProp import default
 
         original = default.FromSingleProp(n=1)
-        self.client.sync(original)
+        await self._sync(original)
 
         original.n = 9
-        self.client.sync(original)
+        await self._sync(original)
 
         self.assertEqual(original.val, (9,) * 10)
 
-    def test_model_sync_computed_multi_prop_from_multi_prop_01(self):
+    async def test_model_sync_computed_multi_prop_from_multi_prop_01(self):
         # Create new, expr prop is empty
 
         from models.TestModelSyncComputedMultiProp import default
 
         original = default.FromMultiProp()
-        self.client.sync(original)
+        await self._sync(original)
 
         self.assertEqual(original.val, (9,) * 1)
 
-    def test_model_sync_computed_multi_prop_from_multi_prop_02(self):
+    async def test_model_sync_computed_multi_prop_from_multi_prop_02(self):
         # Create new, expr prop has values
 
         from models.TestModelSyncComputedMultiProp import default
 
         original = default.FromMultiProp(n=[1, 2, 3])
-        self.client.sync(original)
+        await self._sync(original)
 
         self.assertEqual(original.val, (9,) * 7)
 
-    def test_model_sync_computed_multi_prop_from_multi_prop_03(self):
+    async def test_model_sync_computed_multi_prop_from_multi_prop_03(self):
         # Update without val set does not fetch it
 
         from models.TestModelSyncComputedMultiProp import default
 
-        self.client.sync(default.FromMultiProp())
-        mirror = self.client.query_required_single(
+        await self._sync(default.FromMultiProp())
+        mirror = await self._query_required_single(
             default.FromMultiProp.select(val=False).limit(1)
         )
-        self.client.sync(mirror)
+        await self._sync(mirror)
 
         self.assertFalse(hasattr(mirror, 'val'))
 
-    def test_model_sync_computed_multi_prop_from_multi_prop_04(self):
+    async def test_model_sync_computed_multi_prop_from_multi_prop_04(self):
         # Update with val set, initially empty
 
         from models.TestModelSyncComputedMultiProp import default
 
         original = default.FromMultiProp()
-        self.client.sync(original)
+        await self._sync(original)
 
         original.n = [7, 8, 9]
-        self.client.sync(original)
+        await self._sync(original)
 
         self.assertEqual(original.val, (9,) * 25)
 
-    def test_model_sync_computed_multi_prop_from_multi_prop_05(self):
+    async def test_model_sync_computed_multi_prop_from_multi_prop_05(self):
         # Update with val set, initially has values
 
         from models.TestModelSyncComputedMultiProp import default
 
         original = default.FromMultiProp(n=[1, 2, 3])
-        self.client.sync(original)
+        await self._sync(original)
 
         original.n = [7, 8, 9]
-        self.client.sync(original)
+        await self._sync(original)
 
         self.assertEqual(original.val, (9,) * 25)
 
-    def test_model_sync_computed_multi_prop_from_single_link_01(self):
+    async def test_model_sync_computed_multi_prop_from_single_link_01(self):
         # Create new, expr prop is None
 
         from models.TestModelSyncComputedMultiProp import default
 
         original = default.FromSingleLink()
-        self.client.sync(original)
+        await self._sync(original)
 
         self.assertEqual(original.val, ())
 
-    def test_model_sync_computed_multi_prop_from_single_link_02(self):
+    async def test_model_sync_computed_multi_prop_from_single_link_02(self):
         # Create new, target already exists
 
         from models.TestModelSyncComputedMultiProp import default
 
         target = default.Target(val=1)
-        self.client.save(target)
+        await self._save(target)
 
         original = default.FromSingleLink(target=target)
-        self.client.sync(original)
+        await self._sync(original)
 
         self.assertEqual(original.val, (9,) * 2)
 
-    def test_model_sync_computed_multi_prop_from_single_link_03(self):
+    async def test_model_sync_computed_multi_prop_from_single_link_03(self):
         # Create new, target created alongside object
 
         from models.TestModelSyncComputedMultiProp import default
 
         target = default.Target(val=1)
         original = default.FromSingleLink(target=target)
-        self.client.sync(original, target)
+        await self._sync(original, target)
 
         self.assertEqual(original.val, (9,) * 2)
 
-    def test_model_sync_computed_multi_prop_from_single_link_04(self):
+    async def test_model_sync_computed_multi_prop_from_single_link_04(self):
         # Update without val set does not fetch it
 
         from models.TestModelSyncComputedMultiProp import default
 
-        self.client.sync(default.FromSingleLink())
-        mirror = self.client.query_required_single(
+        await self._sync(default.FromSingleLink())
+        mirror = await self._query_required_single(
             default.FromSingleLink.select(val=False).limit(1)
         )
-        self.client.sync(mirror)
+        await self._sync(mirror)
 
         self.assertFalse(hasattr(mirror, 'val'))
 
-    def test_model_sync_computed_multi_prop_from_single_link_05(self):
+    async def test_model_sync_computed_multi_prop_from_single_link_05(self):
         # Update with val set, initially target is None
 
         from models.TestModelSyncComputedMultiProp import default
 
         target = default.Target(val=9)
         original = default.FromSingleLink()
-        self.client.sync(original, target)
+        await self._sync(original, target)
 
         original.target = target
-        self.client.sync(original)
+        await self._sync(original)
 
         self.assertEqual(original.val, (9,) * 10)
 
-    def test_model_sync_computed_multi_prop_from_single_link_06(self):
+    async def test_model_sync_computed_multi_prop_from_single_link_06(self):
         # Update with val set, initially target is set
         # target val changes
 
         from models.TestModelSyncComputedMultiProp import default
 
         target = default.Target(val=1)
-        self.client.save(target)
+        await self._save(target)
 
         original = default.FromSingleLink(target=target)
-        self.client.sync(original)
+        await self._sync(original)
 
         target.val = 9
-        self.client.sync(original, target)
+        await self._sync(original, target)
 
         self.assertEqual(original.val, (9,) * 10)
 
-    def test_model_sync_computed_multi_prop_from_single_link_07(self):
+    async def test_model_sync_computed_multi_prop_from_single_link_07(self):
         # Update with val set, initially target is set
         # target changes
 
         from models.TestModelSyncComputedMultiProp import default
 
         target_a = default.Target(val=1)
-        self.client.save(target_a)
+        await self._save(target_a)
 
         original = default.FromSingleLink(target=target_a)
-        self.client.sync(original)
+        await self._sync(original)
 
         target_b = default.Target(val=9)
         original.target = target_b
-        self.client.sync(original, target_b)
+        await self._sync(original, target_b)
 
         self.assertEqual(original.val, (9,) * 10)
 
-    def test_model_sync_computed_multi_prop_from_multi_link_01(self):
+    async def test_model_sync_computed_multi_prop_from_multi_link_01(self):
         # Create new, expr prop is None
 
         from models.TestModelSyncComputedMultiProp import default
 
         original = default.FromMultiLink()
-        self.client.sync(original)
+        await self._sync(original)
 
         self.assertEqual(original.val, (9,) * 1)
 
-    def test_model_sync_computed_multi_prop_from_multi_link_02(self):
+    async def test_model_sync_computed_multi_prop_from_multi_link_02(self):
         # Create new, target already exists
 
         from models.TestModelSyncComputedMultiProp import default
@@ -2268,14 +2459,14 @@ class TestModelSyncComputedMultiProp(tb.ModelTestCase):
         target_a = default.Target(val=1)
         target_b = default.Target(val=2)
         target_c = default.Target(val=3)
-        self.client.save(target_a, target_b, target_c)
+        await self._save(target_a, target_b, target_c)
 
         original = default.FromMultiLink(target=[target_a, target_b, target_c])
-        self.client.sync(original)
+        await self._sync(original)
 
         self.assertEqual(original.val, (9,) * 7)
 
-    def test_model_sync_computed_multi_prop_from_multi_link_03(self):
+    async def test_model_sync_computed_multi_prop_from_multi_link_03(self):
         # Create new, target created alongside object
 
         from models.TestModelSyncComputedMultiProp import default
@@ -2284,24 +2475,24 @@ class TestModelSyncComputedMultiProp(tb.ModelTestCase):
         target_b = default.Target(val=2)
         target_c = default.Target(val=3)
         original = default.FromMultiLink(target=[target_a, target_b, target_c])
-        self.client.sync(original, target_a, target_b, target_c)
+        await self._sync(original, target_a, target_b, target_c)
 
         self.assertEqual(original.val, (9,) * 7)
 
-    def test_model_sync_computed_multi_prop_from_multi_link_04(self):
+    async def test_model_sync_computed_multi_prop_from_multi_link_04(self):
         # Update without val set does not fetch it
 
         from models.TestModelSyncComputedMultiProp import default
 
-        self.client.sync(default.FromMultiLink())
-        mirror = self.client.query_required_single(
+        await self._sync(default.FromMultiLink())
+        mirror = await self._query_required_single(
             default.FromMultiLink.select(val=False).limit(1)
         )
-        self.client.sync(mirror)
+        await self._sync(mirror)
 
         self.assertFalse(hasattr(mirror, 'val'))
 
-    def test_model_sync_computed_multi_prop_from_multi_link_05(self):
+    async def test_model_sync_computed_multi_prop_from_multi_link_05(self):
         # Update with val set, initially target is empty
 
         from models.TestModelSyncComputedMultiProp import default
@@ -2309,17 +2500,17 @@ class TestModelSyncComputedMultiProp(tb.ModelTestCase):
         target_a = default.Target(val=7)
         target_b = default.Target(val=8)
         target_c = default.Target(val=9)
-        self.client.save(target_a, target_b, target_c)
+        await self._save(target_a, target_b, target_c)
 
         original = default.FromMultiLink()
-        self.client.sync(original)
+        await self._sync(original)
 
         original.target = [target_a, target_b, target_c]
-        self.client.sync(original)
+        await self._sync(original)
 
         self.assertEqual(original.val, (9,) * 25)
 
-    def test_model_sync_computed_multi_prop_from_multi_link_06(self):
+    async def test_model_sync_computed_multi_prop_from_multi_link_06(self):
         # Update with val set, initially target has values
         # target val changes
 
@@ -2328,19 +2519,19 @@ class TestModelSyncComputedMultiProp(tb.ModelTestCase):
         target_a = default.Target(val=1)
         target_b = default.Target(val=2)
         target_c = default.Target(val=3)
-        self.client.save(target_a, target_b, target_c)
+        await self._save(target_a, target_b, target_c)
 
         original = default.FromMultiLink(target=[target_a, target_b, target_c])
-        self.client.sync(original)
+        await self._sync(original)
 
         target_a.val = 7
         target_b.val = 8
         target_c.val = 9
-        self.client.sync(original)
+        await self._sync(original)
 
         self.assertEqual(original.val, (9,) * 25)
 
-    def test_model_sync_computed_multi_prop_from_multi_link_07(self):
+    async def test_model_sync_computed_multi_prop_from_multi_link_07(self):
         # Update with val set, initially target has values
         # target changes
 
@@ -2349,84 +2540,96 @@ class TestModelSyncComputedMultiProp(tb.ModelTestCase):
         target_a = default.Target(val=1)
         target_b = default.Target(val=2)
         target_c = default.Target(val=3)
-        self.client.save(target_a, target_b, target_c)
+        await self._save(target_a, target_b, target_c)
 
         original = default.FromMultiLink(target=[target_a, target_b, target_c])
-        self.client.sync(original)
+        await self._sync(original)
 
         target_d = default.Target(val=7)
         target_e = default.Target(val=8)
         target_f = default.Target(val=9)
         original.target = [target_d, target_e, target_f]
-        self.client.sync(original, target_d, target_e, target_f)
+        await self._sync(original, target_d, target_e, target_f)
 
         self.assertEqual(original.val, (9,) * 25)
 
-    def test_model_sync_computed_multi_prop_from_exclusive_backlink_01(self):
+    async def test_model_sync_computed_multi_prop_from_exclusive_backlink_01(
+        self,
+    ):
         # Create new, no source
 
         from models.TestModelSyncComputedMultiProp import default
 
         original = default.FromExclusiveBacklink()
-        self.client.sync(original)
+        await self._sync(original)
 
         self.assertEqual(original.val, ())
 
-    def test_model_sync_computed_multi_prop_from_exclusive_backlink_02(self):
+    async def test_model_sync_computed_multi_prop_from_exclusive_backlink_02(
+        self,
+    ):
         # Create new, source already exists
 
         from models.TestModelSyncComputedMultiProp import default
 
         source = default.ExclusiveSource(val=1)
-        self.client.save(source)
+        await self._save(source)
 
         original = default.FromExclusiveBacklink()
         source.target = original
-        self.client.sync(original, source)
+        await self._sync(original, source)
 
         self.assertEqual(original.val, (9,) * 2)
 
-    def test_model_sync_computed_multi_prop_from_exclusive_backlink_03(self):
+    async def test_model_sync_computed_multi_prop_from_exclusive_backlink_03(
+        self,
+    ):
         # Create new, source created alongside object
 
         from models.TestModelSyncComputedMultiProp import default
 
         original = default.FromExclusiveBacklink()
         source = default.ExclusiveSource(val=1, target=original)
-        self.client.sync(original, source)
+        await self._sync(original, source)
 
         self.assertEqual(original.val, (9,) * 2)
 
-    def test_model_sync_computed_multi_prop_from_exclusive_backlink_04(self):
+    async def test_model_sync_computed_multi_prop_from_exclusive_backlink_04(
+        self,
+    ):
         # Update without val set does not fetch it
 
         from models.TestModelSyncComputedMultiProp import default
 
-        self.client.sync(default.FromExclusiveBacklink())
-        mirror = self.client.query_required_single(
+        await self._sync(default.FromExclusiveBacklink())
+        mirror = await self._query_required_single(
             default.FromExclusiveBacklink.select(val=False).limit(1)
         )
-        self.client.sync(mirror)
+        await self._sync(mirror)
 
         self.assertFalse(hasattr(mirror, 'val'))
 
-    def test_model_sync_computed_multi_prop_from_exclusive_backlink_05(self):
+    async def test_model_sync_computed_multi_prop_from_exclusive_backlink_05(
+        self,
+    ):
         # Update with val set, initially no source
 
         from models.TestModelSyncComputedMultiProp import default
 
         source = default.ExclusiveSource(val=9)
-        self.client.save(source)
+        await self._save(source)
 
         original = default.FromExclusiveBacklink()
-        self.client.sync(original)
+        await self._sync(original)
 
         source.target = original
-        self.client.sync(original, source)
+        await self._sync(original, source)
 
         self.assertEqual(original.val, (9,) * 10)
 
-    def test_model_sync_computed_multi_prop_from_exclusive_backlink_06(self):
+    async def test_model_sync_computed_multi_prop_from_exclusive_backlink_06(
+        self,
+    ):
         # Update with val set, initially no source
         # source val changes
 
@@ -2434,14 +2637,16 @@ class TestModelSyncComputedMultiProp(tb.ModelTestCase):
 
         original = default.FromExclusiveBacklink()
         source = default.ExclusiveSource(val=1, target=original)
-        self.client.sync(original, source)
+        await self._sync(original, source)
 
         source.val = 9
-        self.client.sync(original, source)
+        await self._sync(original, source)
 
         self.assertEqual(original.val, (9,) * 10)
 
-    def test_model_sync_computed_multi_prop_from_exclusive_backlink_07(self):
+    async def test_model_sync_computed_multi_prop_from_exclusive_backlink_07(
+        self,
+    ):
         # Update with val set, initially has source
         # source changes
 
@@ -2449,26 +2654,30 @@ class TestModelSyncComputedMultiProp(tb.ModelTestCase):
 
         original = default.FromExclusiveBacklink()
         source_a = default.ExclusiveSource(val=1, target=original)
-        self.client.sync(original, source_a)
+        await self._sync(original, source_a)
 
         source_a.target = None
-        self.client.sync(source_a)
+        await self._sync(source_a)
         source_b = default.ExclusiveSource(val=9, target=original)
-        self.client.sync(original, source_b)
+        await self._sync(original, source_b)
 
         self.assertEqual(original.val, (9,) * 10)
 
-    def test_model_sync_computed_multi_prop_from_single_backlink_01(self):
+    async def test_model_sync_computed_multi_prop_from_single_backlink_01(
+        self,
+    ):
         # Create new, no sources
 
         from models.TestModelSyncComputedMultiProp import default
 
         original = default.FromSingleBacklink()
-        self.client.sync(original)
+        await self._sync(original)
 
         self.assertEqual(original.val, (9,) * 1)
 
-    def test_model_sync_computed_multi_prop_from_single_backlink_02(self):
+    async def test_model_sync_computed_multi_prop_from_single_backlink_02(
+        self,
+    ):
         # Create new, sources already exists
 
         from models.TestModelSyncComputedMultiProp import default
@@ -2476,17 +2685,19 @@ class TestModelSyncComputedMultiProp(tb.ModelTestCase):
         source_a = default.SingleSource(val=1)
         source_b = default.SingleSource(val=2)
         source_c = default.SingleSource(val=3)
-        self.client.save(source_a, source_b, source_c)
+        await self._save(source_a, source_b, source_c)
 
         original = default.FromSingleBacklink()
         source_a.target = original
         source_b.target = original
         source_c.target = original
-        self.client.sync(original, source_a, source_b, source_c)
+        await self._sync(original, source_a, source_b, source_c)
 
         self.assertEqual(original.val, (9,) * 7)
 
-    def test_model_sync_computed_multi_prop_from_single_backlink_03(self):
+    async def test_model_sync_computed_multi_prop_from_single_backlink_03(
+        self,
+    ):
         # Create new, sources created alongside object
 
         from models.TestModelSyncComputedMultiProp import default
@@ -2495,24 +2706,28 @@ class TestModelSyncComputedMultiProp(tb.ModelTestCase):
         source_a = default.SingleSource(val=1, target=original)
         source_b = default.SingleSource(val=2, target=original)
         source_c = default.SingleSource(val=3, target=original)
-        self.client.sync(original, source_a, source_b, source_c)
+        await self._sync(original, source_a, source_b, source_c)
 
         self.assertEqual(original.val, (9,) * 7)
 
-    def test_model_sync_computed_multi_prop_from_single_backlink_04(self):
+    async def test_model_sync_computed_multi_prop_from_single_backlink_04(
+        self,
+    ):
         # Update without val set does not fetch it
 
         from models.TestModelSyncComputedMultiProp import default
 
-        self.client.sync(default.FromSingleBacklink())
-        mirror = self.client.query_required_single(
+        await self._sync(default.FromSingleBacklink())
+        mirror = await self._query_required_single(
             default.FromSingleBacklink.select(val=False).limit(1)
         )
-        self.client.sync(mirror)
+        await self._sync(mirror)
 
         self.assertFalse(hasattr(mirror, 'val'))
 
-    def test_model_sync_computed_multi_prop_from_single_backlink_05(self):
+    async def test_model_sync_computed_multi_prop_from_single_backlink_05(
+        self,
+    ):
         # Update with val set, initially no sources
 
         from models.TestModelSyncComputedMultiProp import default
@@ -2520,19 +2735,21 @@ class TestModelSyncComputedMultiProp(tb.ModelTestCase):
         source_a = default.SingleSource(val=7)
         source_b = default.SingleSource(val=8)
         source_c = default.SingleSource(val=9)
-        self.client.save(source_a, source_b, source_c)
+        await self._save(source_a, source_b, source_c)
 
         original = default.FromSingleBacklink()
-        self.client.sync(original)
+        await self._sync(original)
 
         source_a.target = original
         source_b.target = original
         source_c.target = original
-        self.client.sync(original, source_a, source_b, source_c)
+        await self._sync(original, source_a, source_b, source_c)
 
         self.assertEqual(original.val, (9,) * 25)
 
-    def test_model_sync_computed_multi_prop_from_single_backlink_06(self):
+    async def test_model_sync_computed_multi_prop_from_single_backlink_06(
+        self,
+    ):
         # Update with val set, initially no sources
         # source vals changes
 
@@ -2542,16 +2759,18 @@ class TestModelSyncComputedMultiProp(tb.ModelTestCase):
         source_a = default.SingleSource(val=1, target=original)
         source_b = default.SingleSource(val=2, target=original)
         source_c = default.SingleSource(val=3, target=original)
-        self.client.sync(original, source_a, source_b, source_c)
+        await self._sync(original, source_a, source_b, source_c)
 
         source_a.val = 7
         source_b.val = 8
         source_c.val = 9
-        self.client.sync(original, source_a, source_b, source_c)
+        await self._sync(original, source_a, source_b, source_c)
 
         self.assertEqual(original.val, (9,) * 25)
 
-    def test_model_sync_computed_multi_prop_from_single_backlink_07(self):
+    async def test_model_sync_computed_multi_prop_from_single_backlink_07(
+        self,
+    ):
         # Update with val set, initially has sources
         # sources change
 
@@ -2561,106 +2780,107 @@ class TestModelSyncComputedMultiProp(tb.ModelTestCase):
         source_a = default.SingleSource(val=1)
         source_b = default.SingleSource(val=2)
         source_c = default.SingleSource(val=3)
-        self.client.sync(original, source_a, source_b, source_c)
+        await self._sync(original, source_a, source_b, source_c)
 
         source_a.target = None
         source_b.target = None
         source_c.target = None
-        self.client.sync(source_a, source_b, source_c)
+        await self._sync(source_a, source_b, source_c)
         source_d = default.SingleSource(val=7, target=original)
         source_e = default.SingleSource(val=8, target=original)
         source_f = default.SingleSource(val=9, target=original)
-        self.client.sync(original, source_d, source_e, source_f)
+        await self._sync(original, source_d, source_e, source_f)
 
         self.assertEqual(original.val, (9,) * 25)
 
-    def test_model_sync_computed_multi_prop_from_stable_expr_01(self):
+    async def test_model_sync_computed_multi_prop_from_stable_expr_01(self):
         # Create new, expr prop is None
 
         from models.TestModelSyncComputedMultiProp import default
 
         original = default.FromStableExpr()
-        self.client.sync(original)
+        await self._sync(original)
 
         self.assertEqual(original.val, (9,) * 1)
 
-    def test_model_sync_computed_multi_prop_from_stable_expr_02(self):
+    async def test_model_sync_computed_multi_prop_from_stable_expr_02(self):
         # Update without val set does not fetch it
 
         from models.TestModelSyncComputedMultiProp import default
 
-        self.client.sync(default.FromStableExpr())
-        mirror = self.client.query_required_single(
+        await self._sync(default.FromStableExpr())
+        mirror = await self._query_required_single(
             default.FromStableExpr.select(val=False).limit(1)
         )
-        self.client.sync(mirror)
+        await self._sync(mirror)
 
         self.assertFalse(hasattr(mirror, 'val'))
 
-    def test_model_sync_computed_multi_prop_from_stable_expr_03(self):
+    async def test_model_sync_computed_multi_prop_from_stable_expr_03(self):
         # Update with val set, initially None
 
         from models.TestModelSyncComputedMultiProp import default
 
         original = default.FromStableExpr()
-        self.client.sync(original)
+        await self._sync(original)
 
         # This increments val by 1
         other = default.FromStableExpr()
-        self.client.sync(original, other)
+        await self._sync(original, other)
 
         self.assertEqual(original.val, (9,) * 2)
 
-    def test_model_sync_computed_multi_prop_from_global_01(self):
+    async def test_model_sync_computed_multi_prop_from_global_01(self):
         # Create new, global is None
 
         from models.TestModelSyncComputedMultiProp import default
 
         original = default.FromGlobal()
-        self.client.sync(original)
+        await self._sync(original)
 
         self.assertEqual(original.val, ())
 
-    def test_model_sync_computed_multi_prop_from_global_02(self):
+    async def test_model_sync_computed_multi_prop_from_global_02(self):
         # Create new, global has value
 
         from models.TestModelSyncComputedMultiProp import default
 
         sess_client = self.client.with_globals({"default::SomeGlobal": 1})
         original = default.FromGlobal()
-        sess_client.sync(original)
+        await self._sync_with_client(sess_client, original)
 
         self.assertEqual(original.val, (9,) * 2)
 
-    def test_model_sync_computed_multi_prop_from_global_03(self):
+    async def test_model_sync_computed_multi_prop_from_global_03(self):
         # Update without val set does not fetch it
 
         from models.TestModelSyncComputedMultiProp import default
 
-        self.client.sync(default.FromGlobal())
-        mirror = self.client.query_required_single(
+        await self._sync(default.FromGlobal())
+        mirror = await self._query_required_single(
             default.FromGlobal.select(val=False).limit(1)
         )
-        self.client.sync(mirror)
+        await self._sync(mirror)
 
         self.assertFalse(hasattr(mirror, 'val'))
 
-    def test_model_sync_computed_multi_prop_from_global_04(self):
+    async def test_model_sync_computed_multi_prop_from_global_04(self):
         # Update with val set, initially None
 
         from models.TestModelSyncComputedMultiProp import default
 
         sess_client = self.client.with_globals({"default::SomeGlobal": 1})
         original = default.FromGlobal()
-        sess_client.sync(original)
+        await self._sync_with_client(sess_client, original)
 
         sess_client = self.client.with_globals({"default::SomeGlobal": 9})
-        sess_client.sync(original)
+        await self._sync_with_client(sess_client, original)
 
         self.assertEqual(original.val, (9,) * 10)
 
 
-class TestModelSyncSingleLink(tb.ModelTestCase):
+@make_async_tests
+class TestModelSyncSingleLink(TestBlockingModelSyncBase):
     ISOLATED_TEST_BRANCHES = True
 
     SCHEMA = """
@@ -2725,10 +2945,10 @@ class TestModelSyncSingleLink(tb.ModelTestCase):
                 expected.__linkprops__,
             )
 
-    def test_model_sync_single_link_01(self):
+    async def test_model_sync_single_link_01(self):
         # Insert new object with single link
 
-        def _testcase(
+        async def _testcase(
             model_type: typing.Type[GelModel],
             initial_target: typing.Any,
             *,
@@ -2741,15 +2961,15 @@ class TestModelSyncSingleLink(tb.ModelTestCase):
 
             # sync one at a type
             with_target = model_type(target=initial_target)
-            self.client.sync(with_target)
+            await self._sync(with_target)
             self._check_links_equal(with_target.target, expected_target)
 
             with_none = model_type(target=None)
-            self.client.sync(with_none)
+            await self._sync(with_none)
             self._check_links_equal(with_none.target, None)
 
             with_unset = model_type()
-            self.client.sync(with_unset)
+            await self._sync(with_unset)
             if dml_default_type:
                 self.assertNotEqual(with_unset.target, expected_target)
                 self.assertEqual(type(with_unset.target), dml_default_type)
@@ -2761,7 +2981,7 @@ class TestModelSyncSingleLink(tb.ModelTestCase):
             with_none = model_type(target=None)
             with_unset = model_type()
 
-            self.client.sync(with_target, with_none, with_unset)
+            await self._sync(with_target, with_none, with_unset)
 
             self._check_links_equal(with_target.target, expected_target)
             self._check_links_equal(with_none.target, None)
@@ -2772,49 +2992,51 @@ class TestModelSyncSingleLink(tb.ModelTestCase):
                 self._check_links_equal(with_unset.target, default_target)
 
             # cleanup
-            self.client.query(model_type.delete())
+            await self._query(model_type.delete())
 
         from models.TestModelSyncSingleLink import default
 
         target = default.Target()
-        self.client.save(target)
+        await self._save(target)
 
-        _testcase(default.Source, target)
+        await _testcase(default.Source, target)
 
-        _testcase(
+        await _testcase(
             default.SourceWithProp,
             default.SourceWithProp.target.link(target),
         )
-        _testcase(
+        await _testcase(
             default.SourceWithProp,
             default.SourceWithProp.target.link(target, lprop=1),
         )
 
         # Passing unwrapped target as link with props automatically wraps
         # it in a proxy model.
-        _testcase(
+        await _testcase(
             default.SourceWithProp,
             target,
             expected_target=default.SourceWithProp.target.link(target),
         )
 
-        _testcase(default.SourceWithDefault, target, default_target=target)
+        await _testcase(
+            default.SourceWithDefault, target, default_target=target
+        )
 
-        _testcase(
+        await _testcase(
             default.SourceWithDefaultAndProp,
             default.SourceWithDefaultAndProp.target.link(target),
             default_target=default.SourceWithDefaultAndProp.target.link(
                 target
             ),
         )
-        _testcase(
+        await _testcase(
             default.SourceWithDefaultAndProp,
             default.SourceWithDefaultAndProp.target.link(target, lprop=1),
             default_target=default.SourceWithDefaultAndProp.target.link(
                 target
             ),
         )
-        _testcase(
+        await _testcase(
             default.SourceWithDefaultAndProp,
             target,
             expected_target=default.SourceWithDefaultAndProp.target.link(
@@ -2825,35 +3047,35 @@ class TestModelSyncSingleLink(tb.ModelTestCase):
             ),
         )
 
-        _testcase(
+        await _testcase(
             default.SourceWithDmlDefault,
             target,
             dml_default_type=default.Target2,
         )
 
         # Linkprop with default
-        _testcase(
+        await _testcase(
             default.SourceWithPropWithDefault,
             target,
             expected_target=default.SourceWithPropWithDefault.target.link(
                 target, lprop=-1
             ),
         )
-        _testcase(
+        await _testcase(
             default.SourceWithPropWithDefault,
             default.SourceWithPropWithDefault.target.link(target),
             expected_target=default.SourceWithPropWithDefault.target.link(
                 target, lprop=-1
             ),
         )
-        _testcase(
+        await _testcase(
             default.SourceWithPropWithDefault,
             default.SourceWithPropWithDefault.target.link(target, lprop=None),
             expected_target=default.SourceWithPropWithDefault.target.link(
                 target, lprop=None
             ),
         )
-        _testcase(
+        await _testcase(
             default.SourceWithPropWithDefault,
             default.SourceWithPropWithDefault.target.link(target, lprop=1),
             expected_target=default.SourceWithPropWithDefault.target.link(
@@ -2861,10 +3083,10 @@ class TestModelSyncSingleLink(tb.ModelTestCase):
             ),
         )
 
-    def test_model_sync_single_link_02(self):
+    async def test_model_sync_single_link_02(self):
         # Updating existing objects with single link
 
-        def _testcase(
+        async def _testcase(
             model_type: typing.Type[GelModel],
             initial_target: typing.Any,
             changed_target: typing.Any,
@@ -2874,15 +3096,15 @@ class TestModelSyncSingleLink(tb.ModelTestCase):
                 expected_target = changed_target
 
             original = model_type(target=initial_target)
-            self.client.save(original)
+            await self._save(original)
 
-            mirror_1 = self.client.query_required_single(
+            mirror_1 = await self._query_required_single(
                 model_type.select(target=True).limit(1)
             )
-            mirror_2 = self.client.query_required_single(
+            mirror_2 = await self._query_required_single(
                 model_type.select(target=True).limit(1)
             )
-            mirror_3 = self.client.query_required_single(
+            mirror_3 = await self._query_required_single(
                 model_type.select(target=False).limit(1)
             )
 
@@ -2895,7 +3117,7 @@ class TestModelSyncSingleLink(tb.ModelTestCase):
             original.target = changed_target
 
             # sync some of the objects
-            self.client.sync(original, mirror_1, mirror_3)
+            await self._sync(original, mirror_1, mirror_3)
 
             # only synced objects with value set get update
             self._check_links_equal(original.target, expected_target)
@@ -2904,58 +3126,58 @@ class TestModelSyncSingleLink(tb.ModelTestCase):
             self.assertFalse(hasattr(mirror_3, 'val'))
 
             # cleanup
-            self.client.query(model_type.delete())
+            await self._query(model_type.delete())
 
         from models.TestModelSyncSingleLink import default
 
         target_a = default.Target()
         target_b = default.Target()
-        self.client.save(target_a, target_b)
+        await self._save(target_a, target_b)
 
         # Change to/from None
-        _testcase(default.Source, None, target_b)
-        _testcase(default.Source, target_a, None)
+        await _testcase(default.Source, None, target_b)
+        await _testcase(default.Source, target_a, None)
 
-        _testcase(
+        await _testcase(
             default.SourceWithProp,
             None,
             default.SourceWithProp.target.link(target_b),
         )
-        _testcase(
+        await _testcase(
             default.SourceWithProp,
             None,
             default.SourceWithProp.target.link(target_b, lprop=1),
         )
-        _testcase(
+        await _testcase(
             default.SourceWithProp,
             default.SourceWithProp.target.link(target_a),
             None,
         )
-        _testcase(
+        await _testcase(
             default.SourceWithProp,
             default.SourceWithProp.target.link(target_a, lprop=1),
             None,
         )
 
         # Change to a new value
-        _testcase(default.Source, target_a, target_b)
+        await _testcase(default.Source, target_a, target_b)
 
-        _testcase(
+        await _testcase(
             default.SourceWithProp,
             default.SourceWithProp.target.link(target_a),
             default.SourceWithProp.target.link(target_b),
         )
-        _testcase(
+        await _testcase(
             default.SourceWithProp,
             default.SourceWithProp.target.link(target_a, lprop=1),
             default.SourceWithProp.target.link(target_b),
         )
-        _testcase(
+        await _testcase(
             default.SourceWithProp,
             default.SourceWithProp.target.link(target_a),
             default.SourceWithProp.target.link(target_b, lprop=1),
         )
-        _testcase(
+        await _testcase(
             default.SourceWithProp,
             default.SourceWithProp.target.link(target_a, lprop=1),
             default.SourceWithProp.target.link(target_b, lprop=1),
@@ -2963,13 +3185,13 @@ class TestModelSyncSingleLink(tb.ModelTestCase):
 
         # Passing unwrapped target as link with props automatically wraps
         # it in a proxy model.
-        _testcase(
+        await _testcase(
             default.SourceWithProp,
             None,
             target_b,
             default.SourceWithProp.target.link(target_b),
         )
-        _testcase(
+        await _testcase(
             default.SourceWithProp,
             default.SourceWithProp.target.link(target_a),
             target_b,
@@ -2977,50 +3199,50 @@ class TestModelSyncSingleLink(tb.ModelTestCase):
         )
 
         # only changing lprop
-        _testcase(
+        await _testcase(
             default.SourceWithProp,
             default.SourceWithProp.target.link(target_a),
             default.SourceWithProp.target.link(target_a, lprop=2),
         )
-        _testcase(
+        await _testcase(
             default.SourceWithProp,
             default.SourceWithProp.target.link(target_a, lprop=1),
             default.SourceWithProp.target.link(target_a),
         )
-        _testcase(
+        await _testcase(
             default.SourceWithProp,
             default.SourceWithProp.target.link(target_a, lprop=1),
             default.SourceWithProp.target.link(target_a, lprop=2),
         )
 
         # Change to the same value
-        _testcase(default.Source, None, None)
-        _testcase(default.Source, target_a, target_a)
-        _testcase(
+        await _testcase(default.Source, None, None)
+        await _testcase(default.Source, target_a, target_a)
+        await _testcase(
             default.SourceWithProp,
             default.SourceWithProp.target.link(target_a),
             default.SourceWithProp.target.link(target_a),
         )
-        _testcase(
+        await _testcase(
             default.SourceWithProp,
             default.SourceWithProp.target.link(target_a, lprop=1),
             default.SourceWithProp.target.link(target_a, lprop=1),
         )
 
         # Linkprop with default
-        _testcase(
+        await _testcase(
             default.SourceWithPropWithDefault,
             None,
             target_a,
             default.SourceWithPropWithDefault.target.link(target_a, lprop=-1),
         )
-        _testcase(
+        await _testcase(
             default.SourceWithPropWithDefault,
             None,
             default.SourceWithPropWithDefault.target.link(target_a),
             default.SourceWithPropWithDefault.target.link(target_a, lprop=-1),
         )
-        _testcase(
+        await _testcase(
             default.SourceWithPropWithDefault,
             None,
             default.SourceWithPropWithDefault.target.link(
@@ -3030,25 +3252,25 @@ class TestModelSyncSingleLink(tb.ModelTestCase):
                 target_a, lprop=None
             ),
         )
-        _testcase(
+        await _testcase(
             default.SourceWithPropWithDefault,
             None,
             default.SourceWithPropWithDefault.target.link(target_a, lprop=1),
             default.SourceWithPropWithDefault.target.link(target_a, lprop=1),
         )
-        _testcase(
+        await _testcase(
             default.SourceWithPropWithDefault,
             default.SourceWithPropWithDefault.target.link(target_a, lprop=9),
             target_a,
             default.SourceWithPropWithDefault.target.link(target_a, lprop=-1),
         )
-        _testcase(
+        await _testcase(
             default.SourceWithPropWithDefault,
             default.SourceWithPropWithDefault.target.link(target_a, lprop=9),
             default.SourceWithPropWithDefault.target.link(target_a),
             default.SourceWithPropWithDefault.target.link(target_a, lprop=-1),
         )
-        _testcase(
+        await _testcase(
             default.SourceWithPropWithDefault,
             default.SourceWithPropWithDefault.target.link(target_a, lprop=9),
             default.SourceWithPropWithDefault.target.link(
@@ -3058,25 +3280,25 @@ class TestModelSyncSingleLink(tb.ModelTestCase):
                 target_a, lprop=None
             ),
         )
-        _testcase(
+        await _testcase(
             default.SourceWithPropWithDefault,
             default.SourceWithPropWithDefault.target.link(target_a, lprop=9),
             default.SourceWithPropWithDefault.target.link(target_a, lprop=1),
             default.SourceWithPropWithDefault.target.link(target_a, lprop=1),
         )
-        _testcase(
+        await _testcase(
             default.SourceWithPropWithDefault,
             default.SourceWithPropWithDefault.target.link(target_a, lprop=9),
             target_b,
             default.SourceWithPropWithDefault.target.link(target_b, lprop=-1),
         )
-        _testcase(
+        await _testcase(
             default.SourceWithPropWithDefault,
             default.SourceWithPropWithDefault.target.link(target_a, lprop=9),
             default.SourceWithPropWithDefault.target.link(target_b),
             default.SourceWithPropWithDefault.target.link(target_b, lprop=-1),
         )
-        _testcase(
+        await _testcase(
             default.SourceWithPropWithDefault,
             default.SourceWithPropWithDefault.target.link(target_a, lprop=9),
             default.SourceWithPropWithDefault.target.link(
@@ -3086,14 +3308,14 @@ class TestModelSyncSingleLink(tb.ModelTestCase):
                 target_b, lprop=None
             ),
         )
-        _testcase(
+        await _testcase(
             default.SourceWithPropWithDefault,
             default.SourceWithPropWithDefault.target.link(target_a, lprop=9),
             default.SourceWithPropWithDefault.target.link(target_b, lprop=1),
             default.SourceWithPropWithDefault.target.link(target_b, lprop=1),
         )
 
-    def _testcase_03(
+    async def _testcase_03(
         self,
         model_type: typing.Type[GelModel],
         initial_target: typing.Any,
@@ -3102,15 +3324,15 @@ class TestModelSyncSingleLink(tb.ModelTestCase):
         changed_target_2: typing.Any,
     ) -> None:
         original = model_type(target=initial_target)
-        self.client.save(original)
+        await self._save(original)
 
-        mirror_1 = self.client.query_required_single(
+        mirror_1 = await self._query_required_single(
             model_type.select(target=True).limit(1)
         )
-        mirror_2 = self.client.query_required_single(
+        mirror_2 = await self._query_required_single(
             model_type.select(target=True).limit(1)
         )
-        mirror_3 = self.client.query_required_single(
+        mirror_3 = await self._query_required_single(
             model_type.select(target=False).limit(1)
         )
 
@@ -3125,7 +3347,7 @@ class TestModelSyncSingleLink(tb.ModelTestCase):
         mirror_2.target = changed_target_2
 
         # sync some of the objects
-        self.client.sync(original, mirror_1, mirror_3)
+        await self._sync(original, mirror_1, mirror_3)
 
         # only synced objects are updated
         self._check_links_equal(original.target, changed_target_0)
@@ -3134,9 +3356,9 @@ class TestModelSyncSingleLink(tb.ModelTestCase):
         self.assertFalse(hasattr(mirror_3, 'val'))
 
         # cleanup
-        self.client.query(model_type.delete())
+        await self._query(model_type.delete())
 
-    def test_model_sync_single_link_03(self):
+    async def test_model_sync_single_link_03(self):
         # Reconciling different changes to single link
 
         from models.TestModelSyncSingleLink import default
@@ -3145,9 +3367,9 @@ class TestModelSyncSingleLink(tb.ModelTestCase):
         target_b = default.Target()
         target_c = default.Target()
         target_d = default.Target()
-        self.client.save(target_a, target_b, target_c, target_d)
+        await self._save(target_a, target_b, target_c, target_d)
 
-        self._testcase_03(
+        await self._testcase_03(
             default.Source,
             target_a,
             target_b,
@@ -3156,7 +3378,7 @@ class TestModelSyncSingleLink(tb.ModelTestCase):
         )
 
     @tb.xfail
-    def test_model_sync_single_link_03a(self):
+    async def test_model_sync_single_link_03a(self):
         # ISE on sync()
         # gel.errors.InternalServerError: more than one row returned by a
         # subquery used as an expression
@@ -3166,9 +3388,9 @@ class TestModelSyncSingleLink(tb.ModelTestCase):
         target_b = default.Target()
         target_c = default.Target()
         target_d = default.Target()
-        self.client.save(target_a, target_b, target_c, target_d)
+        await self._save(target_a, target_b, target_c, target_d)
 
-        self._testcase_03(
+        await self._testcase_03(
             default.SourceWithProp,
             default.SourceWithProp.target.link(target_a),
             default.SourceWithProp.target.link(target_b),
@@ -3177,7 +3399,7 @@ class TestModelSyncSingleLink(tb.ModelTestCase):
         )
 
     @tb.xfail
-    def test_model_sync_single_link_03b(self):
+    async def test_model_sync_single_link_03b(self):
         # ISE on sync()
         # gel.errors.InternalServerError: more than one row returned by a
         # subquery used as an expression
@@ -3187,9 +3409,9 @@ class TestModelSyncSingleLink(tb.ModelTestCase):
         target_b = default.Target()
         target_c = default.Target()
         target_d = default.Target()
-        self.client.save(target_a, target_b, target_c, target_d)
+        await self._save(target_a, target_b, target_c, target_d)
 
-        self._testcase_03(
+        await self._testcase_03(
             default.SourceWithProp,
             default.SourceWithProp.target.link(target_a, lprop=1),
             default.SourceWithProp.target.link(target_a, lprop=2),
@@ -3198,7 +3420,7 @@ class TestModelSyncSingleLink(tb.ModelTestCase):
         )
 
     @tb.xfail
-    def test_model_sync_single_link_04(self):
+    async def test_model_sync_single_link_04(self):
         # Existing object without link should not have it fetched
 
         from models.TestModelSyncSingleLink import default
@@ -3207,7 +3429,7 @@ class TestModelSyncSingleLink(tb.ModelTestCase):
         changed_target_0 = default.Target()
         changed_target_1 = default.Target()
         changed_target_2 = default.Target()
-        self.client.save(
+        await self._save(
             initial_target,
             changed_target_0,
             changed_target_1,
@@ -3215,48 +3437,48 @@ class TestModelSyncSingleLink(tb.ModelTestCase):
         )
 
         original = default.Source(target=initial_target)
-        self.client.save(original)
+        await self._save(original)
 
-        mirror_1 = self.client.query_required_single(
+        mirror_1 = await self._query_required_single(
             default.Source.select(target=False).limit(1)
         )
         original.target = changed_target_0
-        self.client.save(original)
-        self.client.sync(mirror_1)
+        await self._save(original)
+        await self._sync(mirror_1)
         self.assertFalse(hasattr(mirror_1, "target"))
 
         # Sync alongside another object with the prop set
-        mirror_2 = self.client.query_required_single(
+        mirror_2 = await self._query_required_single(
             default.Source.select(target=True).limit(1)
         )
         original.target = changed_target_1
-        self.client.save(original)
-        self.client.sync(mirror_1, mirror_2)  # Error here
+        await self._save(original)
+        await self._sync(mirror_1, mirror_2)  # Error here
         self.assertFalse(hasattr(mirror_1, "target"))
 
         # Sync alongside another object with the prop changed
-        mirror_2 = self.client.query_required_single(
+        mirror_2 = await self._query_required_single(
             default.Source.select(targets=True).limit(1)
         )
         mirror_2.target = changed_target_2
-        self.client.sync(mirror_1, mirror_2)
+        await self._sync(mirror_1, mirror_2)
         self.assertEqual(mirror_1.targets._mode, _tracked_list.Mode.Write)
         self.assertEqual(mirror_1.targets._items, [])
 
-    def test_model_sync_single_link_05(self):
+    async def test_model_sync_single_link_05(self):
         # Updating linkprops without changing the proxy model objects
 
         from models.TestModelSyncSingleLink import default
 
         target_a = default.Target()
-        self.client.save(target_a)
+        await self._save(target_a)
 
         initial_target = default.SourceWithManyProps.target.link(
             target_a, a=1, b=2, c=3, d=4
         )
 
         original = default.SourceWithManyProps(target=initial_target)
-        self.client.save(original)
+        await self._save(original)
 
         self._check_links_equal(original.target, initial_target)
 
@@ -3268,11 +3490,12 @@ class TestModelSyncSingleLink(tb.ModelTestCase):
             target_a, a=1, b=9, c=None, d=4
         )
 
-        self.client.sync(original)
+        await self._sync(original)
         self._check_links_equal(original.target, expected_target)
 
 
-class TestModelSyncMultiLink(tb.ModelTestCase):
+@make_async_tests
+class TestModelSyncMultiLink(TestBlockingModelSyncBase):
     ISOLATED_TEST_BRANCHES = True
 
     SCHEMA = """
@@ -3315,7 +3538,7 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
             for a in actual:
                 self.assertEqual(a.__linkprops__, expected_lprops[a.id])
 
-    def _base_testcase(
+    async def _base_testcase(
         self,
         model_type: typing.Type[GelModel],
         initial_targets: typing.Collection[typing.Any],
@@ -3325,7 +3548,7 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
         expected_targets = set(expected_targets)
 
         original = model_type(targets=initial_targets)
-        self.client.save(original)
+        await self._save(original)
 
         self._check_multilinks_equal(original.targets, initial_targets)
 
@@ -3333,15 +3556,15 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
         change_original(original)
 
         # sync some of the objects
-        self.client.sync(original)
+        await self._sync(original)
 
         # only synced objects with value set get update
         self._check_multilinks_equal(original.targets, expected_targets)
 
         # cleanup
-        self.client.query(model_type.delete())
+        await self._query(model_type.delete())
 
-    def _testcase_init(
+    async def _testcase_init(
         self,
         model_type: typing.Type[GelModel],
         initial_targets: typing.Collection[typing.Any],
@@ -3353,15 +3576,15 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
         with_targets = model_type(targets=initial_targets)
         without_targets = model_type()
 
-        self.client.sync(with_targets, without_targets)
+        await self._sync(with_targets, without_targets)
 
         self._check_multilinks_equal(with_targets.targets, expected_targets)
         self._check_multilinks_equal(without_targets.targets, [])
 
         # cleanup
-        self.client.query(model_type.delete())
+        await self._query(model_type.delete())
 
-    def test_model_sync_multi_link_01(self):
+    async def test_model_sync_multi_link_01(self):
         # Insert new object with multi link
 
         from models.TestModelSyncMultiLink import default
@@ -3369,15 +3592,17 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
         target_a = default.Target()
         target_b = default.Target()
         target_c = default.Target()
-        self.client.save(target_a, target_b, target_c)
+        await self._save(target_a, target_b, target_c)
 
         # No linkprops
-        self._testcase_init(default.Source, [])
-        self._testcase_init(default.Source, [target_a, target_b, target_c])
+        await self._testcase_init(default.Source, [])
+        await self._testcase_init(
+            default.Source, [target_a, target_b, target_c]
+        )
 
         # With linkprops
-        self._testcase_init(default.SourceWithProp, [])
-        self._testcase_init(
+        await self._testcase_init(default.SourceWithProp, [])
+        await self._testcase_init(
             default.SourceWithProp,
             [target_a, target_b, target_c],
             [
@@ -3386,7 +3611,7 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
                 default.SourceWithProp.targets.link(target_c),
             ],
         )
-        self._testcase_init(
+        await self._testcase_init(
             default.SourceWithProp,
             [
                 default.SourceWithProp.targets.link(target_a),
@@ -3394,7 +3619,7 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
                 default.SourceWithProp.targets.link(target_c),
             ],
         )
-        self._testcase_init(
+        await self._testcase_init(
             default.SourceWithProp,
             [
                 default.SourceWithProp.targets.link(target_a, lprop=1),
@@ -3404,17 +3629,17 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
         )
 
     @tb.xfail  # multilink linkprops not refetched
-    def test_model_sync_multi_link_01a(self):
+    async def test_model_sync_multi_link_01a(self):
         # With linkprop with default
         from models.TestModelSyncMultiLink import default
 
         target_a = default.Target()
         target_b = default.Target()
         target_c = default.Target()
-        self.client.save(target_a, target_b, target_c)
+        await self._save(target_a, target_b, target_c)
 
-        self._testcase_init(default.SourceWithPropWithDefault, [])
-        self._testcase_init(
+        await self._testcase_init(default.SourceWithPropWithDefault, [])
+        await self._testcase_init(
             default.SourceWithPropWithDefault,
             [target_a, target_b, target_c],
             [
@@ -3429,7 +3654,7 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
                 ),
             ],
         )
-        self._testcase_init(
+        await self._testcase_init(
             default.SourceWithPropWithDefault,
             [
                 default.SourceWithPropWithDefault.targets.link(target_a),
@@ -3448,7 +3673,7 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
                 ),
             ],
         )
-        self._testcase_init(
+        await self._testcase_init(
             default.SourceWithPropWithDefault,
             [
                 default.SourceWithPropWithDefault.targets.link(
@@ -3473,7 +3698,7 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
                 ),
             ],
         )
-        self._testcase_init(
+        await self._testcase_init(
             default.SourceWithPropWithDefault,
             [
                 default.SourceWithPropWithDefault.targets.link(
@@ -3487,7 +3712,7 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
                 ),
             ],
         )
-        self._testcase_init(
+        await self._testcase_init(
             default.SourceWithPropWithDefault,
             [
                 default.SourceWithPropWithDefault.targets.link(target_a),
@@ -3519,7 +3744,7 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
 
         return change
 
-    def _testcase_assign(
+    async def _testcase_assign(
         self,
         model_type: typing.Type[GelModel],
         initial_targets: typing.Collection[typing.Any],
@@ -3529,14 +3754,14 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
         if expected_targets is None:
             expected_targets = changed_targets
 
-        self._base_testcase(
+        await self._base_testcase(
             model_type,
             initial_targets,
             self._get_assign_targets_func(changed_targets),
             expected_targets,
         )
 
-    def test_model_sync_multi_link_02(self):
+    async def test_model_sync_multi_link_02(self):
         # Updating existing objects with multi link
         # Set links to new value
 
@@ -3546,52 +3771,52 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
         target_b = default.Target()
         target_c = default.Target()
         target_d = default.Target()
-        self.client.save(target_a, target_b, target_c, target_d)
+        await self._save(target_a, target_b, target_c, target_d)
 
         # No linkprops
-        self._testcase_assign(default.Source, [], [])
-        self._testcase_assign(
+        await self._testcase_assign(default.Source, [], [])
+        await self._testcase_assign(
             default.Source,
             [],
             [target_a, target_b, target_c],
         )
 
-        self._testcase_assign(
+        await self._testcase_assign(
             default.Source,
             [target_a, target_b, target_c],
             [],
         )
-        self._testcase_assign(
+        await self._testcase_assign(
             default.Source,
             [target_a, target_b, target_c],
             [target_a, target_b, target_c],
         )
 
-        self._testcase_assign(
+        await self._testcase_assign(
             default.Source,
             [target_a, target_b],
             [target_c, target_d],
         )
-        self._testcase_assign(
+        await self._testcase_assign(
             default.Source,
             [target_a, target_b],
             [target_a, target_b, target_c, target_d],
         )
-        self._testcase_assign(
+        await self._testcase_assign(
             default.Source,
             [target_a, target_b, target_c, target_d],
             [target_a, target_b],
         )
 
-        self._testcase_assign(
+        await self._testcase_assign(
             default.Source,
             [target_a, target_b, target_c],
             [target_c, target_d],
         )
 
         # With linkprops
-        self._testcase_assign(default.SourceWithProp, [], [])
-        self._testcase_assign(
+        await self._testcase_assign(default.SourceWithProp, [], [])
+        await self._testcase_assign(
             default.SourceWithProp,
             [],
             [target_a, target_b, target_c],
@@ -3601,7 +3826,7 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
                 default.SourceWithProp.targets.link(target_c),
             ],
         )
-        self._testcase_assign(
+        await self._testcase_assign(
             default.SourceWithProp,
             [],
             [
@@ -3610,7 +3835,7 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
                 default.SourceWithProp.targets.link(target_c),
             ],
         )
-        self._testcase_assign(
+        await self._testcase_assign(
             default.SourceWithProp,
             [],
             [
@@ -3620,7 +3845,7 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
             ],
         )
 
-        self._testcase_assign(
+        await self._testcase_assign(
             default.SourceWithProp,
             [
                 default.SourceWithProp.targets.link(target_a),
@@ -3629,7 +3854,7 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
             ],
             [],
         )
-        self._testcase_assign(
+        await self._testcase_assign(
             default.SourceWithProp,
             [
                 default.SourceWithProp.targets.link(target_a),
@@ -3643,7 +3868,7 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
                 default.SourceWithProp.targets.link(target_c),
             ],
         )
-        self._testcase_assign(
+        await self._testcase_assign(
             default.SourceWithProp,
             [
                 default.SourceWithProp.targets.link(target_a),
@@ -3656,7 +3881,7 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
                 default.SourceWithProp.targets.link(target_c),
             ],
         )
-        self._testcase_assign(
+        await self._testcase_assign(
             default.SourceWithProp,
             [
                 default.SourceWithProp.targets.link(target_a),
@@ -3670,7 +3895,7 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
             ],
         )
 
-        self._testcase_assign(
+        await self._testcase_assign(
             default.SourceWithProp,
             [
                 default.SourceWithProp.targets.link(target_a, lprop=1),
@@ -3679,7 +3904,7 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
             ],
             [],
         )
-        self._testcase_assign(
+        await self._testcase_assign(
             default.SourceWithProp,
             [
                 default.SourceWithProp.targets.link(target_a, lprop=1),
@@ -3692,7 +3917,7 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
                 default.SourceWithProp.targets.link(target_c),
             ],
         )
-        self._testcase_assign(
+        await self._testcase_assign(
             default.SourceWithProp,
             [
                 default.SourceWithProp.targets.link(target_a, lprop=1),
@@ -3705,7 +3930,7 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
                 default.SourceWithProp.targets.link(target_c, lprop=3),
             ],
         )
-        self._testcase_assign(
+        await self._testcase_assign(
             default.SourceWithProp,
             [
                 default.SourceWithProp.targets.link(target_a, lprop=1),
@@ -3719,7 +3944,7 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
             ],
         )
 
-        self._testcase_assign(
+        await self._testcase_assign(
             default.SourceWithProp,
             [
                 default.SourceWithProp.targets.link(target_a),
@@ -3731,7 +3956,7 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
                 default.SourceWithProp.targets.link(target_d),
             ],
         )
-        self._testcase_assign(
+        await self._testcase_assign(
             default.SourceWithProp,
             [
                 default.SourceWithProp.targets.link(target_a),
@@ -3742,7 +3967,7 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
                 default.SourceWithProp.targets.link(target_d),
             ],
         )
-        self._testcase_assign(
+        await self._testcase_assign(
             default.SourceWithProp,
             [
                 default.SourceWithProp.targets.link(target_a),
@@ -3755,7 +3980,7 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
                 default.SourceWithProp.targets.link(target_d),
             ],
         )
-        self._testcase_assign(
+        await self._testcase_assign(
             default.SourceWithProp,
             [
                 default.SourceWithProp.targets.link(target_a),
@@ -3768,7 +3993,7 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
                 default.SourceWithProp.targets.link(target_b),
             ],
         )
-        self._testcase_assign(
+        await self._testcase_assign(
             default.SourceWithProp,
             [
                 default.SourceWithProp.targets.link(target_a),
@@ -3782,7 +4007,7 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
         )
 
     @tb.xfail  # multilink linkprops not refetched
-    def test_model_sync_multi_link_02b(self):
+    async def test_model_sync_multi_link_02b(self):
         # With linkprop with default
 
         from models.TestModelSyncMultiLink import default
@@ -3791,7 +4016,7 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
         target_b = default.Target()
         target_c = default.Target()
         target_d = default.Target()
-        self.client.save(target_a, target_b, target_c, target_d)
+        await self._save(target_a, target_b, target_c, target_d)
 
         initials: list[list[typing.Any]] = [
             [],
@@ -3939,14 +4164,14 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
                 if len(change) > 1:
                     expected_targets = change[1]
 
-                self._testcase_assign(
+                await self._testcase_assign(
                     default.SourceWithPropWithDefault,
                     initial_targets,
                     changed_targets,
                     expected_targets,
                 )
 
-    def test_model_sync_multi_link_03(self):
+    async def test_model_sync_multi_link_03(self):
         # Updating existing objects with multi props
         # LinkSet clear
 
@@ -3956,11 +4181,11 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
 
             return change
 
-        def _testcase_clear(
+        async def _testcase_clear(
             model_type: typing.Type[GelModel],
             initial_targets: typing.Collection[typing.Any],
         ) -> None:
-            self._base_testcase(
+            await self._base_testcase(
                 model_type,
                 initial_targets,
                 _get_clear_targets_func(),
@@ -3972,18 +4197,18 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
         target_a = default.Target()
         target_b = default.Target()
         target_c = default.Target()
-        self.client.save(target_a, target_b, target_c)
+        await self._save(target_a, target_b, target_c)
 
         # No linkprops
-        _testcase_clear(default.Source, [])
-        _testcase_clear(
+        await _testcase_clear(default.Source, [])
+        await _testcase_clear(
             default.Source,
             [target_a, target_b, target_c],
         )
 
         # With linkprops
-        _testcase_clear(default.SourceWithProp, [])
-        _testcase_clear(
+        await _testcase_clear(default.SourceWithProp, [])
+        await _testcase_clear(
             default.SourceWithProp,
             [
                 default.SourceWithProp.targets.link(target_a),
@@ -3991,7 +4216,7 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
                 default.SourceWithProp.targets.link(target_c),
             ],
         )
-        _testcase_clear(
+        await _testcase_clear(
             default.SourceWithProp,
             [
                 default.SourceWithProp.targets.link(target_a, lprop=1),
@@ -4001,8 +4226,8 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
         )
 
         # With linkprop with default
-        _testcase_clear(default.SourceWithPropWithDefault, [])
-        _testcase_clear(
+        await _testcase_clear(default.SourceWithPropWithDefault, [])
+        await _testcase_clear(
             default.SourceWithPropWithDefault,
             [
                 default.SourceWithPropWithDefault.targets.link(
@@ -4016,7 +4241,7 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
                 ),
             ],
         )
-        _testcase_clear(
+        await _testcase_clear(
             default.SourceWithPropWithDefault,
             [
                 default.SourceWithPropWithDefault.targets.link(
@@ -4040,21 +4265,21 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
 
         return change
 
-    def _testcase_update(
+    async def _testcase_update(
         self,
         model_type: typing.Type[GelModel],
         initial_targets: typing.Collection[typing.Any],
         update_targets: typing.Collection[typing.Any],
         expected_targets: typing.Collection[typing.Any],
     ) -> None:
-        self._base_testcase(
+        await self._base_testcase(
             model_type,
             initial_targets,
             self._get_update_targets_func(update_targets),
             expected_targets,
         )
 
-    def test_model_sync_multi_link_04(self):
+    async def test_model_sync_multi_link_04(self):
         # Updating existing objects with multi props
         # LinkSet update
 
@@ -4064,50 +4289,50 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
         target_b = default.Target()
         target_c = default.Target()
         target_d = default.Target()
-        self.client.save(target_a, target_b, target_c, target_d)
+        await self._save(target_a, target_b, target_c, target_d)
 
         # No linkprops
-        self._testcase_update(default.Source, [], [], [])
-        self._testcase_update(
+        await self._testcase_update(default.Source, [], [], [])
+        await self._testcase_update(
             default.Source,
             [],
             [target_a, target_b, target_c],
             [target_a, target_b, target_c],
         )
 
-        self._testcase_update(
+        await self._testcase_update(
             default.Source,
             [target_a, target_b, target_c],
             [],
             [target_a, target_b, target_c],
         )
-        self._testcase_update(
+        await self._testcase_update(
             default.Source,
             [target_a, target_b, target_c],
             [target_a, target_b, target_c],
             [target_a, target_b, target_c],
         )
 
-        self._testcase_update(
+        await self._testcase_update(
             default.Source,
             [target_a, target_b],
             [target_c, target_d],
             [target_a, target_b, target_c, target_d],
         )
-        self._testcase_update(
+        await self._testcase_update(
             default.Source,
             [target_a, target_b],
             [target_a, target_b, target_c, target_d],
             [target_a, target_b, target_c, target_d],
         )
-        self._testcase_update(
+        await self._testcase_update(
             default.Source,
             [target_a, target_b, target_c, target_d],
             [target_a, target_b],
             [target_a, target_b, target_c, target_d],
         )
 
-        self._testcase_update(
+        await self._testcase_update(
             default.Source,
             [target_a, target_b, target_c],
             [target_c, target_d],
@@ -4115,8 +4340,8 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
         )
 
         # With linkprops
-        self._testcase_update(default.SourceWithProp, [], [], [])
-        self._testcase_update(
+        await self._testcase_update(default.SourceWithProp, [], [], [])
+        await self._testcase_update(
             default.SourceWithProp,
             [],
             [target_a, target_b],
@@ -4125,7 +4350,7 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
                 default.SourceWithProp.targets.link(target_b),
             ],
         )
-        self._testcase_update(
+        await self._testcase_update(
             default.SourceWithProp,
             [],
             [
@@ -4137,7 +4362,7 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
                 default.SourceWithProp.targets.link(target_b),
             ],
         )
-        self._testcase_update(
+        await self._testcase_update(
             default.SourceWithProp,
             [],
             [
@@ -4150,7 +4375,7 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
             ],
         )
 
-        self._testcase_update(
+        await self._testcase_update(
             default.SourceWithProp,
             [
                 default.SourceWithProp.targets.link(target_a),
@@ -4162,7 +4387,7 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
                 default.SourceWithProp.targets.link(target_b),
             ],
         )
-        self._testcase_update(
+        await self._testcase_update(
             default.SourceWithProp,
             [
                 default.SourceWithProp.targets.link(target_a),
@@ -4174,7 +4399,7 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
                 default.SourceWithProp.targets.link(target_b),
             ],
         )
-        self._testcase_update(
+        await self._testcase_update(
             default.SourceWithProp,
             [
                 default.SourceWithProp.targets.link(target_a),
@@ -4189,7 +4414,7 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
                 default.SourceWithProp.targets.link(target_b),
             ],
         )
-        self._testcase_update(
+        await self._testcase_update(
             default.SourceWithProp,
             [
                 default.SourceWithProp.targets.link(target_a),
@@ -4206,7 +4431,7 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
             ],
         )
 
-        self._testcase_update(
+        await self._testcase_update(
             default.SourceWithProp,
             [
                 default.SourceWithProp.targets.link(target_a, lprop=1),
@@ -4218,7 +4443,7 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
                 default.SourceWithProp.targets.link(target_b, lprop=2),
             ],
         )
-        self._testcase_update(
+        await self._testcase_update(
             default.SourceWithProp,
             [
                 default.SourceWithProp.targets.link(target_a, lprop=1),
@@ -4233,7 +4458,7 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
                 default.SourceWithProp.targets.link(target_b),
             ],
         )
-        self._testcase_update(
+        await self._testcase_update(
             default.SourceWithProp,
             [
                 default.SourceWithProp.targets.link(target_a, lprop=1),
@@ -4248,7 +4473,7 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
                 default.SourceWithProp.targets.link(target_b, lprop=2),
             ],
         )
-        self._testcase_update(
+        await self._testcase_update(
             default.SourceWithProp,
             [
                 default.SourceWithProp.targets.link(target_a, lprop=1),
@@ -4264,7 +4489,7 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
             ],
         )
 
-        self._testcase_update(
+        await self._testcase_update(
             default.SourceWithProp,
             [
                 default.SourceWithProp.targets.link(target_a),
@@ -4278,7 +4503,7 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
                 default.SourceWithProp.targets.link(target_d),
             ],
         )
-        self._testcase_update(
+        await self._testcase_update(
             default.SourceWithProp,
             [
                 default.SourceWithProp.targets.link(target_a),
@@ -4295,7 +4520,7 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
                 default.SourceWithProp.targets.link(target_d),
             ],
         )
-        self._testcase_update(
+        await self._testcase_update(
             default.SourceWithProp,
             [
                 default.SourceWithProp.targets.link(target_a),
@@ -4314,7 +4539,7 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
                 default.SourceWithProp.targets.link(target_d),
             ],
         )
-        self._testcase_update(
+        await self._testcase_update(
             default.SourceWithProp,
             [
                 default.SourceWithProp.targets.link(target_a),
@@ -4333,7 +4558,7 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
                 default.SourceWithProp.targets.link(target_d),
             ],
         )
-        self._testcase_update(
+        await self._testcase_update(
             default.SourceWithProp,
             [
                 default.SourceWithProp.targets.link(target_a),
@@ -4352,7 +4577,7 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
                 default.SourceWithProp.targets.link(target_d),
             ],
         )
-        self._testcase_update(
+        await self._testcase_update(
             default.SourceWithProp,
             [
                 default.SourceWithProp.targets.link(target_a, lprop=1),
@@ -4371,7 +4596,7 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
                 default.SourceWithProp.targets.link(target_d),
             ],
         )
-        self._testcase_update(
+        await self._testcase_update(
             default.SourceWithProp,
             [
                 default.SourceWithProp.targets.link(target_a),
@@ -4390,7 +4615,7 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
                 default.SourceWithProp.targets.link(target_d, lprop=6),
             ],
         )
-        self._testcase_update(
+        await self._testcase_update(
             default.SourceWithProp,
             [
                 default.SourceWithProp.targets.link(target_a, lprop=1),
@@ -4411,7 +4636,7 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
         )
 
     @tb.xfail  # multilink linkprops not refetched
-    def test_model_sync_multi_link_04c(self):
+    async def test_model_sync_multi_link_04c(self):
         # With linkprop with default
         from models.TestModelSyncMultiLink import default
 
@@ -4419,10 +4644,12 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
         target_b = default.Target()
         target_c = default.Target()
         target_d = default.Target()
-        self.client.save(target_a, target_b, target_c, target_d)
+        await self._save(target_a, target_b, target_c, target_d)
 
-        self._testcase_update(default.SourceWithPropWithDefault, [], [], [])
-        self._testcase_update(
+        await self._testcase_update(
+            default.SourceWithPropWithDefault, [], [], []
+        )
+        await self._testcase_update(
             default.SourceWithPropWithDefault,
             [],
             [target_a, target_b, target_c],
@@ -4438,7 +4665,7 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
                 ),
             ],
         )
-        self._testcase_update(
+        await self._testcase_update(
             default.SourceWithPropWithDefault,
             [],
             [
@@ -4458,7 +4685,7 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
                 ),
             ],
         )
-        self._testcase_update(
+        await self._testcase_update(
             default.SourceWithPropWithDefault,
             [],
             [
@@ -4484,7 +4711,7 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
                 ),
             ],
         )
-        self._testcase_update(
+        await self._testcase_update(
             default.SourceWithPropWithDefault,
             [],
             [
@@ -4510,172 +4737,9 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
                 ),
             ],
         )
-        self._testcase_update(
+        await self._testcase_update(
             default.SourceWithPropWithDefault,
             [],
-            [
-                default.SourceWithPropWithDefault.targets.link(target_a),
-                default.SourceWithPropWithDefault.targets.link(
-                    target_b, lprop=None
-                ),
-                default.SourceWithPropWithDefault.targets.link(
-                    target_c, lprop=1
-                ),
-            ],
-            [
-                default.SourceWithPropWithDefault.targets.link(
-                    target_a, lprop=-1
-                ),
-                default.SourceWithPropWithDefault.targets.link(
-                    target_b, lprop=None
-                ),
-                default.SourceWithPropWithDefault.targets.link(
-                    target_c, lprop=1
-                ),
-            ],
-        )
-
-        self._testcase_update(
-            default.SourceWithPropWithDefault,
-            [
-                default.SourceWithPropWithDefault.targets.link(
-                    target_a, lprop=None
-                ),
-                default.SourceWithPropWithDefault.targets.link(
-                    target_b, lprop=None
-                ),
-                default.SourceWithPropWithDefault.targets.link(
-                    target_c, lprop=None
-                ),
-            ],
-            [target_a, target_b, target_c],
-            [
-                default.SourceWithPropWithDefault.targets.link(
-                    target_a, lprop=-1
-                ),
-                default.SourceWithPropWithDefault.targets.link(
-                    target_b, lprop=-1
-                ),
-                default.SourceWithPropWithDefault.targets.link(
-                    target_c, lprop=-1
-                ),
-            ],
-        )
-        self._testcase_update(
-            default.SourceWithPropWithDefault,
-            [
-                default.SourceWithPropWithDefault.targets.link(
-                    target_a, lprop=None
-                ),
-                default.SourceWithPropWithDefault.targets.link(
-                    target_b, lprop=None
-                ),
-                default.SourceWithPropWithDefault.targets.link(
-                    target_c, lprop=None
-                ),
-            ],
-            [
-                default.SourceWithPropWithDefault.targets.link(target_a),
-                default.SourceWithPropWithDefault.targets.link(target_b),
-                default.SourceWithPropWithDefault.targets.link(target_c),
-            ],
-            [
-                default.SourceWithPropWithDefault.targets.link(
-                    target_a, lprop=-1
-                ),
-                default.SourceWithPropWithDefault.targets.link(
-                    target_b, lprop=-1
-                ),
-                default.SourceWithPropWithDefault.targets.link(
-                    target_c, lprop=-1
-                ),
-            ],
-        )
-        self._testcase_update(
-            default.SourceWithPropWithDefault,
-            [
-                default.SourceWithPropWithDefault.targets.link(
-                    target_a, lprop=None
-                ),
-                default.SourceWithPropWithDefault.targets.link(
-                    target_b, lprop=None
-                ),
-                default.SourceWithPropWithDefault.targets.link(
-                    target_c, lprop=None
-                ),
-            ],
-            [
-                default.SourceWithPropWithDefault.targets.link(
-                    target_a, lprop=None
-                ),
-                default.SourceWithPropWithDefault.targets.link(
-                    target_b, lprop=None
-                ),
-                default.SourceWithPropWithDefault.targets.link(
-                    target_c, lprop=None
-                ),
-            ],
-            [
-                default.SourceWithPropWithDefault.targets.link(
-                    target_a, lprop=None
-                ),
-                default.SourceWithPropWithDefault.targets.link(
-                    target_b, lprop=None
-                ),
-                default.SourceWithPropWithDefault.targets.link(
-                    target_c, lprop=None
-                ),
-            ],
-        )
-        self._testcase_update(
-            default.SourceWithPropWithDefault,
-            [
-                default.SourceWithPropWithDefault.targets.link(
-                    target_a, lprop=None
-                ),
-                default.SourceWithPropWithDefault.targets.link(
-                    target_b, lprop=None
-                ),
-                default.SourceWithPropWithDefault.targets.link(
-                    target_c, lprop=None
-                ),
-            ],
-            [
-                default.SourceWithPropWithDefault.targets.link(
-                    target_a, lprop=1
-                ),
-                default.SourceWithPropWithDefault.targets.link(
-                    target_b, lprop=2
-                ),
-                default.SourceWithPropWithDefault.targets.link(
-                    target_c, lprop=3
-                ),
-            ],
-            [
-                default.SourceWithPropWithDefault.targets.link(
-                    target_a, lprop=1
-                ),
-                default.SourceWithPropWithDefault.targets.link(
-                    target_b, lprop=2
-                ),
-                default.SourceWithPropWithDefault.targets.link(
-                    target_c, lprop=3
-                ),
-            ],
-        )
-        self._testcase_update(
-            default.SourceWithPropWithDefault,
-            [
-                default.SourceWithPropWithDefault.targets.link(
-                    target_a, lprop=None
-                ),
-                default.SourceWithPropWithDefault.targets.link(
-                    target_b, lprop=None
-                ),
-                default.SourceWithPropWithDefault.targets.link(
-                    target_c, lprop=None
-                ),
-            ],
             [
                 default.SourceWithPropWithDefault.targets.link(target_a),
                 default.SourceWithPropWithDefault.targets.link(
@@ -4698,7 +4762,170 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
             ],
         )
 
-        self._testcase_update(
+        await self._testcase_update(
+            default.SourceWithPropWithDefault,
+            [
+                default.SourceWithPropWithDefault.targets.link(
+                    target_a, lprop=None
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_b, lprop=None
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_c, lprop=None
+                ),
+            ],
+            [target_a, target_b, target_c],
+            [
+                default.SourceWithPropWithDefault.targets.link(
+                    target_a, lprop=-1
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_b, lprop=-1
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_c, lprop=-1
+                ),
+            ],
+        )
+        await self._testcase_update(
+            default.SourceWithPropWithDefault,
+            [
+                default.SourceWithPropWithDefault.targets.link(
+                    target_a, lprop=None
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_b, lprop=None
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_c, lprop=None
+                ),
+            ],
+            [
+                default.SourceWithPropWithDefault.targets.link(target_a),
+                default.SourceWithPropWithDefault.targets.link(target_b),
+                default.SourceWithPropWithDefault.targets.link(target_c),
+            ],
+            [
+                default.SourceWithPropWithDefault.targets.link(
+                    target_a, lprop=-1
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_b, lprop=-1
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_c, lprop=-1
+                ),
+            ],
+        )
+        await self._testcase_update(
+            default.SourceWithPropWithDefault,
+            [
+                default.SourceWithPropWithDefault.targets.link(
+                    target_a, lprop=None
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_b, lprop=None
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_c, lprop=None
+                ),
+            ],
+            [
+                default.SourceWithPropWithDefault.targets.link(
+                    target_a, lprop=None
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_b, lprop=None
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_c, lprop=None
+                ),
+            ],
+            [
+                default.SourceWithPropWithDefault.targets.link(
+                    target_a, lprop=None
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_b, lprop=None
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_c, lprop=None
+                ),
+            ],
+        )
+        await self._testcase_update(
+            default.SourceWithPropWithDefault,
+            [
+                default.SourceWithPropWithDefault.targets.link(
+                    target_a, lprop=None
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_b, lprop=None
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_c, lprop=None
+                ),
+            ],
+            [
+                default.SourceWithPropWithDefault.targets.link(
+                    target_a, lprop=1
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_b, lprop=2
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_c, lprop=3
+                ),
+            ],
+            [
+                default.SourceWithPropWithDefault.targets.link(
+                    target_a, lprop=1
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_b, lprop=2
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_c, lprop=3
+                ),
+            ],
+        )
+        await self._testcase_update(
+            default.SourceWithPropWithDefault,
+            [
+                default.SourceWithPropWithDefault.targets.link(
+                    target_a, lprop=None
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_b, lprop=None
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_c, lprop=None
+                ),
+            ],
+            [
+                default.SourceWithPropWithDefault.targets.link(target_a),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_b, lprop=None
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_c, lprop=1
+                ),
+            ],
+            [
+                default.SourceWithPropWithDefault.targets.link(
+                    target_a, lprop=-1
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_b, lprop=None
+                ),
+                default.SourceWithPropWithDefault.targets.link(
+                    target_c, lprop=1
+                ),
+            ],
+        )
+
+        await self._testcase_update(
             default.SourceWithPropWithDefault,
             [
                 default.SourceWithPropWithDefault.targets.link(
@@ -4724,7 +4951,7 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
                 ),
             ],
         )
-        self._testcase_update(
+        await self._testcase_update(
             default.SourceWithPropWithDefault,
             [
                 default.SourceWithPropWithDefault.targets.link(
@@ -4754,7 +4981,7 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
                 ),
             ],
         )
-        self._testcase_update(
+        await self._testcase_update(
             default.SourceWithPropWithDefault,
             [
                 default.SourceWithPropWithDefault.targets.link(
@@ -4790,7 +5017,7 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
                 ),
             ],
         )
-        self._testcase_update(
+        await self._testcase_update(
             default.SourceWithPropWithDefault,
             [
                 default.SourceWithPropWithDefault.targets.link(
@@ -4826,7 +5053,7 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
                 ),
             ],
         )
-        self._testcase_update(
+        await self._testcase_update(
             default.SourceWithPropWithDefault,
             [
                 default.SourceWithPropWithDefault.targets.link(
@@ -4860,7 +5087,7 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
                 ),
             ],
         )
-        self._testcase_update(
+        await self._testcase_update(
             default.SourceWithPropWithDefault,
             [
                 default.SourceWithPropWithDefault.targets.link(
@@ -4906,21 +5133,21 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
 
         return change
 
-    def _testcase_add(
+    async def _testcase_add(
         self,
         model_type: typing.Type[GelModel],
         initial_targets: typing.Collection[typing.Any],
         add_target: typing.Any,
         expected_targets: typing.Collection[typing.Any],
     ) -> None:
-        self._base_testcase(
+        await self._base_testcase(
             model_type,
             initial_targets,
             self._get_add_targets_func(add_target),
             expected_targets,
         )
 
-    def test_model_sync_multi_link_05(self):
+    async def test_model_sync_multi_link_05(self):
         # Updating existing objects with multi props
         # LinkSet add
 
@@ -4930,22 +5157,22 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
         target_b = default.Target()
         target_c = default.Target()
         target_d = default.Target()
-        self.client.save(target_a, target_b, target_c, target_d)
+        await self._save(target_a, target_b, target_c, target_d)
 
         # No linkprops
-        self._testcase_add(
+        await self._testcase_add(
             default.Source,
             [],
             target_a,
             [target_a],
         )
-        self._testcase_add(
+        await self._testcase_add(
             default.Source,
             [target_a],
             target_a,
             [target_a],
         )
-        self._testcase_add(
+        await self._testcase_add(
             default.Source,
             [target_a, target_b, target_c],
             target_d,
@@ -4953,64 +5180,64 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
         )
 
         # With linkprops
-        self._testcase_add(
+        await self._testcase_add(
             default.SourceWithProp,
             [],
             target_a,
             [default.SourceWithProp.targets.link(target_a)],
         )
-        self._testcase_add(
+        await self._testcase_add(
             default.SourceWithProp,
             [],
             default.SourceWithProp.targets.link(target_a),
             [default.SourceWithProp.targets.link(target_a)],
         )
-        self._testcase_add(
+        await self._testcase_add(
             default.SourceWithProp,
             [],
             default.SourceWithProp.targets.link(target_a, lprop=1),
             [default.SourceWithProp.targets.link(target_a, lprop=1)],
         )
 
-        self._testcase_add(
+        await self._testcase_add(
             default.SourceWithProp,
             [default.SourceWithProp.targets.link(target_a)],
             target_a,
             [default.SourceWithProp.targets.link(target_a)],
         )
-        self._testcase_add(
+        await self._testcase_add(
             default.SourceWithProp,
             [default.SourceWithProp.targets.link(target_a)],
             default.SourceWithProp.targets.link(target_a),
             [default.SourceWithProp.targets.link(target_a)],
         )
-        self._testcase_add(
+        await self._testcase_add(
             default.SourceWithProp,
             [default.SourceWithProp.targets.link(target_a)],
             default.SourceWithProp.targets.link(target_a, lprop=1),
             [default.SourceWithProp.targets.link(target_a, lprop=1)],
         )
 
-        self._testcase_add(
+        await self._testcase_add(
             default.SourceWithProp,
             [default.SourceWithProp.targets.link(target_a, lprop=1)],
             default.SourceWithProp.targets.link(target_a),
             [default.SourceWithProp.targets.link(target_a)],
         )
-        self._testcase_add(
+        await self._testcase_add(
             default.SourceWithProp,
             [default.SourceWithProp.targets.link(target_a, lprop=1)],
             default.SourceWithProp.targets.link(target_a, lprop=1),
             [default.SourceWithProp.targets.link(target_a, lprop=1)],
         )
-        self._testcase_add(
+        await self._testcase_add(
             default.SourceWithProp,
             [default.SourceWithProp.targets.link(target_a, lprop=1)],
             default.SourceWithProp.targets.link(target_a, lprop=2),
             [default.SourceWithProp.targets.link(target_a, lprop=2)],
         )
 
-        self._testcase_add(
+        await self._testcase_add(
             default.SourceWithProp,
             [
                 default.SourceWithProp.targets.link(target_a),
@@ -5025,7 +5252,7 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
                 default.SourceWithProp.targets.link(target_d),
             ],
         )
-        self._testcase_add(
+        await self._testcase_add(
             default.SourceWithProp,
             [
                 default.SourceWithProp.targets.link(target_a),
@@ -5040,7 +5267,7 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
                 default.SourceWithProp.targets.link(target_d),
             ],
         )
-        self._testcase_add(
+        await self._testcase_add(
             default.SourceWithProp,
             [
                 default.SourceWithProp.targets.link(target_a),
@@ -5057,7 +5284,7 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
         )
 
     @tb.xfail  # multilink linkprops not refetched
-    def test_model_sync_multi_link_05b(self):
+    async def test_model_sync_multi_link_05b(self):
         # With linkprop with default
         from models.TestModelSyncMultiLink import default
 
@@ -5065,9 +5292,9 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
         target_b = default.Target()
         target_c = default.Target()
         target_d = default.Target()
-        self.client.save(target_a, target_b, target_c, target_d)
+        await self._save(target_a, target_b, target_c, target_d)
 
-        self._testcase_add(
+        await self._testcase_add(
             default.SourceWithPropWithDefault,
             [],
             target_a,
@@ -5077,7 +5304,7 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
                 )
             ],
         )
-        self._testcase_add(
+        await self._testcase_add(
             default.SourceWithPropWithDefault,
             [],
             default.SourceWithPropWithDefault.targets.link(target_a),
@@ -5087,7 +5314,7 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
                 )
             ],
         )
-        self._testcase_add(
+        await self._testcase_add(
             default.SourceWithPropWithDefault,
             [],
             default.SourceWithPropWithDefault.targets.link(
@@ -5099,7 +5326,7 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
                 )
             ],
         )
-        self._testcase_add(
+        await self._testcase_add(
             default.SourceWithPropWithDefault,
             [],
             default.SourceWithPropWithDefault.targets.link(target_a, lprop=1),
@@ -5109,7 +5336,7 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
                 )
             ],
         )
-        self._testcase_add(
+        await self._testcase_add(
             default.SourceWithPropWithDefault,
             [
                 default.SourceWithPropWithDefault.targets.link(
@@ -5123,7 +5350,7 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
                 )
             ],
         )
-        self._testcase_add(
+        await self._testcase_add(
             default.SourceWithPropWithDefault,
             [
                 default.SourceWithPropWithDefault.targets.link(
@@ -5137,7 +5364,7 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
                 )
             ],
         )
-        self._testcase_add(
+        await self._testcase_add(
             default.SourceWithPropWithDefault,
             [
                 default.SourceWithPropWithDefault.targets.link(
@@ -5153,7 +5380,7 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
                 )
             ],
         )
-        self._testcase_add(
+        await self._testcase_add(
             default.SourceWithPropWithDefault,
             [
                 default.SourceWithPropWithDefault.targets.link(
@@ -5167,7 +5394,7 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
                 )
             ],
         )
-        self._testcase_add(
+        await self._testcase_add(
             default.SourceWithPropWithDefault,
             [
                 default.SourceWithPropWithDefault.targets.link(
@@ -5181,7 +5408,7 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
                 )
             ],
         )
-        self._testcase_add(
+        await self._testcase_add(
             default.SourceWithPropWithDefault,
             [
                 default.SourceWithPropWithDefault.targets.link(
@@ -5195,7 +5422,7 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
                 )
             ],
         )
-        self._testcase_add(
+        await self._testcase_add(
             default.SourceWithPropWithDefault,
             [
                 default.SourceWithPropWithDefault.targets.link(
@@ -5211,7 +5438,7 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
                 )
             ],
         )
-        self._testcase_add(
+        await self._testcase_add(
             default.SourceWithPropWithDefault,
             [
                 default.SourceWithPropWithDefault.targets.link(
@@ -5225,7 +5452,7 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
                 )
             ],
         )
-        self._testcase_add(
+        await self._testcase_add(
             default.SourceWithPropWithDefault,
             [
                 default.SourceWithPropWithDefault.targets.link(
@@ -5254,7 +5481,7 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
                 ),
             ],
         )
-        self._testcase_add(
+        await self._testcase_add(
             default.SourceWithPropWithDefault,
             [
                 default.SourceWithPropWithDefault.targets.link(
@@ -5285,7 +5512,7 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
                 ),
             ],
         )
-        self._testcase_add(
+        await self._testcase_add(
             default.SourceWithPropWithDefault,
             [
                 default.SourceWithPropWithDefault.targets.link(
@@ -5315,7 +5542,7 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
             ],
         )
 
-    def test_model_sync_multi_link_06(self):
+    async def test_model_sync_multi_link_06(self):
         # Updating existing objects with multi props
         # LinkSet discard
 
@@ -5327,13 +5554,13 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
 
             return change
 
-        def _testcase_discard(
+        async def _testcase_discard(
             model_type: typing.Type[GelModel],
             initial_targets: typing.Collection[typing.Any],
             discard_target: typing.Any,
             expected_targets: typing.Collection[typing.Any],
         ) -> None:
-            self._base_testcase(
+            await self._base_testcase(
                 model_type,
                 initial_targets,
                 _get_discard_targets_func(discard_target),
@@ -5346,16 +5573,16 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
         target_b = default.Target()
         target_c = default.Target()
         target_d = default.Target()
-        self.client.save(target_a, target_b, target_c, target_d)
+        await self._save(target_a, target_b, target_c, target_d)
 
         # No linkprops
-        _testcase_discard(
+        await _testcase_discard(
             default.Source,
             [target_a],
             target_a,
             [],
         )
-        _testcase_discard(
+        await _testcase_discard(
             default.Source,
             [target_a, target_b, target_c],
             target_c,
@@ -5363,45 +5590,45 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
         )
 
         # With linkprops
-        _testcase_discard(
+        await _testcase_discard(
             default.SourceWithProp,
             [default.SourceWithProp.targets.link(target_a)],
             target_a,
             [],
         )
-        _testcase_discard(
+        await _testcase_discard(
             default.SourceWithProp,
             [default.SourceWithProp.targets.link(target_a)],
             default.SourceWithProp.targets.link(target_a),
             [],
         )
-        _testcase_discard(
+        await _testcase_discard(
             default.SourceWithProp,
             [default.SourceWithProp.targets.link(target_a)],
             default.SourceWithProp.targets.link(target_a, lprop=1),
             [],
         )
 
-        _testcase_discard(
+        await _testcase_discard(
             default.SourceWithProp,
             [default.SourceWithProp.targets.link(target_a, lprop=1)],
             default.SourceWithProp.targets.link(target_a),
             [],
         )
-        _testcase_discard(
+        await _testcase_discard(
             default.SourceWithProp,
             [default.SourceWithProp.targets.link(target_a, lprop=1)],
             default.SourceWithProp.targets.link(target_a, lprop=1),
             [],
         )
-        _testcase_discard(
+        await _testcase_discard(
             default.SourceWithProp,
             [default.SourceWithProp.targets.link(target_a, lprop=1)],
             default.SourceWithProp.targets.link(target_a, lprop=2),
             [],
         )
 
-        _testcase_discard(
+        await _testcase_discard(
             default.SourceWithProp,
             [
                 default.SourceWithProp.targets.link(target_a),
@@ -5414,7 +5641,7 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
                 default.SourceWithProp.targets.link(target_b),
             ],
         )
-        _testcase_discard(
+        await _testcase_discard(
             default.SourceWithProp,
             [
                 default.SourceWithProp.targets.link(target_a),
@@ -5427,7 +5654,7 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
                 default.SourceWithProp.targets.link(target_b),
             ],
         )
-        _testcase_discard(
+        await _testcase_discard(
             default.SourceWithProp,
             [
                 default.SourceWithProp.targets.link(target_a),
@@ -5440,7 +5667,7 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
                 default.SourceWithProp.targets.link(target_b),
             ],
         )
-        _testcase_discard(
+        await _testcase_discard(
             default.SourceWithProp,
             [
                 default.SourceWithProp.targets.link(target_a, lprop=1),
@@ -5453,7 +5680,7 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
                 default.SourceWithProp.targets.link(target_b, lprop=2),
             ],
         )
-        _testcase_discard(
+        await _testcase_discard(
             default.SourceWithProp,
             [
                 default.SourceWithProp.targets.link(target_a, lprop=1),
@@ -5466,7 +5693,7 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
                 default.SourceWithProp.targets.link(target_b, lprop=2),
             ],
         )
-        _testcase_discard(
+        await _testcase_discard(
             default.SourceWithProp,
             [
                 default.SourceWithProp.targets.link(target_a, lprop=1),
@@ -5481,7 +5708,7 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
         )
 
         # With linkprop with default
-        _testcase_discard(
+        await _testcase_discard(
             default.SourceWithPropWithDefault,
             [
                 default.SourceWithPropWithDefault.targets.link(
@@ -5491,7 +5718,7 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
             target_a,
             [],
         )
-        _testcase_discard(
+        await _testcase_discard(
             default.SourceWithPropWithDefault,
             [
                 default.SourceWithPropWithDefault.targets.link(
@@ -5501,7 +5728,7 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
             default.SourceWithPropWithDefault.targets.link(target_a),
             [],
         )
-        _testcase_discard(
+        await _testcase_discard(
             default.SourceWithPropWithDefault,
             [
                 default.SourceWithPropWithDefault.targets.link(
@@ -5513,7 +5740,7 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
             ),
             [],
         )
-        _testcase_discard(
+        await _testcase_discard(
             default.SourceWithPropWithDefault,
             [
                 default.SourceWithPropWithDefault.targets.link(
@@ -5525,13 +5752,13 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
         )
 
         # Discarding non-member items does nothing
-        _testcase_discard(
+        await _testcase_discard(
             default.Source,
             [target_a, target_b, target_c],
             target_d,
             [target_a, target_b, target_c],
         )
-        _testcase_discard(
+        await _testcase_discard(
             default.SourceWithProp,
             [
                 default.SourceWithProp.targets.link(target_a),
@@ -5545,7 +5772,7 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
                 default.SourceWithProp.targets.link(target_c),
             ],
         )
-        _testcase_discard(
+        await _testcase_discard(
             default.SourceWithProp,
             [
                 default.SourceWithProp.targets.link(target_a),
@@ -5559,7 +5786,7 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
                 default.SourceWithProp.targets.link(target_c),
             ],
         )
-        _testcase_discard(
+        await _testcase_discard(
             default.SourceWithProp,
             [
                 default.SourceWithProp.targets.link(target_a, lprop=1),
@@ -5574,7 +5801,7 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
             ],
         )
 
-    def test_model_sync_multi_link_07(self):
+    async def test_model_sync_multi_link_07(self):
         # Updating existing objects with multi props
         # LinkSet remove
 
@@ -5586,13 +5813,13 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
 
             return change
 
-        def _testcase_remove(
+        async def _testcase_remove(
             model_type: typing.Type[GelModel],
             initial_targets: typing.Collection[typing.Any],
             remove_target: typing.Any,
             expected_targets: typing.Collection[typing.Any],
         ) -> None:
-            self._base_testcase(
+            await self._base_testcase(
                 model_type,
                 initial_targets,
                 _get_remove_targets_func(remove_target),
@@ -5604,16 +5831,16 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
         target_a = default.Target()
         target_b = default.Target()
         target_c = default.Target()
-        self.client.save(target_a, target_b, target_c)
+        await self._save(target_a, target_b, target_c)
 
         # No linkprops
-        _testcase_remove(
+        await _testcase_remove(
             default.Source,
             [target_a],
             target_a,
             [],
         )
-        _testcase_remove(
+        await _testcase_remove(
             default.Source,
             [target_a, target_b, target_c],
             target_c,
@@ -5621,45 +5848,45 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
         )
 
         # With linkprops
-        _testcase_remove(
+        await _testcase_remove(
             default.SourceWithProp,
             [default.SourceWithProp.targets.link(target_a)],
             target_a,
             [],
         )
-        _testcase_remove(
+        await _testcase_remove(
             default.SourceWithProp,
             [default.SourceWithProp.targets.link(target_a)],
             default.SourceWithProp.targets.link(target_a),
             [],
         )
-        _testcase_remove(
+        await _testcase_remove(
             default.SourceWithProp,
             [default.SourceWithProp.targets.link(target_a)],
             default.SourceWithProp.targets.link(target_a, lprop=1),
             [],
         )
 
-        _testcase_remove(
+        await _testcase_remove(
             default.SourceWithProp,
             [default.SourceWithProp.targets.link(target_a, lprop=1)],
             default.SourceWithProp.targets.link(target_a),
             [],
         )
-        _testcase_remove(
+        await _testcase_remove(
             default.SourceWithProp,
             [default.SourceWithProp.targets.link(target_a, lprop=1)],
             default.SourceWithProp.targets.link(target_a, lprop=1),
             [],
         )
-        _testcase_remove(
+        await _testcase_remove(
             default.SourceWithProp,
             [default.SourceWithProp.targets.link(target_a, lprop=1)],
             default.SourceWithProp.targets.link(target_a, lprop=2),
             [],
         )
 
-        _testcase_remove(
+        await _testcase_remove(
             default.SourceWithProp,
             [
                 default.SourceWithProp.targets.link(target_a),
@@ -5672,7 +5899,7 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
                 default.SourceWithProp.targets.link(target_b),
             ],
         )
-        _testcase_remove(
+        await _testcase_remove(
             default.SourceWithProp,
             [
                 default.SourceWithProp.targets.link(target_a),
@@ -5685,7 +5912,7 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
                 default.SourceWithProp.targets.link(target_b),
             ],
         )
-        _testcase_remove(
+        await _testcase_remove(
             default.SourceWithProp,
             [
                 default.SourceWithProp.targets.link(target_a),
@@ -5698,7 +5925,7 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
                 default.SourceWithProp.targets.link(target_b),
             ],
         )
-        _testcase_remove(
+        await _testcase_remove(
             default.SourceWithProp,
             [
                 default.SourceWithProp.targets.link(target_a, lprop=1),
@@ -5711,7 +5938,7 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
                 default.SourceWithProp.targets.link(target_b, lprop=2),
             ],
         )
-        _testcase_remove(
+        await _testcase_remove(
             default.SourceWithProp,
             [
                 default.SourceWithProp.targets.link(target_a, lprop=1),
@@ -5724,7 +5951,7 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
                 default.SourceWithProp.targets.link(target_b, lprop=2),
             ],
         )
-        _testcase_remove(
+        await _testcase_remove(
             default.SourceWithProp,
             [
                 default.SourceWithProp.targets.link(target_a, lprop=1),
@@ -5739,7 +5966,7 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
         )
 
         # With linkprop with default
-        _testcase_remove(
+        await _testcase_remove(
             default.SourceWithPropWithDefault,
             [
                 default.SourceWithPropWithDefault.targets.link(
@@ -5749,7 +5976,7 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
             target_a,
             [],
         )
-        _testcase_remove(
+        await _testcase_remove(
             default.SourceWithPropWithDefault,
             [
                 default.SourceWithPropWithDefault.targets.link(
@@ -5759,7 +5986,7 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
             default.SourceWithPropWithDefault.targets.link(target_a),
             [],
         )
-        _testcase_remove(
+        await _testcase_remove(
             default.SourceWithPropWithDefault,
             [
                 default.SourceWithPropWithDefault.targets.link(
@@ -5771,7 +5998,7 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
             ),
             [],
         )
-        _testcase_remove(
+        await _testcase_remove(
             default.SourceWithPropWithDefault,
             [
                 default.SourceWithPropWithDefault.targets.link(
@@ -5791,21 +6018,21 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
 
         return change
 
-    def _testcase_op_iadd(
+    async def _testcase_op_iadd(
         self,
         model_type: typing.Type[GelModel],
         initial_targets: typing.Collection[typing.Any],
         op_iadd_targets: typing.Collection[typing.Any],
         expected_targets: typing.Collection[typing.Any],
     ) -> None:
-        self._base_testcase(
+        await self._base_testcase(
             model_type,
             initial_targets,
             self._get_op_iadd_targets_func(op_iadd_targets),
             expected_targets,
         )
 
-    def test_model_sync_multi_link_08(self):
+    async def test_model_sync_multi_link_08(self):
         # Updating existing objects with multi props
         # LinkSet operator iadd
 
@@ -5815,50 +6042,50 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
         target_b = default.Target()
         target_c = default.Target()
         target_d = default.Target()
-        self.client.save(target_a, target_b, target_c, target_d)
+        await self._save(target_a, target_b, target_c, target_d)
 
         # No linkprops
-        self._testcase_op_iadd(default.Source, [], [], [])
-        self._testcase_op_iadd(
+        await self._testcase_op_iadd(default.Source, [], [], [])
+        await self._testcase_op_iadd(
             default.Source,
             [],
             [target_a, target_b, target_c],
             [target_a, target_b, target_c],
         )
 
-        self._testcase_op_iadd(
+        await self._testcase_op_iadd(
             default.Source,
             [target_a, target_b, target_c],
             [],
             [target_a, target_b, target_c],
         )
-        self._testcase_op_iadd(
+        await self._testcase_op_iadd(
             default.Source,
             [target_a, target_b, target_c],
             [target_a, target_b, target_c],
             [target_a, target_b, target_c],
         )
 
-        self._testcase_op_iadd(
+        await self._testcase_op_iadd(
             default.Source,
             [target_a, target_b],
             [target_c, target_d],
             [target_a, target_b, target_c, target_d],
         )
-        self._testcase_op_iadd(
+        await self._testcase_op_iadd(
             default.Source,
             [target_a, target_b],
             [target_a, target_b, target_c, target_d],
             [target_a, target_b, target_c, target_d],
         )
-        self._testcase_op_iadd(
+        await self._testcase_op_iadd(
             default.Source,
             [target_a, target_b, target_c, target_d],
             [target_a, target_b],
             [target_a, target_b, target_c, target_d],
         )
 
-        self._testcase_op_iadd(
+        await self._testcase_op_iadd(
             default.Source,
             [target_a, target_b, target_c],
             [target_c, target_d],
@@ -5866,8 +6093,8 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
         )
 
         # With linkprops
-        self._testcase_op_iadd(default.SourceWithProp, [], [], [])
-        self._testcase_op_iadd(
+        await self._testcase_op_iadd(default.SourceWithProp, [], [], [])
+        await self._testcase_op_iadd(
             default.SourceWithProp,
             [],
             [target_a, target_b],
@@ -5876,7 +6103,7 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
                 default.SourceWithProp.targets.link(target_b),
             ],
         )
-        self._testcase_op_iadd(
+        await self._testcase_op_iadd(
             default.SourceWithProp,
             [],
             [
@@ -5888,7 +6115,7 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
                 default.SourceWithProp.targets.link(target_b),
             ],
         )
-        self._testcase_op_iadd(
+        await self._testcase_op_iadd(
             default.SourceWithProp,
             [],
             [
@@ -5901,7 +6128,7 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
             ],
         )
 
-        self._testcase_op_iadd(
+        await self._testcase_op_iadd(
             default.SourceWithProp,
             [
                 default.SourceWithProp.targets.link(target_a),
@@ -5913,7 +6140,7 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
                 default.SourceWithProp.targets.link(target_b),
             ],
         )
-        self._testcase_op_iadd(
+        await self._testcase_op_iadd(
             default.SourceWithProp,
             [
                 default.SourceWithProp.targets.link(target_a),
@@ -5925,7 +6152,7 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
                 default.SourceWithProp.targets.link(target_b),
             ],
         )
-        self._testcase_op_iadd(
+        await self._testcase_op_iadd(
             default.SourceWithProp,
             [
                 default.SourceWithProp.targets.link(target_a),
@@ -5940,7 +6167,7 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
                 default.SourceWithProp.targets.link(target_b),
             ],
         )
-        self._testcase_op_iadd(
+        await self._testcase_op_iadd(
             default.SourceWithProp,
             [
                 default.SourceWithProp.targets.link(target_a),
@@ -5957,7 +6184,7 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
             ],
         )
 
-        self._testcase_op_iadd(
+        await self._testcase_op_iadd(
             default.SourceWithProp,
             [
                 default.SourceWithProp.targets.link(target_a, lprop=1),
@@ -5969,7 +6196,7 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
                 default.SourceWithProp.targets.link(target_b, lprop=2),
             ],
         )
-        self._testcase_op_iadd(
+        await self._testcase_op_iadd(
             default.SourceWithProp,
             [
                 default.SourceWithProp.targets.link(target_a, lprop=1),
@@ -5984,7 +6211,7 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
                 default.SourceWithProp.targets.link(target_b),
             ],
         )
-        self._testcase_op_iadd(
+        await self._testcase_op_iadd(
             default.SourceWithProp,
             [
                 default.SourceWithProp.targets.link(target_a, lprop=1),
@@ -5999,7 +6226,7 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
                 default.SourceWithProp.targets.link(target_b, lprop=2),
             ],
         )
-        self._testcase_op_iadd(
+        await self._testcase_op_iadd(
             default.SourceWithProp,
             [
                 default.SourceWithProp.targets.link(target_a, lprop=1),
@@ -6015,7 +6242,7 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
             ],
         )
 
-        self._testcase_op_iadd(
+        await self._testcase_op_iadd(
             default.SourceWithProp,
             [
                 default.SourceWithProp.targets.link(target_a),
@@ -6029,7 +6256,7 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
                 default.SourceWithProp.targets.link(target_d),
             ],
         )
-        self._testcase_op_iadd(
+        await self._testcase_op_iadd(
             default.SourceWithProp,
             [
                 default.SourceWithProp.targets.link(target_a),
@@ -6046,7 +6273,7 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
                 default.SourceWithProp.targets.link(target_d),
             ],
         )
-        self._testcase_op_iadd(
+        await self._testcase_op_iadd(
             default.SourceWithProp,
             [
                 default.SourceWithProp.targets.link(target_a),
@@ -6065,7 +6292,7 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
                 default.SourceWithProp.targets.link(target_d),
             ],
         )
-        self._testcase_op_iadd(
+        await self._testcase_op_iadd(
             default.SourceWithProp,
             [
                 default.SourceWithProp.targets.link(target_a),
@@ -6084,7 +6311,7 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
                 default.SourceWithProp.targets.link(target_d),
             ],
         )
-        self._testcase_op_iadd(
+        await self._testcase_op_iadd(
             default.SourceWithProp,
             [
                 default.SourceWithProp.targets.link(target_a),
@@ -6103,7 +6330,7 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
                 default.SourceWithProp.targets.link(target_d),
             ],
         )
-        self._testcase_op_iadd(
+        await self._testcase_op_iadd(
             default.SourceWithProp,
             [
                 default.SourceWithProp.targets.link(target_a, lprop=1),
@@ -6122,7 +6349,7 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
                 default.SourceWithProp.targets.link(target_d),
             ],
         )
-        self._testcase_op_iadd(
+        await self._testcase_op_iadd(
             default.SourceWithProp,
             [
                 default.SourceWithProp.targets.link(target_a),
@@ -6141,7 +6368,7 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
                 default.SourceWithProp.targets.link(target_d, lprop=6),
             ],
         )
-        self._testcase_op_iadd(
+        await self._testcase_op_iadd(
             default.SourceWithProp,
             [
                 default.SourceWithProp.targets.link(target_a, lprop=1),
@@ -6162,7 +6389,7 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
         )
 
     @tb.xfail  # multilink linkprops not refetched
-    def test_model_sync_multi_link_08c(self):
+    async def test_model_sync_multi_link_08c(self):
         # With linkprop with default
 
         from models.TestModelSyncMultiLink import default
@@ -6171,10 +6398,12 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
         target_b = default.Target()
         target_c = default.Target()
         target_d = default.Target()
-        self.client.save(target_a, target_b, target_c, target_d)
+        await self._save(target_a, target_b, target_c, target_d)
 
-        self._testcase_op_iadd(default.SourceWithPropWithDefault, [], [], [])
-        self._testcase_op_iadd(
+        await self._testcase_op_iadd(
+            default.SourceWithPropWithDefault, [], [], []
+        )
+        await self._testcase_op_iadd(
             default.SourceWithPropWithDefault,
             [],
             [target_a, target_b, target_c],
@@ -6190,7 +6419,7 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
                 ),
             ],
         )
-        self._testcase_op_iadd(
+        await self._testcase_op_iadd(
             default.SourceWithPropWithDefault,
             [],
             [
@@ -6210,7 +6439,7 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
                 ),
             ],
         )
-        self._testcase_op_iadd(
+        await self._testcase_op_iadd(
             default.SourceWithPropWithDefault,
             [],
             [
@@ -6236,7 +6465,7 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
                 ),
             ],
         )
-        self._testcase_op_iadd(
+        await self._testcase_op_iadd(
             default.SourceWithPropWithDefault,
             [],
             [
@@ -6262,7 +6491,7 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
                 ),
             ],
         )
-        self._testcase_op_iadd(
+        await self._testcase_op_iadd(
             default.SourceWithPropWithDefault,
             [],
             [
@@ -6287,7 +6516,7 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
             ],
         )
 
-        self._testcase_op_iadd(
+        await self._testcase_op_iadd(
             default.SourceWithPropWithDefault,
             [
                 default.SourceWithPropWithDefault.targets.link(
@@ -6313,7 +6542,7 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
                 ),
             ],
         )
-        self._testcase_op_iadd(
+        await self._testcase_op_iadd(
             default.SourceWithPropWithDefault,
             [
                 default.SourceWithPropWithDefault.targets.link(
@@ -6343,7 +6572,7 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
                 ),
             ],
         )
-        self._testcase_op_iadd(
+        await self._testcase_op_iadd(
             default.SourceWithPropWithDefault,
             [
                 default.SourceWithPropWithDefault.targets.link(
@@ -6379,7 +6608,7 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
                 ),
             ],
         )
-        self._testcase_op_iadd(
+        await self._testcase_op_iadd(
             default.SourceWithPropWithDefault,
             [
                 default.SourceWithPropWithDefault.targets.link(
@@ -6415,7 +6644,7 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
                 ),
             ],
         )
-        self._testcase_op_iadd(
+        await self._testcase_op_iadd(
             default.SourceWithPropWithDefault,
             [
                 default.SourceWithPropWithDefault.targets.link(
@@ -6450,7 +6679,7 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
             ],
         )
 
-        self._testcase_op_iadd(
+        await self._testcase_op_iadd(
             default.SourceWithPropWithDefault,
             [
                 default.SourceWithPropWithDefault.targets.link(
@@ -6476,7 +6705,7 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
                 ),
             ],
         )
-        self._testcase_op_iadd(
+        await self._testcase_op_iadd(
             default.SourceWithPropWithDefault,
             [
                 default.SourceWithPropWithDefault.targets.link(
@@ -6506,7 +6735,7 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
                 ),
             ],
         )
-        self._testcase_op_iadd(
+        await self._testcase_op_iadd(
             default.SourceWithPropWithDefault,
             [
                 default.SourceWithPropWithDefault.targets.link(
@@ -6542,7 +6771,7 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
                 ),
             ],
         )
-        self._testcase_op_iadd(
+        await self._testcase_op_iadd(
             default.SourceWithPropWithDefault,
             [
                 default.SourceWithPropWithDefault.targets.link(
@@ -6578,7 +6807,7 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
                 ),
             ],
         )
-        self._testcase_op_iadd(
+        await self._testcase_op_iadd(
             default.SourceWithPropWithDefault,
             [
                 default.SourceWithPropWithDefault.targets.link(
@@ -6612,7 +6841,7 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
                 ),
             ],
         )
-        self._testcase_op_iadd(
+        await self._testcase_op_iadd(
             default.SourceWithPropWithDefault,
             [
                 default.SourceWithPropWithDefault.targets.link(
@@ -6649,7 +6878,7 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
             ],
         )
 
-    def test_model_sync_multi_link_09(self):
+    async def test_model_sync_multi_link_09(self):
         # Updating existing objects with multi props
         # LinkSet operator isub
 
@@ -6661,13 +6890,13 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
 
             return change
 
-        def _testcase_op_isub(
+        async def _testcase_op_isub(
             model_type: typing.Type[GelModel],
             initial_targets: typing.Collection[typing.Any],
             op_isub_targets: typing.Collection[typing.Any],
             expected_targets: typing.Collection[typing.Any],
         ) -> None:
-            self._base_testcase(
+            await self._base_testcase(
                 model_type,
                 initial_targets,
                 _get_op_isub_targets_func(op_isub_targets),
@@ -6680,37 +6909,37 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
         target_b = default.Target()
         target_c = default.Target()
         target_d = default.Target()
-        self.client.save(target_a, target_b, target_c, target_d)
+        await self._save(target_a, target_b, target_c, target_d)
 
         # No linkprops
-        _testcase_op_isub(default.Source, [], [], [])
-        _testcase_op_isub(
+        await _testcase_op_isub(default.Source, [], [], [])
+        await _testcase_op_isub(
             default.Source,
             [],
             [target_a],
             [],
         )
 
-        _testcase_op_isub(
+        await _testcase_op_isub(
             default.Source,
             [target_a],
             [],
             [target_a],
         )
-        _testcase_op_isub(
+        await _testcase_op_isub(
             default.Source,
             [target_a],
             [target_a],
             [],
         )
-        _testcase_op_isub(
+        await _testcase_op_isub(
             default.Source,
             [target_a],
             [target_b],
             [target_a],
         )
 
-        _testcase_op_isub(
+        await _testcase_op_isub(
             default.Source,
             [target_a, target_b, target_c],
             [target_c, target_d],
@@ -6718,95 +6947,95 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
         )
 
         # With linkprops
-        _testcase_op_isub(default.SourceWithProp, [], [], [])
-        _testcase_op_isub(
+        await _testcase_op_isub(default.SourceWithProp, [], [], [])
+        await _testcase_op_isub(
             default.SourceWithProp,
             [],
             [target_a],
             [],
         )
-        _testcase_op_isub(
+        await _testcase_op_isub(
             default.SourceWithProp,
             [],
             [default.SourceWithProp.targets.link(target_a)],
             [],
         )
-        _testcase_op_isub(
+        await _testcase_op_isub(
             default.SourceWithProp,
             [],
             [default.SourceWithProp.targets.link(target_a, lprop=1)],
             [],
         )
 
-        _testcase_op_isub(
+        await _testcase_op_isub(
             default.SourceWithProp,
             [default.SourceWithProp.targets.link(target_a)],
             [],
             [default.SourceWithProp.targets.link(target_a)],
         )
-        _testcase_op_isub(
+        await _testcase_op_isub(
             default.SourceWithProp,
             [default.SourceWithProp.targets.link(target_a)],
             [target_a],
             [],
         )
-        _testcase_op_isub(
+        await _testcase_op_isub(
             default.SourceWithProp,
             [default.SourceWithProp.targets.link(target_a)],
             [default.SourceWithProp.targets.link(target_a)],
             [],
         )
-        _testcase_op_isub(
+        await _testcase_op_isub(
             default.SourceWithProp,
             [default.SourceWithProp.targets.link(target_a)],
             [default.SourceWithProp.targets.link(target_a, lprop=1)],
             [],
         )
-        _testcase_op_isub(
+        await _testcase_op_isub(
             default.SourceWithProp,
             [default.SourceWithProp.targets.link(target_a)],
             [target_b],
             [default.SourceWithProp.targets.link(target_a)],
         )
-        _testcase_op_isub(
+        await _testcase_op_isub(
             default.SourceWithProp,
             [default.SourceWithProp.targets.link(target_a)],
             [default.SourceWithProp.targets.link(target_b)],
             [default.SourceWithProp.targets.link(target_a)],
         )
 
-        _testcase_op_isub(
+        await _testcase_op_isub(
             default.SourceWithProp,
             [default.SourceWithProp.targets.link(target_a, lprop=1)],
             [],
             [default.SourceWithProp.targets.link(target_a, lprop=1)],
         )
-        _testcase_op_isub(
+        await _testcase_op_isub(
             default.SourceWithProp,
             [default.SourceWithProp.targets.link(target_a, lprop=1)],
             [default.SourceWithProp.targets.link(target_a)],
             [],
         )
-        _testcase_op_isub(
+        await _testcase_op_isub(
             default.SourceWithProp,
             [default.SourceWithProp.targets.link(target_a, lprop=1)],
             [default.SourceWithProp.targets.link(target_a, lprop=1)],
             [],
         )
-        _testcase_op_isub(
+        await _testcase_op_isub(
             default.SourceWithProp,
             [default.SourceWithProp.targets.link(target_a, lprop=1)],
             [default.SourceWithProp.targets.link(target_a, lprop=2)],
             [],
         )
-        _testcase_op_isub(
+        await _testcase_op_isub(
             default.SourceWithProp,
             [default.SourceWithProp.targets.link(target_a, lprop=1)],
             [default.SourceWithProp.targets.link(target_b)],
             [default.SourceWithProp.targets.link(target_a, lprop=1)],
         )
 
-        _testcase_op_isub(
+        await _testcase_op_isub(
             default.Source,
             [
                 default.SourceWithProp.targets.link(target_a),
@@ -6819,7 +7048,7 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
                 default.SourceWithProp.targets.link(target_b),
             ],
         )
-        _testcase_op_isub(
+        await _testcase_op_isub(
             default.Source,
             [
                 default.SourceWithProp.targets.link(target_a),
@@ -6835,7 +7064,7 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
                 default.SourceWithProp.targets.link(target_b),
             ],
         )
-        _testcase_op_isub(
+        await _testcase_op_isub(
             default.Source,
             [
                 default.SourceWithProp.targets.link(target_a),
@@ -6852,7 +7081,7 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
             ],
         )
 
-        _testcase_op_isub(
+        await _testcase_op_isub(
             default.Source,
             [
                 default.SourceWithProp.targets.link(target_a, lprop=1),
@@ -6868,7 +7097,7 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
                 default.SourceWithProp.targets.link(target_b, lprop=2),
             ],
         )
-        _testcase_op_isub(
+        await _testcase_op_isub(
             default.Source,
             [
                 default.SourceWithProp.targets.link(target_a, lprop=1),
@@ -6884,7 +7113,7 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
                 default.SourceWithProp.targets.link(target_b, lprop=2),
             ],
         )
-        _testcase_op_isub(
+        await _testcase_op_isub(
             default.Source,
             [
                 default.SourceWithProp.targets.link(target_a, lprop=1),
@@ -6902,20 +7131,20 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
         )
 
         # With linkprop with default
-        _testcase_op_isub(default.SourceWithPropWithDefault, [], [], [])
-        _testcase_op_isub(
+        await _testcase_op_isub(default.SourceWithPropWithDefault, [], [], [])
+        await _testcase_op_isub(
             default.SourceWithPropWithDefault,
             [],
             [target_a],
             [],
         )
-        _testcase_op_isub(
+        await _testcase_op_isub(
             default.SourceWithPropWithDefault,
             [],
             [default.SourceWithPropWithDefault.targets.link(target_a)],
             [],
         )
-        _testcase_op_isub(
+        await _testcase_op_isub(
             default.SourceWithPropWithDefault,
             [],
             [
@@ -6925,7 +7154,7 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
             ],
             [],
         )
-        _testcase_op_isub(
+        await _testcase_op_isub(
             default.SourceWithPropWithDefault,
             [],
             [
@@ -6936,7 +7165,7 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
             [],
         )
 
-        _testcase_op_isub(
+        await _testcase_op_isub(
             default.SourceWithPropWithDefault,
             [
                 default.SourceWithPropWithDefault.targets.link(
@@ -6950,7 +7179,7 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
                 )
             ],
         )
-        _testcase_op_isub(
+        await _testcase_op_isub(
             default.SourceWithPropWithDefault,
             [
                 default.SourceWithPropWithDefault.targets.link(
@@ -6960,7 +7189,7 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
             [target_a],
             [],
         )
-        _testcase_op_isub(
+        await _testcase_op_isub(
             default.SourceWithPropWithDefault,
             [
                 default.SourceWithPropWithDefault.targets.link(
@@ -6970,7 +7199,7 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
             [default.SourceWithPropWithDefault.targets.link(target_a)],
             [],
         )
-        _testcase_op_isub(
+        await _testcase_op_isub(
             default.SourceWithPropWithDefault,
             [
                 default.SourceWithPropWithDefault.targets.link(
@@ -6984,7 +7213,7 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
             ],
             [],
         )
-        _testcase_op_isub(
+        await _testcase_op_isub(
             default.SourceWithPropWithDefault,
             [
                 default.SourceWithPropWithDefault.targets.link(
@@ -6998,7 +7227,7 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
             ],
             [],
         )
-        _testcase_op_isub(
+        await _testcase_op_isub(
             default.SourceWithPropWithDefault,
             [
                 default.SourceWithPropWithDefault.targets.link(
@@ -7012,7 +7241,7 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
                 )
             ],
         )
-        _testcase_op_isub(
+        await _testcase_op_isub(
             default.SourceWithPropWithDefault,
             [
                 default.SourceWithPropWithDefault.targets.link(
@@ -7028,11 +7257,11 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
         )
 
     @tb.xfail
-    def test_model_sync_multi_link_10(self):
+    async def test_model_sync_multi_link_10(self):
         # Existing object without link should not have it fetched
         # No linkprops
 
-        def _testcase(
+        async def _testcase(
             model_type: typing.Type[GelModel],
             initial_targets: typing.Any,
             changed_targets_0: typing.Any,
@@ -7040,38 +7269,38 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
             changed_targets_2: typing.Any,
         ):
             original = model_type(targets=initial_targets)
-            self.client.save(original)
+            await self._save(original)
 
-            mirror_1 = self.client.query_required_single(
+            mirror_1 = await self._query_required_single(
                 model_type.select(targets=False).limit(1)
             )
             original.targets = changed_targets_0
-            self.client.save(original)
-            self.client.sync(mirror_1)
+            await self._save(original)
+            await self._sync(mirror_1)
             self.assertEqual(mirror_1.targets._mode, _tracked_list.Mode.Write)
             self.assertEqual(mirror_1.targets._items, [])
 
             # Sync alongside another object with the prop set
-            mirror_2 = self.client.query_required_single(
+            mirror_2 = await self._query_required_single(
                 model_type.select(targets=True).limit(1)
             )
             original.targets = changed_targets_1
-            self.client.save(original)
-            self.client.sync(mirror_1, mirror_2)
+            await self._save(original)
+            await self._sync(mirror_1, mirror_2)
             self.assertEqual(mirror_1.targets._mode, _tracked_list.Mode.Write)
             self.assertEqual(mirror_1.targets._items, [])
 
             # Sync alongside another object with the prop changed
-            mirror_2 = self.client.query_required_single(
+            mirror_2 = await self._query_required_single(
                 model_type.select(targets=True).limit(1)
             )
             mirror_2.targets = changed_targets_2
-            self.client.sync(mirror_1, mirror_2)
+            await self._sync(mirror_1, mirror_2)
             self.assertEqual(mirror_1.targets._mode, _tracked_list.Mode.Write)
             self.assertEqual(mirror_1.targets._items, [])  # Fail
 
             # cleanup
-            self.client.query(model_type.delete())
+            await self._query(model_type.delete())
 
         from models.TestModelSyncMultiLink import default
 
@@ -7079,21 +7308,21 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
         changed_target_0 = default.Target()
         changed_target_1 = default.Target()
         changed_target_2 = default.Target()
-        self.client.save(
+        await self._save(
             initial_target,
             changed_target_0,
             changed_target_1,
             changed_target_2,
         )
 
-        _testcase(
+        await _testcase(
             default.Source,
             [initial_target],
             [changed_target_0],
             [changed_target_1],
             [changed_target_2],
         )
-        _testcase(
+        await _testcase(
             default.SourceWithProp,
             [default.SourceWithProp.targets.link(initial_target)],
             [default.SourceWithProp.targets.link(changed_target_0)],
@@ -7101,13 +7330,13 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
             [default.SourceWithProp.targets.link(changed_target_2)],
         )
 
-    def test_model_sync_multi_link_11(self):
+    async def test_model_sync_multi_link_11(self):
         # Updating linkprops without changing the proxy model objects
 
         from models.TestModelSyncMultiLink import default
 
         target_a = default.Target()
-        self.client.save(target_a)
+        await self._save(target_a)
 
         initial_targets = [
             default.SourceWithManyProps.targets.link(
@@ -7116,7 +7345,7 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
         ]
 
         original = default.SourceWithManyProps(targets=initial_targets)
-        self.client.save(original)
+        await self._save(original)
 
         self._check_multilinks_equal(original.targets, initial_targets)
 
@@ -7131,11 +7360,12 @@ class TestModelSyncMultiLink(tb.ModelTestCase):
             )
         ]
 
-        self.client.sync(original)
+        await self._sync(original)
         self._check_multilinks_equal(original.targets, expected_targets)
 
 
-class TestModelSyncRewrite(tb.ModelTestCase):
+@make_async_tests
+class TestModelSyncRewrite(TestBlockingModelSyncBase):
     ISOLATED_TEST_BRANCHES = True
 
     SCHEMA = """
@@ -7165,46 +7395,46 @@ class TestModelSyncRewrite(tb.ModelTestCase):
         };
     """
 
-    def test_model_sync_rewrite_insert_01(self):
+    async def test_model_sync_rewrite_insert_01(self):
         # Insert, property with rewrite
 
         from models.TestModelSyncRewrite import default
 
-        def _testcase(
+        async def _testcase(
             insert_n: int | None,
             insert_val: int | None,
             expected_val: int | None,
         ) -> None:
             original = default.SingleProp(n=insert_n, val=insert_val)
-            self.client.sync(original)
+            await self._sync(original)
 
             self.assertEqual(original.val, expected_val)
 
             # cleanup
-            self.client.query(default.SingleProp.delete())
+            await self._query(default.SingleProp.delete())
 
-        _testcase(None, None, None)
-        _testcase(1, None, 2)
-        _testcase(1, 0, 2)
+        await _testcase(None, None, None)
+        await _testcase(1, None, 2)
+        await _testcase(1, 0, 2)
 
-    def test_model_sync_rewrite_insert_02(self):
+    async def test_model_sync_rewrite_insert_02(self):
         # Insert, link with rewrite
 
         from models.TestModelSyncRewrite import default
 
-        def _testcase(
+        async def _testcase(
             insert_n: int | None,
             insert_target: default.Target | None,
             expected_val: int | None,
         ) -> None:
             original = default.SingleLink(n=insert_n, target=insert_target)
-            self.client.sync(original)
+            await self._sync(original)
 
             self.assertNotEqual(original.target, insert_target)
             assert original.target is not None
             self.assertFalse(hasattr(original.target, 'n'))
 
-            rewritten_target = self.client.query_required_single(
+            rewritten_target = await self._query_required_single(
                 default.Target.select(n=True)
                 .filter(id=original.target.id)
                 .limit(1)
@@ -7212,79 +7442,79 @@ class TestModelSyncRewrite(tb.ModelTestCase):
             self.assertEqual(rewritten_target.n, expected_val)
 
             # cleanup
-            self.client.query(default.SingleLink.delete())
+            await self._query(default.SingleLink.delete())
 
         target_zero = default.Target(n=0)
-        self.client.save(target_zero)
+        await self._save(target_zero)
 
-        _testcase(None, None, None)
+        await _testcase(None, None, None)
 
         # Normally we might expect the rewrite to be 1+1 because this is an
         # insert. However, sync currently splits adding links to a separate
         # batch query, making it an update. This is surprising, but everything
         # about rewrites is surprising.
-        _testcase(1, None, 3)
-        _testcase(1, target_zero, 3)
+        await _testcase(1, None, 3)
+        await _testcase(1, target_zero, 3)
 
-    def test_model_sync_rewrite_update_01(self):
+    async def test_model_sync_rewrite_update_01(self):
         # Update, property with rewrite
         # Only update the rewrite field
 
         from models.TestModelSyncRewrite import default
 
-        def _testcase(
+        async def _testcase(
             insert_n: int | None,
             update_val: int | None,
             expected_val: int | None,
         ) -> None:
             original = default.SingleProp(n=insert_n)
-            self.client.sync(original)
+            await self._sync(original)
 
             original.val = update_val
             original.dummy = 1  # Change some other prop in parallel
-            self.client.sync(original)
+            await self._sync(original)
 
             self.assertEqual(original.val, expected_val)
 
             # cleanup
-            self.client.query(default.SingleProp.delete())
+            await self._query(default.SingleProp.delete())
 
-        _testcase(None, None, None)
-        _testcase(None, 1, None)
-        _testcase(1, None, 3)
-        _testcase(1, 1, 3)
-        _testcase(1, 9, 3)
+        await _testcase(None, None, None)
+        await _testcase(None, 1, None)
+        await _testcase(1, None, 3)
+        await _testcase(1, 1, 3)
+        await _testcase(1, 9, 3)
 
-    def test_model_sync_rewrite_update_02(self):
+    async def test_model_sync_rewrite_update_02(self):
         # Update, property with rewrite
         # Only update other field
 
         from models.TestModelSyncRewrite import default
 
-        def _testcase(
+        async def _testcase(
             insert_n: int | None,
             update_n: int | None,
             expected_val: int | None,
         ) -> None:
             original = default.SingleProp(n=insert_n)
-            self.client.sync(original)
+            await self._sync(original)
 
             original.n = update_n
             original.dummy = 1  # Change some other prop in parallel
-            self.client.sync(original)
+            await self._sync(original)
 
             self.assertEqual(original.val, expected_val)
 
             # cleanup
-            self.client.query(default.SingleProp.delete())
+            await self._query(default.SingleProp.delete())
 
-        _testcase(None, None, None)
-        _testcase(None, 1, 3)
-        _testcase(1, None, None)
-        _testcase(1, 1, 3)
-        _testcase(1, 9, 11)
+        await _testcase(None, None, None)
+        await _testcase(None, 1, 3)
+        await _testcase(1, None, None)
+        await _testcase(1, 1, 3)
+        await _testcase(1, 9, 11)
 
-    def test_model_sync_rewrite_update_03(self):
+    async def test_model_sync_rewrite_update_03(self):
         # Update, link with rewrite
         # Only update the rewrite field
 
@@ -7293,28 +7523,28 @@ class TestModelSyncRewrite(tb.ModelTestCase):
         # Initialize all links to not None, because sync currently breaks
         # otherwise.
         target_zero = default.Target(n=0)
-        self.client.save(target_zero)
+        await self._save(target_zero)
 
-        def _testcase(
+        async def _testcase(
             insert_n: int | None,
             update_target: default.Target | None,
             expected_val: int | None,
         ) -> None:
             original = default.SingleLink(n=insert_n, target=target_zero)
-            self.client.sync(original)
+            await self._sync(original)
 
             insert_target = original.target
 
             original.target = update_target
             original.dummy = 1  # Change some other prop in parallel
-            self.client.sync(original)
+            await self._sync(original)
 
             self.assertNotEqual(original.target, insert_target)
             self.assertNotEqual(original.target, update_target)
             assert original.target is not None
             self.assertFalse(hasattr(original.target, 'n'))
 
-            rewritten_target = self.client.query_required_single(
+            rewritten_target = await self._query_required_single(
                 default.Target.select(n=True)
                 .filter(id=original.target.id)
                 .limit(1)
@@ -7322,15 +7552,15 @@ class TestModelSyncRewrite(tb.ModelTestCase):
             self.assertEqual(rewritten_target.n, expected_val)
 
             # cleanup
-            self.client.query(default.SingleLink.delete())
+            await self._query(default.SingleLink.delete())
 
         target_one = default.Target(n=1)
-        self.client.save(target_one)
+        await self._save(target_one)
 
-        _testcase(1, None, 3)
-        _testcase(1, target_one, 3)
+        await _testcase(1, None, 3)
+        await _testcase(1, target_one, 3)
 
-    def test_model_sync_rewrite_update_04(self):
+    async def test_model_sync_rewrite_update_04(self):
         # Update, link with rewrite
         # Only update other field
 
@@ -7339,27 +7569,27 @@ class TestModelSyncRewrite(tb.ModelTestCase):
         # Initialize all links to not None, because sync currently breaks
         # otherwise.
         target_zero = default.Target(n=0)
-        self.client.save(target_zero)
+        await self._save(target_zero)
 
-        def _testcase(
+        async def _testcase(
             insert_n: int | None,
             update_n: int | None,
             expected_val: int | None,
         ) -> None:
             original = default.SingleLink(n=insert_n, target=target_zero)
-            self.client.sync(original)
+            await self._sync(original)
 
             insert_target = original.target
 
             original.n = update_n
             original.dummy = 1  # Change some other prop in parallel
-            self.client.sync(original)
+            await self._sync(original)
 
             self.assertNotEqual(original.target, insert_target)
             assert original.target is not None
             self.assertFalse(hasattr(original.target, 'n'))
 
-            rewritten_target = self.client.query_required_single(
+            rewritten_target = await self._query_required_single(
                 default.Target.select(n=True)
                 .filter(id=original.target.id)
                 .limit(1)
@@ -7367,15 +7597,16 @@ class TestModelSyncRewrite(tb.ModelTestCase):
             self.assertEqual(rewritten_target.n, expected_val)
 
             # cleanup
-            self.client.query(default.SingleLink.delete())
+            await self._query(default.SingleLink.delete())
 
-        _testcase(None, None, None)
-        _testcase(1, None, None)
-        _testcase(1, 1, 3)
-        _testcase(1, 9, 11)
+        await _testcase(None, None, None)
+        await _testcase(1, None, None)
+        await _testcase(1, 1, 3)
+        await _testcase(1, 9, 11)
 
 
-class TestModelSyncTrigger(tb.ModelTestCase):
+@make_async_tests
+class TestModelSyncTrigger(TestBlockingModelSyncBase):
     ISOLATED_TEST_BRANCHES = True
 
     SCHEMA = """
@@ -7443,78 +7674,78 @@ class TestModelSyncTrigger(tb.ModelTestCase):
         };
     """
 
-    def test_model_sync_trigger_insert_01(self):
+    async def test_model_sync_trigger_insert_01(self):
         # Insert trigger, basic
         from models.TestModelSyncTrigger import default
 
         test_obj = default.TestInsert(val=0)
         trigger_a = default.TriggerInsert(n=1)
-        self.client.sync(test_obj, trigger_a)
+        await self._sync(test_obj, trigger_a)
         self.assertEqual(test_obj.val, 1)
 
         trigger_b = default.TriggerInsert(n=2)
-        self.client.sync(test_obj, trigger_b)
+        await self._sync(test_obj, trigger_b)
         self.assertEqual(test_obj.val, 3)
 
         trigger_c = default.TriggerInsert(n=3)
-        self.client.sync(test_obj, trigger_c)
+        await self._sync(test_obj, trigger_c)
         self.assertEqual(test_obj.val, 6)
 
-    def test_model_sync_trigger_insert_02(self):
+    async def test_model_sync_trigger_insert_02(self):
         # Insert trigger, computed modified by trigger
         from models.TestModelSyncTrigger import default
 
         test_obj = default.TestInsert(val=0)
         trigger = default.TriggerInsertComputed(n=1)
-        self.client.sync(test_obj, trigger)
+        await self._sync(test_obj, trigger)
 
         self.assertEqual(trigger.test_vals, (1,))
 
-    def test_model_sync_trigger_insert_03(self):
+    async def test_model_sync_trigger_insert_03(self):
         # Insert trigger
         # Link will cause test objs to be batched before trigger objs
         from models.TestModelSyncTrigger import default
 
         test_obj = default.TestInsert(val=0)
         trigger_a = default.TriggerInsertWithLink(n=1, test=test_obj)
-        self.client.sync(test_obj, trigger_a)
+        await self._sync(test_obj, trigger_a)
         self.assertEqual(test_obj.val, 1)
 
         trigger_b = default.TriggerInsertWithLink(n=2, test=test_obj)
-        self.client.sync(test_obj, trigger_b)
+        await self._sync(test_obj, trigger_b)
         self.assertEqual(test_obj.val, 3)
 
         trigger_c = default.TriggerInsertWithLink(n=3, test=test_obj)
-        self.client.sync(test_obj, trigger_c)
+        await self._sync(test_obj, trigger_c)
         self.assertEqual(test_obj.val, 6)
 
-    def test_model_sync_trigger_update_01(self):
+    async def test_model_sync_trigger_update_01(self):
         from models.TestModelSyncTrigger import default
 
         test_obj = default.TestUpdate(val=0)
         trigger = default.TriggerUpdate(n=0)
-        self.client.sync(test_obj, trigger)
+        await self._sync(test_obj, trigger)
 
         trigger.n = 1
-        self.client.sync(test_obj, trigger)
+        await self._sync(test_obj, trigger)
         self.assertEqual(test_obj.val, 1)
 
         trigger.n = 2
-        self.client.sync(test_obj, trigger)
+        await self._sync(test_obj, trigger)
         self.assertEqual(test_obj.val, 3)
 
         trigger.n = 3
-        self.client.sync(test_obj, trigger)
+        await self._sync(test_obj, trigger)
         self.assertEqual(test_obj.val, 6)
 
-    def test_model_sync_trigger_update_02(self):
+    async def test_model_sync_trigger_update_02(self):
         # Update trigger, computed modified by trigger
         from models.TestModelSyncTrigger import default
 
         test_obj = default.TestUpdate(val=0)
         trigger = default.TriggerUpdateComputed(n=0)
-        self.client.sync(test_obj, trigger)
+        await self._sync(test_obj, trigger)
 
         trigger.n = 1
-        self.client.sync(test_obj, trigger)
+        await self._sync(test_obj, trigger)
         self.assertEqual(trigger.test_vals, (1,))
