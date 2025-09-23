@@ -29,6 +29,7 @@ if TYPE_CHECKING:
     from ._email_password import EmailPassword
     from ._builtin_ui import BuiltinUI
     from ._oidc import OpenIDConnect
+    from ._magic_link import MagicLink
 
 
 _BUILTIN_OAUTH2_PROVIDERS = {
@@ -74,6 +75,8 @@ class GelAuth(client_mod.Extension):
     _auto_builtin_ui: bool = True
     _manual_oidc_providers: list[str]
     _oidc_providers: dict[str, OpenIDConnect]
+    _magic_link: Optional[MagicLink] = None
+    _auto_magic_link: bool = True
 
     _on_new_identity_path = utils.Config("/")
     _on_new_identity_name = utils.Config("gel.fastapi.auth.on_new_identity")
@@ -347,6 +350,13 @@ class GelAuth(client_mod.Extension):
                                 and self._email_password is None
                             ):
                                 _ = self.email_password
+
+                        case "builtin::local_magic_link":
+                            if (
+                                self._auto_magic_link
+                                and self._magic_link is None
+                            ):
+                                _ = self.magic_link
 
                 if (
                     config.ui is not None
