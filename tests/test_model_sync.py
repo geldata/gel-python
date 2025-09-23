@@ -49,6 +49,33 @@ if typing.TYPE_CHECKING:
     from gel.abstract import Queryable, _T_ql
 
 
+# Model sync tests are run for both blocking and async clients.
+#
+# To implement this, tests in this file should not call self.client
+# directly. Instead, they call the corresponding function from
+# `TestBlockingModelSyncBase``.
+#
+# Test classes should derive from `TestBlockingModelSyncBase` and use the
+# `make_async_tests` to automatically create the async versions of the tests.
+#
+# The async test classes and functions will be created such that:
+#
+#   @make_async_tests
+#   class TestFoo(TestBlockingModelSyncBase):
+#       async def test_foo_01(self):
+#           ...
+#
+# will be create the async version:
+#
+#   class TestAsyncFoo(TestAsyncModelSyncBase):
+#       async def test_async_foo_01(self):
+#           ...
+#
+# Both base classes (`TestBlockingModelSyncBase` and `TestAsyncModelSyncBase`)
+# wrap the client calls in an async function. When adding new functions,
+# ensure both classes have the same interface.
+
+
 # Helpers to replicate tests as both blocking and async
 
 
