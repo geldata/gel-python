@@ -3958,7 +3958,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                     self.write(f"__gel_type_class__ = __{name}_ops__")
             if objtype.name == "std::BaseObject":
                 write_id_attr(objtype, "RequiredId")
-            self._write_base_object_type_body(objtype)
+            self._write_base_object_type_body(objtype, include_tname=True)
             with self.type_checking():
                 self._write_object_type_qb_methods(objtype)
             self.write()
@@ -4348,7 +4348,20 @@ class GeneratedSchemaModule(BaseGeneratedModule):
     def _write_base_object_type_body(
         self,
         objtype: reflection.ObjectType,
+        *,
+        include_tname: bool = False,
     ) -> None:
+        if include_tname:
+            type_name = objtype.schemapath
+            literal = self.import_name("typing", "Literal")
+            field = self.import_name("pydantic", "Field")
+            self._write_model_attribute(
+                "tname__",
+                f'{literal}["{type_name}"] = {field}('
+                f'"{type_name}", alias="__tname__")',
+            )
+            self.write()
+
         with self.type_checking():
             render_id_variant = False
 
@@ -4716,13 +4729,6 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         ):
             self.write(f'"""type {objtype.name}"""')
             self.write()
-            literal = self.import_name("typing", "Literal")
-            field = self.import_name("pydantic", "Field")
-            self._write_model_attribute(
-                "tname__",
-                f'{literal}["{type_name}"] = {field}('
-                f'"{type_name}", alias="__tname__")',
-            )
             pointers = _get_object_type_body(objtype)
             if pointers:
                 localns = frozenset(ptr.name for ptr in pointers)
