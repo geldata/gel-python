@@ -17,14 +17,11 @@
 #
 
 
-import typing
 import string
+import typing_extensions
 
 import os
 
-
-if typing.TYPE_CHECKING:
-    from typing import reveal_type
 
 from gel._internal._testbase import _models as tb
 
@@ -117,29 +114,29 @@ class TestLinkSetModels(tb.ModelTestCase):
     def test_link_set_model_types_01(self):
         from models.link_set import default
 
-        self.assertEqual(
-            reveal_type(default.House.members),
-            "type[models.link_set.default.Person]",
+        typing_extensions.assert_type(
+            default.House.members,
+            type[default.Person],
         )
-        self.assertEqual(
-            reveal_type(default.Person.house),
-            "type[models.link_set.__shapes__.default.Person.__links__.house]",
+        typing_extensions.assert_type(
+            default.Person.house,
+            type[default.Person.__links__.house],
         )
-        self.assertEqual(
-            reveal_type(default.Person.friends),
-            "type[models.link_set.__shapes__.default.Person.__links__.friends]",
+        typing_extensions.assert_type(
+            default.Person.friends,
+            type[default.Person.__links__.friends],
         )
-        self.assertEqual(
-            reveal_type(default.Person.pet),
-            "type[models.link_set.default.Pet]",
+        typing_extensions.assert_type(
+            default.Person.pet,
+            type[default.Pet],
         )
-        self.assertEqual(
-            reveal_type(default.Person.classes),
-            "type[models.link_set.default.Class]",
+        typing_extensions.assert_type(
+            default.Person.classes,
+            type[default.Class],
         )
-        self.assertEqual(
-            reveal_type(default.Pet.owner),
-            "type[models.link_set.default.Person]",
+        typing_extensions.assert_type(
+            default.Pet.owner,
+            type[default.Person],
         )
 
     def test_link_set_model_query_single_link_01(self):
@@ -157,9 +154,9 @@ class TestLinkSetModels(tb.ModelTestCase):
         )
 
         self.assertEqual(harry.pet, hedwig)
-        self.assertEqual(
-            reveal_type(harry.pet),
-            "models.link_set.default.Pet | None",
+        typing_extensions.assert_type(
+            harry.pet,
+            default.Pet | None,
         )
 
     def test_link_set_model_query_single_link_02(self):
@@ -177,9 +174,9 @@ class TestLinkSetModels(tb.ModelTestCase):
         )
 
         self.assertEqual(harry.pet, hedwig)
-        self.assertEqual(
-            reveal_type(harry.pet),
-            "models.link_set.default.Pet | None",
+        typing_extensions.assert_type(
+            harry.pet,
+            default.Pet | None,
         )
 
     def test_link_set_model_query_single_link_03(self):
@@ -196,6 +193,7 @@ class TestLinkSetModels(tb.ModelTestCase):
         self.assertFalse(hasattr(harry, 'pet'))
 
     def test_link_set_model_query_multi_link_01(self):
+        from gel._internal._qbmodel._abstract._link_set import LinkSet
         from models.link_set import default
 
         harry = self.client.query_required_single(
@@ -213,16 +211,13 @@ class TestLinkSetModels(tb.ModelTestCase):
         )
 
         self.assertEqual(harry.classes, {charms, potions})
-        self.assertEqual(
-            reveal_type(harry.classes),
-            (
-                "gel._internal._qbmodel._abstract._link_set.LinkSet["
-                "models.link_set.default.Class"
-                "]"
-            ),
+        typing_extensions.assert_type(
+            harry.classes,
+            LinkSet[default.Class],
         )
 
     def test_link_set_model_query_multi_link_02(self):
+        from gel._internal._qbmodel._abstract._link_set import LinkSet
         from models.link_set import default
 
         harry = self.client.query_required_single(
@@ -240,17 +235,14 @@ class TestLinkSetModels(tb.ModelTestCase):
         )
 
         self.assertEqual(harry.classes, {charms, potions})
-        self.assertEqual(
-            reveal_type(harry.classes),
-            (
-                "gel._internal._qbmodel._abstract._link_set.LinkSet["
-                "models.link_set.default.Class"
-                "]"
-            ),
+        typing_extensions.assert_type(
+            harry.classes,
+            LinkSet[default.Class],
         )
 
     def test_link_set_model_query_multi_link_03(self):
         from gel._internal import _tracked_list
+        from gel._internal._qbmodel._abstract._link_set import LinkSet
         from models.link_set import default
 
         harry = self.client.query_required_single(
@@ -264,11 +256,9 @@ class TestLinkSetModels(tb.ModelTestCase):
         self.assertTrue(hasattr(harry, "classes"))
         self.assertEqual(harry.classes._mode, _tracked_list.Mode.Write)
         self.assertEqual(harry.classes._items, [])
-        self.assertEqual(
-            reveal_type(harry.classes),
-            "gel._internal._qbmodel._abstract._link_set.LinkSet["
-            "models.link_set.default.Class"
-            "]",
+        typing_extensions.assert_type(
+            harry.classes,
+            LinkSet[default.Class],
         )
 
     def test_link_set_model_query_single_link_with_props_01(self):
@@ -286,9 +276,9 @@ class TestLinkSetModels(tb.ModelTestCase):
         )
 
         self.assertEqual(harry.house, griffindor)
-        self.assertEqual(
-            reveal_type(harry.house),
-            "models.link_set.__shapes__.default.Person.__links__.house | None",
+        typing_extensions.assert_type(
+            harry.house,
+            default.Person.__links__.house | None,
         )
         self.assertEqual(
             (
@@ -298,13 +288,13 @@ class TestLinkSetModels(tb.ModelTestCase):
             ),
             "seeker",
         )
-        self.assertEqual(
-            reveal_type(
+        typing_extensions.assert_type(
+            (
                 harry.house.__linkprops__.rank
                 if harry.house is not None
                 else None
             ),
-            "builtins.str | None",
+            str | None,
         )
 
     def test_link_set_model_query_single_link_with_props_02(self):
@@ -322,9 +312,9 @@ class TestLinkSetModels(tb.ModelTestCase):
         )
 
         self.assertEqual(harry.house, griffindor)
-        self.assertEqual(
-            reveal_type(harry.house),
-            "models.link_set.__shapes__.default.Person.__links__.house | None",
+        typing_extensions.assert_type(
+            harry.house,
+            default.Person.__links__.house | None,
         )
         self.assertEqual(
             (
@@ -334,13 +324,13 @@ class TestLinkSetModels(tb.ModelTestCase):
             ),
             "seeker",
         )
-        self.assertEqual(
-            reveal_type(
+        typing_extensions.assert_type(
+            (
                 harry.house.__linkprops__.rank
                 if harry.house is not None
                 else None
             ),
-            "builtins.str | None",
+            str | None,
         )
 
     def test_link_set_model_query_single_link_with_props_03(self):
@@ -357,6 +347,7 @@ class TestLinkSetModels(tb.ModelTestCase):
         self.assertFalse(hasattr(harry, 'house'))
 
     def test_link_set_model_query_multi_link_with_props_01(self):
+        from gel._internal._qbmodel._abstract._link_set import LinkWithPropsSet
         from models.link_set import default
 
         harry = self.client.query_required_single(
@@ -374,25 +365,24 @@ class TestLinkSetModels(tb.ModelTestCase):
         )
 
         self.assertEqual(harry.friends, {hermione, ron})
-        self.assertEqual(
-            reveal_type(harry.friends),
-            (
-                "gel._internal._qbmodel._abstract._link_set.LinkWithPropsSet["
-                "models.link_set.__shapes__.default.Person.__links__.friends, "
-                "models.link_set.default.Person"
-                "]"
-            ),
+        typing_extensions.assert_type(
+            harry.friends,
+            LinkWithPropsSet[
+                default.Person.__links__.friends,
+                default.Person,
+            ],
         )
         self.assertEqual(
             {f: f.__linkprops__.opinion for f in harry.friends},
             {hermione: "smart", ron: "reliable"},
         )
-        self.assertEqual(
-            reveal_type(list(harry.friends)[0].__linkprops__.opinion),
-            "builtins.str | None",
+        typing_extensions.assert_type(
+            list(harry.friends)[0].__linkprops__.opinion,
+            str | None,
         )
 
     def test_link_set_model_query_multi_link_with_props_02(self):
+        from gel._internal._qbmodel._abstract._link_set import LinkWithPropsSet
         from models.link_set import default
 
         harry = self.client.query_required_single(
@@ -410,26 +400,25 @@ class TestLinkSetModels(tb.ModelTestCase):
         )
 
         self.assertEqual(harry.friends, {hermione, ron})
-        self.assertEqual(
-            reveal_type(harry.friends),
-            (
-                "gel._internal._qbmodel._abstract._link_set.LinkWithPropsSet["
-                "models.link_set.__shapes__.default.Person.__links__.friends, "
-                "models.link_set.default.Person"
-                "]"
-            ),
+        typing_extensions.assert_type(
+            harry.friends,
+            LinkWithPropsSet[
+                default.Person.__links__.friends,
+                default.Person,
+            ],
         )
         self.assertEqual(
             {f: f.__linkprops__.opinion for f in harry.friends},
             {hermione: "smart", ron: "reliable"},
         )
-        self.assertEqual(
-            reveal_type(list(harry.friends)[0].__linkprops__.opinion),
-            "builtins.str | None",
+        typing_extensions.assert_type(
+            list(harry.friends)[0].__linkprops__.opinion,
+            str | None,
         )
 
     def test_link_set_model_query_multi_link_with_props_03(self):
         from gel._internal import _tracked_list
+        from gel._internal._qbmodel._abstract._link_set import LinkWithPropsSet
         from models.link_set import default
 
         harry = self.client.query_required_single(
@@ -443,14 +432,12 @@ class TestLinkSetModels(tb.ModelTestCase):
         self.assertTrue(hasattr(harry, "friends"))
         self.assertEqual(harry.friends._mode, _tracked_list.Mode.Write)
         self.assertEqual(harry.friends._items, [])
-        self.assertEqual(
-            reveal_type(harry.friends),
-            (
-                "gel._internal._qbmodel._abstract._link_set.LinkWithPropsSet["
-                "models.link_set.__shapes__.default.Person.__links__.friends, "
-                "models.link_set.default.Person"
-                "]"
-            ),
+        typing_extensions.assert_type(
+            harry.friends,
+            LinkWithPropsSet[
+                default.Person.__links__.friends,
+                default.Person,
+            ],
         )
 
     def test_link_set_model_query_computed_single_link_01(self):
@@ -464,10 +451,7 @@ class TestLinkSetModels(tb.ModelTestCase):
         )
 
         self.assertEqual(hedwig.owner, harry)
-        self.assertEqual(
-            reveal_type(hedwig.owner),
-            "models.link_set.default.Person | None",
-        )
+        typing_extensions.assert_type(hedwig.owner, default.Person | None)
 
     def test_link_set_model_query_computed_single_link_02(self):
         from models.link_set import default
@@ -482,10 +466,7 @@ class TestLinkSetModels(tb.ModelTestCase):
         )
 
         self.assertEqual(hedwig.owner, harry)
-        self.assertEqual(
-            reveal_type(hedwig.owner),
-            "models.link_set.default.Person | None",
-        )
+        typing_extensions.assert_type(hedwig.owner, default.Person | None)
 
     def test_link_set_model_query_computed_single_link_03(self):
         from models.link_set import default
@@ -502,6 +483,7 @@ class TestLinkSetModels(tb.ModelTestCase):
 
     @tb.xfail  # expected ForwardRef to be a path alias
     def test_link_set_model_query_computed_multi_link_01(self):
+        from gel._internal._qbmodel._abstract._link_set import ComputedLinkSet
         from models.link_set import default
 
         griffindor = self.client.query_required_single(
@@ -522,16 +504,13 @@ class TestLinkSetModels(tb.ModelTestCase):
         )
 
         self.assertEqual(griffindor.members, {harry, hermione, ron})
-        self.assertEqual(
-            reveal_type(griffindor.members),
-            (
-                "gel._internal._qbmodel._abstract._link_set.ComputedLinkSet["
-                "models.link_set.default.Person"
-                "]"
-            ),
+        typing_extensions.assert_type(
+            griffindor.members,
+            ComputedLinkSet[default.Person],
         )
 
     def test_link_set_model_query_computed_multi_link_02(self):
+        from gel._internal._qbmodel._abstract._link_set import ComputedLinkSet
         from models.link_set import default
 
         griffindor = self.client.query_required_single(
@@ -555,13 +534,9 @@ class TestLinkSetModels(tb.ModelTestCase):
         )
 
         self.assertEqual(griffindor.members, {harry, hermione, ron, neville})
-        self.assertEqual(
-            reveal_type(griffindor.members),
-            (
-                "gel._internal._qbmodel._abstract._link_set.ComputedLinkSet["
-                "models.link_set.default.Person"
-                "]"
-            ),
+        typing_extensions.assert_type(
+            griffindor.members,
+            ComputedLinkSet[default.Person],
         )
 
     def test_link_set_model_query_computed_multi_link_03(self):
@@ -579,6 +554,7 @@ class TestLinkSetModels(tb.ModelTestCase):
 
     def test_link_set_model_modify_multi_link_add_01(self):
         # Add existing item
+        from gel._internal._qbmodel._abstract._link_set import LinkSet
         from models.link_set import default
 
         harry = self.client.query_required_single(
@@ -598,17 +574,14 @@ class TestLinkSetModels(tb.ModelTestCase):
         harry.classes.add(potions)
 
         self.assertEqual(harry.classes, {charms, potions})
-        self.assertEqual(
-            reveal_type(harry.classes),
-            (
-                "gel._internal._qbmodel._abstract._link_set.LinkSet["
-                "models.link_set.default.Class"
-                "]"
-            ),
+        typing_extensions.assert_type(
+            harry.classes,
+            LinkSet[default.Class],
         )
 
     def test_link_set_model_modify_multi_link_add_02(self):
         # Add new item with id
+        from gel._internal._qbmodel._abstract._link_set import LinkSet
         from models.link_set import default
 
         harry = self.client.query_required_single(
@@ -631,17 +604,14 @@ class TestLinkSetModels(tb.ModelTestCase):
         harry.classes.add(divination)
 
         self.assertEqual(harry.classes, {charms, potions, divination})
-        self.assertEqual(
-            reveal_type(harry.classes),
-            (
-                "gel._internal._qbmodel._abstract._link_set.LinkSet["
-                "models.link_set.default.Class"
-                "]"
-            ),
+        typing_extensions.assert_type(
+            harry.classes,
+            LinkSet[default.Class],
         )
 
     def test_link_set_model_modify_multi_link_add_03(self):
         # Add new item without id
+        from gel._internal._qbmodel._abstract._link_set import LinkSet
         from models.link_set import default
 
         harry = self.client.query_required_single(
@@ -663,17 +633,14 @@ class TestLinkSetModels(tb.ModelTestCase):
 
         # Compare to list, since there are unhashable items
         self.assertEqual(harry.classes, [charms, potions, herbology])
-        self.assertEqual(
-            reveal_type(harry.classes),
-            (
-                "gel._internal._qbmodel._abstract._link_set.LinkSet["
-                "models.link_set.default.Class"
-                "]"
-            ),
+        typing_extensions.assert_type(
+            harry.classes,
+            LinkSet[default.Class],
         )
 
     def test_link_set_model_modify_multi_link_remove_01(self):
         # Remove existing item
+        from gel._internal._qbmodel._abstract._link_set import LinkSet
         from models.link_set import default
 
         harry = self.client.query_required_single(
@@ -694,17 +661,14 @@ class TestLinkSetModels(tb.ModelTestCase):
 
         # Compare to list, tracking indexes and sets not synchronized
         self.assertEqual(harry.classes, [charms])
-        self.assertEqual(
-            reveal_type(harry.classes),
-            (
-                "gel._internal._qbmodel._abstract._link_set.LinkSet["
-                "models.link_set.default.Class"
-                "]"
-            ),
+        typing_extensions.assert_type(
+            harry.classes,
+            LinkSet[default.Class],
         )
 
     def test_link_set_model_modify_multi_link_remove_02(self):
         # Remove new item with id
+        from gel._internal._qbmodel._abstract._link_set import LinkSet
         from models.link_set import default
 
         harry = self.client.query_required_single(
@@ -728,17 +692,14 @@ class TestLinkSetModels(tb.ModelTestCase):
             harry.classes.remove(divination)
 
         self.assertEqual(harry.classes, {charms, potions})
-        self.assertEqual(
-            reveal_type(harry.classes),
-            (
-                "gel._internal._qbmodel._abstract._link_set.LinkSet["
-                "models.link_set.default.Class"
-                "]"
-            ),
+        typing_extensions.assert_type(
+            harry.classes,
+            LinkSet[default.Class],
         )
 
     def test_link_set_model_modify_multi_link_remove_03(self):
         # Remove new item without id
+        from gel._internal._qbmodel._abstract._link_set import LinkSet
         from models.link_set import default
 
         harry = self.client.query_required_single(
@@ -760,17 +721,14 @@ class TestLinkSetModels(tb.ModelTestCase):
             harry.classes.remove(herbology)
 
         self.assertEqual(harry.classes, {charms, potions})
-        self.assertEqual(
-            reveal_type(harry.classes),
-            (
-                "gel._internal._qbmodel._abstract._link_set.LinkSet["
-                "models.link_set.default.Class"
-                "]"
-            ),
+        typing_extensions.assert_type(
+            harry.classes,
+            LinkSet[default.Class],
         )
 
     def test_link_set_model_modify_multi_link_discard_01(self):
         # Discard existing item
+        from gel._internal._qbmodel._abstract._link_set import LinkSet
         from models.link_set import default
 
         harry = self.client.query_required_single(
@@ -791,17 +749,14 @@ class TestLinkSetModels(tb.ModelTestCase):
 
         # Compare to list, tracking indexes and sets not synchronized
         self.assertEqual(harry.classes, [charms])
-        self.assertEqual(
-            reveal_type(harry.classes),
-            (
-                "gel._internal._qbmodel._abstract._link_set.LinkSet["
-                "models.link_set.default.Class"
-                "]"
-            ),
+        typing_extensions.assert_type(
+            harry.classes,
+            LinkSet[default.Class],
         )
 
     def test_link_set_model_modify_multi_link_discard_02(self):
         # Discard new item with id
+        from gel._internal._qbmodel._abstract._link_set import LinkSet
         from models.link_set import default
 
         harry = self.client.query_required_single(
@@ -824,17 +779,14 @@ class TestLinkSetModels(tb.ModelTestCase):
         harry.classes.discard(divination)
 
         self.assertEqual(harry.classes, {charms, potions})
-        self.assertEqual(
-            reveal_type(harry.classes),
-            (
-                "gel._internal._qbmodel._abstract._link_set.LinkSet["
-                "models.link_set.default.Class"
-                "]"
-            ),
+        typing_extensions.assert_type(
+            harry.classes,
+            LinkSet[default.Class],
         )
 
     def test_link_set_model_modify_multi_link_discard_03(self):
         # Discard new item without id
+        from gel._internal._qbmodel._abstract._link_set import LinkSet
         from models.link_set import default
 
         harry = self.client.query_required_single(
@@ -855,17 +807,14 @@ class TestLinkSetModels(tb.ModelTestCase):
         harry.classes.discard(herbology)
 
         self.assertEqual(harry.classes, {charms, potions})
-        self.assertEqual(
-            reveal_type(harry.classes),
-            (
-                "gel._internal._qbmodel._abstract._link_set.LinkSet["
-                "models.link_set.default.Class"
-                "]"
-            ),
+        typing_extensions.assert_type(
+            harry.classes,
+            LinkSet[default.Class],
         )
 
     def test_link_set_model_modify_multi_link_clear_01(self):
         # Discard existing item
+        from gel._internal._qbmodel._abstract._link_set import LinkSet
         from models.link_set import default
 
         harry = self.client.query_required_single(
@@ -879,17 +828,14 @@ class TestLinkSetModels(tb.ModelTestCase):
         harry.classes.clear()
 
         self.assertEqual(harry.classes, set())
-        self.assertEqual(
-            reveal_type(harry.classes),
-            (
-                "gel._internal._qbmodel._abstract._link_set.LinkSet["
-                "models.link_set.default.Class"
-                "]"
-            ),
+        typing_extensions.assert_type(
+            harry.classes,
+            LinkSet[default.Class],
         )
 
     def test_link_set_model_modify_multi_link_update_01(self):
         # Update existing item
+        from gel._internal._qbmodel._abstract._link_set import LinkSet
         from models.link_set import default
 
         harry = self.client.query_required_single(
@@ -909,17 +855,14 @@ class TestLinkSetModels(tb.ModelTestCase):
         harry.classes.update([potions])
 
         self.assertEqual(harry.classes, {charms, potions})
-        self.assertEqual(
-            reveal_type(harry.classes),
-            (
-                "gel._internal._qbmodel._abstract._link_set.LinkSet["
-                "models.link_set.default.Class"
-                "]"
-            ),
+        typing_extensions.assert_type(
+            harry.classes,
+            LinkSet[default.Class],
         )
 
     def test_link_set_model_modify_multi_link_update_02(self):
         # Update new item with id
+        from gel._internal._qbmodel._abstract._link_set import LinkSet
         from models.link_set import default
 
         harry = self.client.query_required_single(
@@ -942,17 +885,14 @@ class TestLinkSetModels(tb.ModelTestCase):
         harry.classes.update([divination])
 
         self.assertEqual(harry.classes, {charms, potions, divination})
-        self.assertEqual(
-            reveal_type(harry.classes),
-            (
-                "gel._internal._qbmodel._abstract._link_set.LinkSet["
-                "models.link_set.default.Class"
-                "]"
-            ),
+        typing_extensions.assert_type(
+            harry.classes,
+            LinkSet[default.Class],
         )
 
     def test_link_set_model_modify_multi_link_update_03(self):
         # Update new item with id
+        from gel._internal._qbmodel._abstract._link_set import LinkSet
         from models.link_set import default
 
         harry = self.client.query_required_single(
@@ -974,18 +914,15 @@ class TestLinkSetModels(tb.ModelTestCase):
 
         # Compare to list, since there are unhashable items
         self.assertEqual(harry.classes, [charms, potions, herbology])
-        self.assertEqual(
-            reveal_type(harry.classes),
-            (
-                "gel._internal._qbmodel._abstract._link_set.LinkSet["
-                "models.link_set.default.Class"
-                "]"
-            ),
+        typing_extensions.assert_type(
+            harry.classes,
+            LinkSet[default.Class],
         )
 
     @tb.xfail  # mypy seems to be checking + instead of +=
     def test_link_set_model_modify_multi_link_op_iadd_01(self):
         # Operator iadd existing item
+        from gel._internal._qbmodel._abstract._link_set import LinkSet
         from models.link_set import default
 
         harry = self.client.query_required_single(
@@ -1005,18 +942,15 @@ class TestLinkSetModels(tb.ModelTestCase):
         harry.classes += [potions]
 
         self.assertEqual(harry.classes, {charms, potions})
-        self.assertEqual(
-            reveal_type(harry.classes),
-            (
-                "gel._internal._qbmodel._abstract._link_set.LinkSet["
-                "models.link_set.default.Class"
-                "]"
-            ),
+        typing_extensions.assert_type(
+            harry.classes,
+            LinkSet[default.Class],
         )
 
     @tb.xfail  # mypy seems to be checking + instead of +=
     def test_link_set_model_modify_multi_link_op_iadd_02(self):
         # Operator iadd new item with id
+        from gel._internal._qbmodel._abstract._link_set import LinkSet
         from models.link_set import default
 
         harry = self.client.query_required_single(
@@ -1039,18 +973,15 @@ class TestLinkSetModels(tb.ModelTestCase):
         harry.classes += [divination]
 
         self.assertEqual(harry.classes, {charms, potions, divination})
-        self.assertEqual(
-            reveal_type(harry.classes),
-            (
-                "gel._internal._qbmodel._abstract._link_set.LinkSet["
-                "models.link_set.default.Class"
-                "]"
-            ),
+        typing_extensions.assert_type(
+            harry.classes,
+            LinkSet[default.Class],
         )
 
     @tb.xfail  # mypy seems to be checking + instead of +=
     def test_link_set_model_modify_multi_link_op_iadd_03(self):
         # Update new item with id
+        from gel._internal._qbmodel._abstract._link_set import LinkSet
         from models.link_set import default
 
         harry = self.client.query_required_single(
@@ -1072,18 +1003,15 @@ class TestLinkSetModels(tb.ModelTestCase):
 
         # Compare to list, since there are unhashable items
         self.assertEqual(harry.classes, [charms, potions, herbology])
-        self.assertEqual(
-            reveal_type(harry.classes),
-            (
-                "gel._internal._qbmodel._abstract._link_set.LinkSet["
-                "models.link_set.default.Class"
-                "]"
-            ),
+        typing_extensions.assert_type(
+            harry.classes,
+            LinkSet[default.Class],
         )
 
     @tb.xfail  # mypy seems to be checking - instead of -=
     def test_link_set_model_modify_multi_link_op_isub_01(self):
         # Operator isub existing item
+        from gel._internal._qbmodel._abstract._link_set import LinkSet
         from models.link_set import default
 
         harry = self.client.query_required_single(
@@ -1103,18 +1031,15 @@ class TestLinkSetModels(tb.ModelTestCase):
         harry.classes -= [potions]
 
         self.assertEqual(harry.classes, {charms})
-        self.assertEqual(
-            reveal_type(harry.classes),
-            (
-                "gel._internal._qbmodel._abstract._link_set.LinkSet["
-                "models.link_set.default.Class"
-                "]"
-            ),
+        typing_extensions.assert_type(
+            harry.classes,
+            LinkSet[default.Class],
         )
 
     @tb.xfail  # mypy seems to be checking - instead of -=
     def test_link_set_model_modify_multi_link_op_isub_02(self):
         # Operator isub new item with id
+        from gel._internal._qbmodel._abstract._link_set import LinkSet
         from models.link_set import default
 
         harry = self.client.query_required_single(
@@ -1137,18 +1062,15 @@ class TestLinkSetModels(tb.ModelTestCase):
         harry.classes -= [divination]
 
         self.assertEqual(harry.classes, {charms, potions})
-        self.assertEqual(
-            reveal_type(harry.classes),
-            (
-                "gel._internal._qbmodel._abstract._link_set.LinkSet["
-                "models.link_set.default.Class"
-                "]"
-            ),
+        typing_extensions.assert_type(
+            harry.classes,
+            LinkSet[default.Class],
         )
 
     # Tests for friends property (multi link with props) instead of classes
     def test_link_set_model_modify_multi_link_with_props_add_01(self):
         # Add existing item
+        from gel._internal._qbmodel._abstract._link_set import LinkWithPropsSet
         from models.link_set import default
 
         harry = self.client.query_required_single(
@@ -1168,14 +1090,12 @@ class TestLinkSetModels(tb.ModelTestCase):
         harry.friends.add(ron)
 
         self.assertEqual(harry.friends, {hermione, ron})
-        self.assertEqual(
-            reveal_type(harry.friends),
-            (
-                "gel._internal._qbmodel._abstract._link_set.LinkWithPropsSet["
-                "models.link_set.__shapes__.default.Person.__links__.friends, "
-                "models.link_set.default.Person"
-                "]"
-            ),
+        typing_extensions.assert_type(
+            harry.friends,
+            LinkWithPropsSet[
+                default.Person.__links__.friends,
+                default.Person,
+            ],
         )
         self.assertEqual(
             {f: f.__linkprops__.opinion for f in harry.friends},
@@ -1184,6 +1104,7 @@ class TestLinkSetModels(tb.ModelTestCase):
 
     def test_link_set_model_modify_multi_link_with_props_add_02(self):
         # Add new item with id
+        from gel._internal._qbmodel._abstract._link_set import LinkWithPropsSet
         from models.link_set import default
 
         harry = self.client.query_required_single(
@@ -1206,14 +1127,12 @@ class TestLinkSetModels(tb.ModelTestCase):
         harry.friends.add(neville)
 
         self.assertEqual(harry.friends, {hermione, ron, neville})
-        self.assertEqual(
-            reveal_type(harry.friends),
-            (
-                "gel._internal._qbmodel._abstract._link_set.LinkWithPropsSet["
-                "models.link_set.__shapes__.default.Person.__links__.friends, "
-                "models.link_set.default.Person"
-                "]"
-            ),
+        typing_extensions.assert_type(
+            harry.friends,
+            LinkWithPropsSet[
+                default.Person.__links__.friends,
+                default.Person,
+            ],
         )
         self.assertEqual(
             {
@@ -1229,6 +1148,7 @@ class TestLinkSetModels(tb.ModelTestCase):
 
     def test_link_set_model_modify_multi_link_with_props_add_03(self):
         # Add new item without id
+        from gel._internal._qbmodel._abstract._link_set import LinkWithPropsSet
         from models.link_set import default
 
         harry = self.client.query_required_single(
@@ -1250,14 +1170,12 @@ class TestLinkSetModels(tb.ModelTestCase):
 
         # Compare to list, since there are unhashable items
         self.assertEqual(harry.friends, [hermione, ron, luna])
-        self.assertEqual(
-            reveal_type(harry.friends),
-            (
-                "gel._internal._qbmodel._abstract._link_set.LinkWithPropsSet["
-                "models.link_set.__shapes__.default.Person.__links__.friends, "
-                "models.link_set.default.Person"
-                "]"
-            ),
+        typing_extensions.assert_type(
+            harry.friends,
+            LinkWithPropsSet[
+                default.Person.__links__.friends,
+                default.Person,
+            ],
         )
         self.assertEqual(
             {
@@ -1277,6 +1195,7 @@ class TestLinkSetModels(tb.ModelTestCase):
 
     def test_link_set_model_modify_multi_link_with_props_remove_01(self):
         # Remove existing item
+        from gel._internal._qbmodel._abstract._link_set import LinkWithPropsSet
         from models.link_set import default
 
         harry = self.client.query_required_single(
@@ -1297,14 +1216,12 @@ class TestLinkSetModels(tb.ModelTestCase):
 
         # Compare to list, tracking indexes and sets not synchronized
         self.assertEqual(harry.friends, [hermione])
-        self.assertEqual(
-            reveal_type(harry.friends),
-            (
-                "gel._internal._qbmodel._abstract._link_set.LinkWithPropsSet["
-                "models.link_set.__shapes__.default.Person.__links__.friends, "
-                "models.link_set.default.Person"
-                "]"
-            ),
+        typing_extensions.assert_type(
+            harry.friends,
+            LinkWithPropsSet[
+                default.Person.__links__.friends,
+                default.Person,
+            ],
         )
         self.assertEqual(
             {f: f.__linkprops__.opinion for f in harry.friends},
@@ -1313,6 +1230,7 @@ class TestLinkSetModels(tb.ModelTestCase):
 
     def test_link_set_model_modify_multi_link_with_props_remove_02(self):
         # Remove new item with id
+        from gel._internal._qbmodel._abstract._link_set import LinkWithPropsSet
         from models.link_set import default
 
         harry = self.client.query_required_single(
@@ -1336,14 +1254,12 @@ class TestLinkSetModels(tb.ModelTestCase):
             harry.friends.remove(neville)
 
         self.assertEqual(harry.friends, {hermione, ron})
-        self.assertEqual(
-            reveal_type(harry.friends),
-            (
-                "gel._internal._qbmodel._abstract._link_set.LinkWithPropsSet["
-                "models.link_set.__shapes__.default.Person.__links__.friends, "
-                "models.link_set.default.Person"
-                "]"
-            ),
+        typing_extensions.assert_type(
+            harry.friends,
+            LinkWithPropsSet[
+                default.Person.__links__.friends,
+                default.Person,
+            ],
         )
         self.assertEqual(
             {f: f.__linkprops__.opinion for f in harry.friends},
@@ -1352,6 +1268,7 @@ class TestLinkSetModels(tb.ModelTestCase):
 
     def test_link_set_model_modify_multi_link_with_props_remove_03(self):
         # Remove new item without id
+        from gel._internal._qbmodel._abstract._link_set import LinkWithPropsSet
         from models.link_set import default
 
         harry = self.client.query_required_single(
@@ -1373,14 +1290,12 @@ class TestLinkSetModels(tb.ModelTestCase):
             harry.friends.remove(luna)
 
         self.assertEqual(harry.friends, {hermione, ron})
-        self.assertEqual(
-            reveal_type(harry.friends),
-            (
-                "gel._internal._qbmodel._abstract._link_set.LinkWithPropsSet["
-                "models.link_set.__shapes__.default.Person.__links__.friends, "
-                "models.link_set.default.Person"
-                "]"
-            ),
+        typing_extensions.assert_type(
+            harry.friends,
+            LinkWithPropsSet[
+                default.Person.__links__.friends,
+                default.Person,
+            ],
         )
         self.assertEqual(
             {f: f.__linkprops__.opinion for f in harry.friends},
@@ -1389,6 +1304,7 @@ class TestLinkSetModels(tb.ModelTestCase):
 
     def test_link_set_model_modify_multi_link_with_props_discard_01(self):
         # Discard existing item
+        from gel._internal._qbmodel._abstract._link_set import LinkWithPropsSet
         from models.link_set import default
 
         harry = self.client.query_required_single(
@@ -1409,14 +1325,12 @@ class TestLinkSetModels(tb.ModelTestCase):
 
         # Compare to list, tracking indexes and sets not synchronized
         self.assertEqual(harry.friends, [hermione])
-        self.assertEqual(
-            reveal_type(harry.friends),
-            (
-                "gel._internal._qbmodel._abstract._link_set.LinkWithPropsSet["
-                "models.link_set.__shapes__.default.Person.__links__.friends, "
-                "models.link_set.default.Person"
-                "]"
-            ),
+        typing_extensions.assert_type(
+            harry.friends,
+            LinkWithPropsSet[
+                default.Person.__links__.friends,
+                default.Person,
+            ],
         )
         self.assertEqual(
             {f: f.__linkprops__.opinion for f in harry.friends},
@@ -1425,6 +1339,7 @@ class TestLinkSetModels(tb.ModelTestCase):
 
     def test_link_set_model_modify_multi_link_with_props_discard_02(self):
         # Discard new item with id
+        from gel._internal._qbmodel._abstract._link_set import LinkWithPropsSet
         from models.link_set import default
 
         harry = self.client.query_required_single(
@@ -1447,14 +1362,12 @@ class TestLinkSetModels(tb.ModelTestCase):
         harry.friends.discard(neville)
 
         self.assertEqual(harry.friends, {hermione, ron})
-        self.assertEqual(
-            reveal_type(harry.friends),
-            (
-                "gel._internal._qbmodel._abstract._link_set.LinkWithPropsSet["
-                "models.link_set.__shapes__.default.Person.__links__.friends, "
-                "models.link_set.default.Person"
-                "]"
-            ),
+        typing_extensions.assert_type(
+            harry.friends,
+            LinkWithPropsSet[
+                default.Person.__links__.friends,
+                default.Person,
+            ],
         )
         self.assertEqual(
             {f: f.__linkprops__.opinion for f in harry.friends},
@@ -1463,6 +1376,7 @@ class TestLinkSetModels(tb.ModelTestCase):
 
     def test_link_set_model_modify_multi_link_with_props_discard_03(self):
         # Discard new item without id
+        from gel._internal._qbmodel._abstract._link_set import LinkWithPropsSet
         from models.link_set import default
 
         harry = self.client.query_required_single(
@@ -1483,14 +1397,12 @@ class TestLinkSetModels(tb.ModelTestCase):
         harry.friends.discard(luna)
 
         self.assertEqual(harry.friends, {hermione, ron})
-        self.assertEqual(
-            reveal_type(harry.friends),
-            (
-                "gel._internal._qbmodel._abstract._link_set.LinkWithPropsSet["
-                "models.link_set.__shapes__.default.Person.__links__.friends, "
-                "models.link_set.default.Person"
-                "]"
-            ),
+        typing_extensions.assert_type(
+            harry.friends,
+            LinkWithPropsSet[
+                default.Person.__links__.friends,
+                default.Person,
+            ],
         )
         self.assertEqual(
             {f: f.__linkprops__.opinion for f in harry.friends},
@@ -1499,6 +1411,7 @@ class TestLinkSetModels(tb.ModelTestCase):
 
     def test_link_set_model_modify_multi_link_with_props_clear_01(self):
         # Clear existing items
+        from gel._internal._qbmodel._abstract._link_set import LinkWithPropsSet
         from models.link_set import default
 
         harry = self.client.query_required_single(
@@ -1512,14 +1425,12 @@ class TestLinkSetModels(tb.ModelTestCase):
         harry.friends.clear()
 
         self.assertEqual(harry.friends, set())
-        self.assertEqual(
-            reveal_type(harry.friends),
-            (
-                "gel._internal._qbmodel._abstract._link_set.LinkWithPropsSet["
-                "models.link_set.__shapes__.default.Person.__links__.friends, "
-                "models.link_set.default.Person"
-                "]"
-            ),
+        typing_extensions.assert_type(
+            harry.friends,
+            LinkWithPropsSet[
+                default.Person.__links__.friends,
+                default.Person,
+            ],
         )
         self.assertEqual(
             {f: f.__linkprops__.opinion for f in harry.friends},
@@ -1528,6 +1439,7 @@ class TestLinkSetModels(tb.ModelTestCase):
 
     def test_link_set_model_modify_multi_link_with_props_update_01(self):
         # Update existing item
+        from gel._internal._qbmodel._abstract._link_set import LinkWithPropsSet
         from models.link_set import default
 
         harry = self.client.query_required_single(
@@ -1547,14 +1459,12 @@ class TestLinkSetModels(tb.ModelTestCase):
         harry.friends.update([ron])
 
         self.assertEqual(harry.friends, {hermione, ron})
-        self.assertEqual(
-            reveal_type(harry.friends),
-            (
-                "gel._internal._qbmodel._abstract._link_set.LinkWithPropsSet["
-                "models.link_set.__shapes__.default.Person.__links__.friends, "
-                "models.link_set.default.Person"
-                "]"
-            ),
+        typing_extensions.assert_type(
+            harry.friends,
+            LinkWithPropsSet[
+                default.Person.__links__.friends,
+                default.Person,
+            ],
         )
         self.assertEqual(
             {f: f.__linkprops__.opinion for f in harry.friends},
@@ -1563,6 +1473,7 @@ class TestLinkSetModels(tb.ModelTestCase):
 
     def test_link_set_model_modify_multi_link_with_props_update_02(self):
         # Update new item with id
+        from gel._internal._qbmodel._abstract._link_set import LinkWithPropsSet
         from models.link_set import default
 
         harry = self.client.query_required_single(
@@ -1585,14 +1496,12 @@ class TestLinkSetModels(tb.ModelTestCase):
         harry.friends.update([neville])
 
         self.assertEqual(harry.friends, {hermione, ron, neville})
-        self.assertEqual(
-            reveal_type(harry.friends),
-            (
-                "gel._internal._qbmodel._abstract._link_set.LinkWithPropsSet["
-                "models.link_set.__shapes__.default.Person.__links__.friends, "
-                "models.link_set.default.Person"
-                "]"
-            ),
+        typing_extensions.assert_type(
+            harry.friends,
+            LinkWithPropsSet[
+                default.Person.__links__.friends,
+                default.Person,
+            ],
         )
         self.assertEqual(
             {
@@ -1608,6 +1517,7 @@ class TestLinkSetModels(tb.ModelTestCase):
 
     def test_link_set_model_modify_multi_link_with_props_update_03(self):
         # Update new item without id
+        from gel._internal._qbmodel._abstract._link_set import LinkWithPropsSet
         from models.link_set import default
 
         harry = self.client.query_required_single(
@@ -1629,14 +1539,12 @@ class TestLinkSetModels(tb.ModelTestCase):
 
         # Compare to list, since there are unhashable items
         self.assertEqual(harry.friends, [hermione, ron, luna])
-        self.assertEqual(
-            reveal_type(harry.friends),
-            (
-                "gel._internal._qbmodel._abstract._link_set.LinkWithPropsSet["
-                "models.link_set.__shapes__.default.Person.__links__.friends, "
-                "models.link_set.default.Person"
-                "]"
-            ),
+        typing_extensions.assert_type(
+            harry.friends,
+            LinkWithPropsSet[
+                default.Person.__links__.friends,
+                default.Person,
+            ],
         )
         self.assertEqual(
             {
@@ -1656,6 +1564,7 @@ class TestLinkSetModels(tb.ModelTestCase):
 
     def test_link_set_model_modify_multi_link_with_props_op_iadd_01(self):
         # Operator iadd existing item
+        from gel._internal._qbmodel._abstract._link_set import LinkWithPropsSet
         from models.link_set import default
 
         harry = self.client.query_required_single(
@@ -1675,14 +1584,12 @@ class TestLinkSetModels(tb.ModelTestCase):
         harry.friends += [ron]
 
         self.assertEqual(harry.friends, {hermione, ron})
-        self.assertEqual(
-            reveal_type(harry.friends),
-            (
-                "gel._internal._qbmodel._abstract._link_set.LinkWithPropsSet["
-                "models.link_set.__shapes__.default.Person.__links__.friends, "
-                "models.link_set.default.Person"
-                "]"
-            ),
+        typing_extensions.assert_type(
+            harry.friends,
+            LinkWithPropsSet[
+                default.Person.__links__.friends,
+                default.Person,
+            ],
         )
         self.assertEqual(
             {f: f.__linkprops__.opinion for f in harry.friends},
@@ -1691,6 +1598,7 @@ class TestLinkSetModels(tb.ModelTestCase):
 
     def test_link_set_model_modify_multi_link_with_props_op_iadd_02(self):
         # Operator iadd new item with id
+        from gel._internal._qbmodel._abstract._link_set import LinkWithPropsSet
         from models.link_set import default
 
         harry = self.client.query_required_single(
@@ -1713,14 +1621,12 @@ class TestLinkSetModels(tb.ModelTestCase):
         harry.friends += [neville]
 
         self.assertEqual(harry.friends, {hermione, ron, neville})
-        self.assertEqual(
-            reveal_type(harry.friends),
-            (
-                "gel._internal._qbmodel._abstract._link_set.LinkWithPropsSet["
-                "models.link_set.__shapes__.default.Person.__links__.friends, "
-                "models.link_set.default.Person"
-                "]"
-            ),
+        typing_extensions.assert_type(
+            harry.friends,
+            LinkWithPropsSet[
+                default.Person.__links__.friends,
+                default.Person,
+            ],
         )
         self.assertEqual(
             {
@@ -1736,6 +1642,7 @@ class TestLinkSetModels(tb.ModelTestCase):
 
     def test_link_set_model_modify_multi_link_with_props_op_iadd_03(self):
         # Operator iadd new item without id
+        from gel._internal._qbmodel._abstract._link_set import LinkWithPropsSet
         from models.link_set import default
 
         harry = self.client.query_required_single(
@@ -1757,14 +1664,12 @@ class TestLinkSetModels(tb.ModelTestCase):
 
         # Compare to list, since there are unhashable items
         self.assertEqual(harry.friends, [hermione, ron, luna])
-        self.assertEqual(
-            reveal_type(harry.friends),
-            (
-                "gel._internal._qbmodel._abstract._link_set.LinkWithPropsSet["
-                "models.link_set.__shapes__.default.Person.__links__.friends, "
-                "models.link_set.default.Person"
-                "]"
-            ),
+        typing_extensions.assert_type(
+            harry.friends,
+            LinkWithPropsSet[
+                default.Person.__links__.friends,
+                default.Person,
+            ],
         )
         self.assertEqual(
             {
@@ -1785,6 +1690,7 @@ class TestLinkSetModels(tb.ModelTestCase):
     @tb.xfail  # mypy seems to be checking - instead of -=
     def test_link_set_model_modify_multi_link_with_props_op_isub_01(self):
         # Operator isub existing item
+        from gel._internal._qbmodel._abstract._link_set import LinkWithPropsSet
         from models.link_set import default
 
         harry = self.client.query_required_single(
@@ -1804,14 +1710,12 @@ class TestLinkSetModels(tb.ModelTestCase):
         harry.friends -= [ron]
 
         self.assertEqual(harry.friends, {hermione})
-        self.assertEqual(
-            reveal_type(harry.friends),
-            (
-                "gel._internal._qbmodel._abstract._link_set.LinkWithPropsSet["
-                "models.link_set.__shapes__.default.Person.__links__.friends, "
-                "models.link_set.default.Person"
-                "]"
-            ),
+        typing_extensions.assert_type(
+            harry.friends,
+            LinkWithPropsSet[
+                default.Person.__links__.friends,
+                default.Person,
+            ],
         )
         self.assertEqual(
             {f: f.__linkprops__.opinion for f in harry.friends},
@@ -1821,6 +1725,7 @@ class TestLinkSetModels(tb.ModelTestCase):
     @tb.xfail  # mypy seems to be checking - instead of -=
     def test_link_set_model_modify_multi_link_with_props_op_isub_02(self):
         # Operator isub new item with id
+        from gel._internal._qbmodel._abstract._link_set import LinkWithPropsSet
         from models.link_set import default
 
         harry = self.client.query_required_single(
@@ -1843,14 +1748,12 @@ class TestLinkSetModels(tb.ModelTestCase):
         harry.friends -= [neville]
 
         self.assertEqual(harry.friends, {hermione, ron})
-        self.assertEqual(
-            reveal_type(harry.friends),
-            (
-                "gel._internal._qbmodel._abstract._link_set.LinkWithPropsSet["
-                "models.link_set.__shapes__.default.Person.__links__.friends, "
-                "models.link_set.default.Person"
-                "]"
-            ),
+        typing_extensions.assert_type(
+            harry.friends,
+            LinkWithPropsSet[
+                default.Person.__links__.friends,
+                default.Person,
+            ],
         )
         self.assertEqual(
             {f: f.__linkprops__.opinion for f in harry.friends},
@@ -1859,6 +1762,7 @@ class TestLinkSetModels(tb.ModelTestCase):
 
     def test_link_set_model_fresh_multi_link_add_01(self):
         # Add existing item
+        from gel._internal._qbmodel._abstract._link_set import LinkSet
         from models.link_set import default
 
         charms = self.client.query_required_single(
@@ -1873,17 +1777,14 @@ class TestLinkSetModels(tb.ModelTestCase):
         harry.classes.add(potions)
 
         self.assertEqual(harry.classes, {charms, potions})
-        self.assertEqual(
-            reveal_type(harry.classes),
-            (
-                "gel._internal._qbmodel._abstract._link_set.LinkSet["
-                "models.link_set.default.Class"
-                "]"
-            ),
+        typing_extensions.assert_type(
+            harry.classes,
+            LinkSet[default.Class],
         )
 
     def test_link_set_model_fresh_multi_link_add_02(self):
         # Add new item with id
+        from gel._internal._qbmodel._abstract._link_set import LinkSet
         from models.link_set import default
 
         charms = self.client.query_required_single(
@@ -1901,17 +1802,14 @@ class TestLinkSetModels(tb.ModelTestCase):
         harry.classes.add(divination)
 
         self.assertEqual(harry.classes, {charms, potions, divination})
-        self.assertEqual(
-            reveal_type(harry.classes),
-            (
-                "gel._internal._qbmodel._abstract._link_set.LinkSet["
-                "models.link_set.default.Class"
-                "]"
-            ),
+        typing_extensions.assert_type(
+            harry.classes,
+            LinkSet[default.Class],
         )
 
     def test_link_set_model_fresh_multi_link_add_03(self):
         # Add new item without id
+        from gel._internal._qbmodel._abstract._link_set import LinkSet
         from models.link_set import default
 
         charms = self.client.query_required_single(
@@ -1928,17 +1826,14 @@ class TestLinkSetModels(tb.ModelTestCase):
 
         # Compare to list, since there are unhashable items
         self.assertEqual(harry.classes, [charms, potions, herbology])
-        self.assertEqual(
-            reveal_type(harry.classes),
-            (
-                "gel._internal._qbmodel._abstract._link_set.LinkSet["
-                "models.link_set.default.Class"
-                "]"
-            ),
+        typing_extensions.assert_type(
+            harry.classes,
+            LinkSet[default.Class],
         )
 
     def test_link_set_model_fresh_multi_link_remove_01(self):
         # Remove existing item
+        from gel._internal._qbmodel._abstract._link_set import LinkSet
         from models.link_set import default
 
         charms = self.client.query_required_single(
@@ -1954,17 +1849,14 @@ class TestLinkSetModels(tb.ModelTestCase):
 
         # Compare to list, tracking indexes and sets not synchronized
         self.assertEqual(harry.classes, [charms])
-        self.assertEqual(
-            reveal_type(harry.classes),
-            (
-                "gel._internal._qbmodel._abstract._link_set.LinkSet["
-                "models.link_set.default.Class"
-                "]"
-            ),
+        typing_extensions.assert_type(
+            harry.classes,
+            LinkSet[default.Class],
         )
 
     def test_link_set_model_fresh_multi_link_remove_02(self):
         # Remove new item with id
+        from gel._internal._qbmodel._abstract._link_set import LinkSet
         from models.link_set import default
 
         charms = self.client.query_required_single(
@@ -1983,17 +1875,14 @@ class TestLinkSetModels(tb.ModelTestCase):
             harry.classes.remove(divination)
 
         self.assertEqual(harry.classes, {charms, potions})
-        self.assertEqual(
-            reveal_type(harry.classes),
-            (
-                "gel._internal._qbmodel._abstract._link_set.LinkSet["
-                "models.link_set.default.Class"
-                "]"
-            ),
+        typing_extensions.assert_type(
+            harry.classes,
+            LinkSet[default.Class],
         )
 
     def test_link_set_model_fresh_multi_link_remove_03(self):
         # Remove new item without id
+        from gel._internal._qbmodel._abstract._link_set import LinkSet
         from models.link_set import default
 
         charms = self.client.query_required_single(
@@ -2010,17 +1899,14 @@ class TestLinkSetModels(tb.ModelTestCase):
             harry.classes.remove(herbology)
 
         self.assertEqual(harry.classes, {charms, potions})
-        self.assertEqual(
-            reveal_type(harry.classes),
-            (
-                "gel._internal._qbmodel._abstract._link_set.LinkSet["
-                "models.link_set.default.Class"
-                "]"
-            ),
+        typing_extensions.assert_type(
+            harry.classes,
+            LinkSet[default.Class],
         )
 
     def test_link_set_model_fresh_multi_link_discard_01(self):
         # Discard existing item
+        from gel._internal._qbmodel._abstract._link_set import LinkSet
         from models.link_set import default
 
         charms = self.client.query_required_single(
@@ -2036,17 +1922,14 @@ class TestLinkSetModels(tb.ModelTestCase):
 
         # Compare to list, tracking indexes and sets not synchronized
         self.assertEqual(harry.classes, [charms])
-        self.assertEqual(
-            reveal_type(harry.classes),
-            (
-                "gel._internal._qbmodel._abstract._link_set.LinkSet["
-                "models.link_set.default.Class"
-                "]"
-            ),
+        typing_extensions.assert_type(
+            harry.classes,
+            LinkSet[default.Class],
         )
 
     def test_link_set_model_fresh_multi_link_discard_02(self):
         # Discard new item with id
+        from gel._internal._qbmodel._abstract._link_set import LinkSet
         from models.link_set import default
 
         charms = self.client.query_required_single(
@@ -2064,17 +1947,14 @@ class TestLinkSetModels(tb.ModelTestCase):
         harry.classes.discard(divination)
 
         self.assertEqual(harry.classes, {charms, potions})
-        self.assertEqual(
-            reveal_type(harry.classes),
-            (
-                "gel._internal._qbmodel._abstract._link_set.LinkSet["
-                "models.link_set.default.Class"
-                "]"
-            ),
+        typing_extensions.assert_type(
+            harry.classes,
+            LinkSet[default.Class],
         )
 
     def test_link_set_model_fresh_multi_link_discard_03(self):
         # Discard new item without id
+        from gel._internal._qbmodel._abstract._link_set import LinkSet
         from models.link_set import default
 
         charms = self.client.query_required_single(
@@ -2090,17 +1970,14 @@ class TestLinkSetModels(tb.ModelTestCase):
         harry.classes.discard(herbology)
 
         self.assertEqual(harry.classes, {charms, potions})
-        self.assertEqual(
-            reveal_type(harry.classes),
-            (
-                "gel._internal._qbmodel._abstract._link_set.LinkSet["
-                "models.link_set.default.Class"
-                "]"
-            ),
+        typing_extensions.assert_type(
+            harry.classes,
+            LinkSet[default.Class],
         )
 
     def test_link_set_model_fresh_multi_link_clear_01(self):
         # Clear existing items
+        from gel._internal._qbmodel._abstract._link_set import LinkSet
         from models.link_set import default
 
         charms = self.client.query_required_single(
@@ -2115,17 +1992,14 @@ class TestLinkSetModels(tb.ModelTestCase):
         harry.classes.clear()
 
         self.assertEqual(harry.classes, set())
-        self.assertEqual(
-            reveal_type(harry.classes),
-            (
-                "gel._internal._qbmodel._abstract._link_set.LinkSet["
-                "models.link_set.default.Class"
-                "]"
-            ),
+        typing_extensions.assert_type(
+            harry.classes,
+            LinkSet[default.Class],
         )
 
     def test_link_set_model_fresh_multi_link_update_01(self):
         # Update existing item
+        from gel._internal._qbmodel._abstract._link_set import LinkSet
         from models.link_set import default
 
         charms = self.client.query_required_single(
@@ -2140,17 +2014,14 @@ class TestLinkSetModels(tb.ModelTestCase):
         harry.classes.update([potions])
 
         self.assertEqual(harry.classes, {charms, potions})
-        self.assertEqual(
-            reveal_type(harry.classes),
-            (
-                "gel._internal._qbmodel._abstract._link_set.LinkSet["
-                "models.link_set.default.Class"
-                "]"
-            ),
+        typing_extensions.assert_type(
+            harry.classes,
+            LinkSet[default.Class],
         )
 
     def test_link_set_model_fresh_multi_link_update_02(self):
         # Update new item with id
+        from gel._internal._qbmodel._abstract._link_set import LinkSet
         from models.link_set import default
 
         charms = self.client.query_required_single(
@@ -2168,17 +2039,14 @@ class TestLinkSetModels(tb.ModelTestCase):
         harry.classes.update([divination])
 
         self.assertEqual(harry.classes, {charms, potions, divination})
-        self.assertEqual(
-            reveal_type(harry.classes),
-            (
-                "gel._internal._qbmodel._abstract._link_set.LinkSet["
-                "models.link_set.default.Class"
-                "]"
-            ),
+        typing_extensions.assert_type(
+            harry.classes,
+            LinkSet[default.Class],
         )
 
     def test_link_set_model_fresh_multi_link_update_03(self):
         # Update new item without id
+        from gel._internal._qbmodel._abstract._link_set import LinkSet
         from models.link_set import default
 
         charms = self.client.query_required_single(
@@ -2195,18 +2063,15 @@ class TestLinkSetModels(tb.ModelTestCase):
 
         # Compare to list, since there are unhashable items
         self.assertEqual(harry.classes, [charms, potions, herbology])
-        self.assertEqual(
-            reveal_type(harry.classes),
-            (
-                "gel._internal._qbmodel._abstract._link_set.LinkSet["
-                "models.link_set.default.Class"
-                "]"
-            ),
+        typing_extensions.assert_type(
+            harry.classes,
+            LinkSet[default.Class],
         )
 
     @tb.xfail  # mypy seems to be checking + instead of +=
     def test_link_set_model_fresh_multi_link_op_iadd_01(self):
         # Operator iadd existing item
+        from gel._internal._qbmodel._abstract._link_set import LinkSet
         from models.link_set import default
 
         charms = self.client.query_required_single(
@@ -2221,18 +2086,15 @@ class TestLinkSetModels(tb.ModelTestCase):
         harry.classes += [potions]
 
         self.assertEqual(harry.classes, {charms, potions})
-        self.assertEqual(
-            reveal_type(harry.classes),
-            (
-                "gel._internal._qbmodel._abstract._link_set.LinkSet["
-                "models.link_set.default.Class"
-                "]"
-            ),
+        typing_extensions.assert_type(
+            harry.classes,
+            LinkSet[default.Class],
         )
 
     @tb.xfail  # mypy seems to be checking + instead of +=
     def test_link_set_model_fresh_multi_link_op_iadd_02(self):
         # Operator iadd new item with id
+        from gel._internal._qbmodel._abstract._link_set import LinkSet
         from models.link_set import default
 
         charms = self.client.query_required_single(
@@ -2250,18 +2112,15 @@ class TestLinkSetModels(tb.ModelTestCase):
         harry.classes += [divination]
 
         self.assertEqual(harry.classes, {charms, potions, divination})
-        self.assertEqual(
-            reveal_type(harry.classes),
-            (
-                "gel._internal._qbmodel._abstract._link_set.LinkSet["
-                "models.link_set.default.Class"
-                "]"
-            ),
+        typing_extensions.assert_type(
+            harry.classes,
+            LinkSet[default.Class],
         )
 
     @tb.xfail  # mypy seems to be checking + instead of +=
     def test_link_set_model_fresh_multi_link_op_iadd_03(self):
         # Operator iadd new item without id
+        from gel._internal._qbmodel._abstract._link_set import LinkSet
         from models.link_set import default
 
         charms = self.client.query_required_single(
@@ -2278,18 +2137,15 @@ class TestLinkSetModels(tb.ModelTestCase):
 
         # Compare to list, since there are unhashable items
         self.assertEqual(harry.classes, [charms, potions, herbology])
-        self.assertEqual(
-            reveal_type(harry.classes),
-            (
-                "gel._internal._qbmodel._abstract._link_set.LinkSet["
-                "models.link_set.default.Class"
-                "]"
-            ),
+        typing_extensions.assert_type(
+            harry.classes,
+            LinkSet[default.Class],
         )
 
     @tb.xfail  # mypy seems to be checking - instead of -=
     def test_link_set_model_fresh_multi_link_op_isub_01(self):
         # Operator isub existing item
+        from gel._internal._qbmodel._abstract._link_set import LinkSet
         from models.link_set import default
 
         charms = self.client.query_required_single(
@@ -2304,18 +2160,15 @@ class TestLinkSetModels(tb.ModelTestCase):
         harry.classes -= [potions]
 
         self.assertEqual(harry.classes, {charms})
-        self.assertEqual(
-            reveal_type(harry.classes),
-            (
-                "gel._internal._qbmodel._abstract._link_set.LinkSet["
-                "models.link_set.default.Class"
-                "]"
-            ),
+        typing_extensions.assert_type(
+            harry.classes,
+            LinkSet[default.Class],
         )
 
     @tb.xfail  # mypy seems to be checking - instead of -=
     def test_link_set_model_fresh_multi_link_op_isub_02(self):
         # Operator isub new item with id
+        from gel._internal._qbmodel._abstract._link_set import LinkSet
         from models.link_set import default
 
         charms = self.client.query_required_single(
@@ -2333,17 +2186,14 @@ class TestLinkSetModels(tb.ModelTestCase):
         harry.classes -= [divination]
 
         self.assertEqual(harry.classes, {charms, potions})
-        self.assertEqual(
-            reveal_type(harry.classes),
-            (
-                "gel._internal._qbmodel._abstract._link_set.LinkSet["
-                "models.link_set.default.Class"
-                "]"
-            ),
+        typing_extensions.assert_type(
+            harry.classes,
+            LinkSet[default.Class],
         )
 
     def test_link_set_model_fresh_multi_link_with_props_add_01(self):
         # Add existing item
+        from gel._internal._qbmodel._abstract._link_set import LinkWithPropsSet
         from models.link_set import default
 
         hermione = self.client.query_required_single(
@@ -2364,14 +2214,12 @@ class TestLinkSetModels(tb.ModelTestCase):
         harry.friends.add(ron)
 
         self.assertEqual(harry.friends, {hermione, ron})
-        self.assertEqual(
-            reveal_type(harry.friends),
-            (
-                "gel._internal._qbmodel._abstract._link_set.LinkWithPropsSet["
-                "models.link_set.__shapes__.default.Person.__links__.friends, "
-                "models.link_set.default.Person"
-                "]"
-            ),
+        typing_extensions.assert_type(
+            harry.friends,
+            LinkWithPropsSet[
+                default.Person.__links__.friends,
+                default.Person,
+            ],
         )
         self.assertEqual(
             {f: f.__linkprops__.opinion for f in harry.friends},
@@ -2380,6 +2228,7 @@ class TestLinkSetModels(tb.ModelTestCase):
 
     def test_link_set_model_fresh_multi_link_with_props_add_02(self):
         # Add new item with id
+        from gel._internal._qbmodel._abstract._link_set import LinkWithPropsSet
         from models.link_set import default
 
         hermione = self.client.query_required_single(
@@ -2403,14 +2252,12 @@ class TestLinkSetModels(tb.ModelTestCase):
         harry.friends.add(neville)
 
         self.assertEqual(harry.friends, {hermione, ron, neville})
-        self.assertEqual(
-            reveal_type(harry.friends),
-            (
-                "gel._internal._qbmodel._abstract._link_set.LinkWithPropsSet["
-                "models.link_set.__shapes__.default.Person.__links__.friends, "
-                "models.link_set.default.Person"
-                "]"
-            ),
+        typing_extensions.assert_type(
+            harry.friends,
+            LinkWithPropsSet[
+                default.Person.__links__.friends,
+                default.Person,
+            ],
         )
         self.assertEqual(
             {
@@ -2426,6 +2273,7 @@ class TestLinkSetModels(tb.ModelTestCase):
 
     def test_link_set_model_fresh_multi_link_with_props_add_03(self):
         # Add new item without id
+        from gel._internal._qbmodel._abstract._link_set import LinkWithPropsSet
         from models.link_set import default
 
         hermione = self.client.query_required_single(
@@ -2448,14 +2296,12 @@ class TestLinkSetModels(tb.ModelTestCase):
 
         # Compare to list, since there are unhashable items
         self.assertEqual(harry.friends, [hermione, ron, luna])
-        self.assertEqual(
-            reveal_type(harry.friends),
-            (
-                "gel._internal._qbmodel._abstract._link_set.LinkWithPropsSet["
-                "models.link_set.__shapes__.default.Person.__links__.friends, "
-                "models.link_set.default.Person"
-                "]"
-            ),
+        typing_extensions.assert_type(
+            harry.friends,
+            LinkWithPropsSet[
+                default.Person.__links__.friends,
+                default.Person,
+            ],
         )
         self.assertEqual(
             {
@@ -2475,6 +2321,7 @@ class TestLinkSetModels(tb.ModelTestCase):
 
     def test_link_set_model_fresh_multi_link_with_props_remove_01(self):
         # Remove existing item
+        from gel._internal._qbmodel._abstract._link_set import LinkWithPropsSet
         from models.link_set import default
 
         hermione = self.client.query_required_single(
@@ -2496,14 +2343,12 @@ class TestLinkSetModels(tb.ModelTestCase):
 
         # Compare to list, tracking indexes and sets not synchronized
         self.assertEqual(harry.friends, [hermione])
-        self.assertEqual(
-            reveal_type(harry.friends),
-            (
-                "gel._internal._qbmodel._abstract._link_set.LinkWithPropsSet["
-                "models.link_set.__shapes__.default.Person.__links__.friends, "
-                "models.link_set.default.Person"
-                "]"
-            ),
+        typing_extensions.assert_type(
+            harry.friends,
+            LinkWithPropsSet[
+                default.Person.__links__.friends,
+                default.Person,
+            ],
         )
         self.assertEqual(
             {f: f.__linkprops__.opinion for f in harry.friends},
@@ -2512,6 +2357,7 @@ class TestLinkSetModels(tb.ModelTestCase):
 
     def test_link_set_model_fresh_multi_link_with_props_remove_02(self):
         # Remove new item with id
+        from gel._internal._qbmodel._abstract._link_set import LinkWithPropsSet
         from models.link_set import default
 
         hermione = self.client.query_required_single(
@@ -2536,14 +2382,12 @@ class TestLinkSetModels(tb.ModelTestCase):
             harry.friends.remove(neville)
 
         self.assertEqual(harry.friends, {hermione, ron})
-        self.assertEqual(
-            reveal_type(harry.friends),
-            (
-                "gel._internal._qbmodel._abstract._link_set.LinkWithPropsSet["
-                "models.link_set.__shapes__.default.Person.__links__.friends, "
-                "models.link_set.default.Person"
-                "]"
-            ),
+        typing_extensions.assert_type(
+            harry.friends,
+            LinkWithPropsSet[
+                default.Person.__links__.friends,
+                default.Person,
+            ],
         )
         self.assertEqual(
             {f: f.__linkprops__.opinion for f in harry.friends},
@@ -2552,6 +2396,7 @@ class TestLinkSetModels(tb.ModelTestCase):
 
     def test_link_set_model_fresh_multi_link_with_props_remove_03(self):
         # Remove new item without id
+        from gel._internal._qbmodel._abstract._link_set import LinkWithPropsSet
         from models.link_set import default
 
         hermione = self.client.query_required_single(
@@ -2574,14 +2419,12 @@ class TestLinkSetModels(tb.ModelTestCase):
             harry.friends.remove(luna)
 
         self.assertEqual(harry.friends, {hermione, ron})
-        self.assertEqual(
-            reveal_type(harry.friends),
-            (
-                "gel._internal._qbmodel._abstract._link_set.LinkWithPropsSet["
-                "models.link_set.__shapes__.default.Person.__links__.friends, "
-                "models.link_set.default.Person"
-                "]"
-            ),
+        typing_extensions.assert_type(
+            harry.friends,
+            LinkWithPropsSet[
+                default.Person.__links__.friends,
+                default.Person,
+            ],
         )
         self.assertEqual(
             {f: f.__linkprops__.opinion for f in harry.friends},
@@ -2590,6 +2433,7 @@ class TestLinkSetModels(tb.ModelTestCase):
 
     def test_link_set_model_fresh_multi_link_with_props_discard_01(self):
         # Discard existing item
+        from gel._internal._qbmodel._abstract._link_set import LinkWithPropsSet
         from models.link_set import default
 
         hermione = self.client.query_required_single(
@@ -2611,14 +2455,12 @@ class TestLinkSetModels(tb.ModelTestCase):
 
         # Compare to list, tracking indexes and sets not synchronized
         self.assertEqual(harry.friends, [hermione])
-        self.assertEqual(
-            reveal_type(harry.friends),
-            (
-                "gel._internal._qbmodel._abstract._link_set.LinkWithPropsSet["
-                "models.link_set.__shapes__.default.Person.__links__.friends, "
-                "models.link_set.default.Person"
-                "]"
-            ),
+        typing_extensions.assert_type(
+            harry.friends,
+            LinkWithPropsSet[
+                default.Person.__links__.friends,
+                default.Person,
+            ],
         )
         self.assertEqual(
             {f: f.__linkprops__.opinion for f in harry.friends},
@@ -2627,6 +2469,7 @@ class TestLinkSetModels(tb.ModelTestCase):
 
     def test_link_set_model_fresh_multi_link_with_props_discard_02(self):
         # Discard new item with id
+        from gel._internal._qbmodel._abstract._link_set import LinkWithPropsSet
         from models.link_set import default
 
         hermione = self.client.query_required_single(
@@ -2650,14 +2493,12 @@ class TestLinkSetModels(tb.ModelTestCase):
         harry.friends.discard(neville)
 
         self.assertEqual(harry.friends, {hermione, ron})
-        self.assertEqual(
-            reveal_type(harry.friends),
-            (
-                "gel._internal._qbmodel._abstract._link_set.LinkWithPropsSet["
-                "models.link_set.__shapes__.default.Person.__links__.friends, "
-                "models.link_set.default.Person"
-                "]"
-            ),
+        typing_extensions.assert_type(
+            harry.friends,
+            LinkWithPropsSet[
+                default.Person.__links__.friends,
+                default.Person,
+            ],
         )
         self.assertEqual(
             {f: f.__linkprops__.opinion for f in harry.friends},
@@ -2666,6 +2507,7 @@ class TestLinkSetModels(tb.ModelTestCase):
 
     def test_link_set_model_fresh_multi_link_with_props_discard_03(self):
         # Discard new item without id
+        from gel._internal._qbmodel._abstract._link_set import LinkWithPropsSet
         from models.link_set import default
 
         hermione = self.client.query_required_single(
@@ -2687,14 +2529,12 @@ class TestLinkSetModels(tb.ModelTestCase):
         harry.friends.discard(luna)
 
         self.assertEqual(harry.friends, {hermione, ron})
-        self.assertEqual(
-            reveal_type(harry.friends),
-            (
-                "gel._internal._qbmodel._abstract._link_set.LinkWithPropsSet["
-                "models.link_set.__shapes__.default.Person.__links__.friends, "
-                "models.link_set.default.Person"
-                "]"
-            ),
+        typing_extensions.assert_type(
+            harry.friends,
+            LinkWithPropsSet[
+                default.Person.__links__.friends,
+                default.Person,
+            ],
         )
         self.assertEqual(
             {f: f.__linkprops__.opinion for f in harry.friends},
@@ -2703,6 +2543,7 @@ class TestLinkSetModels(tb.ModelTestCase):
 
     def test_link_set_model_fresh_multi_link_with_props_clear_01(self):
         # Clear existing items
+        from gel._internal._qbmodel._abstract._link_set import LinkWithPropsSet
         from models.link_set import default
 
         hermione = self.client.query_required_single(
@@ -2723,14 +2564,12 @@ class TestLinkSetModels(tb.ModelTestCase):
         harry.friends.clear()
 
         self.assertEqual(harry.friends, set())
-        self.assertEqual(
-            reveal_type(harry.friends),
-            (
-                "gel._internal._qbmodel._abstract._link_set.LinkWithPropsSet["
-                "models.link_set.__shapes__.default.Person.__links__.friends, "
-                "models.link_set.default.Person"
-                "]"
-            ),
+        typing_extensions.assert_type(
+            harry.friends,
+            LinkWithPropsSet[
+                default.Person.__links__.friends,
+                default.Person,
+            ],
         )
         self.assertEqual(
             {f: f.__linkprops__.opinion for f in harry.friends},
@@ -2739,6 +2578,7 @@ class TestLinkSetModels(tb.ModelTestCase):
 
     def test_link_set_model_fresh_multi_link_with_props_update_01(self):
         # Update existing item
+        from gel._internal._qbmodel._abstract._link_set import LinkWithPropsSet
         from models.link_set import default
 
         hermione = self.client.query_required_single(
@@ -2759,14 +2599,12 @@ class TestLinkSetModels(tb.ModelTestCase):
         harry.friends.update([ron])
 
         self.assertEqual(harry.friends, {hermione, ron})
-        self.assertEqual(
-            reveal_type(harry.friends),
-            (
-                "gel._internal._qbmodel._abstract._link_set.LinkWithPropsSet["
-                "models.link_set.__shapes__.default.Person.__links__.friends, "
-                "models.link_set.default.Person"
-                "]"
-            ),
+        typing_extensions.assert_type(
+            harry.friends,
+            LinkWithPropsSet[
+                default.Person.__links__.friends,
+                default.Person,
+            ],
         )
         self.assertEqual(
             {f: f.__linkprops__.opinion for f in harry.friends},
@@ -2775,6 +2613,7 @@ class TestLinkSetModels(tb.ModelTestCase):
 
     def test_link_set_model_fresh_multi_link_with_props_update_02(self):
         # Update new item with id
+        from gel._internal._qbmodel._abstract._link_set import LinkWithPropsSet
         from models.link_set import default
 
         hermione = self.client.query_required_single(
@@ -2798,14 +2637,12 @@ class TestLinkSetModels(tb.ModelTestCase):
         harry.friends.update([neville])
 
         self.assertEqual(harry.friends, {hermione, ron, neville})
-        self.assertEqual(
-            reveal_type(harry.friends),
-            (
-                "gel._internal._qbmodel._abstract._link_set.LinkWithPropsSet["
-                "models.link_set.__shapes__.default.Person.__links__.friends, "
-                "models.link_set.default.Person"
-                "]"
-            ),
+        typing_extensions.assert_type(
+            harry.friends,
+            LinkWithPropsSet[
+                default.Person.__links__.friends,
+                default.Person,
+            ],
         )
         self.assertEqual(
             {
@@ -2821,6 +2658,7 @@ class TestLinkSetModels(tb.ModelTestCase):
 
     def test_link_set_model_fresh_multi_link_with_props_update_03(self):
         # Update new item without id
+        from gel._internal._qbmodel._abstract._link_set import LinkWithPropsSet
         from models.link_set import default
 
         hermione = self.client.query_required_single(
@@ -2843,14 +2681,12 @@ class TestLinkSetModels(tb.ModelTestCase):
 
         # Compare to list, since there are unhashable items
         self.assertEqual(harry.friends, [hermione, ron, luna])
-        self.assertEqual(
-            reveal_type(harry.friends),
-            (
-                "gel._internal._qbmodel._abstract._link_set.LinkWithPropsSet["
-                "models.link_set.__shapes__.default.Person.__links__.friends, "
-                "models.link_set.default.Person"
-                "]"
-            ),
+        typing_extensions.assert_type(
+            harry.friends,
+            LinkWithPropsSet[
+                default.Person.__links__.friends,
+                default.Person,
+            ],
         )
         self.assertEqual(
             {
@@ -2870,6 +2706,7 @@ class TestLinkSetModels(tb.ModelTestCase):
 
     def test_link_set_model_fresh_multi_link_with_props_op_iadd_01(self):
         # Operator iadd existing item
+        from gel._internal._qbmodel._abstract._link_set import LinkWithPropsSet
         from models.link_set import default
 
         hermione = self.client.query_required_single(
@@ -2890,14 +2727,12 @@ class TestLinkSetModels(tb.ModelTestCase):
         harry.friends += [ron]
 
         self.assertEqual(harry.friends, {hermione, ron})
-        self.assertEqual(
-            reveal_type(harry.friends),
-            (
-                "gel._internal._qbmodel._abstract._link_set.LinkWithPropsSet["
-                "models.link_set.__shapes__.default.Person.__links__.friends, "
-                "models.link_set.default.Person"
-                "]"
-            ),
+        typing_extensions.assert_type(
+            harry.friends,
+            LinkWithPropsSet[
+                default.Person.__links__.friends,
+                default.Person,
+            ],
         )
         self.assertEqual(
             {f: f.__linkprops__.opinion for f in harry.friends},
@@ -2906,6 +2741,7 @@ class TestLinkSetModels(tb.ModelTestCase):
 
     def test_link_set_model_fresh_multi_link_with_props_op_iadd_02(self):
         # Operator iadd new item with id
+        from gel._internal._qbmodel._abstract._link_set import LinkWithPropsSet
         from models.link_set import default
 
         hermione = self.client.query_required_single(
@@ -2929,14 +2765,12 @@ class TestLinkSetModels(tb.ModelTestCase):
         harry.friends += [neville]
 
         self.assertEqual(harry.friends, {hermione, ron, neville})
-        self.assertEqual(
-            reveal_type(harry.friends),
-            (
-                "gel._internal._qbmodel._abstract._link_set.LinkWithPropsSet["
-                "models.link_set.__shapes__.default.Person.__links__.friends, "
-                "models.link_set.default.Person"
-                "]"
-            ),
+        typing_extensions.assert_type(
+            harry.friends,
+            LinkWithPropsSet[
+                default.Person.__links__.friends,
+                default.Person,
+            ],
         )
         self.assertEqual(
             {
@@ -2952,6 +2786,7 @@ class TestLinkSetModels(tb.ModelTestCase):
 
     def test_link_set_model_fresh_multi_link_with_props_op_iadd_03(self):
         # Operator iadd new item without id
+        from gel._internal._qbmodel._abstract._link_set import LinkWithPropsSet
         from models.link_set import default
 
         hermione = self.client.query_required_single(
@@ -2974,14 +2809,12 @@ class TestLinkSetModels(tb.ModelTestCase):
 
         # Compare to list, since there are unhashable items
         self.assertEqual(harry.friends, [hermione, ron, luna])
-        self.assertEqual(
-            reveal_type(harry.friends),
-            (
-                "gel._internal._qbmodel._abstract._link_set.LinkWithPropsSet["
-                "models.link_set.__shapes__.default.Person.__links__.friends, "
-                "models.link_set.default.Person"
-                "]"
-            ),
+        typing_extensions.assert_type(
+            harry.friends,
+            LinkWithPropsSet[
+                default.Person.__links__.friends,
+                default.Person,
+            ],
         )
         self.assertEqual(
             {

@@ -33,6 +33,7 @@
 # mypy: ignore-errors
 
 from __future__ import annotations
+import typing_extensions
 
 import os
 import pathlib
@@ -178,25 +179,21 @@ class TestModelGeneratorMain(tb.ModelTestCase):
         self.assertFalse(hasattr(u2, "name_len"))
 
     def test_modelgen_01(self):
-        from models.orm import default
+        from gel._internal._qbmodel._abstract import ComputedLinkSet
 
-        self.assertEqual(
-            reveal_type(default.User.name),
-            "type[models.__sharedstd__.__shapes__.std.str]",
-        )
+        from models.orm import default, std
 
-        self.assertEqual(
-            reveal_type(default.User.groups),
-            "type[models.orm.default.UserGroup]",
+        typing_extensions.assert_type(default.User.name, type[std.str])
+        typing_extensions.assert_type(
+            default.User.groups, type[default.UserGroup]
         )
 
         q = self.client.query_required_single(
             default.User.select(groups=True).limit(1)
         )
 
-        self.assertIn(
-            "ComputedLinkSet[models.orm.default.UserGroup]",
-            reveal_type(q.groups),
+        typing_extensions.assert_type(
+            q.groups, ComputedLinkSet[default.UserGroup]
         )
 
     def test_modelgen_02(self):
@@ -265,9 +262,7 @@ class TestModelGeneratorMain(tb.ModelTestCase):
         )
         user = next(iter(raid.members))
 
-        self.client.get(
-            default.User.select().filter(name=user.name)
-        )
+        self.client.get(default.User.select().filter(name=user.name))
 
         self.assertIsInstance(user, default.User)
         self.assertIsInstance(user, default.CustomUser)
@@ -295,20 +290,22 @@ class TestModelGeneratorMain(tb.ModelTestCase):
         d = self.client.query_single(q)
 
         assert d is not None
-        self.assertEqual(reveal_type(d), "models.orm.default.Post")
+        typing_extensions.assert_type(d, default.Post)
 
         self.assertIsInstance(d, default.Post)
         self.assertEqual(d.body, "Hello")
         self.assertIsInstance(d.author, default.User)
         self.assertEqual(d.author.name, "Alice")
 
-        self.assertEqual(type(d.author), default.User)
+        typing_extensions.assert_type(d.author, default.User)
 
     @unittest.skipIf(
         sys.version_info < (3, 11),
         "dispatch_overload currently broken under Python 3.10",
     )
     def test_modelgen_data_unpack_1b(self):
+        import uuid
+
         from models.orm import default, std
 
         q = (
@@ -325,9 +322,9 @@ class TestModelGeneratorMain(tb.ModelTestCase):
         )
         d = self.client.get(q)
 
-        self.assertEqual(reveal_type(d), "models.orm.default.Post")
+        typing_extensions.assert_type(d, default.Post)
 
-        self.assertEqual(reveal_type(d.id), "uuid.UUID")
+        typing_extensions.assert_type(d.id, uuid.UUID)
 
         self.assertIsInstance(d, default.Post)
         self.assertEqual(d.body, "Hello")
@@ -622,8 +619,11 @@ class TestModelGeneratorMain(tb.ModelTestCase):
         self.assertEqual(
             user_loaded.model_dump_json(),
             json.dumps(
-                {"id": str(user_loaded.id), "name": "Alice",
-                 tb.TNAME: "default::User"},
+                {
+                    "id": str(user_loaded.id),
+                    "name": "Alice",
+                    tb.TNAME: "default::User",
+                },
                 separators=(",", ":"),
             ),
         )
@@ -651,8 +651,11 @@ class TestModelGeneratorMain(tb.ModelTestCase):
                 context={"gel_allow_unsaved": True},
             ),
             json.dumps(
-                {"id": str(user_loaded.id), "name": "Alice...",
-                 tb.TNAME: "default::User"},
+                {
+                    "id": str(user_loaded.id),
+                    "name": "Alice...",
+                    tb.TNAME: "default::User",
+                },
                 separators=(",", ":"),
             ),
         )
@@ -693,11 +696,13 @@ class TestModelGeneratorMain(tb.ModelTestCase):
 
         # Argh! exclude works based on the *non-aliased* name...
         self.assertEqual(
-            sl.model_dump(exclude={
-                "id": True,
-                tb.TNAME_PY: True,
-                "owner": {"id": True, tb.TNAME_PY: True},
-            }),
+            sl.model_dump(
+                exclude={
+                    "id": True,
+                    tb.TNAME_PY: True,
+                    "owner": {"id": True, tb.TNAME_PY: True},
+                }
+            ),
             expected,
         )
 
@@ -709,11 +714,13 @@ class TestModelGeneratorMain(tb.ModelTestCase):
         )
 
         self.assertEqual(
-            sl.model_dump_json(exclude={
-                "id": True,
-                tb.TNAME_PY: True,
-                "owner": {"id": True, tb.TNAME_PY: True},
-            }),
+            sl.model_dump_json(
+                exclude={
+                    "id": True,
+                    tb.TNAME_PY: True,
+                    "owner": {"id": True, tb.TNAME_PY: True},
+                }
+            ),
             json.dumps(expected, separators=(",", ":")),
         )
 
@@ -1641,8 +1648,12 @@ class TestModelGeneratorMain(tb.ModelTestCase):
         g = default.GameSession(num=1, public=True)
         self.assertEqual(
             g.model_dump(context={"gel_allow_unsaved": True}),
-            {"num": 1, "public": True, "players": [],
-             tb.TNAME: "default::GameSession"},
+            {
+                "num": 1,
+                "public": True,
+                "players": [],
+                tb.TNAME: "default::GameSession",
+            },
         )
         self.assertEqual(
             g.model_dump_json(context={"gel_allow_unsaved": True}),
@@ -1731,9 +1742,8 @@ class TestModelGeneratorMain(tb.ModelTestCase):
         models.default.Post
         models.std.str
 
-        self.assertEqual(
-            reveal_type(models.sub.TypeInSub.post),
-            "type[models.orm.default.Post]",
+        typing_extensions.assert_type(
+            models.sub.TypeInSub.post, type[models.default.Post]
         )
 
     def test_modelgen_typed_query_expr(self):
@@ -1744,18 +1754,12 @@ class TestModelGeneratorMain(tb.ModelTestCase):
 
         q = "select Post filter .body = 'Hello' limit 1"
         p_expected = self.client.query(q)
-        self.assertEqual(
-            reveal_type(p_expected),
-            "builtins.list[Any]",
-        )
+        typing_extensions.assert_type(p_expected, list[typing.Any])
         p_expected = p_expected[0]
 
         typed = gel.expr(models.default.Post, q)
         p = client.query(typed)
-        self.assertEqual(
-            reveal_type(p),
-            "builtins.list[models.orm.default.Post]",
-        )
+        typing_extensions.assert_type(p, list[models.default.Post])
 
         assert len(p) == 1
 
@@ -1787,6 +1791,8 @@ class TestModelGeneratorMain(tb.ModelTestCase):
 
     def test_modelgen_data_model_validation_1(self):
         from typing import cast
+
+        import uuid
 
         from models.orm import default, std
 
@@ -1838,29 +1844,29 @@ class TestModelGeneratorMain(tb.ModelTestCase):
             str(reveal_type(default.User.update)),
         )
 
-        self.assertEqual(
-            reveal_type(u.id),
-            "uuid.UUID",
+        typing_extensions.assert_type(
+            u.id,
+            uuid.UUID,
         )
 
-        self.assertEqual(
-            reveal_type(u.name),
-            "builtins.str",
+        typing_extensions.assert_type(
+            u.name,
+            str,
         )
 
-        self.assertEqual(
-            reveal_type(u.nickname),
-            "builtins.str | None",
+        typing_extensions.assert_type(
+            u.nickname,
+            str | None,
         )
 
-        self.assertEqual(
-            reveal_type(u.name_len),
-            "builtins.int",
+        typing_extensions.assert_type(
+            u.name_len,
+            int,
         )
 
-        self.assertEqual(
-            reveal_type(u.nickname_len),
-            "builtins.int | None",
+        typing_extensions.assert_type(
+            u.nickname_len,
+            int | None,
         )
 
         # Let's test computed link as an arg
@@ -3331,6 +3337,7 @@ class TestModelGeneratorMain(tb.ModelTestCase):
         # Fetch a GameSession object, save its id. Make a new GameSession
         # instance, pass id to it (but not players). Test overriding
         # `.players` link with a new collection
+        from gel._internal._qbmodel._abstract import LinkWithPropsSet
         from gel._internal._tracked_list import Mode
         from models.orm import default
 
@@ -3361,7 +3368,13 @@ class TestModelGeneratorMain(tb.ModelTestCase):
 
         # Override players with new collection
         new_session.players = [elsa, zoe]
-        self.assertIn("LinkWithPropsSet", reveal_type(new_session.players))
+        typing_extensions.assert_type(
+            new_session.players,
+            LinkWithPropsSet[
+                default.GameSession.__links__.players,
+                default.User,
+            ],
+        )
 
         self.assertEqual(new_session.players._mode, Mode.ReadWrite)
         self.assertTrue(new_session.players.__gel_overwrite_data__)
@@ -5224,11 +5237,11 @@ class TestModelGeneratorMain(tb.ModelTestCase):
 
     def test_modelgen_globals_01(self):
         """Test reflection of globals"""
-        from models.orm import default
+        from models.orm import default, std
 
-        self.assertEqual(
-            reveal_type(default.current_game_session_num),
-            "type[models.__sharedstd__.__shapes__.std.int64]",
+        typing_extensions.assert_type(
+            default.current_game_session_num,
+            type[std.int64],
         )
 
         sess_num = 988
@@ -6316,11 +6329,7 @@ class TestModelGeneratorMain(tb.ModelTestCase):
 
         # Test std.or_ function, with a single arg
         users_std_or = self.client.query(
-            default.User.filter(
-                lambda u: std.or_(
-                    u.name == "Alice"
-                )
-            )
+            default.User.filter(lambda u: std.or_(u.name == "Alice"))
         )
         for user in users_std_or:
             self.assertTrue(user.name in ("Alice"))
@@ -6550,7 +6559,7 @@ class TestModelGeneratorMain(tb.ModelTestCase):
         from models.orm import default
 
         c = self.client.get(std.count(default.User.filter(name="Alice")))
-        self.assertEqual(reveal_type(c), "builtins.int")
+        typing_extensions.assert_type(c, int)
         self.assertEqual(c, 1)
 
     def test_modelgen_abstract_type_no_init(self):

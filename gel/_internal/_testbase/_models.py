@@ -670,6 +670,7 @@ def _get_file_code(func: Callable[_P, _R]) -> str:
     source_code = f"""\
 import unittest
 import typing
+import typing_extensions
 
 import gel
 

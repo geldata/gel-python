@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import os
 import typing
+import typing_extensions
 
 if typing.TYPE_CHECKING:
     from typing import reveal_type
@@ -30,6 +31,8 @@ class TestAsyncModelGenerator(tb.AsyncModelTestCase):
         raise AssertionError("this must fail")
 
     async def test_async_modelgen_01(self):
+        from gel._internal._qbmodel._abstract import ComputedLinkSet
+
         from models.orm import default
 
         alice = await self.client.query_required_single(
@@ -40,9 +43,8 @@ class TestAsyncModelGenerator(tb.AsyncModelTestCase):
             .limit(1)
         )
 
-        self.assertIn(
-            "ComputedLinkSet[models.orm.default.UserGroup]",
-            reveal_type(alice.groups),
+        typing_extensions.assert_type(
+            alice.groups, ComputedLinkSet[default.UserGroup]
         )
 
         self.assertEqual(next(iter(alice.groups)).name, "green")
