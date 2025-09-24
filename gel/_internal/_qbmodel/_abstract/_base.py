@@ -169,7 +169,7 @@ class AbstractGelModelMeta(GelTypeMeta):
             # The class registry only tracks the canonical base instances,
             # which are the ones that directly declare 'tname__'
             (tname := getattr(reflection, "name", None)) is not None
-            and 'tname__' in namespace
+            and any('tname__' in base.__dict__ for base in bases)
         ):
             mcls.__gel_class_registry__[str(tname)] = cls
         cls.__gel_shape__ = __gel_shape__
