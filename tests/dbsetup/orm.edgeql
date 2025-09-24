@@ -161,3 +161,12 @@ insert MultiRangeTest {
 insert EnumTest {name := 'red', color := Color.Red};
 insert EnumTest {name := 'green', color := Color.Green};
 insert EnumTest {name := 'blue', color := Color.Blue};
+
+insert NamedWrapper {
+    name := 'custom_user',
+    thing := (
+        select User { @note := "hi" }
+        filter .name = 'Zoe'
+        limit 1
+    )
+};
