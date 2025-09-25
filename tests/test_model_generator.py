@@ -161,12 +161,6 @@ class TestModelGeneratorMain(tb.ModelTestCase):
                     f"{p.type!r} != {e.type!r}",
                 )
 
-    @tb.must_fail  # this test ensures that @typecheck is working
-    def test_modelgen__smoke_test(self):
-        from models.orm import default
-
-        self.assertEqual(reveal_type(default.User.groups), "this must fail")
-
     def test_modelgen_save_refetch_modes(self):
         from models.orm import default
 

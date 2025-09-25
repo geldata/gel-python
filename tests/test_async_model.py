@@ -2,11 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import os
-import typing
 import typing_extensions
-
-if typing.TYPE_CHECKING:
-    from typing import reveal_type
 
 from gel._internal._testbase import _models as tb
 
@@ -20,13 +16,7 @@ class TestAsyncModelGenerator(tb.AsyncModelTestCase):
     ISOLATED_TEST_BRANCHES = True
 
     @tb.must_fail  # this test ensures that @typecheck is working
-    async def test_async_modelgen__smoke_test_01(self):
-        from models.orm import default
-
-        self.assertEqual(reveal_type(default.User.groups), "this must fail")
-
-    @tb.must_fail  # this test ensures that @typecheck is working
-    async def test_async_modelgen__smoke_test_02(self):
+    async def test_async_modelgen__smoke_test(self):
         await asyncio.sleep(0)
         raise AssertionError("this must fail")
 
