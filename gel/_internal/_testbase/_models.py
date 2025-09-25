@@ -10,7 +10,7 @@ from typing import (
     TypeVar,
     TYPE_CHECKING,
 )
-from collections.abc import Awaitable
+from collections.abc import Awaitable, Collection
 from typing_extensions import Self
 
 import argparse
@@ -76,6 +76,7 @@ __all__ = (
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator, Mapping, Sequence
     import pydantic
+    from gel._internal._qbmodel._pydantic._models import GelModel
 
 
 _unset = object()
@@ -546,6 +547,83 @@ class BaseModelTestCase(BranchTestCase):
             getattr(model, "__gel_changed_fields__", ...),
             getattr(model2, "__gel_changed_fields__", ...),
         )
+
+    def _assertObjectsWithFields(
+        self,
+        models: Collection[GelModel],
+        identifying_field: str,
+        expected_obj_fields: list[tuple[type[GelModel], dict[str, Any]]],
+    ) -> None:
+        """Test that models match the expected object fields.
+        Pairs models with their expected fields using the identifying field.
+        """
+        self.assertEqual(len(models), len(expected_obj_fields))
+
+        # Get models per identifier
+        for model in models:
+            self._assertHasFields(model, {identifying_field})
+
+        object_by_identifier = {
+            expected_fields[identifying_field]: next(
+                iter(
+                    m
+                    for m in models
+                    if getattr(m, identifying_field)
+                    == expected_fields[identifying_field]
+                ),
+                None,
+            )
+            for _, expected_fields in expected_obj_fields
+        }
+
+        # Check that models match obj_fields one to one
+        for identifier, obj in object_by_identifier.items():
+            self.assertIsNotNone(
+                obj, f"No model with identifier '{identifier}'"
+            )
+        self.assertEqual(
+            len(object_by_identifier),
+            len(expected_obj_fields),
+            "Duplicate identifier'",
+        )
+
+        # Check each model
+        for expected_type, expected_fields in expected_obj_fields:
+            identifier = expected_fields[identifying_field]
+            obj = object_by_identifier[identifier]
+            assert obj is not None
+            self.assertIsInstance(obj, expected_type)
+            self._assertHasFields(obj, expected_fields)
+
+    def _assertHasFields(
+        self,
+        model: GelModel,
+        expected_fields: dict[str, Any] | set[str],
+    ) -> None:
+        for field_name in expected_fields:
+            self.assertTrue(
+                field_name in model.__pydantic_fields_set__,
+                f"Model is missing field '{field_name}'",
+            )
+
+            if isinstance(expected_fields, dict):
+                expected = expected_fields[field_name]
+                actual = getattr(model, field_name)
+                self.assertEqual(
+                    expected,
+                    actual,
+                    f"Field '{field_name}' value ({actual}) different from "
+                    f"expected ({expected})",
+                )
+
+    def _assertNotHasFields(
+        self, model: GelModel, expected_fields: set[str]
+    ) -> None:
+        for field_name in expected_fields:
+            self.assertTrue(
+                field_name not in model.__pydantic_fields_set__,
+                f"Model has unexpected field '{field_name}'",
+            )
 
 
 class ModelTestCase(SyncQueryTestCase, BaseModelTestCase):  # pyright: ignore[reportIncompatibleVariableOverride, reportIncompatibleMethodOverride]

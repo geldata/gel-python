@@ -189,6 +189,24 @@ def select(
             shape_elements.append(shape_el)
         else:
             el_expr = _qb.edgeql_qb_expr(kwarg, var=prefix_alias)
+            if isinstance(el_expr, (_qb.SchemaSet, _qb.Path)):
+                # If the expression is a schema set or path without an explicit
+                # select, apply a splat.
+                if isinstance(kwarg, type) and issubclass(
+                    kwarg, _qb.GelObjectTypeMetadata
+                ):
+                    el_expr = _qb.ShapeOp(
+                        iter_expr=el_expr,
+                        shape=_qb.get_object_type_splat(kwarg),
+                    )
+                elif isinstance(kwarg, _qb.BaseAlias) and issubclass(
+                    kwarg.__gel_origin__, _qb.GelObjectTypeMetadata
+                ):
+                    el_expr = _qb.ShapeOp(
+                        iter_expr=el_expr,
+                        shape=_qb.get_object_type_splat(kwarg.__gel_origin__),
+                    )
+
             shape_el = _qb.ShapeElement(
                 name=ptrname,
                 expr=el_expr,
