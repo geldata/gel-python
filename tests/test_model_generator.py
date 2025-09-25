@@ -6650,6 +6650,88 @@ class TestModelGeneratorMain(tb.ModelTestCase):
         with self.assertNotWarns():
             self.client.sync(g, warn_on_large_sync=False)
 
+    @tb.xfail('''
+        The save seems to fail for objects fetched via a computed link.
+    ''')
+    def test_modelgen_computed_01(self):
+        from models.orm import default
+
+        # Fetch the user with linked computed groups. Then use one of the
+        # fetched groups to remove the user from it. Save. Check.
+
+        alice = self.client.get(
+            default.User.select(
+                "*",
+                groups=lambda u: u.groups.select(
+                    "*",
+                    users=True,
+                )
+            ).filter(name="Alice")
+        )
+
+        for g in alice.groups:
+            if g.name == "red":
+                g.users.remove(alice)
+                self.assertEqual(
+                    [u.name for u in g.users],
+                    ['Billie', 'Cameron', 'Dana'],
+                )
+                self.client.save(g)
+                break
+
+        refetch = self.client.get(
+            default.User.select(
+                "*",
+                groups=True,
+            ).filter(name="Alice")
+        )
+        self.assertEqual(refetch.name, "Alice")
+        self.assertEqual([g.name for g in refetch.groups], ["green"])
+
+    @tb.xfail('''
+        The sync seems to ignore objects fetched via a computed link
+        even though the objects are being explicitly added to the sync
+        arguments.
+    ''')
+    def test_modelgen_computed_02(self):
+        from models.orm import default
+
+        # Fetch the user with linked computed groups. Then use one of the
+        # fetched groups to remove the user from it. Sync. Check.
+
+        alice = self.client.get(
+            default.User.select(
+                "*",
+                groups=lambda u: u.groups.select(
+                    "*",
+                    users=True,
+                )
+            ).filter(name="Alice")
+        )
+
+        for g in alice.groups:
+            if g.name == "red":
+                g.users.remove(alice)
+                self.assertEqual(
+                    [u.name for u in g.users],
+                    ['Billie', 'Cameron', 'Dana'],
+                )
+                break
+
+        self.client.sync(*alice.groups, alice)
+
+        self.assertEqual(alice.name, "Alice")
+        self.assertEqual([g.name for g in alice.groups], ["green"])
+
+        # double-check the group directly
+        red = self.client.get(
+            default.UserGroup.select(users=True).filter(name="red")
+        )
+        self.assertEqual(
+            [u.name for u in red.users],
+            ['Billie', 'Cameron', 'Dana'],
+        )
+
 
 @tb.typecheck
 class TestEmptyModelGenerator(tb.ModelTestCase):

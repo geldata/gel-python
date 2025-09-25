@@ -444,6 +444,29 @@ class TestQueryBuilder(tb.ModelTestCase):
         res = sess_client.query(q)
         self.assertEqual(len(res), 2)
 
+    @tb.xfail('''
+        std.union seems to fail in the filter
+
+        TypeError: issubclass() arg 2 must be a class, a tuple of classes,
+        or a union
+    ''')
+    def test_qb_filter_13(self):
+        from models.orm import default, std
+
+        # Create a complex filter expression using some std functions and an
+        # unrelated subquery
+        dana = default.User.filter(name="Dana")
+        res = self.client.get(
+            default.UserGroup.filter(
+                lambda g: std.count(
+                    std.distinct(
+                        std.union(g.users, dana)
+                    )
+                ) == 3
+            )
+        )
+        self.assertEqual(res.name, "green")
+
     def test_qb_link_property_01(self):
         from models.orm import default
 
