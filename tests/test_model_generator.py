@@ -3895,6 +3895,20 @@ class TestModelGeneratorMain(tb.ModelTestCase):
         self.assertEqual(fresh.name_len, tpr.name_len)
         self.assertEqual(fresh.toggle, tpr.toggle)
 
+    def test_modelgen_save_reload_props_04(self):
+        from models.orm import default
+
+        # Test toggle rewrite behavior: flipping, disabling, and re-enabling
+
+        # Start with toggle = True, should flip to False
+        tpr = default.TestPropRewrites(
+            name="pizza party", name_len=0, toggle=True
+        )
+        self.client.save(tpr)
+
+        tpr.model_dump()
+        self.assertPydanticSerializes(tpr, test_pickle=False)
+
     def test_modelgen_save_reload_links_01(self):
         from models.orm import default
 
