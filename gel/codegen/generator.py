@@ -114,6 +114,11 @@ class NoPydanticValidation:
         return []\
 """
 
+SKIP_DIRS = {
+    pathlib.Path("dbschema/migrations"),
+    pathlib.Path("dbschema/fixups"),
+}
+
 
 def print_msg(msg):
     print(msg, file=sys.stderr)
@@ -231,9 +236,7 @@ class Generator:
             if not file_or_dir.exists():
                 continue
             if file_or_dir.is_dir():
-                if file_or_dir.relative_to(self._project_dir) != pathlib.Path(
-                    "dbschema/migrations"
-                ):
+                if file_or_dir.relative_to(self._project_dir) not in SKIP_DIRS:
                     self._process_dir(file_or_dir)
             elif file_or_dir.suffix.lower() == ".edgeql":
                 self._process_file(file_or_dir)
