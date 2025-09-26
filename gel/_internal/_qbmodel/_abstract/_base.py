@@ -167,9 +167,28 @@ class AbstractGelModelMeta(GelTypeMeta):
         reflection = cls.__gel_reflection__
         if (
             # The class registry only tracks the canonical base instances,
-            # which are the ones that directly declare 'tname__'
+            # which are the ones with a base that directly declares 'tname__'
+            # but do not declare it themselves.
+            #
+            # Eg.
+            #
+            #   default/__init__.py :
+            #     class Foo(base_shapes.Foo):
+            #       ...
+            #
+            #   __shapes__/default/__init__.py :
+            #     class Foo(__Foo_default_shape__, __gel_shape__="RequiredId"):
+            #       tname__: Literal["default::Foo"] = Field(
+            #         "default::Foo", alias="__tname__")
+            #
+            # The user facing default.Foo does not directly declare tname__,
+            # but base_shapes.Foo does.
+            #
+            # For a derived `type Bar extending Foo`, default.Bar does not
+            # directly declare tname__, but base_shapes.Bar does.
             (tname := getattr(reflection, "name", None)) is not None
-            and 'tname__' in namespace
+            and any('tname__' in base.__dict__ for base in bases)
+            and 'tname__' not in namespace
         ):
             mcls.__gel_class_registry__[str(tname)] = cls
         cls.__gel_shape__ = __gel_shape__
