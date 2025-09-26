@@ -2508,11 +2508,15 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         type_name = stype.schemapath
         tname = type_name.name
         assert stype.enum_values
-        anyenum = self.import_name(BASE_IMPL, "AnyEnum")
+        anyenum = self.get_object(
+            SchemaPath('std', 'anyenum'),
+            aspect=ModuleAspect.SHAPES,
+        )
         with self._class_def(tname, [anyenum]):
             self.write_description(stype)
             for value in stype.enum_values:
                 self.write(f"{ident(value)} = {value!r}")
+            self.write_type_reflection(stype)
         self.write_section_break()
 
     def _write_scalar_type(
@@ -2600,6 +2604,8 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             runtime_parents.append(anyenum_)
             typecheck_meta_parents.append(anyenummeta_)
             typecheck_meta_ignores = ["misc", "unused-ignore"]
+
+            self.export("anyenum")
 
         if not runtime_parents:
             typecheck_parents = [self.get_type(self._types_by_name["anytype"])]
@@ -4176,7 +4182,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                 )
                 union = []
                 select_union = [builtin_bool, expr_closure, expr_proto]
-                if reflection.is_non_enum_scalar_type(target_t):
+                if reflection.is_scalar_type(target_t):
                     broad_ptr_t = self._get_pytype_for_scalar(target_t)
                     union.extend(broad_ptr_t)
                     select_union.extend(broad_ptr_t)
