@@ -2,10 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import os
-import typing
-
-if typing.TYPE_CHECKING:
-    from typing import reveal_type
+import typing_extensions
 
 from gel._internal._testbase import _models as tb
 
@@ -19,17 +16,13 @@ class TestAsyncModelGenerator(tb.AsyncModelTestCase):
     ISOLATED_TEST_BRANCHES = True
 
     @tb.must_fail  # this test ensures that @typecheck is working
-    async def test_async_modelgen__smoke_test_01(self):
-        from models.orm import default
-
-        self.assertEqual(reveal_type(default.User.groups), "this must fail")
-
-    @tb.must_fail  # this test ensures that @typecheck is working
-    async def test_async_modelgen__smoke_test_02(self):
+    async def test_async_modelgen__smoke_test(self):
         await asyncio.sleep(0)
         raise AssertionError("this must fail")
 
     async def test_async_modelgen_01(self):
+        from gel._internal._qbmodel._abstract import ComputedLinkSet
+
         from models.orm import default
 
         alice = await self.client.query_required_single(
@@ -40,9 +33,8 @@ class TestAsyncModelGenerator(tb.AsyncModelTestCase):
             .limit(1)
         )
 
-        self.assertIn(
-            "ComputedLinkSet[models.orm.default.UserGroup]",
-            reveal_type(alice.groups),
+        typing_extensions.assert_type(
+            alice.groups, ComputedLinkSet[default.UserGroup]
         )
 
         self.assertEqual(next(iter(alice.groups)).name, "green")
