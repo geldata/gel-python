@@ -31,6 +31,456 @@ class TestQueryBuilder(tb.ModelTestCase):
 
     ISOLATED_TEST_BRANCHES = False
 
+    def test_implicit_select_01(self):
+        # Schema Set
+
+        from models.orm import default
+
+        # mypy complains if this doesn't have type annotation???
+        users: list[default.User] = self.client.query(default.User)
+
+        self._assertObjectsWithFields(
+            users,
+            "name",
+            [
+                (
+                    default.User,
+                    {
+                        'name': "Alice",
+                        'name_len': 5,
+                        'nickname': None,
+                        'nickname_len': None,
+                    },
+                ),
+                (
+                    default.User,
+                    {
+                        'name': "Billie",
+                        'name_len': 6,
+                        'nickname': None,
+                        'nickname_len': None,
+                    },
+                ),
+                (
+                    default.User,
+                    {
+                        'name': "Cameron",
+                        'name_len': 7,
+                        'nickname': None,
+                        'nickname_len': None,
+                    },
+                ),
+                (
+                    default.User,
+                    {
+                        'name': "Dana",
+                        'name_len': 4,
+                        'nickname': None,
+                        'nickname_len': None,
+                    },
+                ),
+                (
+                    default.User,
+                    {
+                        'name': "Elsa",
+                        'name_len': 4,
+                        'nickname': None,
+                        'nickname_len': None,
+                    },
+                ),
+                (
+                    default.User,
+                    {  # Is not converted to default.CustomUser
+                        'name': "Zoe",
+                        'name_len': 3,
+                        'nickname': None,
+                        'nickname_len': None,
+                    },
+                ),
+            ],
+        )
+
+    def test_implicit_select_02(self):
+        # Schema Set + filter
+
+        from models.orm import default
+
+        users = self.client.query(default.User.filter(name="Alice"))
+        self._assertObjectsWithFields(
+            users,
+            "name",
+            [
+                (
+                    default.User,
+                    {
+                        'name': "Alice",
+                        'name_len': 5,
+                        'nickname': None,
+                        'nickname_len': None,
+                    },
+                ),
+            ],
+        )
+
+    def test_implicit_select_03(self):
+        # Schema Set + Path
+
+        from models.orm import default
+
+        authors = self.client.query(default.Post.author)
+
+        self._assertObjectsWithFields(
+            authors,
+            "name",
+            [
+                (
+                    default.User,
+                    {
+                        'name': "Alice",
+                        'name_len': 5,
+                        'nickname': None,
+                        'nickname_len': None,
+                    },
+                ),
+                (
+                    default.User,
+                    {
+                        'name': "Cameron",
+                        'name_len': 7,
+                        'nickname': None,
+                        'nickname_len': None,
+                    },
+                ),
+                (
+                    default.User,
+                    {
+                        'name': "Elsa",
+                        'name_len': 4,
+                        'nickname': None,
+                        'nickname_len': None,
+                    },
+                ),
+            ],
+        )
+
+    def test_implicit_select_04(self):
+        # Schema Set + Filter + Path
+
+        from models.orm import default
+
+        authors = self.client.query(
+            default.Post.filter(body="I'm Alice").author
+        )
+
+        self._assertObjectsWithFields(
+            authors,
+            "name",
+            [
+                (
+                    default.User,
+                    {
+                        'name': "Alice",
+                        'name_len': 5,
+                        'nickname': None,
+                        'nickname_len': None,
+                    },
+                ),
+            ],
+        )
+
+    def test_implicit_select_05(self):
+        # Schema Set + Path + Filter
+
+        from models.orm import default
+
+        authors = self.client.query(default.Post.author.filter(name="Alice"))
+
+        self._assertObjectsWithFields(
+            authors,
+            "name",
+            [
+                (
+                    default.User,
+                    {
+                        'name': "Alice",
+                        'name_len': 5,
+                        'nickname': None,
+                        'nickname_len': None,
+                    },
+                ),
+            ],
+        )
+
+    def test_implicit_select_06(self):
+        # Schema Set + Filter + Path + Filter
+
+        from models.orm import default
+
+        authors = self.client.query(
+            default.Post.filter(body="I'm Alice").author.filter(name="Alice")
+        )
+
+        self._assertObjectsWithFields(
+            authors,
+            "name",
+            [
+                (
+                    default.User,
+                    {
+                        'name': "Alice",
+                        'name_len': 5,
+                        'nickname': None,
+                        'nickname_len': None,
+                    },
+                ),
+            ],
+        )
+
+    def test_implicit_select_07(self):
+        # Ensure select without a schema path doesn't use a splat
+        from models.orm import default
+
+        groups = self.client.query(
+            default.UserGroup.select(users=lambda x: x.users).filter(
+                name="green"
+            )
+        )
+        self.assertEqual(len(groups), 1)
+
+        for user in groups[0].users:
+            self._assertNotHasFields(user, {"name", "nickname"})
+
+    def test_implicit_select_08(self):
+        # In shape: Schema Set
+        from models.orm import default
+
+        groups = self.client.query(
+            default.UserGroup.select(users=default.User).filter(name="green")
+        )
+        self.assertEqual(len(groups), 1)
+
+        users = groups[0].users
+        self._assertObjectsWithFields(
+            users,
+            "name",
+            [
+                (
+                    default.User,
+                    {
+                        'name': "Alice",
+                        'name_len': 5,
+                        'nickname': None,
+                        'nickname_len': None,
+                    },
+                ),
+                (
+                    default.User,
+                    {
+                        'name': "Billie",
+                        'name_len': 6,
+                        'nickname': None,
+                        'nickname_len': None,
+                    },
+                ),
+                (
+                    default.User,
+                    {
+                        'name': "Cameron",
+                        'name_len': 7,
+                        'nickname': None,
+                        'nickname_len': None,
+                    },
+                ),
+                (
+                    default.User,
+                    {
+                        'name': "Dana",
+                        'name_len': 4,
+                        'nickname': None,
+                        'nickname_len': None,
+                    },
+                ),
+                (
+                    default.User,
+                    {
+                        'name': "Elsa",
+                        'name_len': 4,
+                        'nickname': None,
+                        'nickname_len': None,
+                    },
+                ),
+                (
+                    default.User,
+                    {  # Is not converted to default.CustomUser
+                        'name': "Zoe",
+                        'name_len': 3,
+                        'nickname': None,
+                        'nickname_len': None,
+                    },
+                ),
+            ],
+        )
+
+    def test_implicit_select_09(self):
+        # In shape: Schema Set
+        from models.orm import default
+
+        groups = self.client.query(
+            default.UserGroup.select(
+                users=default.User.filter(name="Alice")
+            ).filter(name="green")
+        )
+        self.assertEqual(len(groups), 1)
+
+        users = groups[0].users
+        self._assertObjectsWithFields(
+            users,
+            "name",
+            [
+                (
+                    default.User,
+                    {
+                        'name': "Alice",
+                        'name_len': 5,
+                        'nickname': None,
+                        'nickname_len': None,
+                    },
+                ),
+            ],
+        )
+
+    def test_implicit_select_10(self):
+        # In shape: Schema Set + Path
+        from models.orm import default
+
+        groups = self.client.query(
+            default.UserGroup.select(users=default.Post.author).filter(
+                name="green"
+            )
+        )
+        self.assertEqual(len(groups), 1)
+
+        users = groups[0].users
+        self._assertObjectsWithFields(
+            users,
+            "name",
+            [
+                (
+                    default.User,
+                    {
+                        'name': "Alice",
+                        'name_len': 5,
+                        'nickname': None,
+                        'nickname_len': None,
+                    },
+                ),
+                (
+                    default.User,
+                    {
+                        'name': "Cameron",
+                        'name_len': 7,
+                        'nickname': None,
+                        'nickname_len': None,
+                    },
+                ),
+                (
+                    default.User,
+                    {
+                        'name': "Elsa",
+                        'name_len': 4,
+                        'nickname': None,
+                        'nickname_len': None,
+                    },
+                ),
+            ],
+        )
+
+    def test_implicit_select_11(self):
+        # In shape: Schema Set + Filter + Path
+        from models.orm import default
+
+        groups = self.client.query(
+            default.UserGroup.select(
+                users=default.Post.filter(body="I'm Alice").author
+            ).filter(name="green")
+        )
+        self.assertEqual(len(groups), 1)
+
+        users = groups[0].users
+        self._assertObjectsWithFields(
+            users,
+            "name",
+            [
+                (
+                    default.User,
+                    {
+                        'name': "Alice",
+                        'name_len': 5,
+                        'nickname': None,
+                        'nickname_len': None,
+                    },
+                ),
+            ],
+        )
+
+    def test_implicit_select_12(self):
+        # In shape: Schema Set + Filter + Path
+        from models.orm import default
+
+        groups = self.client.query(
+            default.UserGroup.select(
+                users=default.Post.author.filter(name="Alice")
+            ).filter(name="green")
+        )
+        self.assertEqual(len(groups), 1)
+
+        users = groups[0].users
+        self._assertObjectsWithFields(
+            users,
+            "name",
+            [
+                (
+                    default.User,
+                    {
+                        'name': "Alice",
+                        'name_len': 5,
+                        'nickname': None,
+                        'nickname_len': None,
+                    },
+                ),
+            ],
+        )
+
+    def test_implicit_select_13(self):
+        # In shape: Schema Set + Filter + Path
+        from models.orm import default
+
+        groups = self.client.query(
+            default.UserGroup.select(
+                users=default.Post.filter(body="I'm Alice").author.filter(
+                    name="Alice"
+                )
+            ).filter(name="green")
+        )
+        self.assertEqual(len(groups), 1)
+
+        users = groups[0].users
+        self._assertObjectsWithFields(
+            users,
+            "name",
+            [
+                (
+                    default.User,
+                    {
+                        'name': "Alice",
+                        'name_len': 5,
+                        'nickname': None,
+                        'nickname_len': None,
+                    },
+                ),
+            ],
+        )
+
     def test_qb_computed_01(self):
         """Replace an existing field with a computed literal value"""
         from models.orm import default, std
@@ -269,9 +719,7 @@ class TestQueryBuilder(tb.ModelTestCase):
             )
             users.append(ures.name)
 
-        self.assertEqual(
-            users, ["Alice", "Billie", "Cameron", "Dana"]
-        )
+        self.assertEqual(users, ["Alice", "Billie", "Cameron", "Dana"])
 
     def test_qb_filter_04(self):
         from models.orm import default, std
@@ -650,7 +1098,7 @@ class TestQueryBuilder(tb.ModelTestCase):
                 lambda x: std.for_(
                     std.range_unpack(std.range(std.int64(1), std.int64(3))),
                     lambda y: x * 10 + y,
-                )
+                ),
             )
         )
 

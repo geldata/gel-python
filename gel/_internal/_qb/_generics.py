@@ -45,7 +45,7 @@ from ._protocols import (
     edgeql_qb_expr,
     is_exprmethod,
 )
-from ._reflection import GelTypeMetadata
+from ._reflection import GelObjectTypeMetadata, GelTypeMetadata
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -366,7 +366,10 @@ class BaseAlias(
 
     def __edgeql__(self) -> tuple[type, tuple[str, dict[str, object]]]:
         type_ = self.__gel_origin__
-        if issubclass(type_, GelTypeMetadata):
+        if issubclass(type_, GelObjectTypeMetadata) and issubclass(
+            type_.__gel_reflection__,
+            GelTypeMetadata.__gel_reflection__,
+        ):
             splat_cb = functools.partial(get_object_type_splat, type_)
         else:
             splat_cb = None

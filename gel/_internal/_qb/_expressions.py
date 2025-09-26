@@ -661,7 +661,7 @@ class SelectStmt(IteratorStmt):
             kwargs = {}
             if isinstance(expr, ShapeOp):
                 kwargs["body_scope"] = expr.scope
-            elif isinstance(expr, SchemaSet):
+            elif isinstance(expr, (SchemaSet, Path)):
                 if splat_cb is not None:
                     shape = splat_cb()
                 else:
