@@ -1506,14 +1506,6 @@ class BaseGeneratedModule:
                 else ImportTime.runtime
             )
 
-        if (
-            import_time is ImportTime.typecheck_runtime
-            or import_time is ImportTime.late_runtime
-        ):
-            foreign_import_time = ImportTime.runtime
-        else:
-            foreign_import_time = import_time
-
         if reflection.is_array_type(stype):
             arr = self.get_object(
                 SchemaPath('std', 'array'),
@@ -1529,8 +1521,9 @@ class BaseGeneratedModule:
             return f"{arr}[{elem_type}]"
 
         elif reflection.is_tuple_type(stype):
-            tup = self.import_name(
-                BASE_IMPL, "Tuple", import_time=foreign_import_time
+            tup = self.get_object(
+                SchemaPath('std', 'tuple'),
+                aspect=ModuleAspect.SHAPES,
             )
             elem_types = [
                 self.get_type(
@@ -1545,8 +1538,9 @@ class BaseGeneratedModule:
             return f"{tup}[{', '.join(elem_types)}]"
 
         elif reflection.is_range_type(stype):
-            rang = self.import_name(
-                BASE_IMPL, "Range", import_time=foreign_import_time
+            rang = self.get_object(
+                SchemaPath('std', 'range'),
+                aspect=ModuleAspect.SHAPES,
             )
             elem_type = self.get_type(
                 stype.get_element_type(self._types),
@@ -1558,11 +1552,13 @@ class BaseGeneratedModule:
             return f"{rang}[{elem_type}]"
 
         elif reflection.is_multi_range_type(stype):
-            rang_el = self.import_name(
-                BASE_IMPL, "Range", import_time=foreign_import_time
+            rang_el = self.get_object(
+                SchemaPath('std', 'range'),
+                aspect=ModuleAspect.SHAPES,
             )
-            rang = self.import_name(
-                BASE_IMPL, "MultiRange", import_time=foreign_import_time
+            rang = self.get_object(
+                SchemaPath('std', 'multirange'),
+                aspect=ModuleAspect.SHAPES,
             )
             elem_type = self.get_type(
                 stype.get_element_type(self._types),
@@ -2420,12 +2416,13 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                 tname = gt.name
                 tmeta = f"__{tname}_meta__"
                 with self._class_def(tmeta, meta_bases):
-                    un_ops = self._write_prefix_operator_methods(ptype)
-                    bin_ops = self._write_infix_operator_methods(ptype)
-                    if gt.name == "anytype":
-                        self.write(f"__hash__ = {type_}.__hash__")
-                    elif not un_ops and not bin_ops:
-                        self.write("pass")
+                    self._write_prefix_operator_methods(ptype)
+                    self._write_infix_operator_methods(ptype)
+                    # We have custom __eq__ functions for codegen
+                    # purposes...  but when applied to two normal
+                    # types they still behave as identity, so keep the
+                    # normal __hash__.
+                    self.write(f"__hash__ = {type_}.__hash__")
 
                 class_kwargs["metaclass"] = tmeta
 

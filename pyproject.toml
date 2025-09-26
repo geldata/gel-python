@@ -222,6 +222,7 @@ extend-ignore = [
     "E252", # missing-whitespace-around-parameter-equals
     "F541", # f-string-missing-placeholders
     "Q000", # prefer double quotes
+    "E741", # ambiguous variable names
 ]
 
 [tool.ruff.format]
