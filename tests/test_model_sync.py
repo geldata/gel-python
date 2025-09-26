@@ -449,7 +449,6 @@ class TestModelSyncBasic(TestBlockingModelSyncBase):
         self.assertTrue(hasattr(c, "id"))
 
 
-@make_async_tests
 class TestModelSyncSingleProp(TestBlockingModelSyncBase):
     ISOLATED_TEST_BRANCHES = True
 
@@ -881,7 +880,6 @@ class TestModelSyncSingleProp(TestBlockingModelSyncBase):
         self.assertFalse(hasattr(mirror_1, "val"))  # Fail
 
 
-@make_async_tests
 class TestModelSyncComputedSingleProp(TestBlockingModelSyncBase):
     ISOLATED_TEST_BRANCHES = True
 
@@ -1615,7 +1613,6 @@ class TestModelSyncComputedSingleProp(TestBlockingModelSyncBase):
         self.assertEqual(original.val, 10)
 
 
-@make_async_tests
 class TestModelSyncMultiProp(TestBlockingModelSyncBase):
     ISOLATED_TEST_BRANCHES = True
 
@@ -2166,7 +2163,6 @@ class TestModelSyncMultiProp(TestBlockingModelSyncBase):
         )
 
 
-@make_async_tests
 class TestModelSyncComputedMultiProp(TestBlockingModelSyncBase):
     ISOLATED_TEST_BRANCHES = True
 
@@ -2906,7 +2902,6 @@ class TestModelSyncComputedMultiProp(TestBlockingModelSyncBase):
         self.assertEqual(original.val, (9,) * 10)
 
 
-@make_async_tests
 class TestModelSyncSingleLink(TestBlockingModelSyncBase):
     ISOLATED_TEST_BRANCHES = True
 
@@ -3521,7 +3516,6 @@ class TestModelSyncSingleLink(TestBlockingModelSyncBase):
         self._check_links_equal(original.target, expected_target)
 
 
-@make_async_tests
 class TestModelSyncMultiLink(TestBlockingModelSyncBase):
     ISOLATED_TEST_BRANCHES = True
 
@@ -7391,7 +7385,6 @@ class TestModelSyncMultiLink(TestBlockingModelSyncBase):
         self._check_multilinks_equal(original.targets, expected_targets)
 
 
-@make_async_tests
 class TestModelSyncRewrite(TestBlockingModelSyncBase):
     ISOLATED_TEST_BRANCHES = True
 
@@ -7632,7 +7625,6 @@ class TestModelSyncRewrite(TestBlockingModelSyncBase):
         await _testcase(1, 9, 11)
 
 
-@make_async_tests
 class TestModelSyncTrigger(TestBlockingModelSyncBase):
     ISOLATED_TEST_BRANCHES = True
 
