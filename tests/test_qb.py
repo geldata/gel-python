@@ -892,12 +892,6 @@ class TestQueryBuilder(tb.ModelTestCase):
         res = sess_client.query(q)
         self.assertEqual(len(res), 2)
 
-    @tb.xfail('''
-        std.union seems to fail in the filter
-
-        TypeError: issubclass() arg 2 must be a class, a tuple of classes,
-        or a union
-    ''')
     def test_qb_filter_13(self):
         from models.orm import default, std
 
@@ -1200,12 +1194,6 @@ class TestQueryBuilderModify(tb.ModelTestCase):
         self.assertEqual(res.name, "blue")
         self.assertEqual({u.name for u in res.users}, {"Zoe", "Dana"})
 
-    @tb.xfail('''
-       Runtime failure because assert_single doesn't work.
-       Bug #897.
-
-       Also fails at typecheck time because assert_single can return None?
-    ''')
     def test_qb_update_03(self):
         from models.orm import default, std
 
@@ -1213,22 +1201,18 @@ class TestQueryBuilderModify(tb.ModelTestCase):
         res = self.client.get(
             default.Post.filter(body="Hello")
             .update(
-                author=std.assert_single(default.User.filter(name="Billie"))
+                author=std.assert_single(default.User.filter(name="Billie"))  # type: ignore
             )
             .select("*", author=lambda p: p.author.select("**"))
         )
 
         self.assertEqual(res.body, "Hello")
-        self.assertEqual(res.author.name, "Zoe")
-        self.assertEqual({g.name for g in res.author.groups}, {"redgreen"})
+        self.assertEqual(res.author.name, "Billie")
+        self.assertEqual({g.name for g in res.author.groups}, {"red", "green"})
 
-    @tb.xfail('''
-       Runtime failure because assert_single doesn't work.
-       Bug #897.
-
-       Also fails at typecheck time because update's *types* dont't
-       support callbacks, though runtime does.
-    ''')
+    # Fails at typecheck time because update's *types* dont't
+    # support callbacks, though runtime does.
+    @tb.skip_typecheck
     def test_qb_update_04(self):
         from models.orm import default, std
 
@@ -1249,9 +1233,9 @@ class TestQueryBuilderModify(tb.ModelTestCase):
         # Add Alice to the group
         self.client.query(
             default.UserGroup.filter(name="blue").update(
-                users=lambda g: std.union(
+                users=lambda g: std.assert_distinct(std.union(
                     g.users, default.User.filter(name="Alice")
-                )
+                ))
             )
         )
 
