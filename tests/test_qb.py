@@ -807,10 +807,6 @@ class TestQueryBuilder(tb.ModelTestCase):
         self.assertEqual(post.author.name, "Elsa")
         self.assertEqual(post.body, "*magic stuff*")
 
-    @tb.xfail('''
-        == on Array seems busted both for the typechecker and runtime
-        Issue #896
-    ''')
     def test_qb_filter_09(self):
         from models.orm import default, std
 
@@ -820,11 +816,10 @@ class TestQueryBuilder(tb.ModelTestCase):
             "*",
             players=True,
         ).filter(
-            lambda g: std.array_agg(g.players.id)
-            == std.array_agg(green.users.id)
+            lambda g: std.array_agg(g.players.order_by(id=True).id)
+            == std.array_agg(green.users.order_by(id=True).id)
         )
 
-        self.assertEqual(1, 2)
         res = self.client.get(q)
         green_res = self.client.get(green)
         self.assertEqual(res.num, 123)
