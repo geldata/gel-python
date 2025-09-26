@@ -192,19 +192,18 @@ def select(
             if isinstance(el_expr, (_qb.SchemaSet, _qb.Path)):
                 # If the expression is a schema set or path without an explicit
                 # select, apply a splat.
-                if isinstance(kwarg, type) and issubclass(
-                    kwarg, _qb.GelObjectTypeMetadata
-                ):
-                    el_expr = _qb.ShapeOp(
-                        iter_expr=el_expr,
-                        shape=_qb.get_object_type_splat(kwarg),
+                if (
+                    el_type := (
+                        kwarg
+                        if isinstance(kwarg, type)
+                        else kwarg.__gel_origin__
+                        if isinstance(kwarg, _qb.BaseAlias)
+                        else None
                     )
-                elif isinstance(kwarg, _qb.BaseAlias) and issubclass(
-                    kwarg.__gel_origin__, _qb.GelObjectTypeMetadata
-                ):
+                ) and issubclass(el_type, _qb.GelObjectTypeMetadata):
                     el_expr = _qb.ShapeOp(
                         iter_expr=el_expr,
-                        shape=_qb.get_object_type_splat(kwarg.__gel_origin__),
+                        shape=_qb.get_object_type_splat(el_type),
                     )
 
             shape_el = _qb.ShapeElement(
