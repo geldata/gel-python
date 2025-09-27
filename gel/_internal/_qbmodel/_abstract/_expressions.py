@@ -24,7 +24,7 @@ from ._descriptors import (
 from ._primitive import (
     GelPrimitiveType,
     PyConstType,
-    PyTypeScalar,
+    GelScalarType,
     get_literal_for_scalar,
     get_literal_for_value,
 )
@@ -106,7 +106,7 @@ def _const_to_expr(
     if isinstance(attr, ModelFieldDescriptor) and (
         tp := attr.get_resolved_type()
     ):
-        if issubclass(tp, PyTypeScalar):
+        if issubclass(tp, GelScalarType):
             return get_literal_for_scalar(tp, val)
 
         raise TypeError(f"unsupported const variant for {cls!r}.{pname!r}")
