@@ -65,18 +65,13 @@ class TestQueryBuilder(tb.ModelTestCase):
         self.assertEqual(res.name, "Alice")
         self.assertEqual(res.nickname, "Little Alice")
 
-    @tb.xfail_unimplemented('''
-        Needs casts. Issue #672.
-        Medium priority.
-        (We might do different syntax and need to change the test.)
-    ''')
     def test_qb_computed_03(self):
         from models.orm import default, std
 
         res = self.client.get(
             default.User.select(
                 name=True,
-                nickname=lambda u: u.name + std.str(std.len(u.name)),
+                nickname=lambda u: u.name + std.str.cast(std.len(u.name)),
             ).filter(name="Alice")
         )
         self.assertEqual(res.name, "Alice")
@@ -902,3 +897,54 @@ class TestQueryBuilderModify(tb.ModelTestCase):
 
         self.assertEqual(e.color, default.Color.Violet)
         self.assertEqual(e.name, "red")
+
+    def test_qb_cast_01(self):
+        # scalar to scalar
+        from models.orm import std
+
+        result = self.client.get(
+            std.str.cast(std.int64(1))
+        )
+        self.assertEqual(result, "1")
+
+    def test_qb_cast_02(self):
+        # enum to scalar
+        from models.orm import default, std
+
+        result = self.client.get(
+            std.str.cast(default.Color.Red)
+        )
+        self.assertEqual(result, "Red")
+
+    def test_qb_cast_03(self):
+        # scalar to enum
+        from models.orm import default, std
+
+        result = self.client.get(
+            default.Color.cast(std.str("Red"))
+        )
+        self.assertEqual(result, default.Color.Red)
+
+    def test_qb_cast_04(self):
+        # casting arrays
+        from models.orm import std
+
+        result = self.client.get(
+            std.array[std.str].cast(
+                std.array[std.int64]([
+                    std.int64(1), std.int64(2), std.int64(3)
+                ])
+            )
+        )
+        self.assertEqual(result, ["1", "2", "3"])
+
+    def test_qb_cast_05(self):
+        # casting tuples
+        from models.orm import default, std
+
+        result = self.client.get(
+            std.tuple[std.int64, default.Color].cast(
+                std.tuple[std.str, std::str](std.str("1"), std.int64("Red"))
+            )
+        )
+        self.assertEqual(result, (1, default.Color.Red))

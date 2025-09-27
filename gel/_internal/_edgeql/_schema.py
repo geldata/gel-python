@@ -11,6 +11,7 @@ import re
 import uuid
 
 from gel._internal._polyfills._strenum import StrEnum
+from gel._internal._schemapath import SchemaPath, ParametricTypeName
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -74,9 +75,12 @@ def _get_type_id(name: str, cls: str) -> uuid.UUID:
 
 def get_array_type_id_and_name(
     element: str,
-) -> tuple[uuid.UUID, str]:
+) -> tuple[uuid.UUID, ParametricTypeName]:
     type_id = _get_type_id(f"array<{_mangle_name(element)}>", "Array")
-    type_name = f"array<{element}>"
+    type_name = ParametricTypeName(
+        SchemaPath("array"),
+        [SchemaPath(element)]
+    )
     return type_id, type_name
 
 
@@ -100,10 +104,13 @@ def get_multirange_type_id_and_name(
 
 def get_tuple_type_id_and_name(
     elements: Iterable[str],
-) -> tuple[uuid.UUID, str]:
+) -> tuple[uuid.UUID, ParametricTypeName]:
     body = ", ".join(elements)
     type_id = _get_type_id(f"tuple<{_mangle_name(body)}>", "Tuple")
-    type_name = f"tuple<{body}>"
+    type_name = ParametricTypeName(
+        SchemaPath("array"),
+        [SchemaPath(element) for element in elements]
+    )
     return type_id, type_name
 
 

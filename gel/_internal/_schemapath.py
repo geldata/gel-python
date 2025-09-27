@@ -8,6 +8,7 @@ from __future__ import annotations
 from typing import SupportsIndex, TypeVar, overload
 from typing_extensions import Self, TypeAliasType
 from collections.abc import Sequence
+import dataclasses
 
 import functools
 import pathlib
@@ -209,3 +210,24 @@ class _SchemaPathParents(Sequence[_T]):
 
     def __repr__(self) -> str:
         return f"<{type(self._path).__name__}.parents>"
+
+
+@dataclasses.dataclass(frozen=True)
+class ParametricTypeName:
+    type_: SchemaPath
+    args: list[TypeName]
+
+    def __str__(self) -> str:
+        return self.as_quoted_schema_name()
+
+    def as_quoted_schema_name(self) -> str:
+        return (
+            f"{self.type_.as_quoted_schema_name()}<"
+            f"{','.join(a.as_quoted_schema_name() for a in self.args)}"
+            f">"
+        )
+
+
+TypeName = TypeAliasType(
+    "TypeName", SchemaPath | ParametricTypeName
+)

@@ -153,7 +153,11 @@ else:
 
 
 class AnyEnum(GelScalarType, StrEnum, metaclass=AnyEnumMeta):
-    pass
+    def __edgeql_literal__(self) -> _qb.Literal:
+        return _qb.Literal(
+            type_=self.__gel_reflection__.name,
+            val=self,
+        )
 
 
 if TYPE_CHECKING:
@@ -233,7 +237,7 @@ class Array(  # type: ignore [misc]
 
         class __gel_reflection__(GelPrimitiveType.__gel_reflection__):  # noqa: N801
             id = tid
-            name = SchemaPath(tname)
+            name = tname
 
         return __gel_reflection__
 
@@ -263,6 +267,22 @@ class Array(  # type: ignore [misc]
     @classmethod
     def __gel_get_py_type__(cls) -> type:
         return list
+
+    def __edgeql_literal__(self) -> _qb.Literal:
+        return _qb.Literal(
+            type_=type(self).__gel_reflection__.name,
+            val=self,
+        )
+
+    @classmethod
+    def cast(cls, expr: _qb.ExprCompatible) -> type[Array[_T]]:
+        return _qb.AnnotatedExpr(  # type: ignore [return-value]
+            cls,
+            _qb.CastOp(
+                expr=expr,
+                type_=cls.__gel_reflection__.name,
+            )
+        )
 
 
 _Ts = TypeVarTuple("_Ts")
@@ -328,6 +348,16 @@ class Tuple(  # type: ignore[misc]
     @classmethod
     def __gel_get_py_type__(cls) -> type:
         return tuple
+
+    @classmethod
+    def cast(cls, expr: _qb.ExprCompatible) -> type[Tuple[Unpack[_Ts]]]:
+        return _qb.AnnotatedExpr(  # type: ignore [return-value]
+            cls,
+            _qb.CastOp(
+                expr=expr,
+                type_=cls.__gel_reflection__.name,
+            )
+        )
 
 
 if TYPE_CHECKING:
