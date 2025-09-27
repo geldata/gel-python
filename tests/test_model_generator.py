@@ -261,7 +261,7 @@ class TestModelGeneratorMain(tb.ModelTestCase):
         self.assertIsInstance(user, default.User)
         self.assertIsInstance(user, default.CustomUser)
 
-    @tb.xfail
+    @tb.xfail("links to std::Object don't decoded to the object's actual type")
     def test_modelgen_07(self):
         from models.orm import default, std
 
@@ -1375,7 +1375,7 @@ class TestModelGeneratorMain(tb.ModelTestCase):
         self.assertPydanticPickles(t)
         self.assertPydanticSerializes(t)
 
-    @tb.xfail
+    @tb.xfail("links to std::Object don't decoded to the object's actual type")
     def test_modelgen_pydantic_apis_11e(self):
         # Test model_dump() and model_dump_json() on models;
         # test *single required* link serialization in all combinations
@@ -1392,7 +1392,7 @@ class TestModelGeneratorMain(tb.ModelTestCase):
         self.assertPydanticPickles(t)
         self.assertPydanticSerializes(t)
 
-    @tb.xfail
+    @tb.xfail("links to std::Object don't decoded to the object's actual type")
     def test_modelgen_pydantic_apis_11f(self):
         # Test model_dump() and model_dump_json() on models;
         # test *single required* link serialization in all combinations
