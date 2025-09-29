@@ -358,26 +358,27 @@ cdef class ObjectCodec(BaseNamedRecordCodec):
             self.cached_return_type = return_type
             self.cached_return_type_proxy = None
 
-        # Store base type's tname in the mapping *also* to exclude
-        # subclasses of base type, e.g. if we have this:
-        #
-        #    class CustomContent(default.Content):
-        #        pass
-        #
-        # then default.Content.__subclasses__() will contain
-        # CustomContent, which we don't want to be there.
-
-        tname_map = {str(refl.name): self.cached_return_type}
-
-        for ch in self.cached_return_type.__subclasses__():
+        # Build a map of descendant types that are marked as being
+        # canonical targets.  Make sure to descend through types not
+        # marked canonical, though, because the
+        # std::Object/std::BaseObject type only get inherited via the
+        # __shapes__ types, and we'll need to descend through that to
+        # get to the real ones.
+        worklist = [self.cached_return_type]
+        tname_map = {}
+        while worklist:
+            ch = worklist.pop()
             try:
                 sub_name = ch.__gel_reflection__.name
+                canonical = ch.__gel_is_canonical__
             except AttributeError:
                 pass
             else:
-                # setdefault only sets it if isn't set already, so
-                # custom subtypes won't be picked up.
-                tname_map.setdefault(str(sub_name), ch)
+                sname = str(sub_name)
+                if sname not in tname_map:
+                    worklist.extend(ch.__subclasses__())
+                    if canonical:
+                        tname_map[sname] = ch
 
         subs = []
         dlists = []
