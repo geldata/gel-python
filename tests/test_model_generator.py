@@ -261,6 +261,22 @@ class TestModelGeneratorMain(tb.ModelTestCase):
         self.assertIsInstance(user, default.User)
         self.assertIsInstance(user, default.CustomUser)
 
+    @tb.xfail("links to std::Object don't decoded to the object's actual type")
+    def test_modelgen_07(self):
+        from models.orm import default, std
+
+        wrapper = self.client.get(
+            default.NamedWrapper.select(
+                name=True,
+                thing=True,
+            ).filter(name="custom_user")
+        )
+        user = wrapper.thing
+        assert user is not None
+
+        self.assertIsInstance(user, std.Object)
+        self.assertIsInstance(user, default.CustomUser)
+
     def test_modelgen_data_unpack_1a(self):
         import gel
         from models.orm import default
@@ -1352,6 +1368,40 @@ class TestModelGeneratorMain(tb.ModelTestCase):
         u = default.User(name="aaa")
         t = default.TestSingleLinksOptOnly(
             opt_wprop_friend=default.TestSingleLinks.req_wprop_friend.link(
+                u, strength=123
+            ),
+        )
+
+        self.assertPydanticPickles(t)
+        self.assertPydanticSerializes(t)
+
+    @tb.xfail("links to std::Object don't decoded to the object's actual type")
+    def test_modelgen_pydantic_apis_11e(self):
+        # Test model_dump() and model_dump_json() on models;
+        # test *single required* link serialization in all combinations
+
+        from models.orm import default
+
+        u = default.User(name="aaa")
+        t = default.TestSingleLinksObjReqOnly(
+            req_wprop_obj=default.TestSingleLinksObjReqOnly.req_wprop_obj.link(
+                u, strength=123
+            ),
+        )
+
+        self.assertPydanticPickles(t)
+        self.assertPydanticSerializes(t)
+
+    @tb.xfail("links to std::Object don't decoded to the object's actual type")
+    def test_modelgen_pydantic_apis_11f(self):
+        # Test model_dump() and model_dump_json() on models;
+        # test *single required* link serialization in all combinations
+
+        from models.orm import default
+
+        u = default.User(name="aaa")
+        t = default.TestSingleLinksObjOptOnly(
+            opt_wprop_obj=default.TestSingleLinksObjOptOnly.opt_wprop_obj.link(
                 u, strength=123
             ),
         )
