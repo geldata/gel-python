@@ -153,7 +153,11 @@ else:
 
 
 class AnyEnum(GelScalarType, StrEnum, metaclass=AnyEnumMeta):
-    pass
+    def __edgeql_literal__(self) -> _qb.Literal | _qb.CastOp:
+        return _qb.Literal(
+            val=str(self),
+            type_=type(self).__gel_reflection__.name,
+        )
 
 
 if TYPE_CHECKING:
@@ -776,12 +780,14 @@ def get_literal_for_value(
 
 
 def get_literal_for_scalar(
-    t: type[PyTypeScalar[_PT_co]],
+    t: type[GelScalarType],
     v: Any,
 ) -> _qb.Literal | _qb.CastOp:
     if not isinstance(v, t):
-        v = t(v)
-    ltype = _py_type_to_literal.get(t.__gel_py_type__)  # type: ignore [arg-type]
+        v = t(v)  # type: ignore [call-arg]
+    ltype = None
+    if issubclass(t, PyTypeScalar):
+        ltype = _py_type_to_literal.get(t.__gel_py_type__)
     if ltype is not None:
         return ltype(val=v)  # type: ignore [call-arg]
     else:

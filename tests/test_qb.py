@@ -1091,11 +1091,6 @@ class TestQueryBuilder(tb.ModelTestCase):
         with self.assertRaisesRegex(TypeError, "use std.exists"):
             default.User.filter(lambda u: u.name is not None)  # type: ignore
 
-    @tb.xfail('''
-        Filtering on enums broken. And Enums need __gel_type_class__?
-        See #635
-    ''')
-    @tb.skip_typecheck
     def test_qb_enum_01(self):
         from models.orm import default
 
@@ -1338,10 +1333,6 @@ class TestQueryBuilderModify(tb.ModelTestCase):
         self.assertEqual(res[1].body, "I'm Alice")
         self.assertEqual(res[1].author.name, "Alice")
 
-    @tb.xfail('''
-        Filtering on enums broken. And Enums need __gel_type_class__?
-        See #635
-    ''')
     def test_qb_enum_edit_01(self):
         from models.orm import default
 
@@ -1356,10 +1347,6 @@ class TestQueryBuilderModify(tb.ModelTestCase):
         self.assertEqual(e.color, default.Color.Orange)
         self.assertEqual(e.name, "red")
 
-    @tb.xfail('''
-        Filtering on enums broken. And Enums need __gel_type_class__?
-        See #635
-    ''')
     def test_qb_enum_edit_02(self):
         from models.orm import default
 
