@@ -154,10 +154,8 @@ else:
 
 class AnyEnum(GelScalarType, StrEnum, metaclass=AnyEnumMeta):
     def __edgeql_literal__(self) -> _qb.Literal | _qb.CastOp:
-        # XXX: should we do this with enum literals?
-        # maybe not, strings will get constant extracted...
-        return _qb.CastOp(
-            expr=_qb.StringLiteral(val=str(self)),
+        return _qb.Literal(
+            val=str(self),
             type_=type(self).__gel_reflection__.name,
         )
 
