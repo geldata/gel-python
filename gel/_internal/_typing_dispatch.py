@@ -42,7 +42,7 @@ _P = ParamSpec("_P")
 _R_co = TypeVar("_R_co", covariant=True)
 
 
-def _isinstance(obj: Any, tp: Any) -> bool:
+def _isinstance(obj: Any, tp: Any, fn: Any) -> bool:
     # Handle Any type - matches everything
     if tp is Any:
         return True
@@ -52,7 +52,7 @@ def _isinstance(obj: Any, tp: Any) -> bool:
         return isinstance(obj, tp)
 
     elif _typing_inspect.is_union_type(tp):
-        return any(_isinstance(obj, el) for el in typing.get_args(tp))
+        return any(_isinstance(obj, el, fn) for el in typing.get_args(tp))
 
     elif _typing_inspect.is_literal(tp):
         # For Literal types, check if obj is one of the literal values
@@ -62,11 +62,17 @@ def _isinstance(obj: Any, tp: Any) -> bool:
         origin = typing.get_origin(tp)
         args = typing.get_args(tp)
         if origin is type:
+            atype = args[0]
+            if isinstance(atype, TypeVar):
+                atype = atype.__bound__
+                ns = _namespace.module_ns_of(fn)
+                atype = _typing_eval.resolve_type(atype, globals=ns)
+
             if isinstance(obj, type):
-                return issubclass(obj, args[0])
+                return issubclass(obj, atype)
             elif (mroent := getattr(obj, "__mro_entries__", None)) is not None:
                 genalias_mro = mroent((obj,))
-                return any(issubclass(c, args[0]) for c in genalias_mro)
+                return any(issubclass(c, atype) for c in genalias_mro)
             else:
                 return False
 
@@ -93,7 +99,7 @@ def _isinstance(obj: Any, tp: Any) -> bool:
 
             # For Mapping[K, V], check first key and first value
             k, v = next(iter(obj.items()))
-            return _isinstance(k, args[0]) and _isinstance(v, args[1])
+            return _isinstance(k, args[0], fn) and _isinstance(v, args[1], fn)
 
         elif issubclass(origin, tuple):
             # Check the container type first
@@ -111,13 +117,13 @@ def _isinstance(obj: Any, tp: Any) -> bool:
             # heterogeneous tuple[*T]
             if num_args == 2 and args[1] is ...:
                 # Homogeneous tuple like tuple[int, ...]
-                return _isinstance(next(iter(obj)), args[0])
+                return _isinstance(next(iter(obj)), args[0], fn)
             elif num_args != num_elems:
                 # Shape of tuple value does not match type definition
                 return False
             else:
                 for el_type, el_val in zip(args, obj, strict=True):
-                    if not _isinstance(el_val, el_type):
+                    if not _isinstance(el_val, el_type, fn):
                         return False
                 return True
 
@@ -130,7 +136,7 @@ def _isinstance(obj: Any, tp: Any) -> bool:
             if not args or len(obj) == 0:
                 return True
 
-            return _isinstance(next(iter(obj)), args[0])
+            return _isinstance(next(iter(obj)), args[0], fn)
 
         else:
             # For other generic types, fall back to checking the origin
@@ -270,7 +276,7 @@ class _OverloadDispatch(Generic[_P, _R_co]):
                         f"cannot dispatch to {self._qname}: an overload "
                         f"is missing a type annotation on the {pn} parameter"
                     )
-                if not _isinstance(arg, pt):
+                if not _isinstance(arg, pt, fn):
                     break
             else:
                 if bound_to is not None:
