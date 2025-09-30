@@ -82,7 +82,7 @@ type Party extending ExclusivelyNamed {
 
 # Object with required multi link, has link props
 type Raid extending ExclusivelyNamed {
-    required multi members: User {
+    required multi members: Named {
         role: str;
         rank: int64;
     };

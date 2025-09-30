@@ -35,6 +35,11 @@ class GelSchemaMetadata:
     class __gel_reflection__:  # noqa: N801
         name: ClassVar[SchemaPath]
 
+    # Whether this class is a "canonical" type - that is, the primary
+    # representation of a database type, not an internal __shape__ class,
+    # or a user-defined subtype, or anything else.
+    __gel_is_canonical__: ClassVar[bool]
+
 
 class GelSourceMetadata(GelSchemaMetadata):
     class __gel_reflection__(GelSchemaMetadata.__gel_reflection__):  # noqa: N801

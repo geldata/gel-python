@@ -4358,6 +4358,9 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         include_tname: bool = False,
     ) -> None:
         if include_tname:
+            if objtype.name in CORE_OBJECTS:
+                self.write('__gel_is_canonical__ = True')
+
             type_name = objtype.schemapath
             literal = self.import_name("typing", "Literal")
             field = self.import_name("pydantic", "Field")
@@ -4734,6 +4737,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             ),
         ):
             self.write(f'"""type {objtype.name}"""')
+            self.write('__gel_is_canonical__ = True')
             self.write()
             pointers = _get_object_type_body(objtype)
             if pointers:
@@ -4746,9 +4750,6 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                         localns=localns,
                     )
                     self._write_model_attribute(ptr.name, ptr_type)
-            else:
-                self.write("pass")
-                self.write()
 
     def _write_model_attribute(self, name: str, anno: str) -> None:
         decl = f"{name}: {anno}"
