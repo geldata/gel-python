@@ -357,9 +357,7 @@ class IDTracker(Generic[T, V]):
 
 
 def is_prop_list(val: object) -> TypeGuard[TrackedList[GelPrimitiveType]]:
-    return isinstance(
-        val, (TrackedList, DowncastingTrackedList)
-    ) and issubclass(type(val).type, GelPrimitiveType)  # type: ignore [misc]
+    return isinstance(val, (TrackedList, DowncastingTrackedList))
 
 
 def is_link_set(val: object) -> TypeGuard[LinkSet[GelModel]]:

@@ -102,15 +102,17 @@ class _BaseMultiProperty(_MultiPointer[_T_co, _BT_co]):
     ) -> pydantic_core.CoreSchema:
         if _typing_inspect.is_generic_alias(source_type):
             args = typing.get_args(source_type)
+            subschema = handler.generate_schema(args[0])
+            listschema = core_schema.list_schema(subschema)
             return core_schema.json_or_python_schema(
-                json_schema=core_schema.list_schema(
-                    handler.generate_schema(args[0])
-                ),
+                json_schema=listschema,
                 python_schema=core_schema.no_info_plain_validator_function(
                     functools.partial(cls._validate, generic_args=args),
                 ),
+                # Convert to a list first, then use the list serializer.
                 serialization=core_schema.plain_serializer_function_ser_schema(
                     list,
+                    return_schema=listschema,
                 ),
             )
         else:
@@ -276,21 +278,17 @@ class _MultiProperty(
     def __gel_resolve_dlist__(  # type: ignore [override]
         cls,
         type_args: tuple[type[Any]] | tuple[type[Any], type[Any]],
-    ) -> _tracked_list.DowncastingTrackedList[_ST_co, _BT_co]:
-        return _tracked_list.DowncastingTrackedList[type_args[0], type_args[1]]  # type: ignore [return-value, valid-type]
+    ) -> _tracked_list.TrackedList[_BT_co]:
+        return _tracked_list.TrackedList[type_args[1]]  # type: ignore [return-value, valid-type]
 
     @classmethod
     def _validate(
         cls,
         value: Any,
         generic_args: tuple[type[_ST_co], type[_BT_co]],
-    ) -> (
-        _tracked_list.DowncastingTrackedList[_ST_co, _BT_co]
-        | _abstract.DefaultValue
-    ):
-        lt: type[_tracked_list.DowncastingTrackedList[_ST_co, _BT_co]] = (
-            _tracked_list.DowncastingTrackedList[
-                generic_args[0],  # type: ignore [valid-type]
+    ) -> _tracked_list.TrackedList[_BT_co] | _abstract.DefaultValue:
+        lt: type[_tracked_list.TrackedList[_BT_co]] = (
+            _tracked_list.TrackedList[
                 generic_args[1],  # type: ignore [valid-type]
             ]
         )

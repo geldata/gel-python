@@ -310,8 +310,12 @@ class AbstractTrackedList(
         """Ensure `value` is of type T and return it."""
         cls = type(self)
 
-        if isinstance(value, cls.type):
-            return value
+        # Somewhat mirroring DowncastingTrackedList, if we can't call
+        # isinstance, figure it is OK...
+        if not _typing_inspect.is_valid_isinstance_arg(cls.type) or isinstance(
+            value, cls.type
+        ):
+            return value  # type: ignore[no-any-return]
 
         raise ValueError(
             f"{cls!r} accepts only values of type {cls.type!r}, "
@@ -541,7 +545,45 @@ class TrackedList(
     parametric.SingleParametricType[_T_co],
     AbstractTrackedList[_T_co],
 ):
-    pass
+    def __reduce__(self) -> tuple[Any, ...]:
+        cls = type(self)
+        return (
+            cls._reconstruct_from_pickle,
+            (
+                cls.__parametric_origin__,
+                cls.type,
+                self._items,
+                self._added_items,
+                self._removed_items,
+                self._mode,
+                self.__gel_overwrite_data__,
+            ),
+        )
+
+    @staticmethod
+    def _reconstruct_from_pickle(  # noqa: PLR0917
+        origin: type[TrackedList[_T_co]],
+        tp: type[_T_co],  # pyright: ignore [reportGeneralTypeIssues]
+        items: list[_T_co],
+        added_items: list[_T_co] | None,
+        removed_items: list[_T_co] | None,
+        mode: Mode,
+        gel_overwrite_data: bool,  # noqa: FBT001
+    ) -> TrackedList[_T_co]:
+        cls = cast(
+            "type[TrackedList[_T_co]]",
+            origin[tp],  # type: ignore [index]
+        )
+        lst = cls.__new__(cls)
+
+        lst._items = items
+        lst._added_items = added_items
+        lst._removed_items = removed_items
+
+        lst._mode = mode
+        lst.__gel_overwrite_data__ = gel_overwrite_data
+
+        return lst
 
 
 class _DowncastingList(parametric.ParametricType, Generic[_T_co, _BT]):
