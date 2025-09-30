@@ -1515,8 +1515,9 @@ class BaseGeneratedModule:
             foreign_import_time = import_time
 
         if reflection.is_array_type(stype):
-            arr = self.import_name(
-                BASE_IMPL, "Array", import_time=foreign_import_time
+            arr = self.get_object(
+                SchemaPath('std', 'array'),
+                aspect=ModuleAspect.SHAPES,
             )
             elem_type = self.get_type(
                 stype.get_element_type(self._types),
