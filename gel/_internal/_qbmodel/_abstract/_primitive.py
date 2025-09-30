@@ -237,7 +237,7 @@ class Array(  # type: ignore [misc]
 
         class __gel_reflection__(GelPrimitiveType.__gel_reflection__):  # noqa: N801
             id = tid
-            name = SchemaPath(tname)
+            name = tname
 
         return __gel_reflection__
 
@@ -325,7 +325,7 @@ class Tuple(  # type: ignore[misc]
 
         class __gel_reflection__(GelPrimitiveType.__gel_reflection__):  # noqa: N801
             id = tid
-            name = SchemaPath(tname)
+            name = tname
 
         return __gel_reflection__
 
@@ -367,7 +367,7 @@ class Range(
 
         class __gel_reflection__(GelPrimitiveType.__gel_reflection__):  # noqa: N801
             id = tid
-            name = SchemaPath(tname)
+            name = tname
 
         return __gel_reflection__
 

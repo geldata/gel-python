@@ -20,7 +20,7 @@ from dataclasses import dataclass, field
 
 from gel._internal import _edgeql
 from gel._internal._polyfills import _strenum
-from gel._internal._schemapath import SchemaPath
+from gel._internal._schemapath import SchemaPath, TypeName
 
 from ._abstract import (
     AtomicExpr,
@@ -88,16 +88,16 @@ class Variable(Symbol):
 
 @dataclass(kw_only=True, frozen=True)
 class SchemaSet(IdentLikeExpr):
-    type_: SchemaPath
+    type_: TypeName
 
     def __edgeql_expr__(self, *, ctx: ScopeContext) -> str:
-        return "::".join(self.type.parts)
+        return self.type_.as_quoted_schema_name()
 
 
 @dataclass(kw_only=True, frozen=True)
 class Global(TypedExpr):
     name: SchemaPath
-    type_: SchemaPath
+    type_: TypeName
 
     @property
     def precedence(self) -> _edgeql.Precedence:
@@ -175,7 +175,7 @@ class SetLiteral(AtomicExpr):
         /,
         *,
         items: Iterable[ExprCompatible],
-        type_: SchemaPath,
+        type_: TypeName,
     ) -> None:
         object.__setattr__(
             self,
@@ -239,7 +239,7 @@ class Op(TypedExpr):
         /,
         *,
         op: _edgeql.Token | str,
-        type_: SchemaPath,
+        type_: TypeName,
     ) -> None:
         super().__init__(type_=type_)
         if not isinstance(op, _edgeql.Token):
@@ -260,7 +260,7 @@ class PrefixOp(Op):
         *,
         expr: ExprCompatible,
         op: _edgeql.Token | str,
-        type_: SchemaPath,
+        type_: TypeName,
     ) -> None:
         object.__setattr__(self, "expr", edgeql_qb_expr(expr))
         super().__init__(op=op, type_=type_)
@@ -281,7 +281,7 @@ class CastOp(PrefixOp):
         self,
         *,
         expr: ExprCompatible,
-        type_: SchemaPath,
+        type_: TypeName,
     ) -> None:
         op = _edgeql.Token.RANGBRACKET
         super().__init__(expr=expr, op=op, type_=type_)
@@ -300,11 +300,11 @@ class CastOp(PrefixOp):
         return f"<{self.type.as_quoted_schema_name()}>{expr}"
 
 
-def empty_set(type_: SchemaPath) -> CastOp:
+def empty_set(type_: TypeName) -> CastOp:
     return CastOp(expr=SetLiteral(items=(), type_=type_), type_=type_)
 
 
-def empty_set_if_none(val: _T | None, type_: SchemaPath) -> _T | CastOp:
+def empty_set_if_none(val: _T | None, type_: TypeName) -> _T | CastOp:
     return empty_set(type_) if val is None else val
 
 
@@ -319,7 +319,7 @@ class BinaryOp(Op):
         lexpr: ExprCompatible,
         rexpr: ExprCompatible,
         op: _edgeql.Token | str,
-        type_: SchemaPath,
+        type_: TypeName,
     ) -> None:
         object.__setattr__(self, "lexpr", edgeql_qb_expr(lexpr))
         object.__setattr__(self, "rexpr", edgeql_qb_expr(rexpr))
@@ -337,7 +337,7 @@ class InfixOp(BinaryOp):
         lexpr: ExprCompatible,
         rexpr: ExprCompatible,
         op: _edgeql.Token | str,
-        type_: SchemaPath,
+        type_: TypeName,
     ) -> None:
         super().__init__(lexpr=lexpr, rexpr=rexpr, op=op, type_=type_)
 
@@ -406,7 +406,7 @@ class FuncCall(TypedExpr):
         fname: str,
         args: list[ExprCompatible] | None = None,
         kwargs: dict[str, ExprCompatible] | None = None,
-        type_: SchemaPath,
+        type_: TypeName,
     ) -> None:
         object.__setattr__(self, "fname", fname)
         if args is not None:
@@ -508,7 +508,7 @@ class OrderByElem(Expr):
         return (self.expr,)
 
     @property
-    def type(self) -> SchemaPath:
+    def type(self) -> TypeName:
         return self.expr.type
 
     @property
@@ -757,7 +757,7 @@ class ForStmt(IteratorExpr, Stmt):
         object.__setattr__(self, "var", var)
 
     @property
-    def type(self) -> SchemaPath:
+    def type(self) -> TypeName:
         return self.body.type
 
     def subnodes(self) -> Iterable[Node]:
@@ -786,7 +786,7 @@ class Splat(_strenum.StrEnum):
 @dataclass(kw_only=True, frozen=True)
 class ShapeElement(Node):
     name: str | Splat
-    origin: SchemaPath
+    origin: TypeName
     expr: Expr | None = None
 
     def subnodes(self) -> Iterable[Node]:
@@ -798,7 +798,7 @@ class ShapeElement(Node):
     @classmethod
     def splat(
         cls,
-        source: SchemaPath,
+        source: TypeName,
         *,
         kind: Splat = Splat.STAR,
     ) -> Self:
@@ -815,7 +815,7 @@ class Shape(Node):
     @classmethod
     def splat(
         cls,
-        source: SchemaPath,
+        source: TypeName,
         *,
         kind: Splat = Splat.STAR,
     ) -> Self:
@@ -873,7 +873,7 @@ class ShapeOp(IteratorExpr):
         return (self.iter_expr, self.shape)
 
     @property
-    def type(self) -> SchemaPath:
+    def type(self) -> TypeName:
         return self.iter_expr.type
 
     @property

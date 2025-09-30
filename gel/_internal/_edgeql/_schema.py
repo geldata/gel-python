@@ -11,6 +11,8 @@ import re
 import uuid
 
 from gel._internal._polyfills._strenum import StrEnum
+from gel._internal._schemapath import SchemaPath, TypeName
+
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -74,46 +76,46 @@ def _get_type_id(name: str, cls: str) -> uuid.UUID:
 
 def get_array_type_id_and_name(
     element: str,
-) -> tuple[uuid.UUID, str]:
+) -> tuple[uuid.UUID, TypeName]:
     type_id = _get_type_id(f"array<{_mangle_name(element)}>", "Array")
     type_name = f"array<{element}>"
-    return type_id, type_name
+    return type_id, SchemaPath(type_name)
 
 
 def get_range_type_id_and_name(
     element: str,
-) -> tuple[uuid.UUID, str]:
+) -> tuple[uuid.UUID, TypeName]:
     type_id = _get_type_id(f"range<{_mangle_name(element)}>", "Range")
     type_name = f"range<{element}>"
-    return type_id, type_name
+    return type_id, SchemaPath(type_name)
 
 
 def get_multirange_type_id_and_name(
     element: str,
-) -> tuple[uuid.UUID, str]:
+) -> tuple[uuid.UUID, TypeName]:
     type_id = _get_type_id(
         f"multirange<{_mangle_name(element)}>", "MultiRange"
     )
     type_name = f"multirange<{element}>"
-    return type_id, type_name
+    return type_id, SchemaPath(type_name)
 
 
 def get_tuple_type_id_and_name(
     elements: Iterable[str],
-) -> tuple[uuid.UUID, str]:
+) -> tuple[uuid.UUID, TypeName]:
     body = ", ".join(elements)
     type_id = _get_type_id(f"tuple<{_mangle_name(body)}>", "Tuple")
     type_name = f"tuple<{body}>"
-    return type_id, type_name
+    return type_id, SchemaPath(type_name)
 
 
 def get_named_tuple_type_id_and_name(
     elements: dict[str, str],
-) -> tuple[uuid.UUID, str]:
+) -> tuple[uuid.UUID, TypeName]:
     body = ", ".join(f"{n}:{t}" for n, t in elements.items())
     type_id = _get_type_id(f"tuple<{_mangle_name(body)}>", "Tuple")
     type_name = f"tuple<{body}>"
-    return type_id, type_name
+    return type_id, SchemaPath(type_name)
 
 
 __all__ = (

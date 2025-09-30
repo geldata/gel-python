@@ -10,7 +10,7 @@ import dataclasses
 if TYPE_CHECKING:
     import abc
     from gel._internal import _edgeql
-    from gel._internal._schemapath import SchemaPath
+    from gel._internal._schemapath import SchemaPath, TypeName
 
 
 @dataclasses.dataclass(frozen=True, kw_only=True)
@@ -33,7 +33,7 @@ class GelReflectionProto(Protocol):
 
 class GelSchemaMetadata:
     class __gel_reflection__:  # noqa: N801
-        name: ClassVar[SchemaPath]
+        name: ClassVar[TypeName]
 
     # Whether this class is a "canonical" type - that is, the primary
     # representation of a database type, not an internal __shape__ class,

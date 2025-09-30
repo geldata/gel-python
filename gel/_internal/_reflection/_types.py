@@ -574,7 +574,7 @@ class ArrayType(HomogeneousCollectionType):
 
     def get_id_and_name(self, element_type: Type) -> tuple[str, str]:
         id_, name = _edgeql.get_array_type_id_and_name(element_type.name)
-        return str(id_), name
+        return str(id_), name.as_schema_name()
 
 
 @struct
@@ -600,7 +600,7 @@ class RangeType(HomogeneousCollectionType):
 
     def get_id_and_name(self, element_type: Type) -> tuple[str, str]:
         id_, name = _edgeql.get_range_type_id_and_name(element_type.name)
-        return str(id_), name
+        return str(id_), name.as_schema_name()
 
 
 @struct
@@ -626,7 +626,7 @@ class MultiRangeType(HomogeneousCollectionType):
 
     def get_id_and_name(self, element_type: Type) -> tuple[str, str]:
         id_, name = _edgeql.get_multirange_type_id_and_name(element_type.name)
-        return str(id_), name
+        return str(id_), name.as_schema_name()
 
 
 @struct
@@ -665,7 +665,7 @@ class TupleType(_TupleType):
         id_, name = _edgeql.get_tuple_type_id_and_name(
             el.name for el in element_types
         )
-        return str(id_), name
+        return str(id_), name.as_schema_name()
 
 
 @struct
@@ -694,7 +694,7 @@ class NamedTupleType(_TupleType):
                 )
             }
         )
-        return str(id_), name
+        return str(id_), name.as_schema_name()
 
 
 def compare_type_generality(a: Type, b: Type, *, schema: Schema) -> int:

@@ -8,6 +8,7 @@ from __future__ import annotations
 from typing import SupportsIndex, TypeVar, overload
 from typing_extensions import Self, TypeAliasType
 from collections.abc import Sequence
+import dataclasses
 
 import functools
 import pathlib
@@ -142,6 +143,9 @@ class SchemaPath:
     def has_prefix(self, other: SchemaPath) -> bool:
         return self.parts[: len(other.parts)] == other.parts
 
+    def as_schema_name(self) -> str:
+        return _SEP.join(p for p in self.parts)
+
     def as_quoted_schema_name(self) -> str:
         return _SEP.join(_edgeql.quote_ident(p) for p in self.parts)
 
@@ -209,3 +213,33 @@ class _SchemaPathParents(Sequence[_T]):
 
     def __repr__(self) -> str:
         return f"<{type(self._path).__name__}.parents>"
+
+
+@dataclasses.dataclass(frozen=True)
+class ParametricTypeName:
+    type_: SchemaPath
+    args: list[TypeName]
+
+    def __str__(self) -> str:
+        return self.as_quoted_schema_name()
+
+    def as_schema_name(self) -> str:
+        return (
+            f"{self.type_.as_schema_name()}<"
+            f"{','.join(a.as_schema_name() for a in self.args)}"
+            f">"
+        )
+
+    def as_quoted_schema_name(self) -> str:
+        return (
+            f"{self.type_.as_quoted_schema_name()}<"
+            f"{','.join(a.as_quoted_schema_name() for a in self.args)}"
+            f">"
+        )
+
+    @property
+    def name(self) -> str:
+        raise NotImplementedError
+
+
+TypeName = TypeAliasType("TypeName", SchemaPath | ParametricTypeName)
