@@ -860,8 +860,8 @@ class UUIDImpl(uuid.UUID):
     ) -> None:
         if hex is not None and isinstance(hex, uuid.UUID):
             super().__init__(
-                int=hex.int,
-                is_safe=hex.is_safe,
+                int=hex.int,  # pyright: ignore[reportArgumentType]
+                is_safe=hex.is_safe,  # pyright: ignore[reportArgumentType]
             )
         else:
             super().__init__(
