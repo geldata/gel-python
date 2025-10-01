@@ -139,3 +139,93 @@ insert MultiRangeTest {
 insert EnumTest {name := 'red', color := Color.Red};
 insert EnumTest {name := 'green', color := Color.Green};
 insert EnumTest {name := 'blue', color := Color.Blue};
+
+# Poly data
+insert Person {
+    name := 'Alice',
+    game_id := 1,
+};
+insert Person {
+    name := 'Billie',
+    game_id := 2,
+    item := (
+        insert Bag {name := 'nice bag', game_id := 11}
+    ),
+};
+insert Person {
+    name := 'Cameron',
+    game_id := 3,
+    item := (
+        insert Box {
+            name := 'big box',
+            game_id := 11,
+            contents := {
+                # Same type, directly extending abstract Content
+                (insert Candy {name := 'cotton candy', game_id := 101}),
+                (insert Candy {name := 'candy corn', game_id := 102}),
+            }
+        }
+    ),
+};
+insert Person {
+    name := 'Dana',
+    game_id := 4,
+    item := (
+        insert Tin {
+            name := 'round tin',
+            game_id := 12,
+            contents := {
+                # Tin has to contain Chocolate
+                (insert Chocolate {
+                    name := 'milk', kind := 'bar', game_id := 3001
+                }),
+                (insert Chocolate {
+                    name := 'dark', kind := 'truffle', game_id := 3002
+                }),
+            }
+        }
+    ),
+};
+insert Person {
+    name := 'Elsa',
+    game_id := 5,
+    item := (
+        insert Box {
+            name := 'package',
+            game_id := 13,
+            contents := {
+                (insert Candy {name := 'lemon drop', game_id := 103}),
+                (insert Chocolate {
+                    name := 'almond', kind := 'piece', game_id := 3003
+                }),
+                (insert Gummy {
+                    name := 'blue bear', flavor := 'grape', game_id := 1001
+                }),
+                (insert GummyWorm {
+                    name := 'sour worm',
+                    game_id := 2002,
+                    flavor := 'raspberry',
+                    size := 2,
+                }),
+            }
+        }
+    ),
+};
+insert Person {
+    name := 'Zoe',
+    game_id := 6,
+    item := (
+        insert GiftBox {
+            name := 'fancy',
+            game_id := 14,
+            contents := {
+                (insert GummyWorm {
+                    name := 'sour worm',
+                    game_id := 2001,
+                    flavor := 'fruity',
+                    size := 10,
+                }),
+            }
+        }
+    ),
+};
