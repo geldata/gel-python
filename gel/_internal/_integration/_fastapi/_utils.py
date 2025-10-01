@@ -80,7 +80,9 @@ class Hook(Generic[Unpack[Ts]]):
             return self
         return self._get(instance)
 
-    def __set__(self, instance: ConfigSubject, value: Callable[..., Any]) -> None:
+    def __set__(
+        self, instance: ConfigSubject, value: Callable[..., Any]
+    ) -> None:
         self._get(instance)(value)
 
     def _get(self, instance: S) -> HookInstance[S, Unpack[Ts]]:
