@@ -102,8 +102,13 @@ class _BaseMultiProperty(_MultiPointer[_T_co, _BT_co]):
     ) -> pydantic_core.CoreSchema:
         if _typing_inspect.is_generic_alias(source_type):
             args = typing.get_args(source_type)
-            return core_schema.no_info_plain_validator_function(
-                functools.partial(cls._validate, generic_args=args),
+            return core_schema.json_or_python_schema(
+                json_schema=core_schema.list_schema(
+                    handler.generate_schema(args[0])
+                ),
+                python_schema=core_schema.no_info_plain_validator_function(
+                    functools.partial(cls._validate, generic_args=args),
+                ),
                 serialization=core_schema.plain_serializer_function_ser_schema(
                     list,
                 ),

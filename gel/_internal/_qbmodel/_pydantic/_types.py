@@ -68,8 +68,13 @@ class Array(_abstract.Array[_T]):
         source_type: Any,
         handler: pydantic.GetCoreSchemaHandler,
     ) -> pydantic_core.CoreSchema:
-        return core_schema.no_info_plain_validator_function(
-            cls._validate,
+        return core_schema.json_or_python_schema(
+            json_schema=core_schema.list_schema(
+                handler.generate_schema(cls.__element_type__)
+            ),
+            python_schema=core_schema.no_info_plain_validator_function(
+                cls._validate,
+            ),
             serialization=core_schema.plain_serializer_function_ser_schema(
                 list,
             ),
