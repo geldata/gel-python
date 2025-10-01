@@ -3961,7 +3961,7 @@ class TestModelGeneratorMain(tb.ModelTestCase):
         self.client.save(tpr)
 
         tpr.model_dump()
-        self.assertPydanticSerializes(tpr, test_pickle=False)
+        self.assertPydanticSerializes(tpr)
 
     def test_modelgen_save_reload_links_01(self):
         from models.orm import default
@@ -4908,9 +4908,8 @@ class TestModelGeneratorMain(tb.ModelTestCase):
             Range(dt.date(2025, 1, 6), dt.date(2025, 2, 17)),
         )
 
-        # FIXME: pickle is broken for ranges
-        self.assertPydanticSerializes(r, test_pickle=False)
-        self.assertPydanticSerializes(r2, test_pickle=False)
+        self.assertPydanticSerializes(r)
+        self.assertPydanticSerializes(r2)
 
     def test_modelgen_save_range_02(self):
         import datetime as dt
