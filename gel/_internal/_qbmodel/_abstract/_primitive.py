@@ -501,6 +501,9 @@ def get_py_type_from_gel_type(tp: type[GelType]) -> Any:
         case t if issubclass(t, PyTypeScalar):
             return t.__gel_py_type__
 
+        case t if issubclass(t, AnyEnum):
+            return t
+
         case t:
             raise NotImplementedError(
                 f"get_py_type({t.__name__}) is not implemented"
