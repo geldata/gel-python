@@ -309,8 +309,8 @@ class GelLifespan:
 
     def with_global(
         self, name: str
-    ) -> Callable[[Callable[P, T]], params.Depends]:
-        def decorator(func: Callable[P, T]) -> params.Depends:
+    ) -> Callable[[Callable[P, object]], params.Depends]:
+        def decorator(func: Callable[P, object]) -> params.Depends:
             def wrapper(
                 request: fastapi.Request, *args: P.args, **kwargs: P.kwargs
             ) -> Iterator[None]:

@@ -141,9 +141,9 @@ class TestFlake8(unittest.TestCase):
                 stderr=subprocess.PIPE,
                 cwd=project_root,
                 env=os.environ | {
-                    # Prevent pyright from checking and
-                    # warning about upgrades.
-                    "PYRIGHT_PYTHON_FORCE_VERSION": "latest",
+                    # Suppress pyright-python's complaints about new
+                    # pyright versions being available.
+                    "PYRIGHT_PYTHON_IGNORE_WARNINGS": "1",
                 }
             )
         except subprocess.CalledProcessError as ex:
