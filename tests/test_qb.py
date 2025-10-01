@@ -25,7 +25,7 @@ from gel._internal._testbase import _models as tb
 
 @tb.typecheck
 class TestQueryBuilder(tb.ModelTestCase):
-    SCHEMA = os.path.join(os.path.dirname(__file__), "dbsetup", "orm.gel")
+    SCHEMA = os.path.join(os.path.dirname(__file__), "dbsetup", "orm_qb.gel")
 
     SETUP = os.path.join(os.path.dirname(__file__), "dbsetup", "orm_qb.edgeql")
 
@@ -483,7 +483,7 @@ class TestQueryBuilder(tb.ModelTestCase):
 
     def test_qb_computed_01(self):
         """Replace an existing field with a computed literal value"""
-        from models.orm import default, std
+        from models.orm_qb import default, std
 
         res1 = self.client.get(
             default.User.select(
@@ -504,7 +504,7 @@ class TestQueryBuilder(tb.ModelTestCase):
         self.assertEqual(res2.nickname, "hello")
 
     def test_qb_computed_02(self):
-        from models.orm import default
+        from models.orm_qb import default
 
         res = self.client.get(
             default.User.select(
@@ -521,7 +521,7 @@ class TestQueryBuilder(tb.ModelTestCase):
         (We might do different syntax and need to change the test.)
     ''')
     def test_qb_computed_03(self):
-        from models.orm import default, std
+        from models.orm_qb import default, std
 
         res = self.client.get(
             default.User.select(
@@ -533,7 +533,7 @@ class TestQueryBuilder(tb.ModelTestCase):
         self.assertEqual(res.nickname, "Alice5")
 
     def test_qb_computed_04(self):
-        from models.orm import default, std
+        from models.orm_qb import default, std
 
         class MyUser(default.User):
             foo: std.str
@@ -548,7 +548,7 @@ class TestQueryBuilder(tb.ModelTestCase):
         self.assertEqual(res.foo, "hello")
 
     def test_qb_computed_05(self):
-        from models.orm import default
+        from models.orm_qb import default
 
         res = self.client.get(
             default.User.select(
@@ -569,7 +569,7 @@ class TestQueryBuilder(tb.ModelTestCase):
         self.assertEqual(res2.name_len, 15)
 
     def test_qb_computed_06(self):
-        from models.orm import default
+        from models.orm_qb import default
 
         res = self.client.get(
             default.User.select(
@@ -598,7 +598,7 @@ class TestQueryBuilder(tb.ModelTestCase):
         self.assertEqual(res3.name, "A!")
 
     def test_qb_order_01(self):
-        from models.orm import default
+        from models.orm_qb import default
 
         res = self.client.query(default.User.order_by(name=True))
         self.assertEqual(
@@ -607,7 +607,7 @@ class TestQueryBuilder(tb.ModelTestCase):
         )
 
     def test_qb_order_02(self):
-        from models.orm import default
+        from models.orm_qb import default
 
         res = self.client.get(
             default.GameSession.select(
@@ -625,7 +625,7 @@ class TestQueryBuilder(tb.ModelTestCase):
         )
 
     def test_qb_order_03(self):
-        from models.orm import default
+        from models.orm_qb import default
 
         res = self.client.get(
             default.GameSession.select(
@@ -642,7 +642,7 @@ class TestQueryBuilder(tb.ModelTestCase):
         )
 
     def test_qb_order_04(self):
-        from models.orm import default, std
+        from models.orm_qb import default, std
 
         res = self.client.query(
             default.UserGroup.select(
@@ -658,7 +658,7 @@ class TestQueryBuilder(tb.ModelTestCase):
         self.assertEqual(names, sorted(names))
 
     def test_qb_filter_01(self):
-        from models.orm import default, std
+        from models.orm_qb import default, std
 
         res = self.client.query(
             default.User.filter(lambda u: std.like(u.name, "%e%")).order_by(
@@ -685,7 +685,7 @@ class TestQueryBuilder(tb.ModelTestCase):
         self.assertEqual(list(res), list(res2))
 
     def test_qb_filter_02(self):
-        from models.orm import default
+        from models.orm_qb import default
 
         res = self.client.get(
             default.UserGroup.select("*", users=True).filter(name="red")
@@ -698,7 +698,7 @@ class TestQueryBuilder(tb.ModelTestCase):
         )
 
     def test_qb_filter_03(self):
-        from models.orm import default
+        from models.orm_qb import default
 
         res = self.client.get(
             default.UserGroup.select(
@@ -722,7 +722,7 @@ class TestQueryBuilder(tb.ModelTestCase):
         self.assertEqual(users, ["Alice", "Billie", "Cameron", "Dana"])
 
     def test_qb_filter_04(self):
-        from models.orm import default, std
+        from models.orm_qb import default, std
 
         res = self.client.get(
             default.UserGroup.select(
@@ -744,7 +744,7 @@ class TestQueryBuilder(tb.ModelTestCase):
         or add a **kwargs.
     ''')
     def test_qb_filter_05(self):
-        from models.orm import default, std
+        from models.orm_qb import default, std
 
         # Test filter by ad-hoc computed
         res = self.client.get(
@@ -761,7 +761,7 @@ class TestQueryBuilder(tb.ModelTestCase):
         We could make it work dynamically if we wanted, though.
     ''')
     def test_qb_filter_06(self):
-        from models.orm import default, std
+        from models.orm_qb import default, std
 
         # Test filter by compex expression
         res = self.client.get(
@@ -779,7 +779,7 @@ class TestQueryBuilder(tb.ModelTestCase):
         self.assertEqual(res.count, 2)
 
     def test_qb_filter_07(self):
-        from models.orm import default
+        from models.orm_qb import default
 
         # Test filter with nested property expression
         res = self.client.query(
@@ -794,7 +794,7 @@ class TestQueryBuilder(tb.ModelTestCase):
         self.assertEqual(res[1].body, "I'm Alice")
 
     def test_qb_filter_08(self):
-        from models.orm import default, std
+        from models.orm_qb import default, std
 
         # Test filter with nested property expression
         res = self.client.query(
@@ -808,7 +808,7 @@ class TestQueryBuilder(tb.ModelTestCase):
         self.assertEqual(post.body, "*magic stuff*")
 
     def test_qb_filter_09(self):
-        from models.orm import default, std
+        from models.orm_qb import default, std
 
         # Find GameSession with same players as the green group
         green = default.UserGroup.select(users=True).filter(name="green")
@@ -829,7 +829,7 @@ class TestQueryBuilder(tb.ModelTestCase):
         )
 
     def test_qb_filter_10(self):
-        from models.orm import default, std
+        from models.orm_qb import default, std
 
         # Find GameSession with same *number* of players as the green group
         green = default.UserGroup.select(users=True).filter(name="green")
@@ -847,7 +847,7 @@ class TestQueryBuilder(tb.ModelTestCase):
         )
 
     def test_qb_filter_11(self):
-        from models.orm import default
+        from models.orm_qb import default
 
         sess_client = self.client.with_globals(
             {"default::current_game_session_num": 123}
@@ -868,7 +868,7 @@ class TestQueryBuilder(tb.ModelTestCase):
 
     def test_qb_filter_12(self):
         # Same as above but with an extra .select() in the filter
-        from models.orm import default
+        from models.orm_qb import default
 
         sess_client = self.client.with_globals(
             {"default::current_game_session_num": 123}
@@ -888,7 +888,7 @@ class TestQueryBuilder(tb.ModelTestCase):
         self.assertEqual(len(res), 2)
 
     def test_qb_filter_13(self):
-        from models.orm import default, std
+        from models.orm_qb import default, std
 
         # Create a complex filter expression using some std functions and an
         # unrelated subquery
@@ -905,7 +905,7 @@ class TestQueryBuilder(tb.ModelTestCase):
         self.assertEqual(res.name, "green")
 
     def test_qb_link_property_01(self):
-        from models.orm import default
+        from models.orm_qb import default
 
         # Test fetching GameSession with players multi-link
         res = self.client.get(
@@ -923,7 +923,7 @@ class TestQueryBuilder(tb.ModelTestCase):
         )
 
     def test_qb_link_property_02(self):
-        from models.orm import default
+        from models.orm_qb import default
 
         # Test filtering players based on link property
         res = self.client.get(
@@ -938,7 +938,7 @@ class TestQueryBuilder(tb.ModelTestCase):
         self.assertEqual([u.name for u in res.players], ["Billie"])
 
     def test_qb_multiprop_01(self):
-        from models.orm import default
+        from models.orm_qb import default
 
         res = self.client.query(
             default.KitchenSink.select(
@@ -954,7 +954,7 @@ class TestQueryBuilder(tb.ModelTestCase):
         self.assertEqual(set(res[1].p_multi_str), {"brown", "fox"})
 
     def test_qb_multiprop_02(self):
-        from models.orm import default, std
+        from models.orm_qb import default, std
 
         res = self.client.get(
             default.KitchenSink.select(
@@ -966,7 +966,7 @@ class TestQueryBuilder(tb.ModelTestCase):
         self.assertEqual(set(res.p_multi_str), {"quick", "fox", "jumps"})
 
     def test_qb_multiprop_03(self):
-        from models.orm import default
+        from models.orm_qb import default
 
         res = self.client.get(
             default.KitchenSink.select(
@@ -983,7 +983,7 @@ class TestQueryBuilder(tb.ModelTestCase):
         We might want *some* way to do it.
     ''')
     def test_qb_multiprop_04(self):
-        from models.orm import default
+        from models.orm_qb import default
 
         res = self.client.get(
             default.KitchenSink.select(
@@ -1000,7 +1000,7 @@ class TestQueryBuilder(tb.ModelTestCase):
         We might want *some* way to do it.
     ''')
     def test_qb_multiprop_05(self):
-        from models.orm import default, std
+        from models.orm_qb import default, std
 
         res = self.client.get(
             default.KitchenSink.select(
@@ -1015,7 +1015,7 @@ class TestQueryBuilder(tb.ModelTestCase):
         self.assertEqual(set(res.p_multi_str), {"brown", "jumps"})
 
     def test_qb_limit_offset_01(self):
-        from models.orm import default, std
+        from models.orm_qb import default, std
 
         res = self.client.get(
             default.User.select(name=True)
@@ -1033,7 +1033,7 @@ class TestQueryBuilder(tb.ModelTestCase):
         )
 
     def test_qb_boolean_operator_error_01(self):
-        from models.orm import default
+        from models.orm_qb import default
 
         # Test that using 'and' operator raises TypeError
         with self.assertRaisesRegex(TypeError, "use std.and_"):
@@ -1081,7 +1081,7 @@ class TestQueryBuilder(tb.ModelTestCase):
             default.User.filter(lambda u: u.name is not None)  # type: ignore
 
     def test_qb_enum_01(self):
-        from models.orm import default
+        from models.orm_qb import default
 
         e = self.client.get(default.EnumTest.filter(color=default.Color.Red))
 
@@ -1089,7 +1089,7 @@ class TestQueryBuilder(tb.ModelTestCase):
         self.assertEqual(e.name, "red")
 
     def test_qb_for_01(self):
-        from models.orm import default, std
+        from models.orm_qb import default, std
 
         res = self.client.query(
             std.for_(
@@ -1143,18 +1143,218 @@ class TestQueryBuilder(tb.ModelTestCase):
         )
         self.assertEqual(len(res4), 1)
 
+    def test_qb_poly_01(self):
+        from models.orm_qb import default
+
+        p = self.client.get(
+            default.Person.select(
+                "*",
+                item=lambda p: p.item.select(
+                    "*",
+                    contents=lambda i: i.contents.select(
+                        "*",
+                    ).order_by(game_id=True),
+                )
+            ).filter(
+                game_id=1,
+            )
+        )
+
+        self.assertEqual(p.name, "Alice")
+        self.assertIsNone(p.item)
+
+    @tb.skip_typecheck
+    def test_qb_poly_02(self):
+        from models.orm_qb import default
+
+        p = self.client.get(
+            default.Person.select(
+                "*",
+                item=lambda p: p.item.select(
+                    "*",
+                    contents=lambda i: i.contents.select(
+                        "*",
+                    ).order_by(game_id=True),
+                )
+            ).filter(
+                game_id=2,
+            )
+        )
+
+        self.assertEqual(p.name, "Billie")
+        self.assertEqual(p.item.name, "nice bag")
+        self.assertEqual(p.item.contents, [])
+        self.assertIsInstance(p.item, default.Bag)
+
+    @tb.skip_typecheck
+    def test_qb_poly_03(self):
+        from models.orm_qb import default
+
+        p = self.client.get(
+            default.Person.select(
+                "*",
+                item=lambda p: p.item.select(
+                    "*",
+                    contents=lambda i: i.contents.select(
+                        "*",
+                    ).order_by(game_id=True),
+                )
+            ).filter(
+                game_id=3,
+            )
+        )
+
+        self.assertEqual(p.name, "Cameron")
+        self.assertEqual(p.item.name, "big box")
+        self.assertIsInstance(p.item, default.Box)
+
+        for c, (name, t) in zip(
+            p.item.contents,
+            [
+                ("cotton candy", default.Candy),
+                ("candy corn", default.Candy),
+            ], strict=False
+        ):
+            self.assertEqual(c.name, name)
+            self.assertIsInstance(c, t)
+
+    @tb.skip_typecheck
+    def test_qb_poly_04(self):
+        from models.orm_qb import default
+
+        p = self.client.get(
+            default.Person.select(
+                "*",
+                item=lambda p: p.item.select(
+                    "*",
+                    contents=lambda i: i.contents.select(
+                        "*",
+                    ).order_by(game_id=True),
+                )
+            ).filter(
+                game_id=4,
+            )
+        )
+
+        self.assertEqual(p.name, "Dana")
+        self.assertEqual(p.item.name, "round tin")
+        self.assertIsInstance(p.item, default.Tin)
+
+        for c, (name, t) in zip(
+            p.item.contents,
+            [
+                ("milk", default.Chocolate),
+                ("dark", default.Chocolate),
+            ], strict=False
+        ):
+            self.assertEqual(c.name, name)
+            self.assertIsInstance(c, t)
+
+    @tb.skip_typecheck
+    def test_qb_poly_05(self):
+        from models.orm_qb import default
+
+        p = self.client.get(
+            default.Person.select(
+                "*",
+                item=lambda p: p.item.select(
+                    "*",
+                    contents=lambda i: i.contents.select(
+                        "*",
+                    ).order_by(game_id=True),
+                )
+            ).filter(
+                game_id=5,
+            )
+        )
+
+        self.assertEqual(p.name, "Elsa")
+        self.assertEqual(p.item.name, "package")
+        self.assertIsInstance(p.item, default.Box)
+
+        for c, (name, t) in zip(
+            p.item.contents,
+            [
+                ("lemon drop", default.Candy),
+                ("blue bear", default.Gummy),
+                ("sour worm", default.GummyWorm),
+                ("almond", default.Chocolate),
+            ], strict=False
+        ):
+            self.assertEqual(c.name, name)
+            self.assertIsInstance(c, t)
+
+    @tb.skip_typecheck
+    def test_qb_poly_06(self):
+        from models.orm_qb import default
+
+        p = self.client.get(
+            default.Person.select(
+                "*",
+                item=lambda p: p.item.select(
+                    "*",
+                    contents=lambda i: i.contents.select(
+                        "*",
+                    ).order_by(game_id=True),
+                )
+            ).filter(
+                game_id=6,
+            )
+        )
+
+        self.assertEqual(p.name, "Zoe")
+        self.assertEqual(p.item.name, "fancy")
+        self.assertIsInstance(p.item, default.GiftBox)
+
+        for c, (name, t) in zip(
+            p.item.contents,
+            [
+                ("sour worm", default.GummyWorm),
+            ], strict=False
+        ):
+            self.assertEqual(c.name, name)
+            self.assertIsInstance(c, t)
+
+    def test_qb_poly_07(self):
+        from models.orm_qb import default
+
+        tin = self.client.get(
+            default.Tin.select(
+                "*",
+                contents=lambda i: i.contents.select(
+                    "*",
+                ).order_by(game_id=True),
+            ).filter(
+                game_id=12,
+            )
+        )
+
+        self.assertEqual(tin.name, "round tin")
+        self.assertIsInstance(tin, default.Tin)
+
+        for c, (name, kind) in zip(
+            tin.contents,
+            [
+                ("milk", "bar"),
+                ("dark", "truffle"),
+            ], strict=False
+        ):
+            self.assertEqual(c.name, name)
+            self.assertEqual(c.kind, kind)
+            self.assertIsInstance(c, default.Chocolate)
+
 
 class TestQueryBuilderModify(tb.ModelTestCase):
     """This test suite is for data manipulation using QB."""
 
-    SCHEMA = os.path.join(os.path.dirname(__file__), "dbsetup", "orm.gel")
+    SCHEMA = os.path.join(os.path.dirname(__file__), "dbsetup", "orm_qb.gel")
 
     SETUP = os.path.join(os.path.dirname(__file__), "dbsetup", "orm_qb.edgeql")
 
     ISOLATED_TEST_BRANCHES = True
 
     def test_qb_update_01(self):
-        from models.orm import default
+        from models.orm_qb import default
 
         self.client.query(
             default.User.filter(name="Alice").update(
@@ -1168,7 +1368,7 @@ class TestQueryBuilderModify(tb.ModelTestCase):
         self.assertEqual(res.nickname, "singer")
 
     def test_qb_update_02(self):
-        from models.orm import default, std
+        from models.orm_qb import default, std
 
         self.client.query(
             default.UserGroup.filter(name="blue").update(
@@ -1185,7 +1385,7 @@ class TestQueryBuilderModify(tb.ModelTestCase):
         self.assertEqual({u.name for u in res.users}, {"Zoe", "Dana"})
 
     def test_qb_update_03(self):
-        from models.orm import default, std
+        from models.orm_qb import default, std
 
         # Combine update and select of the updated object
         res = self.client.get(
@@ -1204,7 +1404,7 @@ class TestQueryBuilderModify(tb.ModelTestCase):
     # support callbacks, though runtime does.
     @tb.skip_typecheck
     def test_qb_update_04(self):
-        from models.orm import default, std
+        from models.orm_qb import default, std
 
         self.client.query(
             default.UserGroup.filter(name="blue").update(
@@ -1253,7 +1453,7 @@ class TestQueryBuilderModify(tb.ModelTestCase):
         self.assertEqual({u.name for u in res2.users}, {"Zoe", "Alice"})
 
     def test_qb_delete_01(self):
-        from models.orm import default
+        from models.orm_qb import default
 
         before = self.client.query(
             default.Post.select(body=True).order_by(body=True)
@@ -1274,7 +1474,7 @@ class TestQueryBuilderModify(tb.ModelTestCase):
         )
 
     def test_qb_delete_02(self):
-        from models.orm import default
+        from models.orm_qb import default
 
         before = self.client.query(
             default.Post.select(body=True).order_by(body=True)
@@ -1297,7 +1497,7 @@ class TestQueryBuilderModify(tb.ModelTestCase):
         )
 
     def test_qb_delete_03(self):
-        from models.orm import default
+        from models.orm_qb import default
 
         # Delete posts by Alice and fetch the deleted stuff
         res = self.client.query(
@@ -1313,7 +1513,7 @@ class TestQueryBuilderModify(tb.ModelTestCase):
         self.assertEqual(res[1].author.name, "Alice")
 
     def test_qb_enum_edit_01(self):
-        from models.orm import default
+        from models.orm_qb import default
 
         e = self.client.get(
             default.EnumTest.filter(
@@ -1327,7 +1527,7 @@ class TestQueryBuilderModify(tb.ModelTestCase):
         self.assertEqual(e.name, "red")
 
     def test_qb_enum_edit_02(self):
-        from models.orm import default
+        from models.orm_qb import default
 
         e = self.client.get(
             default.EnumTest.filter(

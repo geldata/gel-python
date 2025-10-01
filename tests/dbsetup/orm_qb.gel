@@ -1,0 +1,578 @@
+using future simple_scoping;
+
+module default {
+
+abstract type Named {
+    required name: str;
+    name_len := len(.name);
+    nickname: str;
+    nickname_len := len(.nickname);
+}
+
+abstract type ExclusivelyNamed {
+    required name: str {
+        delegated constraint exclusive;
+    }
+}
+
+type UserGroup extending Named {
+    # many-to-many
+    multi link users: User;
+    mascot: str;
+}
+
+type GameSession {
+    required num: int64 {
+        constraint exclusive;
+    };
+    required public: bool {
+        default := false;
+    };
+    time_limit: int64 {
+        default := 60;
+    };
+    # one-to-many
+    multi link players: User {
+        constraint exclusive;
+        property is_tall_enough: bool;
+    };
+}
+
+global current_game_session_num: std::int64;
+single global CurrentGameSession := (
+    select
+        GameSession
+    filter
+        .num = global current_game_session_num
+);
+
+type User extending Named {
+    # test computed backlink
+    groups := .<users[is UserGroup];
+}
+
+type CustomUser extending User {
+    code: str;
+}
+
+type Post {
+    required body: str;
+    required link author: User;
+}
+
+module sub {
+    type TypeInSub {
+        post: default::Post;
+        subsub: default::sub::subsub::TypeInSubSub;
+        ntup: tuple<a: str, b: tuple<c: int64, d: str>>;
+    }
+
+    module subsub {
+        type TypeInSubSub;
+    }
+}
+
+module emptysub {
+}
+
+# Object with required multi link, no link props
+type Party extending ExclusivelyNamed {
+    required multi members: User;
+}
+
+# Object with required multi link, has link props
+type Raid extending ExclusivelyNamed {
+    required multi members: User {
+        role: str;
+        rank: int64;
+    };
+}
+
+# Object with multi link and several link props
+# Use abstract type base to avoid exclusive constraint inheritance.
+abstract type AbstractTeam extending ExclusivelyNamed {
+    overloaded name {
+        delegated constraint exclusive;
+    };
+    multi members: User {
+        role: str;
+        rank: int64;
+    };
+}
+
+type Team extending AbstractTeam;
+
+type ExtraTeam extending AbstractTeam {
+    # multi prop computed
+    multi property member_names := .members.name;
+}
+
+# Object with single required link with link props
+type Image {
+    required file: str;
+    required link author: User {
+        caption: str;
+        year: int64;
+    }
+}
+
+# Object with single optional link no link props
+type Loot extending ExclusivelyNamed {
+    link owner: User;
+}
+
+# Object with single optional link no link props
+type StackableLoot extending ExclusivelyNamed {
+    link owner: User {
+        count: int64;
+        bonus: bool;
+    }
+}
+
+# Object with optional link to self, no link props
+type LinearPath {
+    required label: str {
+        constraint exclusive;
+    }
+    next: LinearPath {
+        constraint exclusive;
+    }
+}
+
+# Object with optional link with link props
+type StepPath {
+    required label: str {
+        constraint exclusive;
+    }
+    next: LinearPath {
+        constraint exclusive;
+        steps: int64 {
+            default := 1
+        }
+    }
+}
+
+type KitchenSink {
+    required str: str;
+    required multi p_multi_str: str;
+    p_opt_str: str;
+    multi p_opt_multi_str: str;
+
+    required array: array<str>;
+    required multi p_multi_arr: array<str>;
+    p_opt_arr: array<str>;
+    multi p_opt_multi_arr: array<str>;
+
+    required p_arrtup: array<tuple<str>>;
+    required multi p_multi_arrtup: array<tuple<str>>;
+    p_opt_arrtup: array<tuple<str>>;
+    multi p_opt_multi_arrtup: array<tuple<str>>;
+
+    required p_tuparr: tuple<array<str>>;
+    required multi p_multi_tuparr: tuple<array<str>>;
+    p_opt_tuparr: tuple<array<str>>;
+    multi p_opt_multi_tuparr: tuple<array<str>>;
+}
+
+scalar type PositiveInt extending int64 {
+    constraint min_value(1);
+}
+
+type AssortedScalars {
+    required name: str;
+    date: cal::local_date;
+    ts: datetime;
+    lts: cal::local_datetime;
+    time: cal::local_time;
+    json: json;
+    bstr: bytes;
+
+    nested_mixed: array<tuple<array<int64>, json>>;
+
+    positive: PositiveInt;
+}
+
+type AllOptional {
+    # Don't add anything else to this type or alter
+    # it in any way.
+    field: str;
+    pointer: AllOptional;
+}
+
+type BaseLink {
+    required val: str;
+}
+
+type ImpossibleLink0 extending BaseLink {
+    # We need the BaseLink here so that we can create an im possible loop,
+    # eventually
+    required il1: BaseLink
+}
+
+type ImpossibleLink1 extending BaseLink {
+    required il0: ImpossibleLink0
+}
+
+type RangeTest {
+    required name: str;
+
+    int_range: range<int64>;
+    float_range: range<float64>;
+    date_range: range<cal::local_date>;
+    datetime_range: range<cal::local_datetime>;
+    tz_datetime_range: range<datetime>;
+}
+
+type MultiRangeTest {
+    required name: str;
+
+    int_mrange: multirange<int64>;
+    float_mrange: multirange<float64>;
+    date_mrange: multirange<cal::local_date>;
+}
+
+scalar type Color extending enum<
+    Red,
+    Orange,
+    Yellow,
+    Green,
+    Blue,
+    Indigo,
+    Violet,
+>;
+
+type EnumTest {
+    required name: str;
+    required color: Color;
+};
+
+type TestSingleLinks {
+    required link req_wprop_friend: User {
+        strength: int32;
+    }
+    comp_req_wprop_friend := .req_wprop_friend;
+
+    required link req_friend: User;
+    comp_req_friend := .req_friend;
+
+    link opt_friend: User;
+    comp_opt_friend := .opt_friend;
+
+    link opt_wprop_friend: User {
+        strength: int32;
+    };
+    comp_opt_wprop_friend := .opt_wprop_friend;
+}
+
+type TestSingleLinksReqOnly {
+    required link req_wprop_friend: User {
+        strength: int32;
+    }
+}
+type TestSingleLinksOptOnly {
+    link opt_wprop_friend: User {
+        strength: int32;
+    }
+}
+
+
+type TestPropRewrites extending ExclusivelyNamed {
+    required name_len: int64 {
+        # This rewrite will keep the name_len in sync with the name.
+        rewrite insert, update using (len(.name));
+    }
+    toggle: bool {
+        # This toggle will flip every time the record is saved. It can also
+        #be turned off by setting it to {}
+        rewrite insert, update using (not .toggle);
+    }
+}
+
+type TestLinkDefault extending ExclusivelyNamed {
+    link user: User {
+        default := (select User filter .name = "Alice" limit 1);
+    }
+}
+
+type TestLinkRewrite extending ExclusivelyNamed {
+    link user: User {
+        rewrite insert, update using (
+            # get the first user with a name >= the object's name
+            select User order by .name < __subject__.name then .name limit 1
+        );
+    }
+}
+
+type TestLinkTrigger extending ExclusivelyNamed {
+    link user: User;
+
+    # Copy the name as the user nickname
+    trigger set_default_user after insert, update for each do (
+        update __new__.user
+        set {
+            nickname := __new__.name
+        }
+    );
+}
+
+# Object with keyword links and props
+type `limit` {
+    `alter`: bool;
+    `like`: str;
+    `commit`: User;
+    multi `configure`: User {
+        `create`: bool;
+    }
+}
+
+abstract type GameObj {
+    required name: str;
+    required game_id: int64;
+}
+
+abstract type Container extending GameObj {
+    multi contents: Content;
+}
+
+abstract type Content extending GameObj;
+
+type Bag extending Container;
+
+type Box extending Container;
+
+type Tin extending Box {
+    overloaded multi contents: Chocolate;
+}
+
+type GiftBox extending Box;
+
+type Candy extending Content;
+
+type Chocolate extending Candy {
+    required kind: str;
+};
+
+type Gummy extending Candy {
+    required flavor: str;
+}
+
+type GummyWorm extending Gummy {
+    required size: int64;
+}
+
+type Person extending GameObj {
+    item: Container;
+}
+
+# Functions for testing overloads
+function add_numbers(a: int64, b: int64) -> int64 {
+    using (a + b)
+};
+
+function add_numbers(a: float64, b: float64) -> float64 {
+    using (a + b)
+};
+
+function add_numbers(a: str, b: str) -> str {
+    using (a ++ b)
+};
+
+# Function with optional parameters
+function format_user(name: str, prefix: optional str = "User") -> str {
+    using ((prefix ?? "User") ++ ": " ++ name)
+};
+
+function format_user(name: str, prefix: str, suffix: str) -> str {
+    using (prefix ++ ": " ++ name ++ " " ++ suffix)
+};
+
+# Function with different return types based on input
+function get_value(input: str) -> str {
+    using (input)
+};
+
+function get_value(input: int64) -> int64 {
+    using (input)
+};
+
+function get_value(input: User) -> str {
+    using (input.name)
+};
+
+# Function with array parameters
+function sum_array(values: array<int64>) -> int64 {
+    using (sum(array_unpack(values)))
+};
+
+function sum_array(values: array<float64>) -> float64 {
+    using (sum(array_unpack(values)))
+};
+
+# Function with tuple parameters
+function process_tuple(data: tuple<str, int64>) -> str {
+    using (data.0 ++ " - " ++ <str>data.1)
+};
+
+function process_tuple(data: tuple<str, str>) -> str {
+    using (data.0 ++ " | " ++ data.1)
+};
+
+# Function with complex overloads that might overlap
+function complex_func(x: int64) -> str {
+    using ("int: " ++ <str>x)
+};
+
+function complex_func(x: float64) -> str {
+    using ("float: " ++ <str>x)
+};
+
+function complex_func(x: str) -> str {
+    using ("str: " ++ x)
+};
+
+function complex_func(x: int64, y: str) -> str {
+    using ("int+str: " ++ <str>x ++ " " ++ y)
+};
+
+function complex_func(x: str, y: int64) -> str {
+    using ("str+int: " ++ x ++ " " ++ <str>y)
+};
+
+# Simple function with default parameters
+function simple_add(x: int64, y: int64 = 10) -> int64 {
+    using (x + y)
+};
+
+function simple_concat(text1: str, text2: str = "default") -> str {
+    using (text1 ++ " " ++ text2)
+};
+
+# Function with optional parameter
+function optional_multiply(x: int64, multiplier: optional float64 = <optional float64>{}) -> float64 {
+    using (<float64>x * (multiplier ?? 1.0))
+};
+
+# Function with array parameter and default
+function join_strings(texts: array<str>, separator: str = " ") -> str {
+    using (array_join(texts, separator))
+};
+
+# Function with multiple defaults
+function format_text(
+    text: str,
+    named only prefix: str = "",
+    named only suffix: str = "",
+    named only uppercase: bool = false
+) -> str {
+    using (
+        prefix ++
+        (str_upper(text) if uppercase else text) ++
+        suffix
+    )
+};
+
+# Variadic functions for testing
+function format_text_variadic(
+    s: str,
+    variadic a: int64,
+    named only suffix: str = '-suf',
+    named only prefix: str = 'pref-'
+) -> str {
+    using (
+        prefix ++ s ++ <str>sum(array_unpack(a)) ++ suffix
+    )
+};
+
+function sum_variadic(variadic values: int64) -> int64 {
+    using (sum(array_unpack(values)))
+};
+
+function join_variadic(separator: str, variadic items: str) -> str {
+    using (array_join(items, separator))
+};
+
+
+
+# Function with variadic and regular parameters
+function process_variadic(
+    base: str,
+    variadic numbers: int64,
+    named only multiplier: int64 = 1
+) -> str {
+    using (
+        base ++ ': ' ++ <str>(sum(array_unpack(numbers)) * multiplier)
+    )
+};
+
+# Function with named-only parameters (no variadic)
+function format_with_options(
+    text: str,
+    named only bold: bool = false,
+    named only italic: bool = false,
+    named only prefix: str = '',
+    named only suffix: str = ''
+) -> str {
+    using (
+        prefix ++
+        ('[BOLD]' if bold else '') ++
+        ('[ITALIC]' if italic else '') ++
+        text ++
+        ('[/ITALIC]' if italic else '') ++
+        ('[/BOLD]' if bold else '') ++
+        suffix
+    )
+};
+
+# Function with optional variadic parameters
+function optional_sum(
+    variadic addends: int64,
+    named only base: int64 = 0
+) -> int64 {
+    using (base + sum(array_unpack(addends)))
+};
+
+# Function combining multiple parameter types
+function complex_variadic(
+    required_param: str,
+    optional_param: str = 'default',
+    variadic var_params: int64,
+    named only flag: bool = false,
+    named only multiplier: float64 = 1.0
+) -> str {
+    using (
+        required_param ++
+        ' (' ++ optional_param ++ ')' ++
+        ' sum=' ++ <str>(<int64>(sum(array_unpack(var_params)) * multiplier)) ++
+        (' [FLAG]' if flag else '')
+    )
+};
+
+}
+
+module content {
+
+abstract type Content {
+  required title: str;
+}
+
+type Movie extending Content {
+  release_year: int64;
+}
+
+type TVShow extending Content {
+  num_seasons: int64;
+}
+
+type Account {
+  required username: str;
+  multi watchlist: Content;
+  favorite: Content;
+}
+
+type NoobAccount {
+  required username: str;
+  multi watchlist: Movie;
+  favorite: Movie;
+}
+
+}
