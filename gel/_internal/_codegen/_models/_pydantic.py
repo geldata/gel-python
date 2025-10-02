@@ -1302,7 +1302,7 @@ class BaseGeneratedModule:
         kwargs: dict[str, str] = {
             "name": repr(ptr.name),
             "type": target_type.schemapath.as_code(classes["SchemaPath"]),
-            "typexpr": repr(target_type.edgeql),
+            "typexpr": repr(target_type.type_name.as_quoted_schema_name()),
             "kind": f"{classes['PointerKind']}({str(ptr.kind)!r})",
             "cardinality": f"{classes['Cardinality']}({str(ptr.card)!r})",
             "computed": str(ptr.is_computed),

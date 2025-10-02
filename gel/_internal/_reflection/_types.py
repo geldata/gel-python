@@ -68,10 +68,6 @@ class Type(SchemaObject, abc.ABC):
         return self.name
 
     @functools.cached_property
-    def edgeql(self) -> str:
-        return self.type_name.as_quoted_schema_name()
-
-    @functools.cached_property
     def generic(self) -> bool:
         sp = self.schemapath
         return (
