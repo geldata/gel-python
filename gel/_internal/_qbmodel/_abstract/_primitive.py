@@ -269,6 +269,22 @@ class Array(  # type: ignore [misc]
     def __gel_get_py_type__(cls) -> type:
         return list
 
+    def __edgeql_literal__(self) -> _qb.Literal:
+        return _qb.Literal(
+            type_=type(self).__gel_reflection__.type_name,
+            val=self,
+        )
+
+    @classmethod
+    def cast(cls, expr: _qb.ExprCompatible) -> type[Array[_T]]:
+        return _qb.AnnotatedExpr(  # type: ignore [return-value]
+            cls,
+            _qb.CastOp(
+                expr=expr,
+                type_=cls.__gel_reflection__.type_name,
+            ),
+        )
+
 
 _Ts = TypeVarTuple("_Ts")
 
@@ -335,6 +351,22 @@ class Tuple(  # type: ignore[misc]
     def __gel_get_py_type__(cls) -> type:
         return tuple
 
+    def __edgeql_literal__(self) -> _qb.Literal:
+        return _qb.Literal(
+            type_=type(self).__gel_reflection__.type_name,
+            val=self,
+        )
+
+    @classmethod
+    def cast(cls, expr: _qb.ExprCompatible) -> type[Tuple[Unpack[_Ts]]]:
+        return _qb.AnnotatedExpr(  # type: ignore [return-value]
+            cls,
+            _qb.CastOp(
+                expr=expr,
+                type_=cls.__gel_reflection__.type_name,
+            ),
+        )
+
 
 if TYPE_CHECKING:
 
@@ -373,6 +405,16 @@ class Range(
             type_name = tname
 
         return __gel_reflection__
+
+    @classmethod
+    def cast(cls, expr: _qb.ExprCompatible) -> type[Range[_T]]:
+        return _qb.AnnotatedExpr(  # type: ignore [return-value]
+            cls,
+            _qb.CastOp(
+                expr=expr,
+                type_=cls.__gel_reflection__.type_name,
+            ),
+        )
 
 
 if TYPE_CHECKING:
