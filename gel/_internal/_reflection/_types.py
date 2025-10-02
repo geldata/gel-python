@@ -23,7 +23,7 @@ from collections import defaultdict
 
 from gel._internal import _dataclass_extras
 from gel._internal import _edgeql
-from gel._internal._schemapath import SchemaPath
+from gel._internal._schemapath import ParametricTypeName, TypeName
 
 from . import _query
 from ._base import struct, sobject, SchemaObject
@@ -69,7 +69,7 @@ class Type(SchemaObject, abc.ABC):
 
     @functools.cached_property
     def edgeql(self) -> str:
-        return self.schemapath.as_quoted_schema_name()
+        return self.type_name.as_quoted_schema_name()
 
     @functools.cached_property
     def generic(self) -> bool:
@@ -79,6 +79,10 @@ class Type(SchemaObject, abc.ABC):
             and sp.parents[0].name == "std"
             and sp.name.startswith("any")
         )
+
+    @functools.cached_property
+    def type_name(self) -> TypeName:
+        return self.schemapath
 
     def assignable_from(
         self,
@@ -181,10 +185,6 @@ class InheritingType(Type):
     final: bool
     bases: tuple[TypeRef, ...]
     ancestors: tuple[TypeRef, ...]
-
-    @functools.cached_property
-    def edgeql(self) -> str:
-        return self.schemapath.as_quoted_schema_name()
 
     def _assignable_from(
         self,
@@ -328,14 +328,6 @@ class CollectionType(Type):
     def __post_init__(self) -> None:
         object.__setattr__(self, "_mutable_cached", None)
 
-    @functools.cached_property
-    def edgeql(self) -> str:
-        return str(self.schemapath)
-
-    @functools.cached_property
-    def schemapath(self) -> SchemaPath:
-        return SchemaPath.from_segments(self.name)
-
 
 @struct
 class HomogeneousCollectionType(CollectionType):
@@ -360,6 +352,15 @@ class HomogeneousCollectionType(CollectionType):
             return self.element_type
         else:
             return schema[self._element_type_id]
+
+    @functools.cached_property
+    def type_name(self) -> TypeName:
+        if self.element_type is None:
+            return self.schemapath
+        else:
+            return ParametricTypeName(
+                self.schemapath, [self.element_type.type_name]
+            )
 
     @functools.cached_property
     def _element_type_id(self) -> str:
@@ -456,6 +457,19 @@ class HeterogeneousCollectionType(CollectionType):
             return self.element_types
         else:
             return tuple(schema[el_tid] for el_tid in self._element_type_ids)
+
+    @functools.cached_property
+    def type_name(self) -> TypeName:
+        if self.element_types is None:
+            return self.schemapath
+        else:
+            return ParametricTypeName(
+                self.schemapath,
+                [
+                    element_type.type_name
+                    for element_type in self.element_types
+                ],
+            )
 
     @functools.cached_property
     def _element_type_ids(self) -> list[str]:
@@ -573,8 +587,8 @@ class ArrayType(HomogeneousCollectionType):
         return self.array_element_id
 
     def get_id_and_name(self, element_type: Type) -> tuple[str, str]:
-        id_, name = _edgeql.get_array_type_id_and_name(element_type.name)
-        return str(id_), name.as_schema_name()
+        id_, _ = _edgeql.get_array_type_id_and_name(element_type.type_name)
+        return str(id_), "std::array"
 
 
 @struct
@@ -599,8 +613,8 @@ class RangeType(HomogeneousCollectionType):
         return self.range_element_id
 
     def get_id_and_name(self, element_type: Type) -> tuple[str, str]:
-        id_, name = _edgeql.get_range_type_id_and_name(element_type.name)
-        return str(id_), name.as_schema_name()
+        id_, _ = _edgeql.get_range_type_id_and_name(element_type.type_name)
+        return str(id_), "std::range"
 
 
 @struct
@@ -625,8 +639,10 @@ class MultiRangeType(HomogeneousCollectionType):
         return self.multirange_element_id
 
     def get_id_and_name(self, element_type: Type) -> tuple[str, str]:
-        id_, name = _edgeql.get_multirange_type_id_and_name(element_type.name)
-        return str(id_), name.as_schema_name()
+        id_, _ = _edgeql.get_multirange_type_id_and_name(
+            element_type.type_name
+        )
+        return str(id_), "std::multirange"
 
 
 @struct
@@ -662,10 +678,10 @@ class TupleType(_TupleType):
     def get_id_and_name(
         self, element_types: tuple[Type, ...]
     ) -> tuple[str, str]:
-        id_, name = _edgeql.get_tuple_type_id_and_name(
-            el.name for el in element_types
+        id_, _ = _edgeql.get_tuple_type_id_and_name(
+            [el.type_name for el in element_types]
         )
-        return str(id_), name.as_schema_name()
+        return str(id_), "std::tuple"
 
 
 @struct
@@ -686,15 +702,15 @@ class NamedTupleType(_TupleType):
     def get_id_and_name(
         self, element_types: tuple[Type, ...]
     ) -> tuple[str, str]:
-        id_, name = _edgeql.get_named_tuple_type_id_and_name(
+        id_, _ = _edgeql.get_named_tuple_type_id_and_name(
             {
-                el.name: el_type.name
+                el.name: el_type.type_name
                 for el, el_type in zip(
                     self.tuple_elements, element_types, strict=True
                 )
             }
         )
-        return str(id_), name.as_schema_name()
+        return str(id_), "std::tuple"
 
 
 def compare_type_generality(a: Type, b: Type, *, schema: Schema) -> int:
