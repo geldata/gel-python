@@ -180,7 +180,7 @@ class ModelFieldDescriptor(_qb.AbstractFieldDescriptor):
                 ptr = owner.__gel_reflection__.pointers[self.__gel_name__]
             except KeyError:
                 # This is a user-defined ad-hoc computed pointer
-                type_ = t.__gel_reflection__.name
+                type_ = t.__gel_reflection__.type_name
             else:
                 type_ = ptr.type
             metadata = _qb.Path(

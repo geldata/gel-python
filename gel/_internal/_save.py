@@ -512,7 +512,7 @@ def get_linked_new_objects(obj: GelModel) -> Iterable[GelModel]:
 
 
 def obj_to_name_ql(obj: GelModel) -> str:
-    return type(obj).__gel_reflection__.name.as_quoted_schema_name()
+    return type(obj).__gel_reflection__.type_name.as_quoted_schema_name()
 
 
 def shift_dict_list(inp: dict[str, list[T]]) -> dict[str, T]:
@@ -1476,7 +1476,9 @@ class SaveExecutor:
                 for obj_id, link_ids in obj_links_all.items()
             ]
 
-            tp_ql_name = tp.__gel_reflection__.name.as_quoted_schema_name()
+            tp_ql_name = (
+                tp.__gel_reflection__.type_name.as_quoted_schema_name()
+            )
 
             query = f"""
                 with
@@ -1545,7 +1547,10 @@ class SaveExecutor:
         # Queries must be independent of each other within the same
         # ChangeBatch, so we can sort them to group queries.
         compiled.sort(
-            key=lambda x: (x[0].__gel_reflection__.name, x[1].single_query)
+            key=lambda x: (
+                x[0].__gel_reflection__.type_name,
+                x[1].single_query,
+            )
         )
 
         icomp = iter(compiled)

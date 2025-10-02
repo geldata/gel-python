@@ -11,7 +11,6 @@ from typing_extensions import (
 
 
 from gel._internal import _qb
-from gel._internal._schemapath import SchemaPath
 
 from ._base import GelType
 
@@ -22,11 +21,10 @@ _T = TypeVar("_T", bound=GelType)
 class Global(_qb.GelSchemaMetadata):
     @classmethod
     def global_(cls, tp: type[_T]) -> type[_T]:
-        assert isinstance(cls.__gel_reflection__.name, SchemaPath)
         return _qb.AnnotatedGlobal(  # type: ignore [return-value]
             tp,
             _qb.Global(
                 name=cls.__gel_reflection__.name,
-                type_=tp.__gel_reflection__.name,
+                type_=tp.__gel_reflection__.type_name,
             ),
         )

@@ -149,9 +149,13 @@ class SchemaPath:
     def as_quoted_schema_name(self) -> str:
         return _SEP.join(_edgeql.quote_ident(p) for p in self.parts)
 
-    def as_code(self, clsname: str = "SchemaPath") -> str:
+    def as_python_code(
+        self,
+        schemapath_clsname: str = "SchemaPath",
+        parametrictype_clsname: str = "ParametricTypeName",
+    ) -> str:
         parts = ", ".join(repr(p) for p in self.parts)
-        return f"{clsname}.from_segments({parts})"
+        return f"{schemapath_clsname}.from_segments({parts})"
 
     def as_pathlib_path(self) -> pathlib.Path:
         return pathlib.Path(*self.parts)
@@ -236,6 +240,20 @@ class ParametricTypeName:
             f"{','.join(a.as_quoted_schema_name() for a in self.args)}"
             f">"
         )
+
+    def as_python_code(
+        self,
+        schemapath_clsname: str = "SchemaPath",
+        parametrictype_clsname: str = "ParametricTypeName",
+    ) -> str:
+        type_code = self.type_.as_python_code(
+            schemapath_clsname, parametrictype_clsname
+        )
+        args_code = ', '.join(
+            a.as_python_code(schemapath_clsname, parametrictype_clsname)
+            for a in self.args
+        )
+        return f"{parametrictype_clsname}({type_code}, [{args_code}])"
 
     @property
     def name(self) -> str:

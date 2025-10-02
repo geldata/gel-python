@@ -33,7 +33,7 @@ class GelReflectionProto(Protocol):
 
 class GelSchemaMetadata:
     class __gel_reflection__:  # noqa: N801
-        name: ClassVar[TypeName]
+        name: ClassVar[SchemaPath]
 
     # Whether this class is a "canonical" type - that is, the primary
     # representation of a database type, not an internal __shape__ class,
@@ -47,7 +47,8 @@ class GelSourceMetadata(GelSchemaMetadata):
 
 
 class GelTypeMetadata(GelSchemaMetadata):
-    pass
+    class __gel_reflection__(GelSchemaMetadata.__gel_reflection__):  # noqa: N801
+        type_name: ClassVar[TypeName]
 
 
 if TYPE_CHECKING:

@@ -929,7 +929,7 @@ def get_object_type_splat(cls: type[GelTypeMetadata]) -> Shape:
     shape = _type_splat_cache.get(cls)
     if shape is None:
         reflection = cls.__gel_reflection__
-        shape = Shape.splat(source=reflection.name)
+        shape = Shape.splat(source=reflection.type_name)
         _type_splat_cache[cls] = shape
     return shape
 

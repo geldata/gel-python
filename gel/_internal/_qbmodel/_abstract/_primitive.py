@@ -156,7 +156,7 @@ class AnyEnum(GelScalarType, StrEnum, metaclass=AnyEnumMeta):
     def __edgeql_literal__(self) -> _qb.Literal | _qb.CastOp:
         return _qb.Literal(
             val=str(self),
-            type_=type(self).__gel_reflection__.name,
+            type_=type(self).__gel_reflection__.type_name,
         )
 
 
@@ -232,12 +232,13 @@ class Array(  # type: ignore [misc]
     @classmethod
     def __gel_reflection__(cls) -> type[GelPrimitiveType.__gel_reflection__]:  # pyright: ignore [reportIncompatibleVariableOverride]
         tid, tname = _edgeql.get_array_type_id_and_name(
-            cls.__element_type__.__gel_reflection__.name
+            cls.__element_type__.__gel_reflection__.type_name
         )
 
         class __gel_reflection__(GelPrimitiveType.__gel_reflection__):  # noqa: N801
             id = tid
-            name = tname
+            name = SchemaPath.from_segments("std", "array")
+            type_name = tname
 
         return __gel_reflection__
 
@@ -320,12 +321,13 @@ class Tuple(  # type: ignore[misc]
     @classmethod
     def __gel_reflection__(cls) -> type[GelPrimitiveType.__gel_reflection__]:  # pyright: ignore [reportIncompatibleVariableOverride]
         tid, tname = _edgeql.get_tuple_type_id_and_name(
-            [el.__gel_reflection__.name for el in cls.__element_types__]
+            [el.__gel_reflection__.type_name for el in cls.__element_types__]
         )
 
         class __gel_reflection__(GelPrimitiveType.__gel_reflection__):  # noqa: N801
             id = tid
-            name = tname
+            name = SchemaPath.from_segments("std", "tuple")
+            type_name = tname
 
         return __gel_reflection__
 
@@ -362,12 +364,13 @@ class Range(
     @classmethod
     def __gel_reflection__(cls) -> type[GelPrimitiveType.__gel_reflection__]:  # pyright: ignore [reportIncompatibleVariableOverride]
         tid, tname = _edgeql.get_range_type_id_and_name(
-            cls.__element_type__.__gel_reflection__.name
+            cls.__element_type__.__gel_reflection__.type_name
         )
 
         class __gel_reflection__(GelPrimitiveType.__gel_reflection__):  # noqa: N801
             id = tid
-            name = tname
+            name = SchemaPath.from_segments("std", "range")
+            type_name = tname
 
         return __gel_reflection__
 
@@ -793,7 +796,7 @@ def get_literal_for_scalar(
     else:
         return _qb.CastOp(
             expr=_qb.StringLiteral(val=str(v)),
-            type_=t.__gel_reflection__.name,
+            type_=t.__gel_reflection__.type_name,
         )
 
 
