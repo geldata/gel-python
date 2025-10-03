@@ -442,12 +442,12 @@ class HeterogeneousCollectionType(CollectionType):
         object.__setattr__(self, "_mutable_cached", mut)  # noqa: PLC2801
         return mut
 
-    def get_id_and_name(
+    def get_id(
         self,
         element_types: tuple[Type, ...],
         *,
         schema: Mapping[str, Type],
-    ) -> tuple[str, str]:
+    ) -> str:
         cls = type(self)
         raise NotImplementedError(f"{cls.__qualname__}.get_id_and_name()")
 
@@ -506,7 +506,7 @@ class HeterogeneousCollectionType(CollectionType):
                 element_types.append(element_type)
 
         element_types_tup = tuple(element_types)
-        id_, _ = self.get_id_and_name(element_types_tup, schema=schema)
+        id_ = self.get_id(element_types_tup, schema=schema)
         return dataclasses.replace(
             self,
             id=id_,
@@ -696,16 +696,16 @@ class TupleType(_TupleType):
     def kind(self) -> Literal[TypeKind.Tuple]:
         return TypeKind.Tuple
 
-    def get_id_and_name(
+    def get_id(
         self,
         element_types: tuple[Type, ...],
         *,
         schema: Mapping[str, Type],
-    ) -> tuple[str, str]:
+    ) -> str:
         id_, _ = _edgeql.get_tuple_type_id_and_name(
             [el.get_type_name(schema) for el in element_types]
         )
-        return str(id_), "std::tuple"
+        return str(id_)
 
 
 @struct
@@ -725,12 +725,12 @@ class NamedTupleType(_TupleType):
     def kind(self) -> Literal[TypeKind.NamedTuple]:
         return TypeKind.NamedTuple
 
-    def get_id_and_name(
+    def get_id(
         self,
         element_types: tuple[Type, ...],
         *,
         schema: Mapping[str, Type],
-    ) -> tuple[str, str]:
+    ) -> str:
         id_, _ = _edgeql.get_named_tuple_type_id_and_name(
             {
                 el.name: el_type.get_type_name(schema)
@@ -739,7 +739,7 @@ class NamedTupleType(_TupleType):
                 )
             }
         )
-        return str(id_), "std::tuple"
+        return str(id_)
 
 
 def compare_type_generality(a: Type, b: Type, *, schema: Schema) -> int:
