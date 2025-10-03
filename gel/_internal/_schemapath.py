@@ -222,24 +222,39 @@ class _SchemaPathParents(Sequence[_T]):
 @dataclasses.dataclass(frozen=True)
 class ParametricTypeName:
     type_: SchemaPath
-    args: list[TypeName]
+    args: list[TypeName] | dict[str, TypeName]
 
     def __str__(self) -> str:
         return self.as_schema_name()
 
     def as_schema_name(self) -> str:
-        return (
-            f"{self.type_.as_schema_name()}<"
-            f"{','.join(a.as_schema_name() for a in self.args)}"
-            f">"
-        )
+        if isinstance(self.args, list):
+            return (
+                f"{self.type_.as_schema_name()}<"
+                f"{','.join(a.as_schema_name() for a in self.args)}"
+                f">"
+            )
+
+        else:
+            args_names = ",".join(
+                f"{n}:{a.as_schema_name()}" for n, a in self.args.items()
+            )
+            return f"{self.type_.as_schema_name()}<{args_names}>"
 
     def as_quoted_schema_name(self) -> str:
-        return (
-            f"{self.type_.as_quoted_schema_name()}<"
-            f"{','.join(a.as_quoted_schema_name() for a in self.args)}"
-            f">"
-        )
+        if isinstance(self.args, list):
+            return (
+                f"{self.type_.as_quoted_schema_name()}<"
+                f"{','.join(a.as_quoted_schema_name() for a in self.args)}"
+                f">"
+            )
+
+        else:
+            args_names = ",".join(
+                f"{n}:{a.as_quoted_schema_name()}"
+                for n, a in self.args.items()
+            )
+            return f"{self.type_.as_schema_name()}<{args_names}>"
 
     def as_python_code(
         self,
@@ -249,11 +264,25 @@ class ParametricTypeName:
         type_code = self.type_.as_python_code(
             schemapath_clsname, parametrictype_clsname
         )
-        args_code = ', '.join(
-            a.as_python_code(schemapath_clsname, parametrictype_clsname)
-            for a in self.args
-        )
-        return f"{parametrictype_clsname}({type_code}, [{args_code}])"
+        if isinstance(self.args, list):
+            args_code = ', '.join(
+                a.as_python_code(schemapath_clsname, parametrictype_clsname)
+                for a in self.args
+            )
+            return f"{parametrictype_clsname}({type_code}, [{args_code}])"
+
+        else:
+            args_code = ', '.join(
+                (
+                    f"'{n}': "
+                    + a.as_python_code(
+                        schemapath_clsname,
+                        parametrictype_clsname,
+                    )
+                )
+                for n, a in self.args.items()
+            )
+            return f"{parametrictype_clsname}({type_code}, {{{args_code}}})"
 
     @property
     def name(self) -> str:

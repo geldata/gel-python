@@ -120,8 +120,8 @@ def get_named_tuple_type_id_and_name(
 ) -> tuple[uuid.UUID, TypeName]:
     body = ", ".join(f"{n}:{t.as_schema_name()}" for n, t in elements.items())
     type_id = _get_type_id(f"tuple<{_mangle_name(body)}>", "Tuple")
-    type_name = f"tuple<{body}>"
-    return type_id, SchemaPath(type_name)
+    type_name = ParametricTypeName(SchemaPath("std", "tuple"), elements)
+    return type_id, type_name
 
 
 __all__ = (

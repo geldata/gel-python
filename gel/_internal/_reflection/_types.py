@@ -741,6 +741,15 @@ class NamedTupleType(_TupleType):
         )
         return str(id_)
 
+    def get_type_name(self, schema: Schema) -> TypeName:
+        return ParametricTypeName(
+            self.schemapath,
+            {
+                element.name: schema[element.type_id].get_type_name(schema)
+                for element in self.tuple_elements
+            },
+        )
+
 
 def compare_type_generality(a: Type, b: Type, *, schema: Schema) -> int:
     """Return 1 if a is more general than b, -1 if a is more specific
