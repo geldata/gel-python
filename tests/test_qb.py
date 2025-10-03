@@ -1163,7 +1163,6 @@ class TestQueryBuilder(tb.ModelTestCase):
         self.assertEqual(p.name, "Alice")
         self.assertIsNone(p.item)
 
-    @tb.skip_typecheck
     def test_qb_poly_02(self):
         from models.orm_qb import default
 
@@ -1182,11 +1181,11 @@ class TestQueryBuilder(tb.ModelTestCase):
         )
 
         self.assertEqual(p.name, "Billie")
+        assert p.item
         self.assertEqual(p.item.name, "nice bag")
         self.assertEqual(p.item.contents, [])
         self.assertIsInstance(p.item, default.Bag)
 
-    @tb.skip_typecheck
     def test_qb_poly_03(self):
         from models.orm_qb import default
 
@@ -1205,6 +1204,7 @@ class TestQueryBuilder(tb.ModelTestCase):
         )
 
         self.assertEqual(p.name, "Cameron")
+        assert p.item
         self.assertEqual(p.item.name, "big box")
         self.assertIsInstance(p.item, default.Box)
 
@@ -1218,7 +1218,6 @@ class TestQueryBuilder(tb.ModelTestCase):
             self.assertEqual(c.name, name)
             self.assertIsInstance(c, t)
 
-    @tb.skip_typecheck
     def test_qb_poly_04(self):
         from models.orm_qb import default
 
@@ -1237,6 +1236,7 @@ class TestQueryBuilder(tb.ModelTestCase):
         )
 
         self.assertEqual(p.name, "Dana")
+        assert p.item
         self.assertEqual(p.item.name, "round tin")
         self.assertIsInstance(p.item, default.Tin)
 
@@ -1250,7 +1250,6 @@ class TestQueryBuilder(tb.ModelTestCase):
             self.assertEqual(c.name, name)
             self.assertIsInstance(c, t)
 
-    @tb.skip_typecheck
     def test_qb_poly_05(self):
         from models.orm_qb import default
 
@@ -1269,6 +1268,7 @@ class TestQueryBuilder(tb.ModelTestCase):
         )
 
         self.assertEqual(p.name, "Elsa")
+        assert p.item
         self.assertEqual(p.item.name, "package")
         self.assertIsInstance(p.item, default.Box)
 
@@ -1284,7 +1284,6 @@ class TestQueryBuilder(tb.ModelTestCase):
             self.assertEqual(c.name, name)
             self.assertIsInstance(c, t)
 
-    @tb.skip_typecheck
     def test_qb_poly_06(self):
         from models.orm_qb import default
 
@@ -1303,6 +1302,7 @@ class TestQueryBuilder(tb.ModelTestCase):
         )
 
         self.assertEqual(p.name, "Zoe")
+        assert p.item
         self.assertEqual(p.item.name, "fancy")
         self.assertIsInstance(p.item, default.GiftBox)
 
