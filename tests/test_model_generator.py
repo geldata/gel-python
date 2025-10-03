@@ -1044,6 +1044,7 @@ class TestModelGeneratorMain(tb.ModelTestCase):
                 p_tuparr=True,
             ).limit(1)
         )
+        self.assertPydanticSerializes(sl)
 
         sl2 = repickle(sl)
         self.assertEqual(sl.model_dump(), sl2.model_dump())

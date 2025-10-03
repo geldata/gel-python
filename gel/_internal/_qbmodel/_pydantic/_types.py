@@ -48,7 +48,7 @@ class Array(_abstract.Array[_T]):
     def _validate(
         cls,
         value: Any,
-    ) -> _tracked_list.DowncastingTrackedList[_T, _T]:  # XXX
+    ) -> _tracked_list.TrackedList[_T]:
         tp = cls.__gel_resolve_dlist__()
         if isinstance(value, tp):
             return value
@@ -58,9 +58,9 @@ class Array(_abstract.Array[_T]):
     @classmethod
     def __gel_resolve_dlist__(
         cls,
-    ) -> type[_tracked_list.DowncastingTrackedList[_T, _T]]:  # XXX
+    ) -> type[_tracked_list.TrackedList[_T]]:
         down = _abstract.get_py_type_from_gel_type(cls.__element_type__)
-        return _tracked_list.DowncastingTrackedList[cls.__element_type__, down]  # type: ignore [name-defined, valid-type]
+        return _tracked_list.TrackedList[down]  # type: ignore [valid-type]
 
     @classmethod
     def __get_pydantic_core_schema__(
@@ -68,10 +68,18 @@ class Array(_abstract.Array[_T]):
         source_type: Any,
         handler: pydantic.GetCoreSchemaHandler,
     ) -> pydantic_core.CoreSchema:
-        return core_schema.no_info_plain_validator_function(
-            cls._validate,
+        subschema = handler.generate_schema(cls.__element_type__)
+        listschema = core_schema.list_schema(subschema)
+        return core_schema.json_or_python_schema(
+            json_schema=listschema,
+            python_schema=core_schema.no_info_plain_validator_function(
+                cls._validate,
+            ),
+            # We need to do a cast to list first, since we used
+            # TrackedList underneath instead of an actual Array...
             serialization=core_schema.plain_serializer_function_ser_schema(
                 list,
+                return_schema=listschema,
             ),
         )
 
@@ -92,9 +100,6 @@ class Tuple(_abstract.Tuple[Unpack[_Ts]]):
             items_schema=[
                 handler.generate_schema(arg) for arg in cls.__element_types__
             ],
-            serialization=core_schema.plain_serializer_function_ser_schema(
-                tuple,
-            ),
         )
 
 
