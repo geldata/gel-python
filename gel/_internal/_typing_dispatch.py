@@ -36,10 +36,55 @@ import typing
 from gel._internal import _namespace
 from gel._internal import _typing_eval
 from gel._internal import _typing_inspect
+from gel._internal import _typing_parametric
 from gel._internal._utils import type_repr
 
 _P = ParamSpec("_P")
 _R_co = TypeVar("_R_co", covariant=True)
+
+
+def _resolve_to_bound(tp: Any, fn: Any) -> Any:
+    if isinstance(tp, TypeVar):
+        tp = tp.__bound__
+        ns = _namespace.module_ns_of(fn)
+        tp = _typing_eval.resolve_type(tp, globals=ns)
+
+    return tp
+
+
+def _issubclass(lhs: Any, tp: Any, fn: Any) -> bool:
+    # NB: Much more limited than _isinstance below.
+
+    # The only special case here is handling subtyping on
+    # our ParametricTypes. ParametricType creates bona fide
+    # subclasses when indexed with concrete types, but GenericAlias
+    # when indexed with type variables.
+    #
+    # This handles the case where the RHS of issubclass is a
+    # GenericAlias over one of our ParametricTypes by comparing the
+    # types for equality and then checking that the concrete types are
+    # subtypes of the variable bounds.
+    # This lets us handle cases like:
+    # std.array[Object] <: std.array[_T_anytype].
+    if _typing_inspect.is_generic_alias(tp):
+        origin = typing.get_origin(tp)
+        args = typing.get_args(tp)
+        if issubclass(origin, _typing_parametric.ParametricType):
+            if (
+                not issubclass(lhs, _typing_parametric.ParametricType)
+                or lhs.__parametric_origin__ is not origin
+                or lhs.__parametric_type_args__ is None
+            ):
+                return False
+
+            targs = lhs.__parametric_type_args__[origin]
+            return all(
+                _issubclass(l, _resolve_to_bound(r, fn), fn)
+                for l, r in zip(targs, args, strict=True)
+            )
+
+    # In other cases,
+    return issubclass(lhs, tp)  # pyright: ignore [reportArgumentType]
 
 
 def _isinstance(obj: Any, tp: Any, fn: Any) -> bool:
@@ -62,17 +107,16 @@ def _isinstance(obj: Any, tp: Any, fn: Any) -> bool:
         origin = typing.get_origin(tp)
         args = typing.get_args(tp)
         if origin is type:
-            atype = args[0]
-            if isinstance(atype, TypeVar):
-                atype = atype.__bound__
-                ns = _namespace.module_ns_of(fn)
-                atype = _typing_eval.resolve_type(atype, globals=ns)
+            atype = _resolve_to_bound(args[0], fn)
 
             if isinstance(obj, type):
                 return issubclass(obj, atype)
+            # NB: This is to handle the case where obj is something
+            # like a qb BaseAlias, where it has some fictitious
+            # associated type that isn't really its runtime type.
             elif (mroent := getattr(obj, "__mro_entries__", None)) is not None:
                 genalias_mro = mroent((obj,))
-                return any(issubclass(c, atype) for c in genalias_mro)
+                return any(_issubclass(c, atype, fn) for c in genalias_mro)
             else:
                 return False
 
@@ -141,6 +185,10 @@ def _isinstance(obj: Any, tp: Any, fn: Any) -> bool:
         else:
             # For other generic types, fall back to checking the origin
             return isinstance(obj, origin)
+
+    elif isinstance(tp, TypeVar):
+        return _isinstance(obj, _resolve_to_bound(tp, fn), fn)
+
     else:
         raise TypeError(f"_isinstance() argument 2 is {tp!r}")
 

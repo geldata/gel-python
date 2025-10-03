@@ -1343,6 +1343,15 @@ class TestQueryBuilder(tb.ModelTestCase):
             self.assertEqual(c.kind, kind)
             self.assertIsInstance(c, default.Chocolate)
 
+    def test_qb_array_agg_01(self):
+        from models.orm import default, std
+
+        agg = std.array_agg(default.User)
+        unpack = std.array_unpack(agg)
+
+        res = self.client.query(unpack)
+        self.assertEqual(len(res), 6)
+
 
 class TestQueryBuilderModify(tb.ModelTestCase):
     """This test suite is for data manipulation using QB."""

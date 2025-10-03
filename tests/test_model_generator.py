@@ -6501,9 +6501,17 @@ class TestModelGeneratorMain(tb.ModelTestCase):
         for user in users_with_char:
             self.assertTrue(search_char in user.name.lower())
 
-    @tb.xfail
+    def test_modelgen_operators_range_eq(self):
+        from models.orm import default
+
+        res = self.client.query(
+            default.RangeTest.filter(
+                lambda u: u.int_range == u.int_range
+            )
+        )
+        self.assertEqual(len(res), 1)
+
     def test_modelgen_operators_range_contains(self):
-        """Test string containment and pattern matching operators"""
         from models.orm import default, std
 
         res = self.client.query(

@@ -59,4 +59,5 @@ extend-ignore = [
     "UP045",   # non-pep604-annotation-optional
     "PLR5501", # collapsible-else-if
     "FURB103", # don't use open and write
+    "E741",    # ambiguous variable names
 ]
