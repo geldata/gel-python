@@ -151,7 +151,7 @@ class Range(_abstract.Range[_T]):
             return value
 
         elif isinstance(value, dict):
-            return cls(
+            return _range.Range(
                 lower=cls._validate_bound(eltype, value["lower"]),
                 upper=cls._validate_bound(eltype, value["upper"]),
                 inc_lower=value["inc_lower"],
