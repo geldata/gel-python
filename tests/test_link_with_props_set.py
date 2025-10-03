@@ -53,7 +53,6 @@ class DummyLinkModel(AbstractGelLinkModel):
             "comment": _qb.GelPointerReflection(
                 name="comment",
                 type=SchemaPath("std", "str"),
-                typexpr="std::str",
                 kind=PointerKind.Property,
                 cardinality=Cardinality.AtMostOne,
                 computed=False,

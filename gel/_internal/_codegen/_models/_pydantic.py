@@ -1152,7 +1152,7 @@ class BaseGeneratedModule:
             obj_name = sobj.schemapath.as_python_code(sp_clsname, ptn_clsname)
             self.write(f"name = {obj_name}")
             if isinstance(sobj, reflection.Type):
-                type_name = sobj.type_name.as_python_code(
+                type_name = sobj.get_type_name(self._types).as_python_code(
                     sp_clsname, ptn_clsname
                 )
                 self.write(f"type_name = {type_name}")
@@ -1197,7 +1197,7 @@ class BaseGeneratedModule:
             obj_name = objtype.schemapath.as_python_code(
                 sp_clsname, ptn_clsname
             )
-            type_name = objtype.type_name.as_python_code(
+            type_name = objtype.get_type_name(self._types).as_python_code(
                 sp_clsname, ptn_clsname
             )
             self.write(f"name = {obj_name}")
@@ -1319,10 +1319,9 @@ class BaseGeneratedModule:
         target_type = self._types[ptr.target_id]
         kwargs: dict[str, str] = {
             "name": repr(ptr.name),
-            "type": target_type.schemapath.as_python_code(
+            "type": target_type.get_type_name(self._types).as_python_code(
                 classes["SchemaPath"], classes["ParametricTypeName"]
             ),
-            "typexpr": repr(target_type.type_name.as_quoted_schema_name()),
             "kind": f"{classes['PointerKind']}({str(ptr.kind)!r})",
             "cardinality": f"{classes['Cardinality']}({str(ptr.card)!r})",
             "computed": str(ptr.is_computed),

@@ -45,6 +45,7 @@ from gel._internal._tracked_list import (
     TrackedList,
 )
 from gel._internal._edgeql import PointerKind, quote_ident
+from gel._internal._schemapath import ParametricTypeName, SchemaPath, TypeName
 import operator
 
 if TYPE_CHECKING:
@@ -513,6 +514,10 @@ def get_linked_new_objects(obj: GelModel) -> Iterable[GelModel]:
 
 def obj_to_name_ql(obj: GelModel) -> str:
     return type(obj).__gel_reflection__.type_name.as_quoted_schema_name()
+
+
+def ptr_type_name(ptr: GelPointerReflection) -> str:
+    return ptr.type.as_quoted_schema_name()
 
 
 def shift_dict_list(inp: dict[str, list[T]]) -> dict[str, T]:
@@ -1930,11 +1935,16 @@ class SaveExecutor:
         shape_parts: list[str] = []
 
         args: list[object] = []
-        args_types: list[str] = []
+        args_types: list[TypeName] = []
+
+        def typename_is_array(type_name: TypeName) -> bool:
+            return isinstance(type_name, ParametricTypeName) and (
+                type_name.type_.parts in {("array",), ("std", "array")}
+            )
 
         def arg_cast(
-            type_ql: str,
-        ) -> tuple[str, Callable[[str], str], Callable[[object], object]]:
+            type_name: TypeName,
+        ) -> tuple[TypeName, Callable[[str], str], Callable[[object], object]]:
             # As a workaround for the current limitation
             # of EdgeQL (tuple arguments can't have empty
             # sets as elements, and free objects input
@@ -1952,22 +1962,33 @@ class SaveExecutor:
             #
             # The nested tuple indirection is needed to support
             # link props that have types of arrays.
-            if type_ql.startswith("array<"):
-                cast = f"array<tuple<{type_ql}>>"
+            if typename_is_array(ch.info.type):
+                cast = ParametricTypeName(
+                    SchemaPath.from_segments("std", "array"),
+                    [
+                        ParametricTypeName(
+                            SchemaPath.from_segments("std", "tuple"),
+                            [type_name],
+                        ),
+                    ],
+                )
                 ret = lambda x: f"(select std::array_unpack({x}).0 limit 1)"  # noqa: E731
                 arg_pack = lambda x: [(x,)] if x is not None else []  # noqa: E731
             else:
-                cast = f"array<{type_ql}>"
+                cast = ParametricTypeName(
+                    SchemaPath.from_segments("std", "array"),
+                    [type_name],
+                )
                 ret = lambda x: f"(select std::array_unpack({x}) limit 1)"  # noqa: E731
                 arg_pack = lambda x: [x] if x is not None else []  # noqa: E731
             return cast, ret, arg_pack
 
         def add_arg(
-            type_ql: str,
+            type_name: TypeName,
             value: Any,
         ) -> str:
             argnum = str(len(args))
-            args_types.append(type_ql)
+            args_types.append(type_name)
             args.append(value)
             return f"__data.{argnum}"
 
@@ -1978,9 +1999,9 @@ class SaveExecutor:
         for ch in change.fields.values():
             if isinstance(ch, PropertyChange):
                 if ch.info.cardinality.is_optional():
-                    tp_ql, tp_unpack, arg_pack = arg_cast(ch.info.typexpr)
+                    tp_cast, tp_unpack, arg_pack = arg_cast(ch.info.type)
                     arg = add_arg(
-                        tp_ql,
+                        tp_cast,
                         arg_pack(ch.value),
                     )
                     shape_parts.append(
@@ -1988,7 +2009,7 @@ class SaveExecutor:
                     )
                 else:
                     assert ch.value is not None
-                    arg = add_arg(ch.info.typexpr, ch.value)
+                    arg = add_arg(ch.info.type, ch.value)
                     shape_parts.append(f"{quote_ident(ch.name)} := {arg}")
 
             elif isinstance(ch, MultiPropAdd):
@@ -1997,15 +2018,26 @@ class SaveExecutor:
                 # or arrays etc.
 
                 assign_op = ":=" if for_insert else "+="
-                if ch.info.typexpr.startswith("array<"):
-                    arg_t = f"array<tuple<{ch.info.typexpr}>>"
+                if typename_is_array(ch.info.type):
+                    arg_t = ParametricTypeName(
+                        SchemaPath.from_segments("std", "array"),
+                        [
+                            ParametricTypeName(
+                                SchemaPath.from_segments("std", "tuple"),
+                                [ch.info.type],
+                            ),
+                        ],
+                    )
                     arg = add_arg(arg_t, [(el,) for el in ch.added])
                     shape_parts.append(
                         f"{quote_ident(ch.name)} {assign_op} "
                         f"std::array_unpack({arg}).0"
                     )
                 else:
-                    arg_t = f"array<{ch.info.typexpr}>"
+                    arg_t = ParametricTypeName(
+                        SchemaPath.from_segments("std", "array"),
+                        [ch.info.type],
+                    )
                     arg = add_arg(arg_t, ch.added)
                     shape_parts.append(
                         f"{quote_ident(ch.name)} {assign_op} "
@@ -2015,14 +2047,25 @@ class SaveExecutor:
             elif isinstance(ch, MultiPropRemove):
                 assert not for_insert
 
-                if ch.info.typexpr.startswith("array<"):
-                    arg_t = f"array<tuple<{ch.info.typexpr}>>"
+                if typename_is_array(ch.info.type):
+                    arg_t = ParametricTypeName(
+                        SchemaPath.from_segments("std", "array"),
+                        [
+                            ParametricTypeName(
+                                SchemaPath.from_segments("std", "tuple"),
+                                [ch.info.type],
+                            ),
+                        ],
+                    )
                     arg = add_arg(arg_t, [(el,) for el in ch.removed])
                     shape_parts.append(
                         f"{quote_ident(ch.name)} -= std::array_unpack({arg}).0"
                     )
                 else:
-                    arg_t = f"array<{ch.info.typexpr}>"
+                    arg_t = ParametricTypeName(
+                        SchemaPath.from_segments("std", "array"),
+                        [ch.info.type],
+                    )
                     arg = add_arg(arg_t, ch.removed)
                     shape_parts.append(
                         f"{quote_ident(ch.name)} -= std::array_unpack({arg})"
@@ -2032,14 +2075,14 @@ class SaveExecutor:
                 tid = (
                     self._get_id(ch.target) if ch.target is not None else None
                 )
-                linked_name = ch.info.typexpr
+                linked_name = ptr_type_name(ch.info)
 
                 if ch.props and ch.target is not None:
                     assert ch.props_info is not None
                     assert tid is not None
 
                     arg_casts = {
-                        k: arg_cast(ch.props_info[k].typexpr)
+                        k: arg_cast(ch.props_info[k].type)
                         for k in ch.props_info
                     }
 
@@ -2047,8 +2090,15 @@ class SaveExecutor:
                     # - whether the lprop is being set
                     # - whether the lprop is being set to the default value
                     # - the value being set if present
-                    sl_subt = [
-                        f"tuple<std::bool, std::bool, {arg_casts[lp_name][0]}>"
+                    sl_subt: list[TypeName] = [
+                        ParametricTypeName(
+                            SchemaPath.from_segments("std", "tuple"),
+                            [
+                                SchemaPath.from_segments("std", "bool"),
+                                SchemaPath.from_segments("std", "bool"),
+                                arg_casts[lp_name][0],
+                            ],
+                        )
                         for lp_name in ch.props_info
                     ]
 
@@ -2067,7 +2117,13 @@ class SaveExecutor:
                     sl_args = [tid, *lprop_args]
 
                     arg = add_arg(
-                        f"tuple<std::uuid, {','.join(sl_subt)}>",
+                        ParametricTypeName(
+                            SchemaPath.from_segments("std", "tuple"),
+                            [
+                                SchemaPath.from_segments("std", "uuid"),
+                                *sl_subt,
+                            ],
+                        ),
                         sl_args,
                     )
 
@@ -2157,7 +2213,10 @@ class SaveExecutor:
                 else:
                     if ch.info.cardinality.is_optional():
                         arg = add_arg(
-                            "array<std::uuid>",
+                            ParametricTypeName(
+                                SchemaPath.from_segments("std", "array"),
+                                [SchemaPath.from_segments("std", "uuid")],
+                            ),
                             [tid] if tid is not None else [],
                         )
                         shape_parts.append(
@@ -2168,7 +2227,9 @@ class SaveExecutor:
                         )
                     else:
                         assert tid is not None
-                        arg = add_arg("std::uuid", tid)
+                        arg = add_arg(
+                            SchemaPath.from_segments("std", "uuid"), tid
+                        )
                         shape_parts.append(
                             f"{quote_ident(ch.name)} := "
                             f"<{linked_name}><std::uuid>{arg}"
@@ -2178,13 +2239,16 @@ class SaveExecutor:
                 assert not for_insert
 
                 arg = add_arg(
-                    "array<std::uuid>",
+                    ParametricTypeName(
+                        SchemaPath.from_segments("std", "array"),
+                        [SchemaPath.from_segments("std", "uuid")],
+                    ),
                     [self._get_id(o) for o in ch.removed],
                 )
 
                 shape_parts.append(
                     f"{quote_ident(ch.name)} -= "
-                    f"<{ch.info.typexpr}>std::array_unpack({arg})"
+                    f"<{ptr_type_name(ch.info)}>std::array_unpack({arg})"
                 )
 
             elif isinstance(ch, MultiLinkAdd):
@@ -2195,10 +2259,10 @@ class SaveExecutor:
                     assert ch.props_info
 
                     link_args: list[tuple[Any, ...]] = []
-                    tuple_subt: list[str] | None = None
+                    tuple_subt: list[TypeName] | None = None
 
                     arg_casts = {
-                        lp_name: arg_cast(ch.props_info[lp_name].typexpr)
+                        lp_name: arg_cast(ch.props_info[lp_name].type)
                         for lp_name in ch.props_info
                     }
 
@@ -2207,7 +2271,14 @@ class SaveExecutor:
                     # - whether the lprop is being set to the default value
                     # - the value being set if present
                     tuple_subt = [
-                        f"tuple<std::bool, std::bool, {arg_casts[lp_name][0]}>"
+                        ParametricTypeName(
+                            SchemaPath.from_segments("std", "tuple"),
+                            [
+                                SchemaPath.from_segments("std", "bool"),
+                                SchemaPath.from_segments("std", "bool"),
+                                arg_casts[lp_name][0],
+                            ],
+                        )
                         for lp_name in ch.props_info
                     ]
 
@@ -2229,7 +2300,20 @@ class SaveExecutor:
                         link_args.append((self._get_id(addo), *lprop_args))
 
                     arg = add_arg(
-                        f"array<tuple<std::uuid, {','.join(tuple_subt)}>>",
+                        ParametricTypeName(
+                            SchemaPath.from_segments("std", "array"),
+                            [
+                                ParametricTypeName(
+                                    SchemaPath.from_segments("std", "tuple"),
+                                    [
+                                        SchemaPath.from_segments(
+                                            "std", "uuid"
+                                        ),
+                                        *tuple_subt,
+                                    ],
+                                ),
+                            ],
+                        ),
                         link_args,
                     )
 
@@ -2253,7 +2337,7 @@ class SaveExecutor:
                             f"{quote_ident(ch.name)} {assign_op} "
                             f"assert_distinct(("
                             f"for __tup in std::array_unpack({arg}) union ("
-                            f"select (<{ch.info.typexpr}>__tup.0) {{ "
+                            f"select (<{ptr_type_name(ch.info)}>__tup.0) {{ "
                             f"{lp_assign}"
                             f"}})))"
                         )
@@ -2299,7 +2383,8 @@ class SaveExecutor:
                                         )
                                         filter __m.id = __tup.0
                                     )
-                                    select (<{ch.info.typexpr}>__tup.0) {{
+                                    select (<{ptr_type_name(ch.info)}>__tup.0)
+                                    {{
                                         {lp_assign_reload}
                                     }}
                                 )
@@ -2309,14 +2394,17 @@ class SaveExecutor:
 
                 else:
                     arg = add_arg(
-                        "array<std::uuid>",
+                        ParametricTypeName(
+                            SchemaPath.from_segments("std", "array"),
+                            [SchemaPath.from_segments("std", "uuid")],
+                        ),
                         [self._get_id(o) for o in ch.added],
                     )
 
                     shape_parts.append(
                         f"{quote_ident(ch.name)} {assign_op} "
                         f"assert_distinct("
-                        f"<{ch.info.typexpr}>std::array_unpack({arg})"
+                        f"<{ptr_type_name(ch.info)}>std::array_unpack({arg})"
                         f")"
                     )
 
@@ -2324,7 +2412,7 @@ class SaveExecutor:
                 assert not for_insert
 
                 shape_parts.append(
-                    f"{quote_ident(ch.name)} := <{ch.info.typexpr}>{{}}"
+                    f"{quote_ident(ch.name)} := <{ptr_type_name(ch.info)}>{{}}"
                 )
 
             else:
@@ -2345,7 +2433,10 @@ class SaveExecutor:
         else:
             assert shape
 
-            arg = add_arg("std::uuid", self._get_id(obj))
+            arg = add_arg(
+                SchemaPath.from_segments("std", "uuid"),
+                self._get_id(obj),
+            )
             query = f"""\
                 update <{q_type_name}>{arg}
                 set {{ {shape} }}
@@ -2359,14 +2450,18 @@ class SaveExecutor:
 
             single_query = f"""
                 with __query := (
-                    with __data := <tuple<{",".join(args_types)}>>$0
+                    with __data := <tuple<{
+                ",".join(a.as_quoted_schema_name() for a in args_types)
+            }>>$0
                     select ({query})
                 ) select __query{select_shape}
             """
 
             multi_query = f"""
                 with __query := (
-                    with __all_data := <array<tuple<{",".join(args_types)}>>>$0
+                    with __all_data := <array<tuple<{
+                ",".join(a.as_quoted_schema_name() for a in args_types)
+            }>>>$0
                     for __data in std::array_unpack(__all_data) union (
                         ({query})
                     )
@@ -2374,7 +2469,9 @@ class SaveExecutor:
             """
 
             args_query = f"""
-                with __all_data := <array<tuple<{",".join(args_types)}>>>$0
+                with __all_data := <array<tuple<{
+                ",".join(a.as_quoted_schema_name() for a in args_types)
+            }>>>$0
                 select std::count(std::array_unpack(__all_data))
             """
 

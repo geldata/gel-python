@@ -16,8 +16,7 @@ if TYPE_CHECKING:
 @dataclasses.dataclass(frozen=True, kw_only=True)
 class GelPointerReflection:
     name: str
-    type: SchemaPath
-    typexpr: str
+    type: TypeName
     kind: _edgeql.PointerKind
     cardinality: _edgeql.Cardinality
     computed: bool
