@@ -43,6 +43,9 @@ class TypeRef:
     id: str
     name: TypeName
 
+    def __str__(self) -> str:
+        return str(self.name)
+
 
 @sobject
 class Type(SchemaObject, abc.ABC):

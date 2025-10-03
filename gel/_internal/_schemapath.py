@@ -225,7 +225,7 @@ class ParametricTypeName:
     args: list[TypeName]
 
     def __str__(self) -> str:
-        return self.as_quoted_schema_name()
+        return self.as_schema_name()
 
     def as_schema_name(self) -> str:
         return (
