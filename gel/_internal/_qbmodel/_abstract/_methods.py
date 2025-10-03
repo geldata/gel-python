@@ -204,5 +204,5 @@ class BaseGelModel(AbstractGelModel):
 
     @classmethod
     def __edgeql_qb_expr__(cls) -> _qb.Expr:  # pyright: ignore [reportIncompatibleMethodOverride]
-        this_type = cls.__gel_reflection__.name
+        this_type = cls.__gel_reflection__.type_name
         return _qb.SchemaSet(type_=this_type)

@@ -202,7 +202,7 @@ class AbstractGelModel(
 
     @classmethod
     def __edgeql_qb_expr__(cls) -> _qb.Expr:  # pyright: ignore [reportIncompatibleMethodOverride]
-        this_type = cls.__gel_reflection__.name
+        this_type = cls.__gel_reflection__.type_name
         return _qb.SchemaSet(type_=this_type)
 
     if TYPE_CHECKING:
@@ -255,8 +255,8 @@ def maybe_collapse_object_type_variant_union(
             # Not an object type reflection union at all!
             return None
         if typename is None:
-            typename = union_arg.__gel_reflection__.name
-        elif typename != union_arg.__gel_reflection__.name:
+            typename = union_arg.__gel_reflection__.type_name
+        elif typename != union_arg.__gel_reflection__.type_name:
             # Reflections of different object types, cannot collapse.
             return None
         if union_arg.__gel_shape__ == "Default" and default_variant is None:

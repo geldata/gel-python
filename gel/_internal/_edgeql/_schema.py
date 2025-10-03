@@ -5,15 +5,13 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, final
+from typing import final
 
 import re
 import uuid
 
 from gel._internal._polyfills._strenum import StrEnum
-
-if TYPE_CHECKING:
-    from collections.abc import Iterable
+from gel._internal._schemapath import ParametricTypeName, SchemaPath, TypeName
 
 
 @final
@@ -73,46 +71,56 @@ def _get_type_id(name: str, cls: str) -> uuid.UUID:
 
 
 def get_array_type_id_and_name(
-    element: str,
-) -> tuple[uuid.UUID, str]:
-    type_id = _get_type_id(f"array<{_mangle_name(element)}>", "Array")
-    type_name = f"array<{element}>"
+    element: TypeName,
+) -> tuple[uuid.UUID, TypeName]:
+    type_id = _get_type_id(
+        f"array<{_mangle_name(element.as_schema_name())}>", "Array"
+    )
+    type_name = ParametricTypeName(SchemaPath("std", "array"), [element])
     return type_id, type_name
 
 
 def get_range_type_id_and_name(
-    element: str,
-) -> tuple[uuid.UUID, str]:
-    type_id = _get_type_id(f"range<{_mangle_name(element)}>", "Range")
-    type_name = f"range<{element}>"
+    element: TypeName,
+) -> tuple[uuid.UUID, TypeName]:
+    type_id = _get_type_id(
+        f"range<{_mangle_name(element.as_schema_name())}>", "Range"
+    )
+    type_name = ParametricTypeName(
+        SchemaPath("std", "range"),
+        [element],
+    )
     return type_id, type_name
 
 
 def get_multirange_type_id_and_name(
-    element: str,
-) -> tuple[uuid.UUID, str]:
+    element: TypeName,
+) -> tuple[uuid.UUID, TypeName]:
     type_id = _get_type_id(
-        f"multirange<{_mangle_name(element)}>", "MultiRange"
+        f"multirange<{_mangle_name(element.as_schema_name())}>", "MultiRange"
     )
-    type_name = f"multirange<{element}>"
+    type_name = ParametricTypeName(
+        SchemaPath("std", "range"),
+        [element],
+    )
     return type_id, type_name
 
 
 def get_tuple_type_id_and_name(
-    elements: Iterable[str],
-) -> tuple[uuid.UUID, str]:
-    body = ", ".join(elements)
+    elements: list[TypeName],
+) -> tuple[uuid.UUID, TypeName]:
+    body = ", ".join(element.as_schema_name() for element in elements)
     type_id = _get_type_id(f"tuple<{_mangle_name(body)}>", "Tuple")
-    type_name = f"tuple<{body}>"
+    type_name = ParametricTypeName(SchemaPath("std", "tuple"), elements)
     return type_id, type_name
 
 
 def get_named_tuple_type_id_and_name(
-    elements: dict[str, str],
-) -> tuple[uuid.UUID, str]:
-    body = ", ".join(f"{n}:{t}" for n, t in elements.items())
+    elements: dict[str, TypeName],
+) -> tuple[uuid.UUID, TypeName]:
+    body = ", ".join(f"{n}:{t.as_schema_name()}" for n, t in elements.items())
     type_id = _get_type_id(f"tuple<{_mangle_name(body)}>", "Tuple")
-    type_name = f"tuple<{body}>"
+    type_name = ParametricTypeName(SchemaPath("std", "tuple"), elements)
     return type_id, type_name
 
 

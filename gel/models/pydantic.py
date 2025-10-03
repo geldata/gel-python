@@ -13,7 +13,7 @@ from pydantic import (
 from gel._internal._deferred_import import DeferredImport
 from gel._internal._edgeql import Cardinality, PointerKind
 from gel._internal._lazyprop import LazyClassProperty
-from gel._internal._schemapath import SchemaPath
+from gel._internal._schemapath import ParametricTypeName, SchemaPath, TypeName
 from gel._internal._typing_dispatch import dispatch_overload
 from gel._internal._utils import UnspecifiedType, Unspecified
 from gel._internal._xmethod import classonlymethod
@@ -162,6 +162,7 @@ __all__ = (
     "OptionalMultiLink",
     "OptionalMultiLinkWithProps",
     "OptionalProperty",
+    "ParametricTypeName",
     "PathAlias",
     "PointerKind",
     "PrefixOp",
@@ -183,6 +184,7 @@ __all__ = (
     "TimeImpl",
     "Tuple",
     "TupleMeta",
+    "TypeName",
     "UUIDImpl",
     "Unspecified",
     "UnspecifiedType",

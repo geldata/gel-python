@@ -1131,7 +1131,8 @@ class BaseGeneratedModule:
         base_types: Iterable[str] = (),
         base_metadata_class: str = "GelSchemaMetadata",
     ) -> None:
-        schemapath = self.import_name(BASE_IMPL, "SchemaPath")
+        sp_clsname = self.import_name(BASE_IMPL, "SchemaPath")
+        ptn_clsname = self.import_name(BASE_IMPL, "ParametricTypeName")
         base_types = list(base_types)
         if not base_types:
             if isinstance(sobj, reflection.InheritingType):
@@ -1148,14 +1149,21 @@ class BaseGeneratedModule:
                 base_types,
             ),
         ):
-            self.write(f"name = {sobj.schemapath.as_code(schemapath)}")
+            obj_name = sobj.schemapath.as_python_code(sp_clsname, ptn_clsname)
+            self.write(f"name = {obj_name}")
+            if isinstance(sobj, reflection.Type):
+                type_name = sobj.get_type_name(self._types).as_python_code(
+                    sp_clsname, ptn_clsname
+                )
+                self.write(f"type_name = {type_name}")
 
     def write_object_type_reflection(
         self,
         objtype: reflection.ObjectType,
         base_types: list[str],
     ) -> None:
-        sp = self.import_name(BASE_IMPL, "SchemaPath")
+        sp_clsname = self.import_name(BASE_IMPL, "SchemaPath")
+        ptn_clsname = self.import_name(BASE_IMPL, "ParametricTypeName")
         lazyclassproperty = self.import_name(BASE_IMPL, "LazyClassProperty")
         objecttype_t = self.get_type(
             self._schema_object_type,
@@ -1186,7 +1194,14 @@ class BaseGeneratedModule:
             "__gel_reflection__",
             _map_name(lambda s: f"{s}.__gel_reflection__", class_bases),
         ):
-            self.write(f"name = {objtype.schemapath.as_code(sp)}")
+            obj_name = objtype.schemapath.as_python_code(
+                sp_clsname, ptn_clsname
+            )
+            type_name = objtype.get_type_name(self._types).as_python_code(
+                sp_clsname, ptn_clsname
+            )
+            self.write(f"name = {obj_name}")
+            self.write(f"type_name = {type_name}")
             # Need a cheap at runtime way to check if the type is abstract
             # in GelModel.__new__
             self.write(f"abstract = {objtype.abstract!r}")
@@ -1263,6 +1278,9 @@ class BaseGeneratedModule:
                 self.write(f"my_ptrs: {ptr_ref_t} = {{")
                 classes = {
                     "SchemaPath": self.import_name(BASE_IMPL, "SchemaPath"),
+                    "ParametricTypeName": self.import_name(
+                        BASE_IMPL, "ParametricTypeName"
+                    ),
                     "GelPointerReflection": gel_ptr_ref,
                     "Cardinality": self.import_name(BASE_IMPL, "Cardinality"),
                     "PointerKind": self.import_name(BASE_IMPL, "PointerKind"),
@@ -1301,8 +1319,9 @@ class BaseGeneratedModule:
         target_type = self._types[ptr.target_id]
         kwargs: dict[str, str] = {
             "name": repr(ptr.name),
-            "type": target_type.schemapath.as_code(classes["SchemaPath"]),
-            "typexpr": repr(target_type.edgeql),
+            "type": target_type.get_type_name(self._types).as_python_code(
+                classes["SchemaPath"], classes["ParametricTypeName"]
+            ),
             "kind": f"{classes['PointerKind']}({str(ptr.kind)!r})",
             "cardinality": f"{classes['Cardinality']}({str(ptr.card)!r})",
             "computed": str(ptr.is_computed),
@@ -2797,7 +2816,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         args = [
             "expr=self",  # The operand is always 'self' for method calls
             f'op="{op_name}"',  # Gel operator name (e.g., "-", "+")
-            "type_=__rtype__.__gel_reflection__.name",  # Result type info
+            "type_=__rtype__.__gel_reflection__.type_name",  # Result type info
         ]
 
         self.write(self.format_list(f"{node_cls}({{list}}),", args))
@@ -2863,7 +2882,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         args = [
             f"expr={other}",
             f'op="{op_name}"',  # Gel operator name (e.g., "-", "+")
-            "type_=__rtype__.__gel_reflection__.name",  # Result type info
+            "type_=__rtype__.__gel_reflection__.type_name",  # Result type info
         ]
 
         self.write(self.format_list(f"{node_cls}({{list}}),", args))
@@ -2925,7 +2944,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             self.write(f"{op_chain}(")
             self.write(f'    "{op_name}",')
             self.write("    __args__,")
-            self.write("    __rtype__.__gel_reflection__.name,")
+            self.write("    __rtype__.__gel_reflection__.type_name,")
             self.write(")")
             return
 
@@ -2948,7 +2967,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             f"lexpr={this}",
             f'op="{op_name}"',
             f"rexpr={other}",
-            "type_=__rtype__.__gel_reflection__.name",
+            "type_=__rtype__.__gel_reflection__.type_name",
         ]
 
         self.write(self.format_list(f"{node_cls}({{list}}),", args))
@@ -3024,7 +3043,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
 
         args = [
             f'op="{op_name}"',  # Gel operator name (e.g., "+", "[]")
-            "type_=__rtype__.__gel_reflection__.name",  # Result type info
+            "type_=__rtype__.__gel_reflection__.type_name",  # Result type info
         ]
 
         if swapped:
@@ -5161,7 +5180,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                 self.write("args=__args__,")
             if bool(sig.kwargs):
                 self.write("kwargs=__kwargs__,")
-            self.write("type_=__rtype__.__gel_reflection__.name,")
+            self.write("type_=__rtype__.__gel_reflection__.type_name,")
         self.write(")")
 
     def _write_function_overload(
@@ -5482,7 +5501,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                                 with self.if_(f"{type_var} is None"):
                                     self.write(
                                         f"{type_var} = "
-                                        f"{cast_t}.__gel_reflection__.name"
+                                        f"{cast_t}.__gel_reflection__.type_name"
                                     )
                     if type_var is not None:
                         anytype = self.get_type(self._types_by_name["anytype"])
@@ -5491,7 +5510,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                             with self.if_(f"{type_var} is None"):
                                 self.write(
                                     f"{type_var} = "
-                                    f"{var}.__gel_reflection__.name"
+                                    f"{var}.__gel_reflection__.type_name"
                                 )
 
             # Build a `match` block for Python-to-Gel coercion of values.
@@ -5605,7 +5624,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                             self.write(
                                 f"{new_pident} = {set_lit}("
                                 f"items=(*{pident},), "
-                                f"type_={canon_type}.__gel_reflection__.name)"
+                                f"type_={canon_type}.__gel_reflection__.type_name)"
                             )
 
             rt_generics = generic_param_map.get("__return__")

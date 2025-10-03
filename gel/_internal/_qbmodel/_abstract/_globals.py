@@ -25,6 +25,6 @@ class Global(_qb.GelSchemaMetadata):
             tp,
             _qb.Global(
                 name=cls.__gel_reflection__.name,
-                type_=tp.__gel_reflection__.name,
+                type_=tp.__gel_reflection__.type_name,
             ),
         )

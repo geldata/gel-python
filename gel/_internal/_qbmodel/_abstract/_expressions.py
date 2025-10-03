@@ -43,7 +43,7 @@ def _get_prefixed_ptr(
     ptrname: str,
     scope: _qb.Scope,
 ) -> tuple[_qb.PathAlias, _qb.Path]:
-    this_type = cls.__gel_reflection__.name
+    this_type = cls.__gel_reflection__.type_name
 
     ptr = getattr(cls, ptrname, Unspecified)
     if ptr is Unspecified:
@@ -121,7 +121,7 @@ def select(
     __operand__: _qb.ExprAlias | None = None,
     **kwargs: bool | _Value,
 ) -> _qb.ShapeOp:
-    this_type = cls.__gel_reflection__.name
+    this_type = cls.__gel_reflection__.type_name
     scope = _qb.Scope()
 
     if __operand__ is not None:
@@ -240,10 +240,9 @@ def update(
     __operand__: _qb.ExprAlias | None = None,
     **kwargs: _Value,
 ) -> _qb.UpdateStmt:
-    this_type = cls.__gel_reflection__.name
     scope = _qb.Scope()
     operand = _qb.edgeql_qb_expr(cls if __operand__ is None else __operand__)
-    this_type = cls.__gel_reflection__.name
+    this_type = cls.__gel_reflection__.type_name
     prefix = _qb.PathPrefix(type_=this_type, scope=scope)
     prefix_alias = _qb.PathAlias(cls, prefix)
 
@@ -443,4 +442,4 @@ def empty_set_if_none(
     val: _T | None,
     type_: type[GelType],
 ) -> _T | _qb.CastOp:
-    return _qb.empty_set_if_none(val, type_=type_.__gel_reflection__.name)
+    return _qb.empty_set_if_none(val, type_=type_.__gel_reflection__.type_name)

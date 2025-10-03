@@ -7,6 +7,7 @@ from __future__ import annotations
 from typing import (
     TYPE_CHECKING,
     Any,
+    ClassVar,
     Literal,
     TypeGuard,
     TypeVar,
@@ -23,7 +24,7 @@ from collections import defaultdict
 
 from gel._internal import _dataclass_extras
 from gel._internal import _edgeql
-from gel._internal._schemapath import SchemaPath
+from gel._internal._schemapath import ParametricTypeName, TypeName
 
 from . import _query
 from ._base import struct, sobject, SchemaObject
@@ -40,10 +41,10 @@ Schema = TypeAliasType("Schema", Mapping[str, "Type"])
 @struct
 class TypeRef:
     id: str
-    name: str
+    name: TypeName
 
     def __str__(self) -> str:
-        return self.name
+        return str(self.name)
 
 
 @sobject
@@ -64,13 +65,6 @@ class Type(SchemaObject, abc.ABC):
     def kind(self) -> TypeKind:
         return kind_of_type(self)
 
-    def __str__(self) -> str:
-        return self.name
-
-    @functools.cached_property
-    def edgeql(self) -> str:
-        return self.schemapath.as_quoted_schema_name()
-
     @functools.cached_property
     def generic(self) -> bool:
         sp = self.schemapath
@@ -79,6 +73,9 @@ class Type(SchemaObject, abc.ABC):
             and sp.parents[0].name == "std"
             and sp.name.startswith("any")
         )
+
+    def get_type_name(self, schema: Schema) -> TypeName:
+        return self.schemapath
 
     def assignable_from(
         self,
@@ -181,10 +178,6 @@ class InheritingType(Type):
     final: bool
     bases: tuple[TypeRef, ...]
     ancestors: tuple[TypeRef, ...]
-
-    @functools.cached_property
-    def edgeql(self) -> str:
-        return self.schemapath.as_quoted_schema_name()
 
     def _assignable_from(
         self,
@@ -322,19 +315,13 @@ class ObjectType(InheritingType):
 
 
 class CollectionType(Type):
+    collection_name: ClassVar[str]
+
     if TYPE_CHECKING:
         _mutable_cached: bool | None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "_mutable_cached", None)
-
-    @functools.cached_property
-    def edgeql(self) -> str:
-        return str(self.schemapath)
-
-    @functools.cached_property
-    def schemapath(self) -> SchemaPath:
-        return SchemaPath.from_segments(self.name)
 
 
 @struct
@@ -351,7 +338,12 @@ class HomogeneousCollectionType(CollectionType):
         object.__setattr__(self, "_mutable_cached", mut)  # noqa: PLC2801
         return mut
 
-    def get_id_and_name(self, element_type: Type) -> tuple[str, str]:
+    def get_id_and_name(
+        self,
+        element_type: Type,
+        *,
+        schema: Mapping[str, Type],
+    ) -> tuple[str, str]:
         cls = type(self)
         raise NotImplementedError(f"{cls.__qualname__}.get_id_and_name()")
 
@@ -360,6 +352,12 @@ class HomogeneousCollectionType(CollectionType):
             return self.element_type
         else:
             return schema[self._element_type_id]
+
+    def get_type_name(self, schema: Schema) -> TypeName:
+        return ParametricTypeName(
+            self.schemapath,
+            [self.get_element_type(schema).get_type_name(schema)],
+        )
 
     @functools.cached_property
     def _element_type_id(self) -> str:
@@ -389,11 +387,10 @@ class HomogeneousCollectionType(CollectionType):
             element_spec,
             schema=schema,
         )
-        id_, name = self.get_id_and_name(element_type)
+        id_, _ = self.get_id_and_name(element_type, schema=schema)
         return dataclasses.replace(
             self,
             id=id_,
-            name=name,
             element_type=element_type,
         )
 
@@ -445,9 +442,12 @@ class HeterogeneousCollectionType(CollectionType):
         object.__setattr__(self, "_mutable_cached", mut)  # noqa: PLC2801
         return mut
 
-    def get_id_and_name(
-        self, element_types: tuple[Type, ...]
-    ) -> tuple[str, str]:
+    def get_id(
+        self,
+        element_types: tuple[Type, ...],
+        *,
+        schema: Mapping[str, Type],
+    ) -> str:
         cls = type(self)
         raise NotImplementedError(f"{cls.__qualname__}.get_id_and_name()")
 
@@ -456,6 +456,15 @@ class HeterogeneousCollectionType(CollectionType):
             return self.element_types
         else:
             return tuple(schema[el_tid] for el_tid in self._element_type_ids)
+
+    def get_type_name(self, schema: Schema) -> TypeName:
+        return ParametricTypeName(
+            self.schemapath,
+            [
+                element_type.get_type_name(schema)
+                for element_type in self.get_element_types(schema)
+            ],
+        )
 
     @functools.cached_property
     def _element_type_ids(self) -> list[str]:
@@ -497,11 +506,10 @@ class HeterogeneousCollectionType(CollectionType):
                 element_types.append(element_type)
 
         element_types_tup = tuple(element_types)
-        id_, name = self.get_id_and_name(element_types_tup)
+        id_ = self.get_id(element_types_tup, schema=schema)
         return dataclasses.replace(
             self,
             id=id_,
-            name=name,
             element_types=element_types_tup,
         )
 
@@ -553,6 +561,8 @@ class HeterogeneousCollectionType(CollectionType):
 
 @struct
 class ArrayType(HomogeneousCollectionType):
+    collection_name: ClassVar[str] = "std::array"
+
     array_element_id: str
 
     is_object: Literal[False]
@@ -572,13 +582,22 @@ class ArrayType(HomogeneousCollectionType):
     def _element_type_id(self) -> str:
         return self.array_element_id
 
-    def get_id_and_name(self, element_type: Type) -> tuple[str, str]:
-        id_, name = _edgeql.get_array_type_id_and_name(element_type.name)
-        return str(id_), name
+    def get_id_and_name(
+        self,
+        element_type: Type,
+        *,
+        schema: Mapping[str, Type],
+    ) -> tuple[str, str]:
+        id_, _ = _edgeql.get_array_type_id_and_name(
+            element_type.get_type_name(schema)
+        )
+        return str(id_), "std::array"
 
 
 @struct
 class RangeType(HomogeneousCollectionType):
+    collection_name: ClassVar[str] = "std::range"
+
     is_object: Literal[False]
     is_scalar: Literal[False]
     is_array: Literal[False]
@@ -598,13 +617,22 @@ class RangeType(HomogeneousCollectionType):
     def _element_type_id(self) -> str:
         return self.range_element_id
 
-    def get_id_and_name(self, element_type: Type) -> tuple[str, str]:
-        id_, name = _edgeql.get_range_type_id_and_name(element_type.name)
-        return str(id_), name
+    def get_id_and_name(
+        self,
+        element_type: Type,
+        *,
+        schema: Mapping[str, Type],
+    ) -> tuple[str, str]:
+        id_, _ = _edgeql.get_range_type_id_and_name(
+            element_type.get_type_name(schema)
+        )
+        return str(id_), "std::range"
 
 
 @struct
 class MultiRangeType(HomogeneousCollectionType):
+    collection_name: ClassVar[str] = "std::multirange"
+
     is_object: Literal[False]
     is_scalar: Literal[False]
     is_array: Literal[False]
@@ -624,9 +652,16 @@ class MultiRangeType(HomogeneousCollectionType):
     def _element_type_id(self) -> str:
         return self.multirange_element_id
 
-    def get_id_and_name(self, element_type: Type) -> tuple[str, str]:
-        id_, name = _edgeql.get_multirange_type_id_and_name(element_type.name)
-        return str(id_), name
+    def get_id_and_name(
+        self,
+        element_type: Type,
+        *,
+        schema: Mapping[str, Type],
+    ) -> tuple[str, str]:
+        id_, _ = _edgeql.get_multirange_type_id_and_name(
+            element_type.get_type_name(schema)
+        )
+        return str(id_), "std::multirange"
 
 
 @struct
@@ -646,6 +681,8 @@ class _TupleType(HeterogeneousCollectionType):
 
 @struct
 class TupleType(_TupleType):
+    collection_name: ClassVar[str] = "std::tuple"
+
     is_object: Literal[False]
     is_scalar: Literal[False]
     is_array: Literal[False]
@@ -659,17 +696,22 @@ class TupleType(_TupleType):
     def kind(self) -> Literal[TypeKind.Tuple]:
         return TypeKind.Tuple
 
-    def get_id_and_name(
-        self, element_types: tuple[Type, ...]
-    ) -> tuple[str, str]:
-        id_, name = _edgeql.get_tuple_type_id_and_name(
-            el.name for el in element_types
+    def get_id(
+        self,
+        element_types: tuple[Type, ...],
+        *,
+        schema: Mapping[str, Type],
+    ) -> str:
+        id_, _ = _edgeql.get_tuple_type_id_and_name(
+            [el.get_type_name(schema) for el in element_types]
         )
-        return str(id_), name
+        return str(id_)
 
 
 @struct
 class NamedTupleType(_TupleType):
+    collection_name: ClassVar[str] = "std::tuple"
+
     is_object: Literal[False]
     is_scalar: Literal[False]
     is_array: Literal[False]
@@ -683,18 +725,30 @@ class NamedTupleType(_TupleType):
     def kind(self) -> Literal[TypeKind.NamedTuple]:
         return TypeKind.NamedTuple
 
-    def get_id_and_name(
-        self, element_types: tuple[Type, ...]
-    ) -> tuple[str, str]:
-        id_, name = _edgeql.get_named_tuple_type_id_and_name(
+    def get_id(
+        self,
+        element_types: tuple[Type, ...],
+        *,
+        schema: Mapping[str, Type],
+    ) -> str:
+        id_, _ = _edgeql.get_named_tuple_type_id_and_name(
             {
-                el.name: el_type.name
+                el.name: el_type.get_type_name(schema)
                 for el, el_type in zip(
                     self.tuple_elements, element_types, strict=True
                 )
             }
         )
-        return str(id_), name
+        return str(id_)
+
+    def get_type_name(self, schema: Schema) -> TypeName:
+        return ParametricTypeName(
+            self.schemapath,
+            {
+                element.name: schema[element.type_id].get_type_name(schema)
+                for element in self.tuple_elements
+            },
+        )
 
 
 def compare_type_generality(a: Type, b: Type, *, schema: Schema) -> int:
@@ -881,7 +935,7 @@ def fetch_types(
         cls = _kind_to_class[kind_of_type(t)]
         replace: dict[str, Any] = {}
         if issubclass(cls, CollectionType):
-            replace["name"] = _edgeql.unmangle_unqual_name(t.name)
+            replace["name"] = cls.collection_name
         vt = _dataclass_extras.coerce_to_dataclass(
             cls,
             t,

@@ -20,7 +20,7 @@ import unittest
 import pathlib
 from typing import Any
 
-from gel._internal._schemapath import SchemaPath
+from gel._internal._schemapath import ParametricTypeName, SchemaPath
 
 
 class TestSchemaPath(unittest.TestCase):
@@ -304,15 +304,69 @@ class TestSchemaPath(unittest.TestCase):
 
     def test_schemapath_as_code(self):
         """Test as_code method."""
-        path = SchemaPath("std::int64")
-        code = path.as_code()
+        type_name = SchemaPath("std::int64")
+        code = type_name.as_python_code()
         self.assertEqual(code, "SchemaPath.from_segments('std', 'int64')")
+
+        type_name = ParametricTypeName(
+            SchemaPath("std", "array"), [SchemaPath("std::int64")]
+        )
+        code = type_name.as_python_code()
+        self.assertEqual(
+            code,
+            "ParametricTypeName("
+            "SchemaPath.from_segments('std', 'array'), "
+            "[SchemaPath.from_segments('std', 'int64')]"
+            ")",
+        )
+
+        type_name = ParametricTypeName(
+            SchemaPath("std", "tuple"),
+            {'a': SchemaPath("std::int64"), 'b': SchemaPath("std::str")},
+        )
+        code = type_name.as_python_code()
+        self.assertEqual(
+            code,
+            "ParametricTypeName("
+            "SchemaPath.from_segments('std', 'tuple'), {"
+            "'a': SchemaPath.from_segments('std', 'int64'), "
+            "'b': SchemaPath.from_segments('std', 'str')"
+            "}"
+            ")",
+        )
 
     def test_schemapath_as_code_custom_classname(self):
         """Test as_code method with custom class name."""
-        path = SchemaPath("std::int64")
-        code = path.as_code("MySchemaPath")
+        type_name = SchemaPath("std::int64")
+        code = type_name.as_python_code("MySchemaPath", "MyParametricTypeName")
         self.assertEqual(code, "MySchemaPath.from_segments('std', 'int64')")
+
+        type_name = ParametricTypeName(
+            SchemaPath("std", "array"), [SchemaPath("std::int64")]
+        )
+        code = type_name.as_python_code("MySchemaPath", "MyParametricTypeName")
+        self.assertEqual(
+            code,
+            "MyParametricTypeName("
+            "MySchemaPath.from_segments('std', 'array'), "
+            "[MySchemaPath.from_segments('std', 'int64')]"
+            ")",
+        )
+
+        type_name = ParametricTypeName(
+            SchemaPath("std", "tuple"),
+            {'a': SchemaPath("std::int64"), 'b': SchemaPath("std::str")},
+        )
+        code = type_name.as_python_code("MySchemaPath", "MyParametricTypeName")
+        self.assertEqual(
+            code,
+            "MyParametricTypeName("
+            "MySchemaPath.from_segments('std', 'tuple'), {"
+            "'a': MySchemaPath.from_segments('std', 'int64'), "
+            "'b': MySchemaPath.from_segments('std', 'str')"
+            "}"
+            ")",
+        )
 
     def test_schemapath_as_pathlib_path(self):
         """Test as_pathlib_path method."""

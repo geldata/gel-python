@@ -53,7 +53,7 @@ from gel._internal import _typing_inspect
 from gel._internal._qbmodel._abstract import LinkSet, LinkWithPropsSet
 from gel._internal._edgeql import Cardinality, PointerKind
 from gel._internal._qbmodel._pydantic._models import GelModel
-from gel._internal._schemapath import SchemaPath
+from gel._internal._schemapath import ParametricTypeName, SchemaPath
 
 from gel._internal._testbase import _models as tb
 
@@ -5487,8 +5487,20 @@ class TestModelGeneratorMain(tb.ModelTestCase):
 
         ntup_t = default.sub.TypeInSub.__gel_reflection__.pointers["ntup"].type
         self.assertEqual(
-            str(ntup_t),
-            "tuple<a:std::str, b:tuple<c:std::int64, d:std::str>>",
+            ntup_t,
+            ParametricTypeName(
+                SchemaPath.from_segments("std", "tuple"),
+                {
+                    'a': SchemaPath.from_segments("std", "str"),
+                    'b': ParametricTypeName(
+                        SchemaPath.from_segments("std", "tuple"),
+                        {
+                            'c': SchemaPath.from_segments("std", "int64"),
+                            'd': SchemaPath.from_segments("std", "str"),
+                        }
+                    ),
+                }
+            ),
         )
 
     def test_modelgen_json_schema_1(self):

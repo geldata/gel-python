@@ -8,6 +8,7 @@ from __future__ import annotations
 from typing import SupportsIndex, TypeVar, overload
 from typing_extensions import Self, TypeAliasType
 from collections.abc import Sequence
+import dataclasses
 
 import functools
 import pathlib
@@ -142,12 +143,19 @@ class SchemaPath:
     def has_prefix(self, other: SchemaPath) -> bool:
         return self.parts[: len(other.parts)] == other.parts
 
+    def as_schema_name(self) -> str:
+        return _SEP.join(p for p in self.parts)
+
     def as_quoted_schema_name(self) -> str:
         return _SEP.join(_edgeql.quote_ident(p) for p in self.parts)
 
-    def as_code(self, clsname: str = "SchemaPath") -> str:
+    def as_python_code(
+        self,
+        schemapath_clsname: str = "SchemaPath",
+        parametrictype_clsname: str = "ParametricTypeName",
+    ) -> str:
         parts = ", ".join(repr(p) for p in self.parts)
-        return f"{clsname}.from_segments({parts})"
+        return f"{schemapath_clsname}.from_segments({parts})"
 
     def as_pathlib_path(self) -> pathlib.Path:
         return pathlib.Path(*self.parts)
@@ -209,3 +217,76 @@ class _SchemaPathParents(Sequence[_T]):
 
     def __repr__(self) -> str:
         return f"<{type(self._path).__name__}.parents>"
+
+
+@dataclasses.dataclass(frozen=True)
+class ParametricTypeName:
+    type_: SchemaPath
+    args: list[TypeName] | dict[str, TypeName]
+
+    def __str__(self) -> str:
+        return self.as_schema_name()
+
+    def as_schema_name(self) -> str:
+        if isinstance(self.args, list):
+            return (
+                f"{self.type_.as_schema_name()}<"
+                f"{','.join(a.as_schema_name() for a in self.args)}"
+                f">"
+            )
+
+        else:
+            args_names = ",".join(
+                f"{n}:{a.as_schema_name()}" for n, a in self.args.items()
+            )
+            return f"{self.type_.as_schema_name()}<{args_names}>"
+
+    def as_quoted_schema_name(self) -> str:
+        if isinstance(self.args, list):
+            return (
+                f"{self.type_.as_quoted_schema_name()}<"
+                f"{','.join(a.as_quoted_schema_name() for a in self.args)}"
+                f">"
+            )
+
+        else:
+            args_names = ",".join(
+                f"{n}:{a.as_quoted_schema_name()}"
+                for n, a in self.args.items()
+            )
+            return f"{self.type_.as_schema_name()}<{args_names}>"
+
+    def as_python_code(
+        self,
+        schemapath_clsname: str = "SchemaPath",
+        parametrictype_clsname: str = "ParametricTypeName",
+    ) -> str:
+        type_code = self.type_.as_python_code(
+            schemapath_clsname, parametrictype_clsname
+        )
+        if isinstance(self.args, list):
+            args_code = ', '.join(
+                a.as_python_code(schemapath_clsname, parametrictype_clsname)
+                for a in self.args
+            )
+            return f"{parametrictype_clsname}({type_code}, [{args_code}])"
+
+        else:
+            args_code = ', '.join(
+                (
+                    f"'{n}': "
+                    + a.as_python_code(
+                        schemapath_clsname,
+                        parametrictype_clsname,
+                    )
+                )
+                for n, a in self.args.items()
+            )
+            return f"{parametrictype_clsname}({type_code}, {{{args_code}}})"
+
+    @property
+    def name(self) -> str:
+        raise NotImplementedError
+
+
+TypeName = TypeAliasType("TypeName", SchemaPath | ParametricTypeName)

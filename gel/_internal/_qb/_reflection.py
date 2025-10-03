@@ -10,14 +10,13 @@ import dataclasses
 if TYPE_CHECKING:
     import abc
     from gel._internal import _edgeql
-    from gel._internal._schemapath import SchemaPath
+    from gel._internal._schemapath import SchemaPath, TypeName
 
 
 @dataclasses.dataclass(frozen=True, kw_only=True)
 class GelPointerReflection:
     name: str
-    type: SchemaPath
-    typexpr: str
+    type: TypeName
     kind: _edgeql.PointerKind
     cardinality: _edgeql.Cardinality
     computed: bool
@@ -47,7 +46,8 @@ class GelSourceMetadata(GelSchemaMetadata):
 
 
 class GelTypeMetadata(GelSchemaMetadata):
-    pass
+    class __gel_reflection__(GelSchemaMetadata.__gel_reflection__):  # noqa: N801
+        type_name: ClassVar[TypeName]
 
 
 if TYPE_CHECKING:
