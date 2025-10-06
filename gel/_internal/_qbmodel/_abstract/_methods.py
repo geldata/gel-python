@@ -9,6 +9,7 @@ from typing import (
     TYPE_CHECKING,
     Any,
     Literal,
+    TypeVar,
 )
 from typing_extensions import Self
 
@@ -22,6 +23,7 @@ from ._expressions import (
     add_filter,
     add_limit,
     add_offset,
+    add_object_type_filter,
     delete,
     order_by,
     select,
@@ -33,6 +35,8 @@ from ._functions import (
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+
+_T_OtherModel = TypeVar("_T_OtherModel", bound="type[BaseGelModel]")
 
 
 class BaseGelModel(AbstractGelModel):
@@ -72,6 +76,11 @@ class BaseGelModel(AbstractGelModel):
 
         @classmethod
         def offset(cls, /, expr: Any) -> type[Self]: ...
+
+        @classmethod
+        def when_type(
+            cls, /, other_model: _T_OtherModel
+        ) -> type[_T_OtherModel]: ...
 
         @classmethod
         def __gel_assert_single__(
@@ -185,6 +194,18 @@ class BaseGelModel(AbstractGelModel):
             return _qb.AnnotatedExpr(  # type: ignore [return-value]
                 cls,
                 add_offset(cls, value, __operand__=__operand__),
+            )
+
+        @classmethod
+        def when_type(
+            cls,
+            /,
+            value: _T_OtherModel,
+            __operand__: _qb.ExprAlias | None = None,
+        ) -> type[_T_OtherModel]:
+            return _qb.AnnotatedExpr(  # type: ignore [return-value]
+                value,
+                add_object_type_filter(cls, value, __operand__=__operand__),
             )
 
         @classonlymethod
