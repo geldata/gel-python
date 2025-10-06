@@ -34,10 +34,10 @@ from gel._internal._qb import (
     ExprCompatible,
     IndexOp,
     InfixOp,
-    PrefixOp,
     FuncCall,
     PathAlias,
     SetLiteral,
+    UnaryOp,
     construct_infix_op_chain,
 )
 
@@ -167,7 +167,6 @@ __all__ = (
     "ParametricTypeName",
     "PathAlias",
     "PointerKind",
-    "PrefixOp",
     "PrivateAttr",
     "Property",
     "ProxyModel",
@@ -188,6 +187,7 @@ __all__ = (
     "TupleMeta",
     "TypeName",
     "UUIDImpl",
+    "UnaryOp",
     "Unspecified",
     "UnspecifiedType",
     "classonlymethod",
