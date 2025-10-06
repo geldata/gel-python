@@ -300,6 +300,31 @@ class CastOp(UnaryOp):
         return f"<{self.type.as_quoted_schema_name()}>{expr}"
 
 
+@dataclass(kw_only=True, frozen=True)
+class ObjectWhenType(UnaryOp):
+    def __init__(
+        self,
+        *,
+        expr: ExprCompatible,
+        type_: TypeName,
+    ) -> None:
+        op = _edgeql.Token.RANGBRACKET
+        super().__init__(expr=expr, op=op, type_=type_)
+
+    @property
+    def precedence(self) -> _edgeql.Precedence:
+        return _edgeql.PRECEDENCE[_edgeql.Token.LBRACKET]
+
+    def subnodes(self) -> Iterable[Node]:
+        return (self.expr,)
+
+    def __edgeql_expr__(self, *, ctx: ScopeContext) -> str:
+        expr = edgeql(self.expr, ctx=ctx)
+        if _need_left_parens(self.precedence, self.expr):
+            expr = f"({expr})"
+        return f"{expr} [is {self.type.as_quoted_schema_name()}]"
+
+
 def empty_set(type_: TypeName) -> CastOp:
     return CastOp(expr=SetLiteral(items=(), type_=type_), type_=type_)
 
@@ -828,6 +853,8 @@ def expr_uses_auto_splat(
 ) -> bool:
     if isinstance(expr, (SchemaSet, Path)):
         return True
+    elif isinstance(expr, ObjectWhenType):
+        return expr_uses_auto_splat(expr.expr)
     else:
         return False
 
