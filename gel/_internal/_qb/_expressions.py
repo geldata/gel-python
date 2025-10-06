@@ -252,7 +252,7 @@ class Op(TypedExpr):
 
 
 @dataclass(kw_only=True, frozen=True)
-class PrefixOp(Op):
+class UnaryOp(Op):
     expr: Expr
 
     def __init__(
@@ -276,7 +276,7 @@ class PrefixOp(Op):
 
 
 @dataclass(kw_only=True, frozen=True)
-class CastOp(PrefixOp):
+class CastOp(UnaryOp):
     def __init__(
         self,
         *,
