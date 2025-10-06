@@ -33,6 +33,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     from ._base import GelType
+    from gel._internal._schemapath import TypeName
 
 
 _T = TypeVar("_T")
@@ -422,6 +423,30 @@ def add_offset(
         )
 
     return dataclasses.replace(stmt, offset=_qb.Offset(offset=offset))
+
+
+def add_object_type_filter(
+    cls: type[GelType],
+    /,
+    type_filter: type[AbstractGelModel],
+    *,
+    __operand__: _qb.ExprAlias | None = None,
+) -> _qb.Expr:
+
+    subject = _qb.edgeql_qb_expr(cls if __operand__ is None else __operand__)
+
+    splat_cb = functools.partial(_qb.get_object_type_splat, cls)
+
+    expr = _qb.ObjectWhenType(
+        expr=subject,
+        type_=cls.__gel_reflection__.type_name,
+    )
+
+    stmt = _qb.SelectStmt.wrap(
+        expr,
+        splat_cb=splat_cb,
+    )
+    return stmt
 
 
 @overload
