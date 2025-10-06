@@ -189,7 +189,7 @@ def select(
             shape_elements.append(shape_el)
         else:
             el_expr = _qb.edgeql_qb_expr(kwarg, var=prefix_alias)
-            if isinstance(el_expr, (_qb.SchemaSet, _qb.Path)):
+            if _qb.expr_uses_auto_splat(el_expr):
                 # If the expression is a schema set or path without an explicit
                 # select, apply a splat.
                 if (
