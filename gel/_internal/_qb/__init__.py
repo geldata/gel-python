@@ -57,6 +57,7 @@ from ._expressions import (
     construct_infix_op_chain,
     empty_set,
     empty_set_if_none,
+    expr_uses_auto_splat,
     get_object_type_splat,
     toplevel_edgeql,
 )
@@ -171,6 +172,7 @@ __all__ = (
     "edgeql_qb_expr",
     "empty_set",
     "empty_set_if_none",
+    "expr_uses_auto_splat",
     "exprmethod",
     "get_object_type_splat",
     "get_origin",

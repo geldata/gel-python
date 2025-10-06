@@ -661,7 +661,7 @@ class SelectStmt(IteratorStmt):
             kwargs = {}
             if isinstance(expr, ShapeOp):
                 kwargs["body_scope"] = expr.scope
-            elif isinstance(expr, (SchemaSet, Path)):
+            elif expr_uses_auto_splat(expr):
                 if splat_cb is not None:
                     shape = splat_cb()
                 else:
@@ -821,6 +821,15 @@ class Shape(Node):
     ) -> Self:
         elements = [ShapeElement.splat(source=source, kind=kind)]
         return cls(elements=elements)
+
+
+def expr_uses_auto_splat(
+    expr: Expr
+) -> bool:
+    if isinstance(expr, (SchemaSet, Path)):
+        return True
+    else:
+        return False
 
 
 def _render_shape(
