@@ -302,13 +302,17 @@ class CastOp(UnaryOp):
 
 @dataclass(kw_only=True, frozen=True)
 class ObjectWhenType(UnaryOp):
+    type_filter: TypeNameExpr
+
     def __init__(
         self,
         *,
         expr: ExprCompatible,
+        type_filter: TypeNameExpr,
         type_: TypeNameExpr,
     ) -> None:
         op = _edgeql.Token.RANGBRACKET
+        object.__setattr__(self, "type_filter", type_filter)
         super().__init__(expr=expr, op=op, type_=type_)
 
     @property
@@ -322,7 +326,7 @@ class ObjectWhenType(UnaryOp):
         expr = edgeql(self.expr, ctx=ctx)
         if _need_left_parens(self.precedence, self.expr):
             expr = f"({expr})"
-        return f"{expr} [is {self.type.as_quoted_schema_name()}]"
+        return f"{expr} [is {self.type_filter.as_quoted_schema_name()}]"
 
 
 def empty_set(type_: TypeName) -> CastOp:

@@ -64,6 +64,7 @@ from ._globals import (
 
 from ._methods import (
     BaseGelModel,
+    BaseGelModelIntersection,
 )
 
 
@@ -130,6 +131,7 @@ __all__ = (
     "Array",
     "ArrayMeta",
     "BaseGelModel",
+    "BaseGelModelIntersection",
     "ComputedLinkSet",
     "ComputedLinkWithPropsSet",
     "ComputedMultiLinkDescriptor",

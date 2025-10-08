@@ -494,6 +494,14 @@ class PathPrefix(Symbol):
         return (self,)
 
 
+@dataclass(frozen=True, kw_only=True)
+class PathTypeIntersectionPrefix(IdentLikeExpr):
+    type_filter: TypeNameExpr
+
+    def __edgeql_expr__(self, *, ctx: ScopeContext) -> str:
+        return f"[is {self.type_filter.as_quoted_schema_name()}]"
+
+
 @dataclass(kw_only=True, frozen=True)
 class ImplicitIteratorStmt(IteratorExpr, Stmt):
     """Base class for statements that are implicit iterators"""
