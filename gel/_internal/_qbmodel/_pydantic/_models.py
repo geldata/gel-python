@@ -923,6 +923,10 @@ class GelSourceModel(
         return res
 
 
+_T_SelfModel = TypeVar("_T_SelfModel", bound="type[_abstract.BaseGelModel]")
+_T_OtherModel = TypeVar("_T_OtherModel", bound="type[_abstract.BaseGelModel]")
+
+
 class GelModel(
     GelSourceModel,
     _abstract.BaseGelModel,
@@ -1321,6 +1325,20 @@ class GelModel(
         if update:
             ll_setattr(copied, "__gel_new__", ll_getattr(self, "__gel_new__"))
         return copied
+
+    if TYPE_CHECKING:
+        # Pretend that when_type returns a proper GelModel
+        @classmethod
+        def when_type(
+            cls: _T_SelfModel, /, other_model: _T_OtherModel
+        ) -> type[GelModelIntersection[_T_SelfModel, _T_OtherModel]]: ...
+
+
+class GelModelIntersection(
+    GelModel, _abstract.BaseGelModelIntersection[_T_SelfModel, _T_OtherModel]
+):
+    def __init__(self) -> None:
+        raise NotImplementedError("Type expressions cannot be instantiated.")
 
 
 class GelLinkModel(

@@ -8,6 +8,8 @@ from __future__ import annotations
 from typing import (
     TYPE_CHECKING,
     Any,
+    ClassVar,
+    Generic,
     Literal,
     TypeVar,
 )
@@ -15,6 +17,10 @@ from typing_extensions import Self
 
 
 from gel._internal import _qb
+from gel._internal._lazyprop import LazyClassProperty
+from gel._internal._schemapath import (
+    TypeNameIntersection,
+)
 from gel._internal._xmethod import classonlymethod
 
 from ._base import AbstractGelModel
@@ -36,6 +42,8 @@ from ._functions import (
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+
+_T_SelfModel = TypeVar("_T_SelfModel", bound="type[BaseGelModel]")
 _T_OtherModel = TypeVar("_T_OtherModel", bound="type[BaseGelModel]")
 
 
@@ -79,8 +87,8 @@ class BaseGelModel(AbstractGelModel):
 
         @classmethod
         def when_type(
-            cls, /, other_model: _T_OtherModel
-        ) -> type[_T_OtherModel]: ...
+            cls: _T_SelfModel, /, other_model: _T_OtherModel
+        ) -> type[BaseGelModelIntersection[_T_SelfModel, _T_OtherModel]]: ...
 
         @classmethod
         def __gel_assert_single__(
@@ -198,13 +206,13 @@ class BaseGelModel(AbstractGelModel):
 
         @classmethod
         def when_type(
-            cls,
+            cls: _T_SelfModel,
             /,
             value: _T_OtherModel,
             __operand__: _qb.ExprAlias | None = None,
-        ) -> type[_T_OtherModel]:
+        ) -> type[BaseGelModelIntersection[_T_SelfModel, _T_OtherModel]]:
             return _qb.AnnotatedExpr(  # type: ignore [return-value]
-                value,
+                create_intersection(cls, value),
                 add_object_type_filter(cls, value, __operand__=__operand__),
             )
 
@@ -227,3 +235,173 @@ class BaseGelModel(AbstractGelModel):
     def __edgeql_qb_expr__(cls) -> _qb.Expr:  # pyright: ignore [reportIncompatibleMethodOverride]
         this_type = cls.__gel_reflection__.type_name
         return _qb.SchemaSet(type_=this_type)
+
+
+_T_Lhs = TypeVar("_T_Lhs", bound="type[AbstractGelModel]")
+_T_Rhs = TypeVar("_T_Rhs", bound="type[AbstractGelModel]")
+
+
+class BaseGelModelIntersection(
+    BaseGelModel,
+    Generic[_T_Lhs, _T_Rhs],
+):
+    __gel_type_class__: ClassVar[type]
+
+    lhs: ClassVar[type[AbstractGelModel]]
+    rhs: ClassVar[type[AbstractGelModel]]
+
+
+T = TypeVar('T')
+U = TypeVar('U')
+
+
+def unchanged(l: T) -> T:
+    return l
+
+
+def take_left(l: T, r: T) -> T:
+    return l
+
+
+def combine_dicts(
+    lhs: dict[str, T],
+    rhs: dict[str, T],
+    *,
+    process_unique: Callable[[T], U | None] = unchanged,
+    process_common: Callable[[T, T], U | None] = take_left,
+) -> dict[str, U]:
+    result: dict[str, U] = {}
+
+    # unique pointers
+    result |= {
+        p_name: p_ref
+        for p_name, lhs_p_ref in lhs.items()
+        if p_name not in rhs
+        if (p_ref := process_unique(lhs_p_ref)) is not None
+    }
+    result |= {
+        p_name: p_ref
+        for p_name, rhs_p_ref in rhs.items()
+        if p_name not in lhs
+        if (p_ref := process_unique(rhs_p_ref)) is not None
+    }
+
+    # common pointers
+    result |= {
+        p_name: p_ref
+        for p_name, lhs_p_ref in rhs.items()
+        if (
+            (rhs_p_ref := rhs.get(p_name)) is not None
+            and (p_ref := process_common(lhs_p_ref, rhs_p_ref)) is not None
+        )
+    }
+
+    return result
+
+
+def create_intersection(
+    lhs: _T_Lhs,
+    rhs: _T_Rhs,
+) -> type[BaseGelModelIntersection[_T_Lhs, _T_Rhs]]:
+    # Pointer reflections
+    ptr_reflections: dict[str, _qb.GelPointerReflection] = combine_dicts(
+        lhs.__gel_reflection__.pointers,
+        rhs.__gel_reflection__.pointers,
+        process_common=lambda l, r: l if l == r else None,
+    )
+
+    class __gel_reflection__(_qb.GelObjectTypeMetadata.__gel_reflection__):  # noqa: N801
+        expr_object_types: set[type[AbstractGelModel]] = getattr(
+            lhs.__gel_reflection__, 'expr_object_types', {lhs}
+        ) | getattr(rhs.__gel_reflection__, 'expr_object_types', {rhs})
+
+        type_name = TypeNameIntersection(
+            args=(
+                lhs.__gel_reflection__.type_name,
+                rhs.__gel_reflection__.type_name,
+            )
+        )
+
+        @LazyClassProperty["dict[str, _qb.GelPointerReflection]"]
+        @classmethod
+        def pointers(
+            cls,
+        ) -> dict[str, _qb.GelPointerReflection]:
+            return ptr_reflections
+
+        @classmethod
+        def object(
+            cls,
+        ) -> Any:
+            raise NotImplementedError(
+                "Type expressions schema objects are inaccessible"
+            )
+
+    @classmethod
+    def __edgeql_qb_expr__(cls) -> _qb.Expr:  # noqa: N807
+        return _qb.ObjectWhenType(
+            expr=lhs.__edgeql_qb_expr__(),
+            type_filter=rhs.__gel_reflection__.type_name,
+            type_=__gel_reflection__.type_name,
+        )
+
+    result = type(
+        f"({lhs.__name__} & {rhs.__name__})",
+        (BaseGelModelIntersection,),
+        {
+            'lhs': lhs,
+            'rhs': rhs,
+            '__gel_reflection__': __gel_reflection__,
+            '__edgeql_qb_expr__': __edgeql_qb_expr__,
+        },
+    )
+
+    lhs_prefix = _qb.PathTypeIntersectionPrefix(
+        type_=__gel_reflection__.type_name,
+        type_filter=lhs.__gel_reflection__.type_name,
+    )
+    rhs_prefix = _qb.PathTypeIntersectionPrefix(
+        type_=__gel_reflection__.type_name,
+        type_filter=rhs.__gel_reflection__.type_name,
+    )
+
+    def process_path_alias(
+        p_name: str,
+        p_refl: _qb.GelPointerReflection,
+        path_alias: _qb.PathAlias,
+        source: _qb.Expr,
+    ) -> _qb.PathAlias:
+        return _qb.PathAlias(
+            path_alias.__gel_origin__,
+            _qb.Path(
+                type_=p_refl.type,
+                source=source,
+                name=p_name,
+                is_lprop=False,
+            ),
+        )
+
+    path_aliases: dict[str, _qb.PathAlias] = combine_dicts(
+        {
+            p_name: process_path_alias(p_name, p_refl, path_alias, lhs_prefix)
+            for p_name, p_refl in lhs.__gel_reflection__.pointers.items()
+            if (
+                hasattr(lhs, p_name)
+                and (path_alias := getattr(lhs, p_name, None)) is not None
+                and isinstance(path_alias, _qb.PathAlias)
+            )
+        },
+        {
+            p_name: process_path_alias(p_name, p_refl, path_alias, rhs_prefix)
+            for p_name, p_refl in rhs.__gel_reflection__.pointers.items()
+            if (
+                hasattr(rhs, p_name)
+                and (path_alias := getattr(rhs, p_name, None)) is not None
+                and isinstance(path_alias, _qb.PathAlias)
+            )
+        },
+    )
+    for p_name, path_alias in path_aliases.items():
+        setattr(result, p_name, path_alias)
+
+    return result

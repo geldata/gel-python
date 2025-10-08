@@ -34,7 +34,6 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     from ._base import GelType
-    from gel._internal._schemapath import TypeName
 
 
 _T = TypeVar("_T")
@@ -437,19 +436,22 @@ def add_offset(
 
 
 def add_object_type_filter(
-    cls: type[GelType],
+    cls: type[AbstractGelModel],
     /,
     type_filter: type[AbstractGelModel],
     *,
     __operand__: _qb.ExprAlias | None = None,
 ) -> _qb.Expr:
+    from ._methods import create_intersection  # noqa: PLC0415
 
     subject = _qb.edgeql_qb_expr(cls if __operand__ is None else __operand__)
 
+    cls = create_intersection(cls, type_filter)
     splat_cb = functools.partial(_qb.get_object_type_splat, cls)
 
     expr = _qb.ObjectWhenType(
         expr=subject,
+        type_filter=type_filter.__gel_reflection__.type_name,
         type_=cls.__gel_reflection__.type_name,
     )
 
