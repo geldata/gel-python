@@ -20,7 +20,7 @@ from dataclasses import dataclass, field
 
 from gel._internal import _edgeql
 from gel._internal._polyfills import _strenum
-from gel._internal._schemapath import SchemaPath, TypeName
+from gel._internal._schemapath import SchemaPath, TypeName, TypeNameExpr
 
 from ._abstract import (
     AtomicExpr,
@@ -239,7 +239,7 @@ class Op(TypedExpr):
         /,
         *,
         op: _edgeql.Token | str,
-        type_: TypeName,
+        type_: TypeNameExpr,
     ) -> None:
         super().__init__(type_=type_)
         if not isinstance(op, _edgeql.Token):
@@ -260,7 +260,7 @@ class UnaryOp(Op):
         *,
         expr: ExprCompatible,
         op: _edgeql.Token | str,
-        type_: TypeName,
+        type_: TypeNameExpr,
     ) -> None:
         object.__setattr__(self, "expr", edgeql_qb_expr(expr))
         super().__init__(op=op, type_=type_)
@@ -306,7 +306,7 @@ class ObjectWhenType(UnaryOp):
         self,
         *,
         expr: ExprCompatible,
-        type_: TypeName,
+        type_: TypeNameExpr,
     ) -> None:
         op = _edgeql.Token.RANGBRACKET
         super().__init__(expr=expr, op=op, type_=type_)
@@ -344,7 +344,7 @@ class BinaryOp(Op):
         lexpr: ExprCompatible,
         rexpr: ExprCompatible,
         op: _edgeql.Token | str,
-        type_: TypeName,
+        type_: TypeNameExpr,
     ) -> None:
         object.__setattr__(self, "lexpr", edgeql_qb_expr(lexpr))
         object.__setattr__(self, "rexpr", edgeql_qb_expr(rexpr))
@@ -362,7 +362,7 @@ class InfixOp(BinaryOp):
         lexpr: ExprCompatible,
         rexpr: ExprCompatible,
         op: _edgeql.Token | str,
-        type_: TypeName,
+        type_: TypeNameExpr,
     ) -> None:
         super().__init__(lexpr=lexpr, rexpr=rexpr, op=op, type_=type_)
 
@@ -431,7 +431,7 @@ class FuncCall(TypedExpr):
         fname: str,
         args: list[ExprCompatible] | None = None,
         kwargs: dict[str, ExprCompatible] | None = None,
-        type_: TypeName,
+        type_: TypeNameExpr,
     ) -> None:
         object.__setattr__(self, "fname", fname)
         if args is not None:
@@ -533,7 +533,7 @@ class OrderByElem(Expr):
         return (self.expr,)
 
     @property
-    def type(self) -> TypeName:
+    def type(self) -> TypeNameExpr:
         return self.expr.type
 
     @property
@@ -613,8 +613,14 @@ class Offset(Clause):
 
 @dataclass(kw_only=True, frozen=True)
 class InsertStmt(Stmt, TypedExpr):
+    type_: TypeName  # insert can only deal with simple type names
+
     stmt: _edgeql.Token = _edgeql.Token.INSERT
     shape: Shape | None = None
+
+    @property
+    def type(self) -> TypeName:
+        return self.type_
 
     def subnodes(self) -> Iterable[Node | None]:
         return (self.shape,)
@@ -782,7 +788,7 @@ class ForStmt(IteratorExpr, Stmt):
         object.__setattr__(self, "var", var)
 
     @property
-    def type(self) -> TypeName:
+    def type(self) -> TypeNameExpr:
         return self.body.type
 
     def subnodes(self) -> Iterable[Node]:
@@ -811,7 +817,7 @@ class Splat(_strenum.StrEnum):
 @dataclass(kw_only=True, frozen=True)
 class ShapeElement(Node):
     name: str | Splat
-    origin: TypeName
+    origin: TypeNameExpr
     expr: Expr | None = None
 
     def subnodes(self) -> Iterable[Node]:
@@ -823,7 +829,7 @@ class ShapeElement(Node):
     @classmethod
     def splat(
         cls,
-        source: TypeName,
+        source: TypeNameExpr,
         *,
         kind: Splat = Splat.STAR,
     ) -> Self:
@@ -840,7 +846,7 @@ class Shape(Node):
     @classmethod
     def splat(
         cls,
-        source: TypeName,
+        source: TypeNameExpr,
         *,
         kind: Splat = Splat.STAR,
     ) -> Self:
@@ -848,9 +854,7 @@ class Shape(Node):
         return cls(elements=elements)
 
 
-def expr_uses_auto_splat(
-    expr: Expr
-) -> bool:
+def expr_uses_auto_splat(expr: Expr) -> bool:
     if isinstance(expr, (SchemaSet, Path)):
         return True
     elif isinstance(expr, ObjectWhenType):
@@ -909,7 +913,7 @@ class ShapeOp(IteratorExpr):
         return (self.iter_expr, self.shape)
 
     @property
-    def type(self) -> TypeName:
+    def type(self) -> TypeNameExpr:
         return self.iter_expr.type
 
     @property

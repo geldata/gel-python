@@ -13,6 +13,7 @@ import functools
 import inspect
 
 from gel._internal import _qb
+from gel._internal._schemapath import TypeNameIntersection, TypeNameUnion
 from gel._internal._utils import Unspecified
 
 from ._base import AbstractGelModel
@@ -380,6 +381,11 @@ def add_limit(
         limit = _qb.IntLiteral(val=expr)
 
     if stmt.limit is not None:
+        if isinstance(limit.type, (TypeNameIntersection, TypeNameUnion)):
+            raise ValueError(
+                f"Invalid type for limit: '{limit.type.as_schema_name()}'"
+            )
+
         limit = _qb.FuncCall(
             fname="std::min",
             args=[
@@ -410,6 +416,11 @@ def add_offset(
         offset = _qb.IntLiteral(val=expr)
 
     if stmt.offset is not None:
+        if isinstance(offset.type, (TypeNameIntersection, TypeNameUnion)):
+            raise ValueError(
+                f"Invalid type for offset: '{offset.type.as_schema_name()}'"
+            )
+
         offset = _qb.FuncCall(
             fname="std::min",
             args=[
