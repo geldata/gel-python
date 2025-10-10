@@ -229,3 +229,49 @@ insert Person {
         }
     ),
 };
+
+insert Inh_A {
+    a := 1,
+};
+insert Inh_B {
+    b := 2,
+};
+insert Inh_C {
+    c := 3,
+};
+insert Inh_AB {
+    a := 4,
+    b := 5,
+    ab := 6,
+};
+insert Inh_AC {
+    a := 7,
+    c := 8,
+    ac := 9,
+};
+insert Inh_BC {
+    b := 10,
+    c := 11,
+    bc := 12,
+};
+insert Inh_ABC {
+    a := 13,
+    b := 14,
+    c := 15,
+    abc := 16,
+};
+insert Inh_AB_AC {
+    a := 17,
+    b := 18,
+    c := 19,
+    ab := 20,
+    ac := 21,
+    ab_ac := 22,
+};
+insert Inh_XA {
+    a := 1000,
+};
+insert Inh_AXA {
+    a := 1001,
+    axa := 10002,
+};
