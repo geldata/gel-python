@@ -576,3 +576,46 @@ type NoobAccount {
 }
 
 }
+
+module default {
+
+type Inh_A {
+    a: int64;
+};
+type Inh_B {
+    b: int64;
+};
+type Inh_C {
+    c: int64;
+};
+type Inh_AB extending Inh_A, Inh_B {
+    ab: int64;
+};
+type Inh_AC extending Inh_A, Inh_C {
+    ac: int64;
+};
+type Inh_BC extending Inh_B, Inh_C {
+    bc: int64;
+};
+type Inh_ABC extending Inh_A, Inh_B, Inh_C {
+    abc: int64;
+};
+type Inh_AB_AC extending Inh_AB, Inh_AC {
+    ab_ac: int64;
+};
+
+type Inh_XA {
+    a: int64;
+};
+type Inh_AXA extending Inh_A, Inh_XA {
+    axa: int64;
+};
+
+type Link_Inh_A {
+    n: int64;
+    l: Inh_A {
+        on target delete allow;
+    };
+};
+
+}
