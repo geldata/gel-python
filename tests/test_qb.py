@@ -895,11 +895,8 @@ class TestQueryBuilder(tb.ModelTestCase):
         dana = default.User.filter(name="Dana")
         res = self.client.get(
             default.UserGroup.filter(
-                lambda g: std.count(
-                    std.distinct(
-                        std.union(g.users, dana)
-                    )
-                ) == 3
+                lambda g: std.count(std.distinct(std.union(g.users, dana)))
+                == 3
             )
         )
         self.assertEqual(res.name, "green")
@@ -1154,7 +1151,7 @@ class TestQueryBuilder(tb.ModelTestCase):
                     contents=lambda i: i.contents.select(
                         "*",
                     ).order_by(game_id=True),
-                )
+                ),
             ).filter(
                 game_id=1,
             )
@@ -1174,7 +1171,7 @@ class TestQueryBuilder(tb.ModelTestCase):
                     contents=lambda i: i.contents.select(
                         "*",
                     ).order_by(game_id=True),
-                )
+                ),
             ).filter(
                 game_id=2,
             )
@@ -1197,7 +1194,7 @@ class TestQueryBuilder(tb.ModelTestCase):
                     contents=lambda i: i.contents.select(
                         "*",
                     ).order_by(game_id=True),
-                )
+                ),
             ).filter(
                 game_id=3,
             )
@@ -1213,7 +1210,8 @@ class TestQueryBuilder(tb.ModelTestCase):
             [
                 ("cotton candy", default.Candy),
                 ("candy corn", default.Candy),
-            ], strict=False
+            ],
+            strict=False,
         ):
             self.assertEqual(c.name, name)
             self.assertIsInstance(c, t)
@@ -1229,7 +1227,7 @@ class TestQueryBuilder(tb.ModelTestCase):
                     contents=lambda i: i.contents.select(
                         "*",
                     ).order_by(game_id=True),
-                )
+                ),
             ).filter(
                 game_id=4,
             )
@@ -1245,7 +1243,8 @@ class TestQueryBuilder(tb.ModelTestCase):
             [
                 ("milk", default.Chocolate),
                 ("dark", default.Chocolate),
-            ], strict=False
+            ],
+            strict=False,
         ):
             self.assertEqual(c.name, name)
             self.assertIsInstance(c, t)
@@ -1261,7 +1260,7 @@ class TestQueryBuilder(tb.ModelTestCase):
                     contents=lambda i: i.contents.select(
                         "*",
                     ).order_by(game_id=True),
-                )
+                ),
             ).filter(
                 game_id=5,
             )
@@ -1279,7 +1278,8 @@ class TestQueryBuilder(tb.ModelTestCase):
                 ("blue bear", default.Gummy),
                 ("sour worm", default.GummyWorm),
                 ("almond", default.Chocolate),
-            ], strict=False
+            ],
+            strict=False,
         ):
             self.assertEqual(c.name, name)
             self.assertIsInstance(c, t)
@@ -1295,7 +1295,7 @@ class TestQueryBuilder(tb.ModelTestCase):
                     contents=lambda i: i.contents.select(
                         "*",
                     ).order_by(game_id=True),
-                )
+                ),
             ).filter(
                 game_id=6,
             )
@@ -1310,7 +1310,8 @@ class TestQueryBuilder(tb.ModelTestCase):
             p.item.contents,
             [
                 ("sour worm", default.GummyWorm),
-            ], strict=False
+            ],
+            strict=False,
         ):
             self.assertEqual(c.name, name)
             self.assertIsInstance(c, t)
@@ -1337,7 +1338,8 @@ class TestQueryBuilder(tb.ModelTestCase):
             [
                 ("milk", "bar"),
                 ("dark", "truffle"),
-            ], strict=False
+            ],
+            strict=False,
         ):
             self.assertEqual(c.name, name)
             self.assertEqual(c.kind, kind)
@@ -1351,6 +1353,167 @@ class TestQueryBuilder(tb.ModelTestCase):
 
         res = self.client.query(unpack)
         self.assertEqual(len(res), 6)
+
+    def test_qb_when_type_01(self):
+        # Simple type intersection
+        from models.orm_qb import default
+
+        result = self.client.query(default.Inh_A.when_type(default.Inh_B))
+
+        self._assertObjectsWithFields(
+            result,
+            "a",
+            [
+                (
+                    default.Inh_AB,
+                    {
+                        "a": 4,
+                        "b": 5,
+                    },
+                ),
+                (
+                    default.Inh_ABC,
+                    {
+                        "a": 13,
+                        "b": 14,
+                    },
+                ),
+                (
+                    default.Inh_AB_AC,
+                    {
+                        "a": 17,
+                        "b": 18,
+                    },
+                ),
+            ],
+        )
+
+    def test_qb_when_type_02(self):
+        # Chained type intersection
+        from models.orm_qb import default
+
+        result = self.client.query(
+            default.Inh_A.when_type(default.Inh_B).when_type(default.Inh_C)
+        )
+
+        self._assertObjectsWithFields(
+            result,
+            "a",
+            [
+                (
+                    default.Inh_ABC,
+                    {
+                        "a": 13,
+                        "b": 14,
+                        "c": 15,
+                    },
+                ),
+                (
+                    default.Inh_AB_AC,
+                    {
+                        "a": 17,
+                        "b": 18,
+                        "c": 19,
+                    },
+                ),
+            ],
+        )
+
+    def test_qb_when_type_03(self):
+        # Select on type intersection
+        from models.orm_qb import default
+
+        result = self.client.query(
+            default.Inh_A.when_type(default.Inh_B).select(a=True)
+        )
+
+        self._assertObjectsWithFields(
+            result,
+            "a",
+            [
+                (
+                    default.Inh_AB,
+                    {
+                        "a": 4,
+                    },
+                ),
+                (
+                    default.Inh_ABC,
+                    {
+                        "a": 13,
+                    },
+                ),
+                (
+                    default.Inh_AB_AC,
+                    {
+                        "a": 17,
+                    },
+                ),
+            ],
+        )
+
+    @tb.skip_typecheck
+    def test_qb_when_type_04(self):
+        # Select containing type intersection
+        from models.orm_qb import default
+
+        result = self.client.query(
+            default.Inh_AB.select(a=lambda x: x.when_type(default.Inh_C).c)
+        )
+
+        self._assertObjectsWithFields(
+            result,
+            "a",
+            [
+                (
+                    default.Inh_AB,
+                    {
+                        "a": None,
+                    },
+                ),
+                (
+                    default.Inh_AB_AC,
+                    {
+                        "a": 19,
+                    },
+                ),
+            ],
+        )
+
+    def test_qb_when_type_05(self):
+        # Select on type intersection containing type intersection
+        from models.orm_qb import default
+
+        result = self.client.query(
+            default.Inh_A.when_type(default.Inh_B).select(
+                ab=lambda x: x.when_type(default.Inh_AB).ab
+            )
+        )
+
+        self._assertObjectsWithFields(
+            result,
+            "ab",
+            [
+                (
+                    default.Inh_AB,
+                    {
+                        "ab": 6,
+                    },
+                ),
+                (
+                    default.Inh_ABC,
+                    {
+                        "ab": None,
+                    },
+                ),
+                (
+                    default.Inh_AB_AC,
+                    {
+                        "ab": 20,
+                    },
+                ),
+            ],
+        )
 
 
 class TestQueryBuilderModify(tb.ModelTestCase):
@@ -1432,9 +1595,9 @@ class TestQueryBuilderModify(tb.ModelTestCase):
         # Add Alice to the group
         self.client.query(
             default.UserGroup.filter(name="blue").update(
-                users=lambda g: std.assert_distinct(std.union(
-                    g.users, default.User.filter(name="Alice")
-                ))
+                users=lambda g: std.assert_distinct(
+                    std.union(g.users, default.User.filter(name="Alice"))
+                )
             )
         )
 

@@ -290,3 +290,43 @@ class ParametricTypeName:
 
 
 TypeName = TypeAliasType("TypeName", SchemaPath | ParametricTypeName)
+
+
+@dataclasses.dataclass(frozen=True, kw_only=True)
+class TypeNameIntersection:
+    args: tuple[TypeNameExpr, ...]
+
+    def as_schema_name(self) -> str:
+        return f"({' & '.join(a.as_schema_name() for a in self.args)})"
+
+    def as_quoted_schema_name(self) -> str:
+        return f"({' & '.join(a.as_quoted_schema_name() for a in self.args)})"
+
+    @property
+    def name(self) -> str:
+        # For type expressions, put the entire schema name inside a quote.
+        # This is ugly, but it works.
+        return f"`{self.as_schema_name()}`"
+
+
+@dataclasses.dataclass(frozen=True, kw_only=True)
+class TypeNameUnion:
+    args: tuple[TypeNameExpr, ...]
+
+    def as_schema_name(self) -> str:
+        return f"({' | '.join(a.as_schema_name() for a in self.args)})"
+
+    def as_quoted_schema_name(self) -> str:
+        return f"({' | '.join(a.as_quoted_schema_name() for a in self.args)})"
+
+    @property
+    def name(self) -> str:
+        # For type expressions, put the entire schema name inside a quote.
+        # This is ugly, but it works.
+        return f"`{self.as_schema_name()}`"
+
+
+TypeNameExpr = TypeAliasType(
+    "TypeNameExpr",
+    TypeName | TypeNameIntersection | TypeNameUnion,
+)
