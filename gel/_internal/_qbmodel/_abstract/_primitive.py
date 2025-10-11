@@ -358,7 +358,7 @@ class Tuple(  # type: ignore[misc]
         )
 
     @classmethod
-    def cast(cls, expr: _qb.ExprCompatible) -> type[Tuple[Unpack[_Ts]]]:
+    def cast(cls, expr: _qb.ExprCompatible) -> Self:
         return _qb.AnnotatedExpr(  # type: ignore [return-value]
             cls,
             _qb.CastOp(
@@ -366,6 +366,11 @@ class Tuple(  # type: ignore[misc]
                 type_=cls.__gel_reflection__.type_name,
             ),
         )
+
+    if TYPE_CHECKING:
+
+        def __new__(cls, args: tuple[Any, ...]) -> Self: ...
+        def __init__(self, args: tuple[Unpack[_Ts]]): ...
 
 
 if TYPE_CHECKING:
