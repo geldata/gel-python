@@ -839,6 +839,14 @@ GENERIC_TYPES = frozenset(
         SchemaPath("std", "multirange"),
     }
 )
+COLLECTION_TYPES = frozenset(
+    {
+        SchemaPath("std", "array"),
+        SchemaPath("std", "tuple"),
+        SchemaPath("std", "range"),
+        SchemaPath("std", "multirange"),
+    }
+)
 
 PSEUDO_TYPES = frozenset(("anytuple", "anyobject", "anytype"))
 
@@ -2352,37 +2360,39 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             t_anypt = self.declare_typevar("_T_anypoint", bound=anypoint)
             self.write(f'_Tt = {typevartup}("_Tt")')
 
+            # Order the bases with more specific types first so that
+            # __gel_reflection__ is resolved correctly.
             generics = {
                 SchemaPath("std", "anytype"): [
                     geltype,
                 ],
                 SchemaPath("std", "anyobject"): [
-                    "anytype",
                     gelmodel,
+                    "anytype",
                 ],
                 SchemaPath("std", "anytuple"): [
-                    "anytype",
                     anytuple,
+                    "anytype",
                 ],
                 SchemaPath("std", "anynamedtuple"): [
-                    "anytuple",
                     anynamedtuple,
+                    "anytuple",
                 ],
                 SchemaPath("std", "tuple"): [
-                    "anytuple",
                     f"{tup}[{unpack}[_Tt]]",
+                    "anytuple",
                 ],
                 SchemaPath("std", "array"): [
-                    "anytype",
                     f"{arr}[{t_anytype}]",
+                    "anytype",
                 ],
                 SchemaPath("std", "range"): [
-                    "anytype",
                     f"{rang}[{t_anypt}]",
+                    "anytype",
                 ],
                 SchemaPath("std", "multirange"): [
-                    "anytype",
                     f"{mrang}[{t_anypt}]",
+                    "anytype",
                 ],
             }
 
@@ -2515,7 +2525,17 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                     suggested_module_alias=rel_import.module_alias,
                 )
                 type_ident = ident(gt.name)
-                self.write(f"{type_ident} = {imported_name}")
+
+                if gt in COLLECTION_TYPES:
+                    # Import collection classes directly so mypy sees them as
+                    # generic classes, not type aliases
+                    self.write(
+                        f"from {rel_import.module} "
+                        f"import {type_ident} as {type_ident}"
+                    )
+                else:
+                    self.write(f"{type_ident} = {imported_name}")
+
                 self.export(type_ident)
 
     def _write_enum_scalar_type(
@@ -2533,7 +2553,36 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             self.write_description(stype)
             for value in stype.enum_values:
                 self.write(f"{ident(value)} = {value!r}")
+
+            self.write()
             self.write_type_reflection(stype)
+
+            # cast method
+            expr_compat = self.import_name(BASE_IMPL, "ExprCompatible")
+
+            type_ = self.import_name("builtins", "type")
+            self_ = self.import_name("typing_extensions", "Self")
+            type_self = f"{type_}[{self_}]"
+
+            aexpr = self.import_name(BASE_IMPL, "AnnotatedExpr")
+            cast_op = self.import_name(BASE_IMPL, "CastOp")
+
+            self.write()
+            with self._classmethod_def(
+                "cast",
+                [f"expr: {expr_compat}"],
+                type_self,
+            ):
+                self.write(f"return {aexpr}(  # type: ignore [return-value]")
+                with self.indented():
+                    self.write("cls,")
+                    self.write(f"{cast_op}(")
+                    with self.indented():
+                        self.write("expr=expr,")
+                        self.write("type_=cls.__gel_reflection__.type_name,")
+                    self.write(")")
+                self.write(")")
+
         self.write_section_break()
 
     def _write_scalar_type(
@@ -2623,6 +2672,8 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             typecheck_meta_ignores = ["misc", "unused-ignore"]
 
             self.export("anyenum")
+
+        is_generic = type_name in GENERIC_TYPES
 
         if not runtime_parents:
             typecheck_parents = [self.get_type(self._types_by_name["anytype"])]
@@ -2725,6 +2776,22 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                     ):
                         self.write("...")
 
+                # cast method
+                if not is_generic:
+                    expr_compat = self.import_name(BASE_IMPL, "ExprCompatible")
+
+                    type_ = self.import_name("builtins", "type")
+                    self_ = self.import_name("typing_extensions", "Self")
+                    type_self = f"{type_}[{self_}]"
+
+                    self.write()
+                    with self._classmethod_def(
+                        "cast",
+                        [f"expr: {expr_compat}"],
+                        type_self,
+                    ):
+                        self.write("...")
+
         self.write()
 
         with self.not_type_checking():
@@ -2738,6 +2805,37 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                     )
                     self.write()
                 self.write_type_reflection(stype)
+
+                # cast method
+                if not is_generic:
+                    expr_compat = self.import_name(BASE_IMPL, "ExprCompatible")
+
+                    type_ = self.import_name("builtins", "type")
+                    self_ = self.import_name("typing_extensions", "Self")
+                    type_self = f"{type_}[{self_}]"
+
+                    aexpr = self.import_name(BASE_IMPL, "AnnotatedExpr")
+                    cast_op = self.import_name(BASE_IMPL, "CastOp")
+
+                    self.write()
+                    with self._classmethod_def(
+                        "cast",
+                        [f"expr: {expr_compat}"],
+                        type_self,
+                    ):
+                        self.write(
+                            f"return {aexpr}(  # type: ignore [return-value]"
+                        )
+                        with self.indented():
+                            self.write("cls,")
+                            self.write(f"{cast_op}(")
+                            with self.indented():
+                                self.write("expr=expr,")
+                                self.write(
+                                    "type_=cls.__gel_reflection__.type_name,"
+                                )
+                            self.write(")")
+                        self.write(")")
 
         self.write_section_break()
 
