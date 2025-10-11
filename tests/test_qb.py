@@ -1399,13 +1399,13 @@ class TestQueryBuilder(tb.ModelTestCase):
                 std.array[std.tuple[std.str, std.str]](
                     [
                         std.tuple[std.str, std.str](
-                            [std.str("1"), std.str("Red")]
+                            (std.str("1"), std.str("Red"))
                         ),
                         std.tuple[std.str, std.str](
-                            [std.str("2"), std.str("Green")]
+                            (std.str("2"), std.str("Green"))
                         ),
                         std.tuple[std.str, std.str](
-                            [std.str("3"), std.str("Blue")]
+                            (std.str("3"), std.str("Blue"))
                         ),
                     ]
                 )

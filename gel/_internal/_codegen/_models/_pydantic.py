@@ -839,6 +839,14 @@ GENERIC_TYPES = frozenset(
         SchemaPath("std", "multirange"),
     }
 )
+COLLECTION_TYPES = frozenset(
+    {
+        SchemaPath("std", "array"),
+        SchemaPath("std", "tuple"),
+        SchemaPath("std", "range"),
+        SchemaPath("std", "multirange"),
+    }
+)
 
 PSEUDO_TYPES = frozenset(("anytuple", "anyobject", "anytype"))
 
@@ -2517,7 +2525,17 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                     suggested_module_alias=rel_import.module_alias,
                 )
                 type_ident = ident(gt.name)
-                self.write(f"{type_ident} = {imported_name}")
+
+                if gt in COLLECTION_TYPES:
+                    # Import collection classes directly so mypy sees them as
+                    # generic classes, not type aliases
+                    self.write(
+                        f"from {rel_import.module} "
+                        f"import {type_ident} as {type_ident}"
+                    )
+                else:
+                    self.write(f"{type_ident} = {imported_name}")
+
                 self.export(type_ident)
 
     def _write_enum_scalar_type(
