@@ -204,6 +204,8 @@ class BaseGelModel(AbstractGelModel):
                 add_offset(cls, value, __operand__=__operand__),
             )
 
+        @classonlymethod
+        @_qb.exprmethod
         @classmethod
         def when_type(
             cls: _T_SelfModel,
