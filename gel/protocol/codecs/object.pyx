@@ -390,7 +390,7 @@ cdef class ObjectCodec(BaseNamedRecordCodec):
         if expr_object_types is not None:
             worklist = list(expr_object_types)
         else:
-            worklist = [self.cached_return_type]
+            worklist = [return_type]
 
         subs = []
         dlists = []
@@ -412,7 +412,7 @@ cdef class ObjectCodec(BaseNamedRecordCodec):
                     subs.append(None)
                     dlists.append(None)
                     origins.append(workitem)
-                elif name in ptrtypes:
+                else:
                     origin = workitem
                     if isinstance(self.source_types[i], ObjectTypeNullCodec):
                         tname = self.source_types[i].get_tname()
@@ -423,7 +423,14 @@ cdef class ObjectCodec(BaseNamedRecordCodec):
 
                     origins.append(origin)
 
-                    sub = inspect.getattr_static(origin, name)
+                    if expr_object_types is not None:
+                        sub = inspect.getattr_static(origin, name, None)
+                        if sub is None:
+                            # This pointer is from a different part of the type expr
+                            continue
+                    else:
+                        sub = inspect.getattr_static(origin, name)
+
                     subs.append(sub.get_resolved_type())
 
                     dlist_factory = None
