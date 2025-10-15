@@ -440,26 +440,37 @@ def add_object_type_filter(
     /,
     type_filter: type[AbstractGelModel],
     *,
-    __operand__: _qb.ExprAlias | None = None,
+    __operand__: _qb.ExprAlias | _qb.Expr | None = None,
 ) -> _qb.Expr:
     from ._methods import create_intersection  # noqa: PLC0415
 
-    subject = _qb.edgeql_qb_expr(cls if __operand__ is None else __operand__)
+    subject: _qb.Expr
+    if isinstance(__operand__, _qb.Expr):
+        subject = __operand__
+    elif __operand__ is not None:
+        subject = _qb.edgeql_qb_expr(__operand__)
+    else:
+        subject = _qb.edgeql_qb_expr(cls)
 
-    cls = create_intersection(cls, type_filter)
-    splat_cb = functools.partial(_qb.get_object_type_splat, cls)
+    result_cls = create_intersection(cls, type_filter)
 
-    expr = _qb.ObjectWhenType(
-        expr=subject,
-        type_filter=type_filter.__gel_reflection__.type_name,
-        type_=cls.__gel_reflection__.type_name,
-    )
+    if isinstance(subject, (_qb.SelectStmt, _qb.ShapeOp)):
+        # Apply the type intersection to the subject.
+        return dataclasses.replace(
+            subject,
+            iter_expr=add_object_type_filter(
+                cls,
+                type_filter,
+                __operand__=subject.iter_expr,
+            ),
+        )
 
-    stmt = _qb.SelectStmt.wrap(
-        expr,
-        splat_cb=splat_cb,
-    )
-    return stmt
+    else:
+        return _qb.ObjectWhenType(
+            expr=subject,
+            type_filter=type_filter.__gel_reflection__.type_name,
+            type_=result_cls.__gel_reflection__.type_name,
+        )
 
 
 @overload
