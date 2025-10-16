@@ -17,7 +17,6 @@ from typing_extensions import Self
 
 
 from gel._internal import _qb
-from gel._internal._lazyprop import LazyClassProperty
 from gel._internal._schemapath import (
     TypeNameIntersection,
 )
@@ -269,8 +268,8 @@ def combine_dicts(
     lhs: dict[str, T],
     rhs: dict[str, T],
     *,
-    process_unique: Callable[[T], U | None] = unchanged,
-    process_common: Callable[[T, T], U | None] = take_left,
+    process_unique: Callable[[T], U | None] = unchanged,  # type: ignore[assignment]
+    process_common: Callable[[T, T], U | None] = take_left,  # type: ignore[assignment]
 ) -> dict[str, U]:
     result: dict[str, U] = {}
 
@@ -312,7 +311,7 @@ def create_intersection(
         process_common=lambda l, r: l if l == r else None,
     )
 
-    class __gel_reflection__(_qb.GelObjectTypeMetadata.__gel_reflection__):  # noqa: N801
+    class __gel_reflection__(_qb.GelObjectTypeExprMetadata.__gel_reflection__):  # noqa: N801
         expr_object_types: set[type[AbstractGelModel]] = getattr(
             lhs.__gel_reflection__, 'expr_object_types', {lhs}
         ) | getattr(rhs.__gel_reflection__, 'expr_object_types', {rhs})
@@ -324,12 +323,7 @@ def create_intersection(
             )
         )
 
-        @LazyClassProperty["dict[str, _qb.GelPointerReflection]"]
-        @classmethod
-        def pointers(
-            cls,
-        ) -> dict[str, _qb.GelPointerReflection]:
-            return ptr_reflections
+        pointers = ptr_reflections
 
         @classmethod
         def object(
@@ -339,13 +333,21 @@ def create_intersection(
                 "Type expressions schema objects are inaccessible"
             )
 
-    @classmethod
-    def __edgeql_qb_expr__(cls) -> _qb.Expr:  # noqa: N807
-        return _qb.ObjectWhenType(
-            expr=lhs.__edgeql_qb_expr__(),
-            type_filter=rhs.__gel_reflection__.type_name,
-            type_=__gel_reflection__.type_name,
-        )
+    if TYPE_CHECKING:
+
+        def __edgeql_qb_expr__(  # noqa: N807
+            self: BaseGelModelIntersection[_T_Lhs, _T_Rhs],
+        ) -> _qb.Expr: ...
+
+    else:
+
+        @classmethod
+        def __edgeql_qb_expr__(cls) -> _qb.Expr:  # noqa: N807
+            return _qb.ObjectWhenType(
+                expr=lhs.__edgeql_qb_expr__(),
+                type_filter=rhs.__gel_reflection__.type_name,
+                type_=__gel_reflection__.type_name,
+            )
 
     result = type(
         f"({lhs.__name__} & {rhs.__name__})",
