@@ -98,6 +98,7 @@ from ._reflection import (
     GelSchemaMetadata,
     GelSourceMetadata,
     GelTypeMetadata,
+    GelObjectTypeExprMetadata,
     GelObjectTypeMetadata,
 )
 
@@ -131,6 +132,7 @@ __all__ = (
     "ForStmt",
     "FuncCall",
     "GelLinkMetadata",
+    "GelObjectTypeExprMetadata",
     "GelObjectTypeMetadata",
     "GelPointerReflection",
     "GelReflectionProto",
