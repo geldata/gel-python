@@ -1357,6 +1357,27 @@ class TestQueryBuilder(tb.ModelTestCase):
         )
         self.assertEqual(result, ["1", "2", "3"])
 
+    def test_qb_cast_scalar_01(self):
+        # scalar to scalar
+        from models.orm import std
+
+        result = self.client.get(std.str.cast(std.int64(1)))
+        self.assertEqual(result, "1")
+
+    def test_qb_cast_scalar_02(self):
+        # enum to scalar
+        from models.orm import default, std
+
+        result = self.client.get(std.str.cast(default.Color.Red))
+        self.assertEqual(result, "Red")
+
+    def test_qb_cast_scalar_03(self):
+        # scalar to enum
+        from models.orm import default, std
+
+        result = self.client.get(default.Color.cast(std.str("Red")))
+        self.assertEqual(result, default.Color.Red)
+
     def test_qb_cast_array_02(self):
         # array[enum] to array[scalar]
         from models.orm_qb import default, std
@@ -1650,24 +1671,3 @@ class TestQueryBuilderModify(tb.ModelTestCase):
 
         self.assertEqual(e.color, default.Color.Violet)
         self.assertEqual(e.name, "red")
-
-    def test_qb_cast_scalar_01(self):
-        # scalar to scalar
-        from models.orm import std
-
-        result = self.client.get(std.str.cast(std.int64(1)))
-        self.assertEqual(result, "1")
-
-    def test_qb_cast_scalar_02(self):
-        # enum to scalar
-        from models.orm import default, std
-
-        result = self.client.get(std.str.cast(default.Color.Red))
-        self.assertEqual(result, "Red")
-
-    def test_qb_cast_scalar_03(self):
-        # scalar to enum
-        from models.orm import default, std
-
-        result = self.client.get(default.Color.cast(std.str("Red")))
-        self.assertEqual(result, default.Color.Red)
