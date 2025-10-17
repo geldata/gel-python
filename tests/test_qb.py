@@ -515,18 +515,13 @@ class TestQueryBuilder(tb.ModelTestCase):
         self.assertEqual(res.name, "Alice")
         self.assertEqual(res.nickname, "Little Alice")
 
-    @tb.xfail_unimplemented('''
-        Needs casts. Issue #672.
-        Medium priority.
-        (We might do different syntax and need to change the test.)
-    ''')
     def test_qb_computed_03(self):
         from models.orm_qb import default, std
 
         res = self.client.get(
             default.User.select(
                 name=True,
-                nickname=lambda u: u.name + std.str(std.len(u.name)),
+                nickname=lambda u: u.name + std.str.cast(std.len(u.name)),
             ).filter(name="Alice")
         )
         self.assertEqual(res.name, "Alice")
@@ -895,11 +890,8 @@ class TestQueryBuilder(tb.ModelTestCase):
         dana = default.User.filter(name="Dana")
         res = self.client.get(
             default.UserGroup.filter(
-                lambda g: std.count(
-                    std.distinct(
-                        std.union(g.users, dana)
-                    )
-                ) == 3
+                lambda g: std.count(std.distinct(std.union(g.users, dana)))
+                == 3
             )
         )
         self.assertEqual(res.name, "green")
@@ -1344,13 +1336,144 @@ class TestQueryBuilder(tb.ModelTestCase):
             self.assertIsInstance(c, default.Chocolate)
 
     def test_qb_array_agg_01(self):
-        from models.orm import default, std
+        from models.orm_qb import default, std
 
         agg = std.array_agg(default.User)
         unpack = std.array_unpack(agg)
 
         res = self.client.query(unpack)
         self.assertEqual(len(res), 6)
+
+    def test_qb_cast_array_01(self):
+        # array[scalar] to array[scalar]
+        from models.orm_qb import std
+
+        result = self.client.get(
+            std.array[std.str].cast(
+                std.array[std.int64](
+                    [std.int64(1), std.int64(2), std.int64(3)]
+                )
+            )
+        )
+        self.assertEqual(result, ["1", "2", "3"])
+
+    def test_qb_cast_scalar_01(self):
+        # scalar to scalar
+        from models.orm import std
+
+        result = self.client.get(std.str.cast(std.int64(1)))
+        self.assertEqual(result, "1")
+
+    def test_qb_cast_scalar_02(self):
+        # enum to scalar
+        from models.orm import default, std
+
+        result = self.client.get(std.str.cast(default.Color.Red))
+        self.assertEqual(result, "Red")
+
+    def test_qb_cast_scalar_03(self):
+        # scalar to enum
+        from models.orm import default, std
+
+        result = self.client.get(default.Color.cast(std.str("Red")))
+        self.assertEqual(result, default.Color.Red)
+
+    def test_qb_cast_array_02(self):
+        # array[enum] to array[scalar]
+        from models.orm_qb import default, std
+
+        result = self.client.get(
+            std.array[std.str].cast(
+                std.array[default.Color](
+                    [
+                        default.Color.Red,
+                        default.Color.Green,
+                        default.Color.Blue,
+                    ]
+                )
+            )
+        )
+        self.assertEqual(result, ["Red", "Green", "Blue"])
+
+    def test_qb_cast_array_03(self):
+        # array[scalar] to array[enum]
+        from models.orm_qb import default, std
+
+        result = self.client.get(
+            std.array[default.Color].cast(
+                std.array[std.str](
+                    [std.str("Red"), std.str("Green"), std.str("Blue")]
+                )
+            )
+        )
+        self.assertEqual(
+            result,
+            [default.Color.Red, default.Color.Green, default.Color.Blue],
+        )
+
+    def test_qb_cast_array_04(self):
+        # array[tuple] to array[tuple]
+        from models.orm_qb import default, std
+
+        result = self.client.get(
+            std.array[std.tuple[std.int64, default.Color]].cast(
+                std.array[std.tuple[std.str, std.str]](
+                    [
+                        std.tuple[std.str, std.str](
+                            (std.str("1"), std.str("Red"))
+                        ),
+                        std.tuple[std.str, std.str](
+                            (std.str("2"), std.str("Green"))
+                        ),
+                        std.tuple[std.str, std.str](
+                            (std.str("3"), std.str("Blue"))
+                        ),
+                    ]
+                )
+            )
+        )
+        self.assertEqual(
+            result,
+            [
+                (1, default.Color.Red),
+                (2, default.Color.Green),
+                (3, default.Color.Blue),
+            ],
+        )
+
+    def test_qb_cast_tuple_01(self):
+        # unnamed tuple to unnamed tuple
+        from models.orm_qb import default, std
+
+        result = self.client.get(
+            std.tuple[
+                std.int64, default.Color, std.str, std.array[std.int64]
+            ].cast(
+                std.tuple[std.str, std.str, default.Color, std.array[std.str]](
+                    (
+                        std.str("1"),
+                        std.str("Red"),
+                        default.Color.Green,
+                        std.array[std.str](
+                            [std.str("2"), std.str("3"), std.str("4")]
+                        ),
+                    )
+                )
+            )
+        )
+        self.assertEqual(result, (1, default.Color.Red, "Green", [2, 3, 4]))
+
+    def test_qb_cast_range_01(self):
+        # range to range
+        from gel.datatypes import range as _range
+        from models.orm_qb import std
+
+        result = self.client.get(
+            std.range[std.int64].cast(
+                std.range[std.int32](std.int32(1), std.int32(9))
+            )
+        )
+        self.assertEqual(result, _range.Range(std.int64(1), std.int64(9)))
 
 
 class TestQueryBuilderModify(tb.ModelTestCase):
@@ -1432,9 +1555,9 @@ class TestQueryBuilderModify(tb.ModelTestCase):
         # Add Alice to the group
         self.client.query(
             default.UserGroup.filter(name="blue").update(
-                users=lambda g: std.assert_distinct(std.union(
-                    g.users, default.User.filter(name="Alice")
-                ))
+                users=lambda g: std.assert_distinct(
+                    std.union(g.users, default.User.filter(name="Alice"))
+                )
             )
         )
 
