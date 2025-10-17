@@ -2557,33 +2557,38 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             self.write()
             self.write_type_reflection(stype)
 
-            # cast method
-            expr_compat = self.import_name(BASE_IMPL, "ExprCompatible")
-
-            type_ = self.import_name("builtins", "type")
-            self_ = self.import_name("typing_extensions", "Self")
-            type_self = f"{type_}[{self_}]"
-
-            aexpr = self.import_name(BASE_IMPL, "AnnotatedExpr")
-            cast_op = self.import_name(BASE_IMPL, "CastOp")
-
             self.write()
-            with self._classmethod_def(
-                "cast",
-                [f"expr: {expr_compat}"],
-                type_self,
-            ):
-                self.write(f"return {aexpr}(  # type: ignore [return-value]")
-                with self.indented():
-                    self.write("cls,")
-                    self.write(f"{cast_op}(")
-                    with self.indented():
-                        self.write("expr=expr,")
-                        self.write("type_=cls.__gel_reflection__.type_name,")
-                    self.write(")")
-                self.write(")")
+            self._write_enum_scalar_cast(stype)
 
         self.write_section_break()
+
+    def _write_enum_scalar_cast(
+        self,
+        stype: reflection.ScalarType,
+    ) -> None:
+        expr_compat = self.import_name(BASE_IMPL, "ExprCompatible")
+
+        type_ = self.import_name("builtins", "type")
+        self_ = self.import_name("typing_extensions", "Self")
+        type_self = f"{type_}[{self_}]"
+
+        aexpr = self.import_name(BASE_IMPL, "AnnotatedExpr")
+        cast_op = self.import_name(BASE_IMPL, "CastOp")
+
+        with self._classmethod_def(
+            "cast",
+            [f"expr: {expr_compat}"],
+            type_self,
+        ):
+            self.write(f"return {aexpr}(  # type: ignore [return-value]")
+            with self.indented():
+                self.write("cls,")
+                self.write(f"{cast_op}(")
+                with self.indented():
+                    self.write("expr=expr,")
+                    self.write("type_=cls.__gel_reflection__.type_name,")
+                self.write(")")
+            self.write(")")
 
     def _write_scalar_type(
         self,
@@ -2776,21 +2781,8 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                     ):
                         self.write("...")
 
-                # cast method
                 if not is_generic:
-                    expr_compat = self.import_name(BASE_IMPL, "ExprCompatible")
-
-                    type_ = self.import_name("builtins", "type")
-                    self_ = self.import_name("typing_extensions", "Self")
-                    type_self = f"{type_}[{self_}]"
-
-                    self.write()
-                    with self._classmethod_def(
-                        "cast",
-                        [f"expr: {expr_compat}"],
-                        type_self,
-                    ):
-                        self.write("...")
+                    self._write_regular_scalar_cast(stype, signature_only=True)
 
         self.write()
 
@@ -2806,38 +2798,54 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                     self.write()
                 self.write_type_reflection(stype)
 
-                # cast method
                 if not is_generic:
-                    expr_compat = self.import_name(BASE_IMPL, "ExprCompatible")
-
-                    type_ = self.import_name("builtins", "type")
-                    self_ = self.import_name("typing_extensions", "Self")
-                    type_self = f"{type_}[{self_}]"
-
-                    aexpr = self.import_name(BASE_IMPL, "AnnotatedExpr")
-                    cast_op = self.import_name(BASE_IMPL, "CastOp")
-
                     self.write()
-                    with self._classmethod_def(
-                        "cast",
-                        [f"expr: {expr_compat}"],
-                        type_self,
-                    ):
-                        self.write(
-                            f"return {aexpr}(  # type: ignore [return-value]"
-                        )
-                        with self.indented():
-                            self.write("cls,")
-                            self.write(f"{cast_op}(")
-                            with self.indented():
-                                self.write("expr=expr,")
-                                self.write(
-                                    "type_=cls.__gel_reflection__.type_name,"
-                                )
-                            self.write(")")
-                        self.write(")")
+                    self._write_regular_scalar_cast(
+                        stype, signature_only=False
+                    )
 
         self.write_section_break()
+
+    def _write_regular_scalar_cast(
+        self,
+        stype: reflection.ScalarType,
+        *,
+        signature_only: bool,
+    ) -> None:
+        expr_compat = self.import_name(BASE_IMPL, "ExprCompatible")
+
+        type_ = self.import_name("builtins", "type")
+        self_ = self.import_name("typing_extensions", "Self")
+        type_self = f"{type_}[{self_}]"
+
+        if signature_only:
+            self.write()
+            with self._classmethod_def(
+                "cast",
+                [f"expr: {expr_compat}"],
+                type_self,
+            ):
+                self.write("...")
+
+        else:
+            aexpr = self.import_name(BASE_IMPL, "AnnotatedExpr")
+            cast_op = self.import_name(BASE_IMPL, "CastOp")
+
+            self.write()
+            with self._classmethod_def(
+                "cast",
+                [f"expr: {expr_compat}"],
+                type_self,
+            ):
+                self.write(f"return {aexpr}(  # type: ignore [return-value]")
+                with self.indented():
+                    self.write("cls,")
+                    self.write(f"{cast_op}(")
+                    with self.indented():
+                        self.write("expr=expr,")
+                        self.write("type_=cls.__gel_reflection__.type_name,")
+                    self.write(")")
+                self.write(")")
 
     def render_callable_return_type(
         self,
