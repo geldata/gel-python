@@ -13,6 +13,7 @@ import functools
 import inspect
 
 from gel._internal import _qb
+from gel._internal._schemapath import TypeNameIntersection, TypeNameUnion
 from gel._internal._utils import Unspecified
 
 from ._base import AbstractGelModel
@@ -189,7 +190,7 @@ def select(
             shape_elements.append(shape_el)
         else:
             el_expr = _qb.edgeql_qb_expr(kwarg, var=prefix_alias)
-            if isinstance(el_expr, (_qb.SchemaSet, _qb.Path)):
+            if _qb.expr_uses_auto_splat(el_expr):
                 # If the expression is a schema set or path without an explicit
                 # select, apply a splat.
                 if (
@@ -379,6 +380,11 @@ def add_limit(
         limit = _qb.IntLiteral(val=expr)
 
     if stmt.limit is not None:
+        if isinstance(limit.type, (TypeNameIntersection, TypeNameUnion)):
+            raise ValueError(
+                f"Invalid type for limit: '{limit.type.as_schema_name()}'"
+            )
+
         limit = _qb.FuncCall(
             fname="std::min",
             args=[
@@ -409,6 +415,11 @@ def add_offset(
         offset = _qb.IntLiteral(val=expr)
 
     if stmt.offset is not None:
+        if isinstance(offset.type, (TypeNameIntersection, TypeNameUnion)):
+            raise ValueError(
+                f"Invalid type for offset: '{offset.type.as_schema_name()}'"
+            )
+
         offset = _qb.FuncCall(
             fname="std::min",
             args=[
@@ -422,6 +433,44 @@ def add_offset(
         )
 
     return dataclasses.replace(stmt, offset=_qb.Offset(offset=offset))
+
+
+def add_object_type_filter(
+    cls: type[AbstractGelModel],
+    /,
+    type_filter: type[AbstractGelModel],
+    *,
+    __operand__: _qb.ExprAlias | _qb.Expr | None = None,
+) -> _qb.Expr:
+    from ._methods import create_intersection  # noqa: PLC0415
+
+    subject: _qb.Expr
+    if isinstance(__operand__, _qb.Expr):
+        subject = __operand__
+    elif __operand__ is not None:
+        subject = _qb.edgeql_qb_expr(__operand__)
+    else:
+        subject = _qb.edgeql_qb_expr(cls)
+
+    result_cls = create_intersection(cls, type_filter)
+
+    if isinstance(subject, (_qb.SelectStmt, _qb.ShapeOp)):
+        # Apply the type intersection to the subject.
+        return dataclasses.replace(
+            subject,
+            iter_expr=add_object_type_filter(
+                cls,
+                type_filter,
+                __operand__=subject.iter_expr,
+            ),
+        )
+
+    else:
+        return _qb.ObjectWhenType(
+            expr=subject,
+            type_filter=type_filter.__gel_reflection__.type_name,
+            type_=result_cls.__gel_reflection__.type_name,
+        )
 
 
 @overload

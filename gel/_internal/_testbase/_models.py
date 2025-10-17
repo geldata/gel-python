@@ -553,6 +553,8 @@ class BaseModelTestCase(BranchTestCase):
         models: Collection[GelModel],
         identifying_field: str,
         expected_obj_fields: list[tuple[type[GelModel], dict[str, Any]]],
+        *,
+        excluded_fields: set[str] | None = None,
     ) -> None:
         """Test that models match the expected object fields.
         Pairs models with their expected fields using the identifying field.
@@ -594,6 +596,8 @@ class BaseModelTestCase(BranchTestCase):
             assert obj is not None
             self.assertIsInstance(obj, expected_type)
             self._assertHasFields(obj, expected_fields)
+            if excluded_fields:
+                self._assertNotHasFields(obj, excluded_fields)
 
     def _assertHasFields(
         self,

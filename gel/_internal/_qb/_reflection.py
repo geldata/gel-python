@@ -10,7 +10,7 @@ import dataclasses
 if TYPE_CHECKING:
     import abc
     from gel._internal import _edgeql
-    from gel._internal._schemapath import SchemaPath, TypeName
+    from gel._internal._schemapath import SchemaPath, TypeName, TypeNameExpr
 
 
 @dataclasses.dataclass(frozen=True, kw_only=True)
@@ -50,6 +50,11 @@ class GelTypeMetadata(GelSchemaMetadata):
         type_name: ClassVar[TypeName]
 
 
+class GelTypeExprMetadata(GelSchemaMetadata):
+    class __gel_reflection__(GelSchemaMetadata.__gel_reflection__):  # noqa: N801
+        type_name: ClassVar[TypeNameExpr]
+
+
 if TYPE_CHECKING:
 
     class GelObjectTypeMetadata(abc.ABC, GelSourceMetadata, GelTypeMetadata):
@@ -69,12 +74,33 @@ if TYPE_CHECKING:
         @abc.abstractmethod
         def __gel_not_abstract__(self) -> None: ...
 
+    class GelObjectTypeExprMetadata(
+        abc.ABC,
+        GelSourceMetadata,
+        GelTypeExprMetadata,
+    ):
+        class __gel_reflection__(  # noqa: N801
+            GelSourceMetadata.__gel_reflection__,
+            GelTypeExprMetadata.__gel_reflection__,
+        ):
+            abstract: ClassVar[bool]
+
+        @abc.abstractmethod
+        def __gel_not_abstract__(self) -> None: ...
+
 else:
 
     class GelObjectTypeMetadata(GelSourceMetadata, GelTypeMetadata):
         class __gel_reflection__(  # noqa: N801
             GelSourceMetadata.__gel_reflection__,
             GelTypeMetadata.__gel_reflection__,
+        ):
+            abstract: ClassVar[bool]
+
+    class GelObjectTypeExprMetadata(GelSourceMetadata, GelTypeExprMetadata):
+        class __gel_reflection__(  # noqa: N801
+            GelSourceMetadata.__gel_reflection__,
+            GelTypeExprMetadata.__gel_reflection__,
         ):
             abstract: ClassVar[bool]
 
