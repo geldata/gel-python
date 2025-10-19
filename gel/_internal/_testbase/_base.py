@@ -1121,11 +1121,18 @@ def xfail(
     func_or_reason: str | Callable[_P, _R], /
 ) -> Callable[_P, _R] | Callable[[Callable[_P, _R]], Callable[_P, _R]]:
     if callable(func_or_reason):
-        return unittest.expectedFailure(func_or_reason)
-    else:
+        func = func_or_reason
+        @functools.wraps(func)
+        def wrapped(*args: _P.args, **kwargs: _P.kwargs) -> _R:
+            return unittest.expectedFailure(func)(*args, **kwargs)
+        return wrapped
 
-        def t(f: Callable[_P, _R]) -> Callable[_P, _R]:
-            return unittest.expectedFailure(f)
+    else:
+        def t(func: Callable[_P, _R]) -> Callable[_P, _R]:
+            @functools.wraps(func)
+            def wrapped(*args: _P.args, **kwargs: _P.kwargs) -> _R:
+                return unittest.expectedFailure(func)(*args, **kwargs)
+            return wrapped
 
         return t
 

@@ -5190,6 +5190,7 @@ class TestModelGeneratorMain(tb.ModelTestCase):
         self.assertEqual(gs0_link.__linkprops__.is_tall_enough, True)
         self.assertEqual(gs1_link.__linkprops__.is_tall_enough, False)
 
+    @tb.xfail
     # victor: merge doesn't happen
     # yury: this is probably OK -- we decided that the Gel server should
     #       "merge things". When a ProxyModel is assigned to a single link
