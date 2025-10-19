@@ -776,19 +776,8 @@ def _typecheck_class(
     Run both mypy and pyright, then stash the results where the
     individual functions will deal with them.
     """
-    print('! A')
-    for func in funcs:
-        print(f"{func.__name__}")
-        if func.__name__ != "test_modelgen_linkprops_06":
-            continue
-        
-        blah = func
-        while blah is not None:
-            print(f"{blah.__name__}")
-            print(inspect.getsource(blah).replace('\n', '\\n'))
-            print()
-            blah = getattr(blah, "__wrapped__", None)
 
+    funcs_by_name = {func.__name__: func for func in funcs}
     contents = [(func.__name__, _get_file_code(func)) for func in funcs]
     cls._mypy_errors = {}
     cls._pyright_errors = {}
@@ -815,6 +804,15 @@ def _typecheck_class(
         inifn = pathlib.Path(d) / "mypy.ini"
         tdir = pathlib.Path(d) / "tests"
         os.mkdir(tdir)
+
+        print('! A')
+        
+        blah = funcs_by_name["test_modelgen_linkprops_06"]
+        while blah is not None:
+            print(f"{blah.__name__}")
+            print(inspect.getsource(blah).replace('\n', '\\n'))
+            print()
+            blah = getattr(blah, "__wrapped__", None)
 
         name: str | None
         for name, code in contents:
