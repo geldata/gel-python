@@ -781,8 +781,11 @@ def _typecheck_class(
             continue
         
         blah = func
+        print('!!!')
         while blah is not None:
-            print(blah.__name__)
+            print(f"{blah.__name__}")
+            print(inspect.getsource(blah).replace('\n', '\\n'))
+            print()
             blah = getattr(blah, "__wrapped__", None)
 
     contents = [(func.__name__, _get_file_code(func)) for func in funcs]
