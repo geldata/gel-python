@@ -813,7 +813,7 @@ def _typecheck_class(
             if name == "test_modelgen_linkprops_06":
                 print('!!!')
                 print()
-                print(code)
+                print(code.replace('\n', '\\n'))
                 print()
                 print('!!!')
                 print()
@@ -841,13 +841,6 @@ def _typecheck_class(
         else:
             pypath = str(test_dir)
         env["PYTHONPATH"] = pypath
-
-        import mypy
-        import pyright
-
-        if mypy is None or pyright is None:
-            print("!!!")
-            raise RuntimeError("!!!")
 
         try:
             cmd = [
