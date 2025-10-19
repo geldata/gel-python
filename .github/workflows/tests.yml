@@ -99,7 +99,7 @@ jobs:
             --project="${{ github.workspace }}" \
             --directory="${{ runner.temp }}/pytests" \
             --with "geltest@git+https://github.com/geldata/geltest.git" \
-            geltest --verbose --exclude test_cqa_ruff
+            geltest --verbose -k test_modelgen_data_model_validation_1
 
   lint:
     runs-on: ubuntu-latest

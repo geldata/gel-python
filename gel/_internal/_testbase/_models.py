@@ -838,6 +838,7 @@ def _typecheck_class(
         import pyright
 
         if mypy is None or pyright is None:
+            print("!!!")
             raise RuntimeError("!!!")
 
         try:
@@ -853,6 +854,8 @@ def _typecheck_class(
                 str(pathlib.Path(__file__).parent.parent / ".mypy_cache"),
                 str(tdir),
             ]
+            print("...")
+            print(cmd)
             res = subprocess.run(
                 cmd,
                 capture_output=True,
@@ -860,6 +863,8 @@ def _typecheck_class(
                 cwd=inifn.parent,
                 env=env,
             )
+            print(res)
+            print()
 
             cmd = [
                 sys.executable,
