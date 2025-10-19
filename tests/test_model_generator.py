@@ -3982,8 +3982,9 @@ class TestModelGeneratorMain(tb.ModelTestCase):
         assert fresh.user is not None
         self.assertEqual(fresh.user.id, alice.id)
 
-    @tb.xfail
-    # See XXX comments
+    @tb.xfail('''
+        See XXX comments
+    ''')
     def test_modelgen_save_reload_links_02(self):
         from models.orm import default
 
@@ -5190,16 +5191,17 @@ class TestModelGeneratorMain(tb.ModelTestCase):
         self.assertEqual(gs0_link.__linkprops__.is_tall_enough, True)
         self.assertEqual(gs1_link.__linkprops__.is_tall_enough, False)
 
-    # victor: merge doesn't happen
-    # yury: this is probably OK -- we decided that the Gel server should
-    #       "merge things". When a ProxyModel is assigned to a single link
-    #       or added to a link set, it should just replace the existing one
-    #       there.  Whatever __linkprops__ are coming in after the assignment
-    #       will be sent to Gel in save() / sync() -- they both are only saving
-    #       the __gel_changed_fields__.
-    #       I'm keeping the test here, but I think we'll remove it later
-    #       once we discuss this one more time.
-    @tb.xfail
+    @tb.xfail('''
+        victor: merge doesn't happen
+        yury: this is probably OK -- we decided that the Gel server should
+              "merge things". When a ProxyModel is assigned to a single link
+              or added to a link set, it should just replace the existing one
+              there.  Whatever __linkprops__ are coming in after the assignment
+              will be sent to Gel in save() / sync() -- they both are only saving
+              the __gel_changed_fields__.
+              I'm keeping the test here, but I think we'll remove it later
+              once we discuss this one more time.
+    ''')
     def test_modelgen_linkprops_06(self):
         from models.orm import default
 
@@ -5244,9 +5246,10 @@ class TestModelGeneratorMain(tb.ModelTestCase):
         self.assertEqual(member.__linkprops__.rank, None)
         self.assertEqual(member.__linkprops__.role, "sorceress")
 
-    @tb.xfail
-    # victor: merge doesn't happen
-    # yury: read the comment in test_modelgen_linkprops_06
+    @tb.xfail('''
+        victor: merge doesn't happen
+        yury: read the comment in test_modelgen_linkprops_06
+    ''')
     def test_modelgen_linkprops_08(self):
         from models.orm import default
 
