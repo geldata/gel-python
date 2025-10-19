@@ -834,6 +834,12 @@ def _typecheck_class(
             pypath = str(test_dir)
         env["PYTHONPATH"] = pypath
 
+        import mypy
+        import pyright
+
+        if mypy is None or pyright is None:
+            raise RuntimeError("!!!")
+
         try:
             cmd = [
                 sys.executable,
