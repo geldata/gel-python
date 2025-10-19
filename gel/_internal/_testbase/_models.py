@@ -776,6 +776,14 @@ def _typecheck_class(
     Run both mypy and pyright, then stash the results where the
     individual functions will deal with them.
     """
+    for func in funcs:
+        if func.__name__ != "test_modelgen_linkprops_06":
+            continue
+        
+        blah = func
+        while blah is not None:
+            print(blah.__name__)
+            blah = getattr(blah, "__wrapped__", None)
 
     contents = [(func.__name__, _get_file_code(func)) for func in funcs]
     cls._mypy_errors = {}
