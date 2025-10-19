@@ -810,6 +810,14 @@ def _typecheck_class(
             with open(testfn, "w", encoding="utf-8") as f:
                 f.write(code)
 
+            if name == "test_modelgen_linkprops_06":
+                print('!!!')
+                print()
+                print(code)
+                print()
+                print('!!!')
+                print()
+
         with open(inifn, "w", encoding="utf-8") as f:
             f.write(
                 textwrap.dedent("""\
