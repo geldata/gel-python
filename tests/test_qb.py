@@ -1480,11 +1480,11 @@ class TestQueryBuilder(tb.ModelTestCase):
         )
         self.assertEqual(result, _range.Range(std.int64(1), std.int64(9)))
 
-    def test_qb_when_type_basic_01(self):
+    def test_qb_is_type_basic_01(self):
         # Simple TypeIntersection
         from models.orm_qb import default
 
-        result = self.client.query(default.Inh_A.when_type(default.Inh_B))
+        result = self.client.query(default.Inh_A.is_(default.Inh_B))
 
         self._assertObjectsWithFields(
             result,
@@ -1515,12 +1515,12 @@ class TestQueryBuilder(tb.ModelTestCase):
             excluded_fields={'c', 'ab', 'ac', 'bc', 'abc', 'ab_ac'},
         )
 
-    def test_qb_when_type_basic_02(self):
+    def test_qb_is_type_basic_02(self):
         # Chained TypeIntersection
         from models.orm_qb import default
 
         result = self.client.query(
-            default.Inh_A.when_type(default.Inh_B).when_type(default.Inh_C)
+            default.Inh_A.is_(default.Inh_B).is_(default.Inh_C)
         )
 
         self._assertObjectsWithFields(
@@ -1547,12 +1547,12 @@ class TestQueryBuilder(tb.ModelTestCase):
             excluded_fields={'ab', 'ac', 'bc', 'abc', 'ab_ac'},
         )
 
-    def test_qb_when_type_basic_03(self):
+    def test_qb_is_type_basic_03(self):
         # TypeIntersection Select
         from models.orm_qb import default
 
         result = self.client.query(
-            default.Inh_A.when_type(default.Inh_B).select(a=True)
+            default.Inh_A.is_(default.Inh_B).select(a=True)
         )
 
         self._assertObjectsWithFields(
@@ -1582,13 +1582,13 @@ class TestQueryBuilder(tb.ModelTestCase):
         )
 
     @tb.skip_typecheck
-    def test_qb_when_type_basic_04(self):
+    def test_qb_is_type_basic_04(self):
         # Model Select
         # with computed single prop using type intersection
         from models.orm_qb import default
 
         result = self.client.query(
-            default.Inh_AB.select(a=lambda x: x.when_type(default.Inh_C).c)
+            default.Inh_AB.select(a=lambda x: x.is_(default.Inh_C).c)
         )
 
         self._assertObjectsWithFields(
@@ -1611,14 +1611,14 @@ class TestQueryBuilder(tb.ModelTestCase):
             excluded_fields={'b', 'c', 'ab', 'ac', 'bc', 'abc', 'ab_ac'},
         )
 
-    def test_qb_when_type_basic_05(self):
+    def test_qb_is_type_basic_05(self):
         # TypeIntersection Select
         # with computed single prop using type intersection
         from models.orm_qb import default
 
         result = self.client.query(
-            default.Inh_A.when_type(default.Inh_B).select(
-                ab=lambda x: x.when_type(default.Inh_AB).ab
+            default.Inh_A.is_(default.Inh_B).select(
+                ab=lambda x: x.is_(default.Inh_AB).ab
             )
         )
 
@@ -1648,17 +1648,17 @@ class TestQueryBuilder(tb.ModelTestCase):
             excluded_fields={'a', 'b', 'c', 'ac', 'bc', 'abc', 'ab_ac'},
         )
 
-    def test_qb_when_type_basic_06(self):
+    def test_qb_is_type_basic_06(self):
         # TypeIntersection Select
         # with computed multi prop using type intersection
         from models.orm_qb import default, std
 
         result = self.client.query(
-            default.Inh_A.when_type(default.Inh_B).select(
+            default.Inh_A.is_(default.Inh_B).select(
                 a=True,
                 abc=lambda x: std.union(
-                    x.when_type(default.Inh_AB).ab,
-                    x.when_type(default.Inh_AC).ac,
+                    x.is_(default.Inh_AB).ab,
+                    x.is_(default.Inh_AC).ac,
                 ),
             )
         )
@@ -1692,12 +1692,12 @@ class TestQueryBuilder(tb.ModelTestCase):
             excluded_fields={'b', 'c', 'ab', 'ac', 'bc', 'ab_ac'},
         )
 
-    def test_qb_when_type_basic_07(self):
+    def test_qb_is_type_basic_07(self):
         # Link TypeIntersection
         from models.orm_qb import default
 
         result = self.client.query(
-            default.Link_Inh_A.l.when_type(default.Inh_B)
+            default.Link_Inh_A.l.is_(default.Inh_B)
         )
 
         self._assertObjectsWithFields(
@@ -1729,15 +1729,15 @@ class TestQueryBuilder(tb.ModelTestCase):
             excluded_fields={'c', 'ab', 'ac', 'bc', 'abc', 'ab_ac'},
         )
 
-    def test_qb_when_type_basic_08(self):
+    def test_qb_is_type_basic_08(self):
         # Link TypeIntersection Select
         # with computed single prop using type intersection
         from models.orm_qb import default
 
         result = self.client.query(
-            default.Link_Inh_A.l.when_type(default.Inh_B).select(
+            default.Link_Inh_A.l.is_(default.Inh_B).select(
                 a=True,
-                ab=lambda x: x.when_type(default.Inh_AB).ab,
+                ab=lambda x: x.is_(default.Inh_AB).ab,
             )
         )
 
@@ -1770,7 +1770,7 @@ class TestQueryBuilder(tb.ModelTestCase):
             excluded_fields={'b', 'c', 'ac', 'bc', 'abc', 'ab_ac'},
         )
 
-    def test_qb_when_type_basic_09(self):
+    def test_qb_is_type_basic_09(self):
         # Model Select
         # with computed single link using type intersection
         from models.orm_qb import default
@@ -1780,7 +1780,7 @@ class TestQueryBuilder(tb.ModelTestCase):
 
         result = self.client.query(
             default.Link_Inh_A.select(
-                n=True, l=lambda x: x.l.when_type(default.Inh_B)
+                n=True, l=lambda x: x.l.is_(default.Inh_B)
             )
         )
 
@@ -1832,7 +1832,7 @@ class TestQueryBuilder(tb.ModelTestCase):
                     r.l, {'a', 'b', 'c', 'ab', 'ac', 'bc', 'abc', 'ab_ac'}
                 )
 
-    def test_qb_when_type_basic_10(self):
+    def test_qb_is_type_basic_10(self):
         # Model Select
         # with computed single link using type intersection
         # with select
@@ -1843,7 +1843,7 @@ class TestQueryBuilder(tb.ModelTestCase):
 
         result = self.client.query(
             default.Link_Inh_A.select(
-                n=True, l=lambda x: x.l.when_type(default.Inh_B).select(a=True)
+                n=True, l=lambda x: x.l.is_(default.Inh_B).select(a=True)
             )
         )
 
@@ -1896,13 +1896,13 @@ class TestQueryBuilder(tb.ModelTestCase):
                     r.l, {'b', 'c', 'ab', 'ac', 'bc', 'abc', 'ab_ac'}
                 )
 
-    def test_qb_when_type_for_01(self):
+    def test_qb_is_type_for_01(self):
         # TypeIntersection in iterator
         from models.orm_qb import default, std
 
         result = self.client.query(
             std.for_(
-                default.Inh_A.when_type(default.Inh_B), lambda x: x
+                default.Inh_A.is_(default.Inh_B), lambda x: x
             ).select(a=True)
         )
 
@@ -1937,14 +1937,14 @@ class TestQueryBuilder(tb.ModelTestCase):
         https://github.com/geldata/gel/issues/9092
         '''
     )
-    def test_qb_when_type_for_02(self):
+    def test_qb_is_type_for_02(self):
         # TypeIntersection in body
         from models.orm_qb import default, std
 
         result = self.client.query(
             std.for_(
                 default.Inh_A,
-                lambda x: x.when_type(default.Inh_B).select(a=True),
+                lambda x: x.is_(default.Inh_B).select(a=True),
             )
         )
 
@@ -1979,13 +1979,13 @@ class TestQueryBuilder(tb.ModelTestCase):
         https://github.com/geldata/gel/issues/9092
         '''
     )
-    def test_qb_when_type_for_03(self):
+    def test_qb_is_type_for_03(self):
         # TypeIntersection on entire statement
         from models.orm_qb import default, std
 
         result = self.client.query(
             std.for_(default.Inh_A, lambda x: x)
-            .when_type(default.Inh_B)
+            .is_(default.Inh_B)
             .select(a=True)
         )
 
@@ -2212,12 +2212,12 @@ class TestQueryBuilderModify(tb.ModelTestCase):
         self.assertEqual(e.color, default.Color.Violet)
         self.assertEqual(e.name, "red")
 
-    def test_qb_update_when_type_01(self):
+    def test_qb_update_is_type_01(self):
         # Type Intersection Update
         from models.orm_qb import default
 
         result = self.client.query(
-            default.Inh_A.when_type(default.Inh_B)
+            default.Inh_A.is_(default.Inh_B)
             .update(a=lambda x: x.a + 1000)
             .select(a=True)
         )
@@ -2292,13 +2292,13 @@ class TestQueryBuilderModify(tb.ModelTestCase):
             excluded_fields={'b', 'c', 'ab', 'ac', 'bc', 'abc', 'ab_ac'},
         )
 
-    def test_qb_update_when_type_02(self):
+    def test_qb_update_is_type_02(self):
         # Update Type Intersection
         from models.orm_qb import default
 
         result = self.client.query(
             default.Inh_A.update(a=lambda x: x.a + 1000)
-            .when_type(default.Inh_B)
+            .is_(default.Inh_B)
             .select(a=True)
         )
         self._assertObjectsWithFields(
@@ -2372,12 +2372,12 @@ class TestQueryBuilderModify(tb.ModelTestCase):
             excluded_fields={'b', 'c', 'ab', 'ac', 'bc', 'abc', 'ab_ac'},
         )
 
-    def test_qb_delete_when_type_01(self):
+    def test_qb_delete_is_type_01(self):
         # Type Intersection Delete
         from models.orm_qb import default
 
         result = self.client.query(
-            default.Inh_A.when_type(default.Inh_B).delete().select(a=True)
+            default.Inh_A.is_(default.Inh_B).delete().select(a=True)
         )
         self._assertObjectsWithFields(
             result,
@@ -2432,12 +2432,12 @@ class TestQueryBuilderModify(tb.ModelTestCase):
             excluded_fields={'b', 'c', 'ab', 'ac', 'bc', 'abc', 'ab_ac'},
         )
 
-    def test_qb_delete_when_type_02(self):
+    def test_qb_delete_is_type_02(self):
         # Delete Type Intersection
         from models.orm_qb import default
 
         result = self.client.query(
-            default.Inh_A.delete().when_type(default.Inh_B).select(a=True)
+            default.Inh_A.delete().is_(default.Inh_B).select(a=True)
         )
         self._assertObjectsWithFields(
             result,

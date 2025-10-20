@@ -85,7 +85,7 @@ class BaseGelModel(AbstractGelModel):
         def offset(cls, /, expr: Any) -> type[Self]: ...
 
         @classmethod
-        def when_type(
+        def is_(
             cls: _T_SelfModel, /, other_model: _T_OtherModel
         ) -> type[BaseGelModelIntersection[_T_SelfModel, _T_OtherModel]]: ...
 
@@ -206,7 +206,7 @@ class BaseGelModel(AbstractGelModel):
         @classonlymethod
         @_qb.exprmethod
         @classmethod
-        def when_type(
+        def is_(
             cls: _T_SelfModel,
             /,
             value: _T_OtherModel,
@@ -352,7 +352,7 @@ def create_intersection(
     # These are used to generate the appropriate path prefix when getting
     # pointers in shapes.
     #
-    # For example, doing `Foo.select(foo=lambda x: x.when_type(Bar).bar)`
+    # For example, doing `Foo.select(foo=lambda x: x.is_(Bar).bar)`
     # will produce the query:
     #    select Foo { [is Bar].bar }
     lhs_prefix = _qb.PathTypeIntersectionPrefix(

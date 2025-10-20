@@ -1327,9 +1327,9 @@ class GelModel(
         return copied
 
     if TYPE_CHECKING:
-        # Pretend that when_type returns a proper GelModel
+        # Pretend that is_ returns a proper GelModel
         @classmethod
-        def when_type(
+        def is_(
             cls: _T_SelfModel, /, other_model: _T_OtherModel
         ) -> type[GelModelIntersection[_T_SelfModel, _T_OtherModel]]: ...
 
