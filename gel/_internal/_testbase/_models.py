@@ -89,21 +89,6 @@ TNAME = "__tname__"
 TNAME_PY = "tname__"
 
 
-MYPY_INI = """\
-[mypy]
-strict = True
-ignore_errors = False
-follow_imports = normal
-show_error_codes = True
-local_partial_types = True
-
-# This is very intentional as it allows us to type check things
-# that must be flagged as an error by the type checker.
-# Don't "type: ignore" unless it's part of the test.
-warn_unused_ignores = True
-"""
-
-
 def _get_test_class_dir(cls: type[unittest.TestCase]) -> pathlib.Path:
     test_file = sys.modules[cls.__module__].__file__
     if test_file is None:
