@@ -387,33 +387,42 @@ cdef class ObjectCodec(BaseNamedRecordCodec):
                     if canonical:
                         tname_map[sname] = ch
 
+        # Iterate over the components of the return type
+        # (just the return type, or the individual parts of a type expression)
+        # to get the codecs for pointers.
+        #
+        # Type expression models do not generate their own versions of
+        # __gel_pointers__.
+        #
+        # See:
+        # -_gel._internal._qbmodel._abstract._methods.create_intersection
         if expr_object_types is not None:
-            worklist = list(expr_object_types)
+            return_type_components = list(expr_object_types)
         else:
-            worklist = [return_type]
+            return_type_components = [return_type]
 
         subs = []
         dlists = []
         origins = []
-        for workitem in worklist:
-            ptrtypes = workitem.__gel_pointers__()
+        for component in return_type_components:
+            ptrtypes = component.__gel_pointers__()
 
             for i, name in enumerate(names):
                 if flags[i] & datatypes._EDGE_POINTER_IS_LINKPROP:
                     subs.append(None)
                     dlists.append(None)
-                    origins.append(workitem)
+                    origins.append(component)
                 elif name == "__tname__":
                     subs.append(None)
                     dlists.append(None)
                     self.cached_tname_index = i
-                    origins.append(workitem)
+                    origins.append(component)
                 elif name in {"__tid__", "id"}:
                     subs.append(None)
                     dlists.append(None)
-                    origins.append(workitem)
+                    origins.append(component)
                 else:
-                    origin = workitem
+                    origin = component
                     if isinstance(self.source_types[i], ObjectTypeNullCodec):
                         tname = self.source_types[i].get_tname()
                         try:

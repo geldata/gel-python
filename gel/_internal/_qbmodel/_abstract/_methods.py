@@ -300,17 +300,21 @@ def combine_dicts(
     return result
 
 
+# TODO: We should cache the results of this
 def create_intersection(
     lhs: _T_Lhs,
     rhs: _T_Rhs,
 ) -> type[BaseGelModelIntersection[_T_Lhs, _T_Rhs]]:
-    # Pointer reflections
+    """Create a runtime intersection type which acts like a GelModel."""
+
+    # Combine pointer reflections from args
     ptr_reflections: dict[str, _qb.GelPointerReflection] = combine_dicts(
         lhs.__gel_reflection__.pointers,
         rhs.__gel_reflection__.pointers,
         process_common=lambda l, r: l if l == r else None,
     )
 
+    # Create type reflection for intersection type
     class __gel_reflection__(_qb.GelObjectTypeExprMetadata.__gel_reflection__):  # noqa: N801
         expr_object_types: set[type[AbstractGelModel]] = getattr(
             lhs.__gel_reflection__, 'expr_object_types', {lhs}
@@ -333,22 +337,6 @@ def create_intersection(
                 "Type expressions schema objects are inaccessible"
             )
 
-    if TYPE_CHECKING:
-
-        def __edgeql_qb_expr__(  # noqa: N807
-            self: BaseGelModelIntersection[_T_Lhs, _T_Rhs],
-        ) -> _qb.Expr: ...
-
-    else:
-
-        @classmethod
-        def __edgeql_qb_expr__(cls) -> _qb.Expr:  # noqa: N807
-            return _qb.ObjectWhenType(
-                expr=lhs.__edgeql_qb_expr__(),
-                type_filter=rhs.__gel_reflection__.type_name,
-                type_=__gel_reflection__.type_name,
-            )
-
     result = type(
         f"({lhs.__name__} & {rhs.__name__})",
         (BaseGelModelIntersection,),
@@ -356,10 +344,17 @@ def create_intersection(
             'lhs': lhs,
             'rhs': rhs,
             '__gel_reflection__': __gel_reflection__,
-            '__edgeql_qb_expr__': __edgeql_qb_expr__,
         },
     )
 
+    # Generate path aliases for pointers.
+    #
+    # These are used to generate the appropriate path prefix when getting
+    # pointers in shapes.
+    #
+    # For example, doing `Foo.select(foo=lambda x: x.when_type(Bar).bar)`
+    # will produce the query:
+    #    select Foo { [is Bar].bar }
     lhs_prefix = _qb.PathTypeIntersectionPrefix(
         type_=__gel_reflection__.type_name,
         type_filter=lhs.__gel_reflection__.type_name,
