@@ -348,15 +348,23 @@ cdef class ObjectCodec(BaseNamedRecordCodec):
             )
 
         lprops_type = None
-        proxy = getattr(return_type, '__proxy_of__', None)
-        if proxy is not None:
+
+        expr_object_types = getattr(return_type.__gel_reflection__, 'expr_object_types', None)
+
+        if proxy := getattr(return_type, '__proxy_of__', None):
             self.cached_return_type_proxy = return_type
             self.cached_return_type = proxy
             assert not hasattr(proxy, '__proxy_of__')
             lprops_type = return_type.__linkprops__
+            worklist = [self.cached_return_type]
+        elif expr_object_types is not None:
+            self.cached_return_type = return_type
+            self.cached_return_type_proxy = None
+            worklist = list(expr_object_types)
         else:
             self.cached_return_type = return_type
             self.cached_return_type_proxy = None
+            worklist = [self.cached_return_type]
 
         # Build a map of descendant types that are marked as being
         # canonical targets.  Make sure to descend through types not
@@ -364,7 +372,6 @@ cdef class ObjectCodec(BaseNamedRecordCodec):
         # std::Object/std::BaseObject type only get inherited via the
         # __shapes__ types, and we'll need to descend through that to
         # get to the real ones.
-        worklist = [self.cached_return_type]
         tname_map = {}
         while worklist:
             ch = worklist.pop()
@@ -380,61 +387,84 @@ cdef class ObjectCodec(BaseNamedRecordCodec):
                     if canonical:
                         tname_map[sname] = ch
 
+        # Iterate over the components of the return type
+        # (just the return type, or the individual parts of a type expression)
+        # to get the codecs for pointers.
+        #
+        # Type expression models do not generate their own versions of
+        # __gel_pointers__.
+        #
+        # See:
+        # -_gel._internal._qbmodel._abstract._methods.create_intersection
+        if expr_object_types is not None:
+            return_type_components = list(expr_object_types)
+        else:
+            return_type_components = [return_type]
+
         subs = []
         dlists = []
         origins = []
-        ptrtypes = return_type.__gel_pointers__()
-        for i, name in enumerate(names):
-            if flags[i] & datatypes._EDGE_POINTER_IS_LINKPROP:
-                subs.append(None)
-                dlists.append(None)
-                origins.append(return_type)
-            elif name == "__tname__":
-                subs.append(None)
-                dlists.append(None)
-                self.cached_tname_index = i
-                origins.append(return_type)
-            elif name in {"__tid__", "id"}:
-                subs.append(None)
-                dlists.append(None)
-                origins.append(return_type)
-            else:
-                origin = return_type
-                if isinstance(self.source_types[i], ObjectTypeNullCodec):
-                    tname = self.source_types[i].get_tname()
-                    try:
-                        origin = tname_map[tname]
-                    except KeyError:
-                        pass
+        for component in return_type_components:
+            ptrtypes = component.__gel_pointers__()
 
-                origins.append(origin)
+            for i, name in enumerate(names):
+                if flags[i] & datatypes._EDGE_POINTER_IS_LINKPROP:
+                    subs.append(None)
+                    dlists.append(None)
+                    origins.append(component)
+                elif name == "__tname__":
+                    subs.append(None)
+                    dlists.append(None)
+                    self.cached_tname_index = i
+                    origins.append(component)
+                elif name in {"__tid__", "id"}:
+                    subs.append(None)
+                    dlists.append(None)
+                    origins.append(component)
+                else:
+                    origin = component
+                    if isinstance(self.source_types[i], ObjectTypeNullCodec):
+                        tname = self.source_types[i].get_tname()
+                        try:
+                            origin = tname_map[tname]
+                        except KeyError:
+                            pass
 
-                sub = inspect.getattr_static(origin, name)
-                subs.append(sub.get_resolved_type())
+                    origins.append(origin)
 
-                dlist_factory = None
+                    if expr_object_types is not None:
+                        sub = inspect.getattr_static(origin, name, None)
+                        if sub is None:
+                            # This pointer is from a different part of the type expr
+                            continue
+                    else:
+                        sub = inspect.getattr_static(origin, name)
 
-                ptr = prefl.get(name)
-                ptrtype = ptrtypes.get(name)
-                if (
-                    ptr is not None
-                    and ptr.cardinality.is_multi()
-                    and ptrtype is not None
-                ):
-                    if isinstance(ptrtype, typing.GenericAlias):
-                        ptrtype = typing.get_origin(ptrtype)
+                    subs.append(sub.get_resolved_type())
 
+                    dlist_factory = None
+
+                    ptr = prefl.get(name)
+                    ptrtype = ptrtypes.get(name)
                     if (
-                        isinstance(ptrtype, type)
-                        and (
-                            issubclass(
-                                ptrtype,
-                                (_tracked_list.AbstractCollection, tuple),
-                            )
-                        )
+                        ptr is not None
+                        and ptr.cardinality.is_multi()
+                        and ptrtype is not None
                     ):
-                        dlist_factory = ptrtype
-                dlists.append(dlist_factory)
+                        if isinstance(ptrtype, typing.GenericAlias):
+                            ptrtype = typing.get_origin(ptrtype)
+
+                        if (
+                            isinstance(ptrtype, type)
+                            and (
+                                issubclass(
+                                    ptrtype,
+                                    (_tracked_list.AbstractCollection, tuple),
+                                )
+                            )
+                        ):
+                            dlist_factory = ptrtype
+                    dlists.append(dlist_factory)
 
         self.cached_return_type_subcodecs = tuple(subs)
         self.cached_return_type_dlists = tuple(dlists)

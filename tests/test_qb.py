@@ -1146,7 +1146,7 @@ class TestQueryBuilder(tb.ModelTestCase):
                     contents=lambda i: i.contents.select(
                         "*",
                     ).order_by(game_id=True),
-                )
+                ),
             ).filter(
                 game_id=1,
             )
@@ -1166,7 +1166,7 @@ class TestQueryBuilder(tb.ModelTestCase):
                     contents=lambda i: i.contents.select(
                         "*",
                     ).order_by(game_id=True),
-                )
+                ),
             ).filter(
                 game_id=2,
             )
@@ -1189,7 +1189,7 @@ class TestQueryBuilder(tb.ModelTestCase):
                     contents=lambda i: i.contents.select(
                         "*",
                     ).order_by(game_id=True),
-                )
+                ),
             ).filter(
                 game_id=3,
             )
@@ -1205,7 +1205,8 @@ class TestQueryBuilder(tb.ModelTestCase):
             [
                 ("cotton candy", default.Candy),
                 ("candy corn", default.Candy),
-            ], strict=False
+            ],
+            strict=False,
         ):
             self.assertEqual(c.name, name)
             self.assertIsInstance(c, t)
@@ -1221,7 +1222,7 @@ class TestQueryBuilder(tb.ModelTestCase):
                     contents=lambda i: i.contents.select(
                         "*",
                     ).order_by(game_id=True),
-                )
+                ),
             ).filter(
                 game_id=4,
             )
@@ -1237,7 +1238,8 @@ class TestQueryBuilder(tb.ModelTestCase):
             [
                 ("milk", default.Chocolate),
                 ("dark", default.Chocolate),
-            ], strict=False
+            ],
+            strict=False,
         ):
             self.assertEqual(c.name, name)
             self.assertIsInstance(c, t)
@@ -1253,7 +1255,7 @@ class TestQueryBuilder(tb.ModelTestCase):
                     contents=lambda i: i.contents.select(
                         "*",
                     ).order_by(game_id=True),
-                )
+                ),
             ).filter(
                 game_id=5,
             )
@@ -1271,7 +1273,8 @@ class TestQueryBuilder(tb.ModelTestCase):
                 ("blue bear", default.Gummy),
                 ("sour worm", default.GummyWorm),
                 ("almond", default.Chocolate),
-            ], strict=False
+            ],
+            strict=False,
         ):
             self.assertEqual(c.name, name)
             self.assertIsInstance(c, t)
@@ -1287,7 +1290,7 @@ class TestQueryBuilder(tb.ModelTestCase):
                     contents=lambda i: i.contents.select(
                         "*",
                     ).order_by(game_id=True),
-                )
+                ),
             ).filter(
                 game_id=6,
             )
@@ -1302,7 +1305,8 @@ class TestQueryBuilder(tb.ModelTestCase):
             p.item.contents,
             [
                 ("sour worm", default.GummyWorm),
-            ], strict=False
+            ],
+            strict=False,
         ):
             self.assertEqual(c.name, name)
             self.assertIsInstance(c, t)
@@ -1329,7 +1333,8 @@ class TestQueryBuilder(tb.ModelTestCase):
             [
                 ("milk", "bar"),
                 ("dark", "truffle"),
-            ], strict=False
+            ],
+            strict=False,
         ):
             self.assertEqual(c.name, name)
             self.assertEqual(c.kind, kind)
@@ -1343,19 +1348,6 @@ class TestQueryBuilder(tb.ModelTestCase):
 
         res = self.client.query(unpack)
         self.assertEqual(len(res), 6)
-
-    def test_qb_cast_array_01(self):
-        # array[scalar] to array[scalar]
-        from models.orm_qb import std
-
-        result = self.client.get(
-            std.array[std.str].cast(
-                std.array[std.int64](
-                    [std.int64(1), std.int64(2), std.int64(3)]
-                )
-            )
-        )
-        self.assertEqual(result, ["1", "2", "3"])
 
     def test_qb_cast_scalar_01(self):
         # scalar to scalar
@@ -1377,6 +1369,19 @@ class TestQueryBuilder(tb.ModelTestCase):
 
         result = self.client.get(default.Color.cast(std.str("Red")))
         self.assertEqual(result, default.Color.Red)
+
+    def test_qb_cast_array_01(self):
+        # array[scalar] to array[scalar]
+        from models.orm_qb import std
+
+        result = self.client.get(
+            std.array[std.str].cast(
+                std.array[std.int64](
+                    [std.int64(1), std.int64(2), std.int64(3)]
+                )
+            )
+        )
+        self.assertEqual(result, ["1", "2", "3"])
 
     def test_qb_cast_array_02(self):
         # array[enum] to array[scalar]
@@ -1474,6 +1479,541 @@ class TestQueryBuilder(tb.ModelTestCase):
             )
         )
         self.assertEqual(result, _range.Range(std.int64(1), std.int64(9)))
+
+    def test_qb_is_type_basic_01(self):
+        # Simple TypeIntersection
+        from models.orm_qb import default
+
+        result = self.client.query(default.Inh_A.is_(default.Inh_B))
+
+        self._assertObjectsWithFields(
+            result,
+            "a",
+            [
+                (
+                    default.Inh_AB,
+                    {
+                        "a": 4,
+                        "b": 5,
+                    },
+                ),
+                (
+                    default.Inh_ABC,
+                    {
+                        "a": 13,
+                        "b": 14,
+                    },
+                ),
+                (
+                    default.Inh_AB_AC,
+                    {
+                        "a": 17,
+                        "b": 18,
+                    },
+                ),
+            ],
+            excluded_fields={'c', 'ab', 'ac', 'bc', 'abc', 'ab_ac'},
+        )
+
+    def test_qb_is_type_basic_02(self):
+        # Chained TypeIntersection
+        from models.orm_qb import default
+
+        result = self.client.query(
+            default.Inh_A.is_(default.Inh_B).is_(default.Inh_C)
+        )
+
+        self._assertObjectsWithFields(
+            result,
+            "a",
+            [
+                (
+                    default.Inh_ABC,
+                    {
+                        "a": 13,
+                        "b": 14,
+                        "c": 15,
+                    },
+                ),
+                (
+                    default.Inh_AB_AC,
+                    {
+                        "a": 17,
+                        "b": 18,
+                        "c": 19,
+                    },
+                ),
+            ],
+            excluded_fields={'ab', 'ac', 'bc', 'abc', 'ab_ac'},
+        )
+
+    def test_qb_is_type_basic_03(self):
+        # TypeIntersection Select
+        from models.orm_qb import default
+
+        result = self.client.query(
+            default.Inh_A.is_(default.Inh_B).select(a=True)
+        )
+
+        self._assertObjectsWithFields(
+            result,
+            "a",
+            [
+                (
+                    default.Inh_AB,
+                    {
+                        "a": 4,
+                    },
+                ),
+                (
+                    default.Inh_ABC,
+                    {
+                        "a": 13,
+                    },
+                ),
+                (
+                    default.Inh_AB_AC,
+                    {
+                        "a": 17,
+                    },
+                ),
+            ],
+            excluded_fields={'b', 'c', 'ab', 'ac', 'bc', 'abc', 'ab_ac'},
+        )
+
+    @tb.skip_typecheck
+    def test_qb_is_type_basic_04(self):
+        # Model Select
+        # with computed single prop using type intersection
+        from models.orm_qb import default
+
+        result = self.client.query(
+            default.Inh_AB.select(a=lambda x: x.is_(default.Inh_C).c)
+        )
+
+        self._assertObjectsWithFields(
+            result,
+            "a",
+            [
+                (
+                    default.Inh_AB,
+                    {
+                        "a": None,
+                    },
+                ),
+                (
+                    default.Inh_AB_AC,
+                    {
+                        "a": 19,
+                    },
+                ),
+            ],
+            excluded_fields={'b', 'c', 'ab', 'ac', 'bc', 'abc', 'ab_ac'},
+        )
+
+    def test_qb_is_type_basic_05(self):
+        # TypeIntersection Select
+        # with computed single prop using type intersection
+        from models.orm_qb import default
+
+        result = self.client.query(
+            default.Inh_A.is_(default.Inh_B).select(
+                ab=lambda x: x.is_(default.Inh_AB).ab
+            )
+        )
+
+        self._assertObjectsWithFields(
+            result,
+            "ab",
+            [
+                (
+                    default.Inh_AB,
+                    {
+                        "ab": 6,
+                    },
+                ),
+                (
+                    default.Inh_ABC,
+                    {
+                        "ab": None,
+                    },
+                ),
+                (
+                    default.Inh_AB_AC,
+                    {
+                        "ab": 20,
+                    },
+                ),
+            ],
+            excluded_fields={'a', 'b', 'c', 'ac', 'bc', 'abc', 'ab_ac'},
+        )
+
+    def test_qb_is_type_basic_06(self):
+        # TypeIntersection Select
+        # with computed multi prop using type intersection
+        from models.orm_qb import default, std
+
+        result = self.client.query(
+            default.Inh_A.is_(default.Inh_B).select(
+                a=True,
+                abc=lambda x: std.union(
+                    x.is_(default.Inh_AB).ab,
+                    x.is_(default.Inh_AC).ac,
+                ),
+            )
+        )
+
+        self._assertObjectsWithFields(
+            result,
+            "a",
+            [
+                (
+                    default.Inh_AB,
+                    {
+                        "a": 4,
+                        "abc": [6],
+                    },
+                ),
+                (
+                    default.Inh_ABC,
+                    {
+                        "a": 13,
+                        "abc": [],
+                    },
+                ),
+                (
+                    default.Inh_AB_AC,
+                    {
+                        "a": 17,
+                        "abc": [20, 21],
+                    },
+                ),
+            ],
+            excluded_fields={'b', 'c', 'ab', 'ac', 'bc', 'ab_ac'},
+        )
+
+    def test_qb_is_type_basic_07(self):
+        # Link TypeIntersection
+        from models.orm_qb import default
+
+        result = self.client.query(
+            default.Link_Inh_A.l.is_(default.Inh_B)
+        )
+
+        self._assertObjectsWithFields(
+            result,
+            "a",
+            [
+                (
+                    default.Inh_AB,
+                    {
+                        "a": 4,
+                        "b": 5,
+                    },
+                ),
+                (
+                    default.Inh_ABC,
+                    {
+                        "a": 13,
+                        "b": 14,
+                    },
+                ),
+                (
+                    default.Inh_AB_AC,
+                    {
+                        "a": 17,
+                        "b": 18,
+                    },
+                ),
+            ],
+            excluded_fields={'c', 'ab', 'ac', 'bc', 'abc', 'ab_ac'},
+        )
+
+    def test_qb_is_type_basic_08(self):
+        # Link TypeIntersection Select
+        # with computed single prop using type intersection
+        from models.orm_qb import default
+
+        result = self.client.query(
+            default.Link_Inh_A.l.is_(default.Inh_B).select(
+                a=True,
+                ab=lambda x: x.is_(default.Inh_AB).ab,
+            )
+        )
+
+        self._assertObjectsWithFields(
+            result,
+            "a",
+            [
+                (
+                    default.Inh_AB,
+                    {
+                        "a": 4,
+                        "ab": 6,
+                    },
+                ),
+                (
+                    default.Inh_ABC,
+                    {
+                        "a": 13,
+                        "ab": None,
+                    },
+                ),
+                (
+                    default.Inh_AB_AC,
+                    {
+                        "a": 17,
+                        "ab": 20,
+                    },
+                ),
+            ],
+            excluded_fields={'b', 'c', 'ac', 'bc', 'abc', 'ab_ac'},
+        )
+
+    def test_qb_is_type_basic_09(self):
+        # Model Select
+        # with computed single link using type intersection
+        from models.orm_qb import default
+
+        inh_a_objs = self.client.query(default.Inh_A.select(a=True))
+        possible_targets = {obj.a: obj for obj in inh_a_objs}
+
+        result = self.client.query(
+            default.Link_Inh_A.select(
+                n=True, l=lambda x: x.l.is_(default.Inh_B)
+            )
+        )
+
+        self._assertObjectsWithFields(
+            result,
+            "n",
+            [
+                (
+                    default.Link_Inh_A,
+                    {
+                        "n": 1,
+                        "l": None,
+                    },
+                ),
+                (
+                    default.Link_Inh_A,
+                    {
+                        "n": 4,
+                        "l": possible_targets[4],
+                    },
+                ),
+                (
+                    default.Link_Inh_A,
+                    {
+                        "n": 7,
+                        "l": None,
+                    },
+                ),
+                (
+                    default.Link_Inh_A,
+                    {
+                        "n": 13,
+                        "l": possible_targets[13],
+                    },
+                ),
+                (
+                    default.Link_Inh_A,
+                    {
+                        "n": 17,
+                        "l": possible_targets[17],
+                    },
+                ),
+            ],
+        )
+
+        for r in result:
+            if r.l is not None:
+                self._assertNotHasFields(
+                    r.l, {'a', 'b', 'c', 'ab', 'ac', 'bc', 'abc', 'ab_ac'}
+                )
+
+    def test_qb_is_type_basic_10(self):
+        # Model Select
+        # with computed single link using type intersection
+        # with select
+        from models.orm_qb import default
+
+        inh_a_objs = self.client.query(default.Inh_A.select(a=True))
+        possible_targets = {obj.a: obj for obj in inh_a_objs}
+
+        result = self.client.query(
+            default.Link_Inh_A.select(
+                n=True, l=lambda x: x.l.is_(default.Inh_B).select(a=True)
+            )
+        )
+
+        self._assertObjectsWithFields(
+            result,
+            "n",
+            [
+                (
+                    default.Link_Inh_A,
+                    {
+                        "n": 1,
+                        "l": None,
+                    },
+                ),
+                (
+                    default.Link_Inh_A,
+                    {
+                        "n": 4,
+                        "l": possible_targets[4],
+                    },
+                ),
+                (
+                    default.Link_Inh_A,
+                    {
+                        "n": 7,
+                        "l": None,
+                    },
+                ),
+                (
+                    default.Link_Inh_A,
+                    {
+                        "n": 13,
+                        "l": possible_targets[13],
+                    },
+                ),
+                (
+                    default.Link_Inh_A,
+                    {
+                        "n": 17,
+                        "l": possible_targets[17],
+                    },
+                ),
+            ],
+        )
+
+        for r in result:
+            if r.l is not None:
+                self._assertHasFields(r.l, {'a'})
+                self._assertNotHasFields(
+                    r.l, {'b', 'c', 'ab', 'ac', 'bc', 'abc', 'ab_ac'}
+                )
+
+    def test_qb_is_type_for_01(self):
+        # TypeIntersection in iterator
+        from models.orm_qb import default, std
+
+        result = self.client.query(
+            std.for_(
+                default.Inh_A.is_(default.Inh_B), lambda x: x
+            ).select(a=True)
+        )
+
+        self._assertObjectsWithFields(
+            result,
+            "a",
+            [
+                (
+                    default.Inh_AB,
+                    {
+                        "a": 4,
+                    },
+                ),
+                (
+                    default.Inh_ABC,
+                    {
+                        "a": 13,
+                    },
+                ),
+                (
+                    default.Inh_AB_AC,
+                    {
+                        "a": 17,
+                    },
+                ),
+            ],
+            excluded_fields={'b', 'c', 'ab', 'ac', 'bc', 'abc', 'ab_ac'},
+        )
+
+    @tb.xfail(
+        '''ISE when applying shape to for loop with type intersection
+        https://github.com/geldata/gel/issues/9092
+        '''
+    )
+    def test_qb_is_type_for_02(self):
+        # TypeIntersection in body
+        from models.orm_qb import default, std
+
+        result = self.client.query(
+            std.for_(
+                default.Inh_A,
+                lambda x: x.is_(default.Inh_B).select(a=True),
+            )
+        )
+
+        self._assertObjectsWithFields(
+            result,
+            "a",
+            [
+                (
+                    default.Inh_AB,
+                    {
+                        "a": 4,
+                    },
+                ),
+                (
+                    default.Inh_ABC,
+                    {
+                        "a": 13,
+                    },
+                ),
+                (
+                    default.Inh_AB_AC,
+                    {
+                        "a": 17,
+                    },
+                ),
+            ],
+            excluded_fields={'b', 'c', 'ab', 'ac', 'bc', 'abc', 'ab_ac'},
+        )
+
+    @tb.xfail(
+        '''ISE when applying shape to for loop with type intersection
+        https://github.com/geldata/gel/issues/9092
+        '''
+    )
+    def test_qb_is_type_for_03(self):
+        # TypeIntersection on entire statement
+        from models.orm_qb import default, std
+
+        result = self.client.query(
+            std.for_(default.Inh_A, lambda x: x)
+            .is_(default.Inh_B)
+            .select(a=True)
+        )
+
+        self._assertObjectsWithFields(
+            result,
+            "a",
+            [
+                (
+                    default.Inh_AB,
+                    {
+                        "a": 4,
+                    },
+                ),
+                (
+                    default.Inh_ABC,
+                    {
+                        "a": 13,
+                    },
+                ),
+                (
+                    default.Inh_AB_AC,
+                    {
+                        "a": 17,
+                    },
+                ),
+            ],
+            excluded_fields={'b', 'c', 'ab', 'ac', 'bc', 'abc', 'ab_ac'},
+        )
 
 
 class TestQueryBuilderModify(tb.ModelTestCase):
@@ -1671,3 +2211,264 @@ class TestQueryBuilderModify(tb.ModelTestCase):
 
         self.assertEqual(e.color, default.Color.Violet)
         self.assertEqual(e.name, "red")
+
+    def test_qb_update_is_type_01(self):
+        # Type Intersection Update
+        from models.orm_qb import default
+
+        result = self.client.query(
+            default.Inh_A.is_(default.Inh_B)
+            .update(a=lambda x: x.a + 1000)
+            .select(a=True)
+        )
+        self._assertObjectsWithFields(
+            result,
+            "a",
+            [
+                (
+                    default.Inh_AB,
+                    {
+                        "a": 1004,
+                    },
+                ),
+                (
+                    default.Inh_ABC,
+                    {
+                        "a": 1013,
+                    },
+                ),
+                (
+                    default.Inh_AB_AC,
+                    {
+                        "a": 1017,
+                    },
+                ),
+            ],
+            excluded_fields={'b', 'c', 'ab', 'ac', 'bc', 'abc', 'ab_ac'},
+        )
+
+        updated = self.client.query(default.Inh_A)
+        self._assertObjectsWithFields(
+            updated,
+            "a",
+            [
+                (
+                    default.Inh_A,
+                    {
+                        "a": 1,
+                    },
+                ),
+                (
+                    default.Inh_AB,
+                    {
+                        "a": 1004,
+                    },
+                ),
+                (
+                    default.Inh_AC,
+                    {
+                        "a": 7,
+                    },
+                ),
+                (
+                    default.Inh_ABC,
+                    {
+                        "a": 1013,
+                    },
+                ),
+                (
+                    default.Inh_AB_AC,
+                    {
+                        "a": 1017,
+                    },
+                ),
+                (
+                    default.Inh_AXA,
+                    {
+                        "a": 1001,
+                    },
+                ),
+            ],
+            excluded_fields={'b', 'c', 'ab', 'ac', 'bc', 'abc', 'ab_ac'},
+        )
+
+    def test_qb_update_is_type_02(self):
+        # Update Type Intersection
+        from models.orm_qb import default
+
+        result = self.client.query(
+            default.Inh_A.update(a=lambda x: x.a + 1000)
+            .is_(default.Inh_B)
+            .select(a=True)
+        )
+        self._assertObjectsWithFields(
+            result,
+            "a",
+            [
+                (
+                    default.Inh_AB,
+                    {
+                        "a": 1004,
+                    },
+                ),
+                (
+                    default.Inh_ABC,
+                    {
+                        "a": 1013,
+                    },
+                ),
+                (
+                    default.Inh_AB_AC,
+                    {
+                        "a": 1017,
+                    },
+                ),
+            ],
+            excluded_fields={'b', 'c', 'ab', 'ac', 'bc', 'abc', 'ab_ac'},
+        )
+
+        updated = self.client.query(default.Inh_A)
+        self._assertObjectsWithFields(
+            updated,
+            "a",
+            [
+                (
+                    default.Inh_A,
+                    {
+                        "a": 1001,
+                    },
+                ),
+                (
+                    default.Inh_AB,
+                    {
+                        "a": 1004,
+                    },
+                ),
+                (
+                    default.Inh_AC,
+                    {
+                        "a": 1007,
+                    },
+                ),
+                (
+                    default.Inh_ABC,
+                    {
+                        "a": 1013,
+                    },
+                ),
+                (
+                    default.Inh_AB_AC,
+                    {
+                        "a": 1017,
+                    },
+                ),
+                (
+                    default.Inh_AXA,
+                    {
+                        "a": 2001,
+                    },
+                ),
+            ],
+            excluded_fields={'b', 'c', 'ab', 'ac', 'bc', 'abc', 'ab_ac'},
+        )
+
+    def test_qb_delete_is_type_01(self):
+        # Type Intersection Delete
+        from models.orm_qb import default
+
+        result = self.client.query(
+            default.Inh_A.is_(default.Inh_B).delete().select(a=True)
+        )
+        self._assertObjectsWithFields(
+            result,
+            "a",
+            [
+                (
+                    default.Inh_AB,
+                    {
+                        "a": 4,
+                    },
+                ),
+                (
+                    default.Inh_ABC,
+                    {
+                        "a": 13,
+                    },
+                ),
+                (
+                    default.Inh_AB_AC,
+                    {
+                        "a": 17,
+                    },
+                ),
+            ],
+            excluded_fields={'b', 'c', 'ab', 'ac', 'bc', 'abc', 'ab_ac'},
+        )
+
+        updated = self.client.query(default.Inh_A)
+        self._assertObjectsWithFields(
+            updated,
+            "a",
+            [
+                (
+                    default.Inh_A,
+                    {
+                        "a": 1,
+                    },
+                ),
+                (
+                    default.Inh_AC,
+                    {
+                        "a": 7,
+                    },
+                ),
+                (
+                    default.Inh_AXA,
+                    {
+                        "a": 1001,
+                    },
+                ),
+            ],
+            excluded_fields={'b', 'c', 'ab', 'ac', 'bc', 'abc', 'ab_ac'},
+        )
+
+    def test_qb_delete_is_type_02(self):
+        # Delete Type Intersection
+        from models.orm_qb import default
+
+        result = self.client.query(
+            default.Inh_A.delete().is_(default.Inh_B).select(a=True)
+        )
+        self._assertObjectsWithFields(
+            result,
+            "a",
+            [
+                (
+                    default.Inh_AB,
+                    {
+                        "a": 4,
+                    },
+                ),
+                (
+                    default.Inh_ABC,
+                    {
+                        "a": 13,
+                    },
+                ),
+                (
+                    default.Inh_AB_AC,
+                    {
+                        "a": 17,
+                    },
+                ),
+            ],
+            excluded_fields={'b', 'c', 'ab', 'ac', 'bc', 'abc', 'ab_ac'},
+        )
+
+        updated = self.client.query(default.Inh_A)
+        self._assertObjectsWithFields(
+            updated,
+            "a",
+            [],
+            excluded_fields={'b', 'c', 'ab', 'ac', 'bc', 'abc', 'ab_ac'},
+        )

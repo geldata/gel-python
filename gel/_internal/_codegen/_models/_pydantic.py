@@ -2909,7 +2909,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
     ) -> None:
         """Generate the query node constructor for a prefix operator method.
 
-        Creates the code that builds a PrefixOp query node for unary operator
+        Creates the code that builds a UnaryOp query node for unary operator
         methods like __neg__. The operator is applied to 'self' as the
         operand.
 
@@ -2917,7 +2917,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             op: The operator reflection object containing metadata
         """
         op_name = op.schemapath.name
-        node_cls = self.import_name(BASE_IMPL, "PrefixOp")
+        node_cls = self.import_name(BASE_IMPL, "UnaryOp")
 
         args = [
             "expr=self",  # The operand is always 'self' for method calls
@@ -2967,7 +2967,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
     ) -> None:
         """Generate the query node constructor for a prefix operator function.
 
-        Creates the code that builds a PrefixOp query node for unary operator
+        Creates the code that builds a UnaryOp query node for unary operator
         functions. Unlike method versions, this takes the operand from function
         arguments and applies special type casting for tuple parameters.
 
@@ -2975,7 +2975,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             op: The operator reflection object containing metadata
         """
         op_name = op.schemapath.name
-        node_cls = self.import_name(BASE_IMPL, "PrefixOp")
+        node_cls = self.import_name(BASE_IMPL, "UnaryOp")
         expr_compat = self.import_name(BASE_IMPL, "ExprCompatible")
         cast_ = self.import_name("typing", "cast")
 

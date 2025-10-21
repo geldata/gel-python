@@ -19,7 +19,7 @@ from gel._internal import _edgeql
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Iterator, Mapping
-    from gel._internal._schemapath import TypeName
+    from gel._internal._schemapath import TypeNameExpr
 
 
 @dataclass(kw_only=True, frozen=True)
@@ -89,7 +89,7 @@ class Expr(Node):
     def precedence(self) -> _edgeql.Precedence: ...
 
     @abc.abstractproperty
-    def type(self) -> TypeName: ...
+    def type(self) -> TypeNameExpr: ...
 
     @abc.abstractmethod
     def __edgeql_expr__(self, *, ctx: ScopeContext) -> str: ...
@@ -100,10 +100,10 @@ class Expr(Node):
 
 @dataclass(kw_only=True, frozen=True)
 class TypedExpr(Expr):
-    type_: TypeName
+    type_: TypeNameExpr
 
     @property
-    def type(self) -> TypeName:
+    def type(self) -> TypeNameExpr:
         return self.type_
 
 
@@ -494,12 +494,20 @@ class PathPrefix(Symbol):
         return (self,)
 
 
+@dataclass(frozen=True, kw_only=True)
+class PathTypeIntersectionPrefix(IdentLikeExpr):
+    type_filter: TypeNameExpr
+
+    def __edgeql_expr__(self, *, ctx: ScopeContext) -> str:
+        return f"[is {self.type_filter.as_quoted_schema_name()}]"
+
+
 @dataclass(kw_only=True, frozen=True)
 class ImplicitIteratorStmt(IteratorExpr, Stmt):
     """Base class for statements that are implicit iterators"""
 
     @property
-    def type(self) -> TypeName:
+    def type(self) -> TypeNameExpr:
         return self.iter_expr.type
 
     @property

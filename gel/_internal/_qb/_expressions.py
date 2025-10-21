@@ -20,7 +20,7 @@ from dataclasses import dataclass, field
 
 from gel._internal import _edgeql
 from gel._internal._polyfills import _strenum
-from gel._internal._schemapath import SchemaPath, TypeName
+from gel._internal._schemapath import SchemaPath, TypeName, TypeNameExpr
 
 from ._abstract import (
     AtomicExpr,
@@ -239,7 +239,7 @@ class Op(TypedExpr):
         /,
         *,
         op: _edgeql.Token | str,
-        type_: TypeName,
+        type_: TypeNameExpr,
     ) -> None:
         super().__init__(type_=type_)
         if not isinstance(op, _edgeql.Token):
@@ -252,7 +252,7 @@ class Op(TypedExpr):
 
 
 @dataclass(kw_only=True, frozen=True)
-class PrefixOp(Op):
+class UnaryOp(Op):
     expr: Expr
 
     def __init__(
@@ -260,7 +260,7 @@ class PrefixOp(Op):
         *,
         expr: ExprCompatible,
         op: _edgeql.Token | str,
-        type_: TypeName,
+        type_: TypeNameExpr,
     ) -> None:
         object.__setattr__(self, "expr", edgeql_qb_expr(expr))
         super().__init__(op=op, type_=type_)
@@ -276,7 +276,7 @@ class PrefixOp(Op):
 
 
 @dataclass(kw_only=True, frozen=True)
-class CastOp(PrefixOp):
+class CastOp(UnaryOp):
     def __init__(
         self,
         *,
@@ -300,6 +300,35 @@ class CastOp(PrefixOp):
         return f"<{self.type.as_quoted_schema_name()}>{expr}"
 
 
+@dataclass(kw_only=True, frozen=True)
+class ObjectWhenType(UnaryOp):
+    type_filter: TypeNameExpr
+
+    def __init__(
+        self,
+        *,
+        expr: ExprCompatible,
+        type_filter: TypeNameExpr,
+        type_: TypeNameExpr,
+    ) -> None:
+        op = _edgeql.Token.RANGBRACKET
+        object.__setattr__(self, "type_filter", type_filter)
+        super().__init__(expr=expr, op=op, type_=type_)
+
+    @property
+    def precedence(self) -> _edgeql.Precedence:
+        return _edgeql.PRECEDENCE[_edgeql.Token.LBRACKET]
+
+    def subnodes(self) -> Iterable[Node]:
+        return (self.expr,)
+
+    def __edgeql_expr__(self, *, ctx: ScopeContext) -> str:
+        expr = edgeql(self.expr, ctx=ctx)
+        if _need_left_parens(self.precedence, self.expr):
+            expr = f"({expr})"
+        return f"{expr} [is {self.type_filter.as_quoted_schema_name()}]"
+
+
 def empty_set(type_: TypeName) -> CastOp:
     return CastOp(expr=SetLiteral(items=(), type_=type_), type_=type_)
 
@@ -319,7 +348,7 @@ class BinaryOp(Op):
         lexpr: ExprCompatible,
         rexpr: ExprCompatible,
         op: _edgeql.Token | str,
-        type_: TypeName,
+        type_: TypeNameExpr,
     ) -> None:
         object.__setattr__(self, "lexpr", edgeql_qb_expr(lexpr))
         object.__setattr__(self, "rexpr", edgeql_qb_expr(rexpr))
@@ -337,7 +366,7 @@ class InfixOp(BinaryOp):
         lexpr: ExprCompatible,
         rexpr: ExprCompatible,
         op: _edgeql.Token | str,
-        type_: TypeName,
+        type_: TypeNameExpr,
     ) -> None:
         super().__init__(lexpr=lexpr, rexpr=rexpr, op=op, type_=type_)
 
@@ -406,7 +435,7 @@ class FuncCall(TypedExpr):
         fname: str,
         args: list[ExprCompatible] | None = None,
         kwargs: dict[str, ExprCompatible] | None = None,
-        type_: TypeName,
+        type_: TypeNameExpr,
     ) -> None:
         object.__setattr__(self, "fname", fname)
         if args is not None:
@@ -508,7 +537,7 @@ class OrderByElem(Expr):
         return (self.expr,)
 
     @property
-    def type(self) -> TypeName:
+    def type(self) -> TypeNameExpr:
         return self.expr.type
 
     @property
@@ -588,8 +617,14 @@ class Offset(Clause):
 
 @dataclass(kw_only=True, frozen=True)
 class InsertStmt(Stmt, TypedExpr):
+    type_: TypeName  # insert can only deal with simple type names
+
     stmt: _edgeql.Token = _edgeql.Token.INSERT
     shape: Shape | None = None
+
+    @property
+    def type(self) -> TypeName:
+        return self.type_
 
     def subnodes(self) -> Iterable[Node | None]:
         return (self.shape,)
@@ -661,7 +696,7 @@ class SelectStmt(IteratorStmt):
             kwargs = {}
             if isinstance(expr, ShapeOp):
                 kwargs["body_scope"] = expr.scope
-            elif isinstance(expr, (SchemaSet, Path)):
+            elif expr_uses_auto_splat(expr):
                 if splat_cb is not None:
                     shape = splat_cb()
                 else:
@@ -757,7 +792,7 @@ class ForStmt(IteratorExpr, Stmt):
         object.__setattr__(self, "var", var)
 
     @property
-    def type(self) -> TypeName:
+    def type(self) -> TypeNameExpr:
         return self.body.type
 
     def subnodes(self) -> Iterable[Node]:
@@ -786,7 +821,7 @@ class Splat(_strenum.StrEnum):
 @dataclass(kw_only=True, frozen=True)
 class ShapeElement(Node):
     name: str | Splat
-    origin: TypeName
+    origin: TypeNameExpr
     expr: Expr | None = None
 
     def subnodes(self) -> Iterable[Node]:
@@ -798,7 +833,7 @@ class ShapeElement(Node):
     @classmethod
     def splat(
         cls,
-        source: TypeName,
+        source: TypeNameExpr,
         *,
         kind: Splat = Splat.STAR,
     ) -> Self:
@@ -815,12 +850,21 @@ class Shape(Node):
     @classmethod
     def splat(
         cls,
-        source: TypeName,
+        source: TypeNameExpr,
         *,
         kind: Splat = Splat.STAR,
     ) -> Self:
         elements = [ShapeElement.splat(source=source, kind=kind)]
         return cls(elements=elements)
+
+
+def expr_uses_auto_splat(expr: Expr) -> bool:
+    if isinstance(expr, (SchemaSet, Path)):
+        return True
+    elif isinstance(expr, ObjectWhenType):
+        return expr_uses_auto_splat(expr.expr)
+    else:
+        return False
 
 
 def _render_shape(
@@ -873,7 +917,7 @@ class ShapeOp(IteratorExpr):
         return (self.iter_expr, self.shape)
 
     @property
-    def type(self) -> TypeName:
+    def type(self) -> TypeNameExpr:
         return self.iter_expr.type
 
     @property
