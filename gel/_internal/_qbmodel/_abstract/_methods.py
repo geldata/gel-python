@@ -14,7 +14,7 @@ from typing import (
     TypeVar,
 )
 from typing_extensions import Self
-
+import weakref
 
 from gel._internal import _qb
 from gel._internal._schemapath import (
@@ -300,12 +300,29 @@ def combine_dicts(
     return result
 
 
-# TODO: We should cache the results of this
+_type_intersection_cache: weakref.WeakKeyDictionary[
+    type[AbstractGelModel],
+    weakref.WeakKeyDictionary[
+        type[AbstractGelModel],
+        type[
+            BaseGelModelIntersection[
+                type[AbstractGelModel], type[AbstractGelModel]
+            ]
+        ],
+    ],
+] = weakref.WeakKeyDictionary()
+
+
 def create_intersection(
     lhs: _T_Lhs,
     rhs: _T_Rhs,
 ) -> type[BaseGelModelIntersection[_T_Lhs, _T_Rhs]]:
     """Create a runtime intersection type which acts like a GelModel."""
+
+    if (lhs_entry := _type_intersection_cache.get(lhs)) and (
+        rhs_entry := lhs_entry.get(rhs)
+    ):
+        return rhs_entry  # type: ignore[return-value]
 
     # Combine pointer reflections from args
     ptr_reflections: dict[str, _qb.GelPointerReflection] = combine_dicts(
@@ -402,5 +419,9 @@ def create_intersection(
     )
     for p_name, path_alias in path_aliases.items():
         setattr(result, p_name, path_alias)
+
+    if lhs not in _type_intersection_cache:
+        _type_intersection_cache[lhs] = weakref.WeakKeyDictionary()
+    _type_intersection_cache[lhs][rhs] = result
 
     return result
