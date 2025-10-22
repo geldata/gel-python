@@ -83,6 +83,9 @@ class BaseGelModel(AbstractGelModel):
         @classmethod
         def offset(cls, /, expr: Any) -> type[Self]: ...
 
+        # We pretend that the return type is _T_OtherModel so that the type
+        # checker is aware of _T_OtherModel's pointers. We don't get Self's
+        # pointers, but that's ok most of the time.
         @classmethod
         def is_(
             cls: type[Self], /, other_model: type[_T_OtherModel]
