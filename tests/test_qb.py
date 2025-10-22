@@ -1351,23 +1351,35 @@ class TestQueryBuilder(tb.ModelTestCase):
 
     def test_qb_cast_scalar_01(self):
         # scalar to scalar
-        from models.orm import std
+        from models.orm_qb import std
 
         result = self.client.get(std.str.cast(std.int64(1)))
         self.assertEqual(result, "1")
 
+        # python scalar to scalar
+        from models.orm_qb import std
+
+        result = self.client.get(std.str.cast(1))
+        self.assertEqual(result, "1")
+        result = self.client.get(std.str.cast("1"))
+        self.assertEqual(result, "1")
+
     def test_qb_cast_scalar_02(self):
         # enum to scalar
-        from models.orm import default, std
+        from models.orm_qb import default, std
 
         result = self.client.get(std.str.cast(default.Color.Red))
         self.assertEqual(result, "Red")
 
     def test_qb_cast_scalar_03(self):
         # scalar to enum
-        from models.orm import default, std
+        from models.orm_qb import default, std
 
         result = self.client.get(default.Color.cast(std.str("Red")))
+        self.assertEqual(result, default.Color.Red)
+
+        # python scalar to enum
+        result = self.client.get(default.Color.cast("Red"))
         self.assertEqual(result, default.Color.Red)
 
     def test_qb_cast_array_01(self):
@@ -1696,9 +1708,7 @@ class TestQueryBuilder(tb.ModelTestCase):
         # Link TypeIntersection
         from models.orm_qb import default
 
-        result = self.client.query(
-            default.Link_Inh_A.l.is_(default.Inh_B)
-        )
+        result = self.client.query(default.Link_Inh_A.l.is_(default.Inh_B))
 
         self._assertObjectsWithFields(
             result,
@@ -1901,9 +1911,9 @@ class TestQueryBuilder(tb.ModelTestCase):
         from models.orm_qb import default, std
 
         result = self.client.query(
-            std.for_(
-                default.Inh_A.is_(default.Inh_B), lambda x: x
-            ).select(a=True)
+            std.for_(default.Inh_A.is_(default.Inh_B), lambda x: x).select(
+                a=True
+            )
         )
 
         self._assertObjectsWithFields(
