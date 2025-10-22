@@ -2957,6 +2957,11 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                     continue
                 scalars_with_rank.append((scalar_type, rank))
 
+            if not scalars_with_rank:
+                # This can happen for scalars which don't convert to simple
+                # python primitives. eg. ext::pgvector::halfvec
+                continue
+
             best_scalar_type = min(
                 scalars_with_rank, key=operator.itemgetter(1)
             )[0]
