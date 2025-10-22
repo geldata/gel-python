@@ -42,8 +42,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
 
-_T_SelfModel = TypeVar("_T_SelfModel", bound="type[BaseGelModel]")
-_T_OtherModel = TypeVar("_T_OtherModel", bound="type[BaseGelModel]")
+_T_OtherModel = TypeVar("_T_OtherModel", bound="BaseGelModel")
 
 
 class BaseGelModel(AbstractGelModel):
@@ -86,8 +85,9 @@ class BaseGelModel(AbstractGelModel):
 
         @classmethod
         def is_(
-            cls: _T_SelfModel, /, other_model: _T_OtherModel
-        ) -> type[BaseGelModelIntersection[_T_SelfModel, _T_OtherModel]]: ...
+            cls: type[Self], /, other_model: type[_T_OtherModel]
+        ) -> type[_T_OtherModel]:
+            ...
 
         @classmethod
         def __gel_assert_single__(
@@ -207,11 +207,11 @@ class BaseGelModel(AbstractGelModel):
         @_qb.exprmethod
         @classmethod
         def is_(
-            cls: _T_SelfModel,
+            cls: type[Self],
             /,
-            value: _T_OtherModel,
+            value: type[_T_OtherModel],
             __operand__: _qb.ExprAlias | None = None,
-        ) -> type[BaseGelModelIntersection[_T_SelfModel, _T_OtherModel]]:
+        ) -> type[BaseGelModelIntersection[type[Self], type[_T_OtherModel]]]:
             return _qb.AnnotatedExpr(  # type: ignore [return-value]
                 create_intersection(cls, value),
                 add_object_type_filter(cls, value, __operand__=__operand__),
