@@ -1581,7 +1581,6 @@ class TestQueryBuilder(tb.ModelTestCase):
             excluded_fields={'b', 'c', 'ab', 'ac', 'bc', 'abc', 'ab_ac'},
         )
 
-    @tb.skip_typecheck
     def test_qb_is_type_basic_04(self):
         # Model Select
         # with computed single prop using type intersection
