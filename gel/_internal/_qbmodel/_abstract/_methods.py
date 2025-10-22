@@ -86,8 +86,7 @@ class BaseGelModel(AbstractGelModel):
         @classmethod
         def is_(
             cls: type[Self], /, other_model: type[_T_OtherModel]
-        ) -> type[_T_OtherModel]:
-            ...
+        ) -> type[_T_OtherModel]: ...
 
         @classmethod
         def __gel_assert_single__(
