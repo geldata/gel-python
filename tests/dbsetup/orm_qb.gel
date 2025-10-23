@@ -618,4 +618,8 @@ type Link_Inh_A {
     };
 };
 
+function Read_Inh_A(x: Inh_A) -> int64 using (x.a ?? -1);
+function Read_Inh_A_Overload(x: Inh_A) -> int64 using (x.a ?? -1);
+function Read_Inh_A_Overload(x: Inh_AB) -> int64 using (x.ab ?? -1);
+
 }

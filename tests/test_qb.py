@@ -2084,6 +2084,23 @@ class TestQueryBuilder(tb.ModelTestCase):
             excluded_fields={'ab', 'ac', 'bc', 'abc', 'ab_ac'},
         )
 
+    def test_qb_is_type_as_function_arg_03(self):
+        # Test that exprs produced by is_ can be passed as function args to
+        # user defined function
+        from models.orm_qb import default
+
+        # Note, we do Inh_A[is Inh_B] since is_ currently pretends its return
+        # type is its argument type.
+        result = self.client.query(
+            default.Read_Inh_A(default.Inh_B.is_(default.Inh_A))
+        )
+        self.assertEqual(sorted(result), [4, 13, 17])
+
+        result = self.client.query(
+            default.Read_Inh_A_Overload(default.Inh_B.is_(default.Inh_A))
+        )
+        self.assertEqual(sorted(result), [6, 13, 20])
+
 
 class TestQueryBuilderModify(tb.ModelTestCase):
     """This test suite is for data manipulation using QB."""
