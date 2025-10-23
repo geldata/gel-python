@@ -1695,9 +1695,7 @@ class TestQueryBuilder(tb.ModelTestCase):
         # Link TypeIntersection
         from models.orm_qb import default
 
-        result = self.client.query(
-            default.Link_Inh_A.l.is_(default.Inh_B)
-        )
+        result = self.client.query(default.Link_Inh_A.l.is_(default.Inh_B))
 
         self._assertObjectsWithFields(
             result,
@@ -1900,9 +1898,9 @@ class TestQueryBuilder(tb.ModelTestCase):
         from models.orm_qb import default, std
 
         result = self.client.query(
-            std.for_(
-                default.Inh_A.is_(default.Inh_B), lambda x: x
-            ).select(a=True)
+            std.for_(default.Inh_A.is_(default.Inh_B), lambda x: x).select(
+                a=True
+            )
         )
 
         self._assertObjectsWithFields(
@@ -2012,6 +2010,78 @@ class TestQueryBuilder(tb.ModelTestCase):
                 ),
             ],
             excluded_fields={'b', 'c', 'ab', 'ac', 'bc', 'abc', 'ab_ac'},
+        )
+
+    def test_qb_is_type_as_function_arg_01(self):
+        # Test that type exprs produced by is_ can be passed as function args
+        from models.orm_qb import default, std
+
+        result = self.client.query(
+            std.distinct(default.Inh_A.is_(default.Inh_B)).select('*')
+        )
+
+        self._assertObjectsWithFields(
+            result,
+            "a",
+            [
+                (
+                    default.Inh_AB,
+                    {
+                        "a": 4,
+                        "b": 5,
+                    },
+                ),
+                (
+                    default.Inh_ABC,
+                    {
+                        "a": 13,
+                        "b": 14,
+                    },
+                ),
+                (
+                    default.Inh_AB_AC,
+                    {
+                        "a": 17,
+                        "b": 18,
+                    },
+                ),
+            ],
+            excluded_fields={'c', 'ab', 'ac', 'bc', 'abc', 'ab_ac'},
+        )
+
+    def test_qb_is_type_as_function_arg_02(self):
+        # Test that complex type exprs produced by is_ can be passed as
+        # function args
+        from models.orm_qb import default, std
+
+        result = self.client.query(
+            std.distinct(
+                default.Inh_A.is_(default.Inh_B).is_(default.Inh_C)
+            ).select('*')
+        )
+
+        self._assertObjectsWithFields(
+            result,
+            "a",
+            [
+                (
+                    default.Inh_ABC,
+                    {
+                        "a": 13,
+                        "b": 14,
+                        "c": 15,
+                    },
+                ),
+                (
+                    default.Inh_AB_AC,
+                    {
+                        "a": 17,
+                        "b": 18,
+                        "c": 19,
+                    },
+                ),
+            ],
+            excluded_fields={'ab', 'ac', 'bc', 'abc', 'ab_ac'},
         )
 
 
