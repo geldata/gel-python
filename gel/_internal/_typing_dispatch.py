@@ -38,7 +38,10 @@ from gel._internal import _typing_eval
 from gel._internal import _typing_inspect
 from gel._internal import _typing_parametric
 from gel._internal._utils import type_repr
-from gel._internal._qbmodel._abstract._methods import BaseGelModelIntersection
+from gel._internal._qbmodel._abstract._methods import (
+    BaseGelModelIntersection,
+    BaseGelModelUnion,
+)
 
 _P = ParamSpec("_P")
 _R_co = TypeVar("_R_co", covariant=True)
@@ -70,6 +73,8 @@ def _issubclass(lhs: Any, tp: Any, fn: Any) -> bool:
 
     if issubclass(lhs, BaseGelModelIntersection):
         return any(_issubclass(c, tp, fn) for c in (lhs.lhs, lhs.rhs))
+    elif issubclass(lhs, BaseGelModelUnion):
+        return all(_issubclass(c, tp, fn) for c in (lhs.lhs, lhs.rhs))
 
     if _typing_inspect.is_generic_alias(tp):
         origin = typing.get_origin(tp)

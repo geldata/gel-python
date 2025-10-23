@@ -68,6 +68,7 @@ from gel._internal._qbmodel._abstract import (
     PyTypeScalarConstraint,
     RangeMeta,
     UUIDImpl,
+    create_union,
     empty_set_if_none,
 )
 
@@ -195,6 +196,7 @@ __all__ = (
     "classonlymethod",
     "computed_field",
     "construct_infix_op_chain",
+    "create_union",
     "dispatch_overload",
     "empty_set_if_none",
 )

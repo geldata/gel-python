@@ -19,6 +19,7 @@ import weakref
 from gel._internal import _qb
 from gel._internal._schemapath import (
     TypeNameIntersection,
+    TypeNameUnion,
 )
 from gel._internal._xmethod import classonlymethod
 
@@ -254,6 +255,16 @@ class BaseGelModelIntersection(
     rhs: ClassVar[type[AbstractGelModel]]
 
 
+class BaseGelModelUnion(
+    BaseGelModel,
+    Generic[_T_Lhs, _T_Rhs],
+):
+    __gel_type_class__: ClassVar[type]
+
+    lhs: ClassVar[type[AbstractGelModel]]
+    rhs: ClassVar[type[AbstractGelModel]]
+
+
 T = TypeVar('T')
 U = TypeVar('U')
 
@@ -425,5 +436,95 @@ def create_intersection(
     if lhs not in _type_intersection_cache:
         _type_intersection_cache[lhs] = weakref.WeakKeyDictionary()
     _type_intersection_cache[lhs][rhs] = result
+
+    return result
+
+
+_type_union_cache: weakref.WeakKeyDictionary[
+    type[AbstractGelModel],
+    weakref.WeakKeyDictionary[
+        type[AbstractGelModel],
+        type[
+            BaseGelModelUnion[type[AbstractGelModel], type[AbstractGelModel]]
+        ],
+    ],
+] = weakref.WeakKeyDictionary()
+
+
+def create_union(
+    lhs: _T_Lhs,
+    rhs: _T_Rhs,
+) -> type[BaseGelModelUnion[_T_Lhs, _T_Rhs]]:
+    """Create a runtime union type which acts like a GelModel."""
+
+    if (lhs_entry := _type_union_cache.get(lhs)) and (
+        rhs_entry := lhs_entry.get(rhs)
+    ):
+        return rhs_entry  # type: ignore[return-value]
+
+    # Combine pointer reflections from args
+    ptr_reflections: dict[str, _qb.GelPointerReflection] = {
+        p_name: p_refl
+        for p_name, p_refl in lhs.__gel_reflection__.pointers.items()
+        if p_name in rhs.__gel_reflection__.pointers
+    }
+
+    # Create type reflection for union type
+    class __gel_reflection__(_qb.GelObjectTypeExprMetadata.__gel_reflection__):  # noqa: N801
+        expr_object_types: set[type[AbstractGelModel]] = getattr(
+            lhs.__gel_reflection__, 'expr_object_types', {lhs}
+        ) | getattr(rhs.__gel_reflection__, 'expr_object_types', {rhs})
+
+        type_name = TypeNameUnion(
+            args=(
+                lhs.__gel_reflection__.type_name,
+                rhs.__gel_reflection__.type_name,
+            )
+        )
+
+        pointers = ptr_reflections
+
+        @classmethod
+        def object(
+            cls,
+        ) -> Any:
+            raise NotImplementedError(
+                "Type expressions schema objects are inaccessible"
+            )
+
+    result = type(
+        f"({lhs.__name__} | {rhs.__name__})",
+        (BaseGelModelUnion,),
+        {
+            'lhs': lhs,
+            'rhs': rhs,
+            '__gel_reflection__': __gel_reflection__,
+        },
+    )
+
+    # Generate path aliases for pointers.
+    #
+    # These are used to generate the appropriate path prefix when getting
+    # pointers in shapes.
+    path_aliases: dict[str, _qb.PathAlias] = {
+        p_name: l_path_alias
+        for p_name, p_refl in lhs.__gel_reflection__.pointers.items()
+        if (
+            hasattr(lhs, p_name)
+            and (l_path_alias := getattr(lhs, p_name, None)) is not None
+            and isinstance(l_path_alias, _qb.PathAlias)
+        )
+        if (
+            hasattr(rhs, p_name)
+            and (r_path_alias := getattr(rhs, p_name, None)) is not None
+            and isinstance(r_path_alias, _qb.PathAlias)
+        )
+    }
+    for p_name, path_alias in path_aliases.items():
+        setattr(result, p_name, path_alias)
+
+    if lhs not in _type_union_cache:
+        _type_union_cache[lhs] = weakref.WeakKeyDictionary()
+    _type_union_cache[lhs][rhs] = result
 
     return result
