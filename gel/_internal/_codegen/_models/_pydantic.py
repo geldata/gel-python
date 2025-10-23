@@ -5795,6 +5795,43 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                             f"# type: ignore [assignment, misc, unused-ignore]"
                         )
 
+                    if function.schemapath in {
+                        SchemaPath('std', 'UNION'),
+                        SchemaPath('std', 'IF'),
+                        SchemaPath('std', '??'),
+                    }:
+                        # Special case for the UNION, IF and ?? operators
+                        # Produce a union type instead of just taking the first
+                        # valid type.
+                        #
+                        # See gel: compile_operator
+                        create_union = self.import_name(
+                            BASE_IMPL, "create_union"
+                        )
+
+                        tvars: list[str] = []
+                        for param, path in sources:
+                            if param.name not in required_generic_params:
+                                continue
+
+                            pn = param_vars[param.name]
+                            tvar = f"__t_{pn}__"
+
+                            resolve(pn, path, tvar)
+                            tvars.append(tvar)
+
+                        self.write(
+                            f"{gtvar} = {tvars[0]}  "
+                            f"# type: ignore [assignment, misc, unused-ignore]"
+                        )
+                        for tvar in tvars[1:]:
+                            self.write(
+                                f"{gtvar} = {create_union}({gtvar}, {tvar})  "
+                                f"# type: ignore [assignment, misc, unused-ignore]"
+                            )
+
+                        continue
+
                     # Try to infer generic type from required params first
                     for param, path in sources:
                         if param.name in required_generic_params:
