@@ -65,6 +65,8 @@ from ._globals import (
 from ._methods import (
     BaseGelModel,
     BaseGelModelIntersection,
+    BaseGelModelUnion,
+    create_union,
 )
 
 
@@ -132,6 +134,7 @@ __all__ = (
     "ArrayMeta",
     "BaseGelModel",
     "BaseGelModelIntersection",
+    "BaseGelModelUnion",
     "ComputedLinkSet",
     "ComputedLinkWithPropsSet",
     "ComputedMultiLinkDescriptor",
@@ -174,6 +177,7 @@ __all__ = (
     "TupleMeta",
     "UUIDImpl",
     "copy_or_ref_lprops",
+    "create_union",
     "empty_set_if_none",
     "field_descriptor",
     "get_base_scalars_backed_by_py_type",
