@@ -34,7 +34,7 @@ class TestQueryBuilder(tb.ModelTestCase):
     def test_implicit_select_01(self):
         # Schema Set
 
-        from models.orm import default
+        from models.orm_qb import default
 
         # mypy complains if this doesn't have type annotation???
         users: list[default.User] = self.client.query(default.User)
@@ -103,7 +103,7 @@ class TestQueryBuilder(tb.ModelTestCase):
     def test_implicit_select_02(self):
         # Schema Set + filter
 
-        from models.orm import default
+        from models.orm_qb import default
 
         users = self.client.query(default.User.filter(name="Alice"))
         self._assertObjectsWithFields(
@@ -125,7 +125,7 @@ class TestQueryBuilder(tb.ModelTestCase):
     def test_implicit_select_03(self):
         # Schema Set + Path
 
-        from models.orm import default
+        from models.orm_qb import default
 
         authors = self.client.query(default.Post.author)
 
@@ -166,7 +166,7 @@ class TestQueryBuilder(tb.ModelTestCase):
     def test_implicit_select_04(self):
         # Schema Set + Filter + Path
 
-        from models.orm import default
+        from models.orm_qb import default
 
         authors = self.client.query(
             default.Post.filter(body="I'm Alice").author
@@ -191,7 +191,7 @@ class TestQueryBuilder(tb.ModelTestCase):
     def test_implicit_select_05(self):
         # Schema Set + Path + Filter
 
-        from models.orm import default
+        from models.orm_qb import default
 
         authors = self.client.query(default.Post.author.filter(name="Alice"))
 
@@ -214,7 +214,7 @@ class TestQueryBuilder(tb.ModelTestCase):
     def test_implicit_select_06(self):
         # Schema Set + Filter + Path + Filter
 
-        from models.orm import default
+        from models.orm_qb import default
 
         authors = self.client.query(
             default.Post.filter(body="I'm Alice").author.filter(name="Alice")
@@ -238,7 +238,7 @@ class TestQueryBuilder(tb.ModelTestCase):
 
     def test_implicit_select_07(self):
         # Ensure select without a schema path doesn't use a splat
-        from models.orm import default
+        from models.orm_qb import default
 
         groups = self.client.query(
             default.UserGroup.select(users=lambda x: x.users).filter(
@@ -252,7 +252,7 @@ class TestQueryBuilder(tb.ModelTestCase):
 
     def test_implicit_select_08(self):
         # In shape: Schema Set
-        from models.orm import default
+        from models.orm_qb import default
 
         groups = self.client.query(
             default.UserGroup.select(users=default.User).filter(name="green")
@@ -323,7 +323,7 @@ class TestQueryBuilder(tb.ModelTestCase):
 
     def test_implicit_select_09(self):
         # In shape: Schema Set
-        from models.orm import default
+        from models.orm_qb import default
 
         groups = self.client.query(
             default.UserGroup.select(
@@ -351,7 +351,7 @@ class TestQueryBuilder(tb.ModelTestCase):
 
     def test_implicit_select_10(self):
         # In shape: Schema Set + Path
-        from models.orm import default
+        from models.orm_qb import default
 
         groups = self.client.query(
             default.UserGroup.select(users=default.Post.author).filter(
@@ -397,7 +397,7 @@ class TestQueryBuilder(tb.ModelTestCase):
 
     def test_implicit_select_11(self):
         # In shape: Schema Set + Filter + Path
-        from models.orm import default
+        from models.orm_qb import default
 
         groups = self.client.query(
             default.UserGroup.select(
@@ -425,7 +425,7 @@ class TestQueryBuilder(tb.ModelTestCase):
 
     def test_implicit_select_12(self):
         # In shape: Schema Set + Filter + Path
-        from models.orm import default
+        from models.orm_qb import default
 
         groups = self.client.query(
             default.UserGroup.select(
@@ -453,7 +453,7 @@ class TestQueryBuilder(tb.ModelTestCase):
 
     def test_implicit_select_13(self):
         # In shape: Schema Set + Filter + Path
-        from models.orm import default
+        from models.orm_qb import default
 
         groups = self.client.query(
             default.UserGroup.select(
@@ -1351,21 +1351,21 @@ class TestQueryBuilder(tb.ModelTestCase):
 
     def test_qb_cast_scalar_01(self):
         # scalar to scalar
-        from models.orm import std
+        from models.orm_qb import std
 
         result = self.client.get(std.str.cast(std.int64(1)))
         self.assertEqual(result, "1")
 
     def test_qb_cast_scalar_02(self):
         # enum to scalar
-        from models.orm import default, std
+        from models.orm_qb import default, std
 
         result = self.client.get(std.str.cast(default.Color.Red))
         self.assertEqual(result, "Red")
 
     def test_qb_cast_scalar_03(self):
         # scalar to enum
-        from models.orm import default, std
+        from models.orm_qb import default, std
 
         result = self.client.get(default.Color.cast(std.str("Red")))
         self.assertEqual(result, default.Color.Red)
