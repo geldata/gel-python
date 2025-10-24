@@ -1323,6 +1323,11 @@ class GelModel(
         return copied
 
 
+class GelObjectModel(GelModel):
+    # Base class for object classes.
+    pass
+
+
 class GelLinkModel(
     GelSourceModel,
     _abstract.AbstractGelLinkModel,
