@@ -2340,7 +2340,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             unpack = self.import_name("typing_extensions", "Unpack")
             geltype = self.import_name(BASE_IMPL, "GelType")
             geltypemeta = self.import_name(BASE_IMPL, "GelTypeMeta")
-            gelmodel = self.import_name(BASE_IMPL, "GelModel")
+            gelobjectmodel = self.import_name(BASE_IMPL, "GelObjectModel")
             gelmodelmeta = self.import_name(BASE_IMPL, "GelModelMeta")
             anytuple = self.import_name(BASE_IMPL, "AnyTuple")
             anynamedtuple = self.import_name(BASE_IMPL, "AnyNamedTuple")
@@ -2367,7 +2367,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                     geltype,
                 ],
                 SchemaPath("std", "anyobject"): [
-                    gelmodel,
+                    gelobjectmodel,
                     "anytype",
                 ],
                 SchemaPath("std", "anytuple"): [
@@ -4354,8 +4354,8 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             )
 
         if not list(variant_bases):
-            gel_model = self.import_name(BASE_IMPL, "GelModel")
-            bases.append(gel_model)
+            gel_object_model = self.import_name(BASE_IMPL, "GelObjectModel")
+            bases.append(gel_object_model)
 
         with self._class_def(
             variant,
