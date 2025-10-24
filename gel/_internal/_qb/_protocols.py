@@ -121,6 +121,12 @@ def edgeql(
     return value
 
 
+ExprPrimitive = TypeAliasType(
+    "ExprPrimitive",
+    int,
+)
+
+
 def edgeql_qb_expr(
     x: ExprCompatible | ExprClosure,
     *,
