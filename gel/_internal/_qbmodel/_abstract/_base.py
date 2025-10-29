@@ -227,6 +227,27 @@ class AbstractGelModel(
                 )
 
 
+class AbstractGelObjectBacklinksModel(
+    AbstractGelSourceModel,
+    _qb.GelTypeMetadata,
+):
+    if TYPE_CHECKING:
+        # Whether the model was copied by reference and must
+        # be copied by value before being accessed by the user.
+        __gel_copied_by_ref__: bool
+
+    class __gel_reflection__(  # noqa: N801
+        _qb.GelSourceMetadata.__gel_reflection__,
+        _qb.GelTypeMetadata.__gel_reflection__,
+    ):
+        pass
+
+    @classmethod
+    def __edgeql_qb_expr__(cls) -> _qb.Expr:  # pyright: ignore [reportIncompatibleMethodOverride]
+        this_type = cls.__gel_reflection__.type_name
+        return _qb.SchemaSet(type_=this_type)
+
+
 class AbstractGelLinkModel(AbstractGelSourceModel):
     if TYPE_CHECKING:
         # Whether the model was copied by reference and must

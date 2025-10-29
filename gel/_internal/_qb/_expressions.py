@@ -217,6 +217,8 @@ class Path(PathExpr):
             source = current.source
             if isinstance(source, PathPrefix) and source.lprop_pivot:
                 step = f"@{_edgeql.quote_ident(current.name)}"
+            elif current.is_backlink:
+                step = f".<{_edgeql.quote_ident(current.name)}"
             else:
                 step = f".{_edgeql.quote_ident(current.name)}"
             steps.append(step)

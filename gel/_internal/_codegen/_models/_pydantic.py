@@ -435,6 +435,12 @@ class ModuleAspect(enum.Enum):
     LATE = enum.auto()
 
 
+@dataclasses.dataclass(frozen=True, kw_only=True)
+class Backlink:
+    source: reflection.ObjectType
+    pointer: reflection.Pointer
+
+
 class SchemaGenerator:
     def __init__(
         self,
@@ -451,6 +457,9 @@ class SchemaGenerator:
         self._std_modules: list[SchemaPath] = []
         self._types: Mapping[str, reflection.Type] = {}
         self._casts: reflection.CastMatrix
+        self._backlinks: dict[
+            reflection.ObjectType, dict[str, list[Backlink]]
+        ] = {}
         self._operators: reflection.OperatorMatrix
         self._functions: list[reflection.Function]
         self._globals: list[reflection.Global]
@@ -579,6 +588,7 @@ class SchemaGenerator:
                 all_casts=self._casts,
                 all_operators=self._operators,
                 all_globals=self._globals,
+                all_backlinks=self._backlinks,
                 modules=self._modules,
                 schema_part=self._schema_part,
             )
@@ -604,6 +614,7 @@ class SchemaGenerator:
                 all_casts=self._casts,
                 all_operators=self._operators,
                 all_globals=self._globals,
+                all_backlinks=self._backlinks,
                 modules=all_modules,
                 schema_part=self._schema_part,
             )
@@ -659,6 +670,24 @@ class SchemaGenerator:
             if reflection.is_object_type(t):
                 name = t.schemapath
                 self._modules[name.parent]["object_types"][name.name] = t
+
+                for p in t.pointers:
+                    if (
+                        reflection.is_link(p)
+                        # For now don't include std::BaseObject.__type__
+                        # Users should just select on the appropriate type
+                        and p.name != "__type__"
+                    ):
+                        target = self._types[p.target_id]
+                        assert isinstance(target, reflection.ObjectType)
+                        if target not in self._backlinks:
+                            self._backlinks[target] = {}
+                        if p.name not in self._backlinks[target]:
+                            self._backlinks[target][p.name] = []
+                        self._backlinks[target][p.name].append(
+                            Backlink(source=t, pointer=p)
+                        )
+
             elif reflection.is_scalar_type(t):
                 name = t.schemapath
                 self._modules[name.parent]["scalar_types"][name.name] = t
@@ -694,6 +723,7 @@ class SchemaGenerator:
             all_casts=self._casts,
             all_operators=self._operators,
             all_globals=self._globals,
+            all_backlinks=self._backlinks,
             modules=self._modules,
             schema_part=self._schema_part,
         )
@@ -944,6 +974,9 @@ class BaseGeneratedModule:
         all_casts: reflection.CastMatrix,
         all_operators: reflection.OperatorMatrix,
         all_globals: list[reflection.Global],
+        all_backlinks: Mapping[
+            reflection.ObjectType, Mapping[str, Sequence[Backlink]]
+        ],
         modules: Collection[SchemaPath],
         schema_part: reflection.SchemaPart,
     ) -> None:
@@ -954,6 +987,7 @@ class BaseGeneratedModule:
         self._casts = all_casts
         self._operators = all_operators
         self._globals = all_globals
+        self._backlinks = all_backlinks
         schema_obj_type = None
         for t in all_types.values():
             self._types_by_name[t.name] = t
@@ -4086,6 +4120,9 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         if proplinks:
             self.write_object_type_link_models(objtype)
 
+        if name != "std::FreeObject":
+            self._write_object_backlinks(objtype)
+
         anyobject_meta = self.get_object(
             SchemaPath("std", "__anyobject_meta__"),
             aspect=ModuleAspect.SHAPES,
@@ -4213,6 +4250,16 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                     self.write(f"__gel_type_class__ = __{name}_ops__")
             if objtype.name == "std::BaseObject":
                 write_id_attr(objtype, "RequiredId")
+
+            if name != "std::FreeObject":
+                backlinks_model_name = self._mangle_backlinks_model_name(name)
+                g_oblm_desc = self.import_name(
+                    BASE_IMPL, "GelObjectBacklinksModelDescriptor"
+                )
+                oblm_desc = f"{g_oblm_desc}[{backlinks_model_name}]"
+                self.write(f"__backlinks__: {oblm_desc} = {oblm_desc}()")
+                self.write()
+
             self._write_base_object_type_body(objtype, include_tname=True)
             with self.type_checking():
                 self._write_object_type_qb_methods(objtype)
@@ -4332,6 +4379,195 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             self.write(f"___{name}___ = {name}")
 
         self.write()
+
+    @staticmethod
+    def _mangle_backlinks_model_name(name: str) -> str:
+        return f"__{name}_backlinks__"
+
+    def _write_object_backlinks(
+        self,
+        objtype: reflection.ObjectType,
+    ) -> None:
+        type_name = objtype.schemapath
+        name = type_name.name
+
+        schema_path = self.import_name(BASE_IMPL, "SchemaPath")
+        parametric_type_name = self.import_name(
+            BASE_IMPL, "ParametricTypeName"
+        )
+        computed_multi_link = self.import_name(BASE_IMPL, "ComputedMultiLink")
+        std_base_object_t = self.get_object(
+            SchemaPath.from_segments("std", "BaseObject"),
+            aspect=ModuleAspect.SHAPES,
+        )
+
+        backlinks_model_name = self._mangle_backlinks_model_name(name)
+
+        base_object_types = [
+            base_type
+            for base_ref in objtype.bases
+            if (base_type := self._types.get(base_ref.id, None))
+            if isinstance(base_type, reflection.ObjectType)
+        ]
+
+        backlinks_base_types: list[str]
+        base_backlinks_reflections: list[str]
+        base_backlinks_models: list[str]
+
+        if objtype.name == "std::BaseObject":
+            object_backlinks_model = self.import_name(
+                BASE_IMPL, "GelObjectBacklinksModel"
+            )
+            backlinks_base_types = [object_backlinks_model]
+            base_backlinks_reflections = [
+                f"{object_backlinks_model}.__gel_reflection__"
+            ]
+            base_backlinks_models = []
+        else:
+            backlinks_base_types = [
+                self.get_object(
+                    SchemaPath(
+                        base_type.schemapath.parent,
+                        self._mangle_backlinks_model_name(
+                            base_type.schemapath.name
+                        ),
+                    ),
+                    aspect=ModuleAspect.SHAPES,
+                )
+                for base_type in base_object_types
+            ]
+            base_backlinks_reflections = [
+                f"{bbt}.__gel_reflection__" for bbt in backlinks_base_types
+            ]
+            base_backlinks_models = backlinks_base_types
+
+        object_backlinks = self._backlinks.get(objtype, {})
+
+        # The backlinks model class
+        with self._class_def(backlinks_model_name, backlinks_base_types):
+            with self._class_def(
+                "__gel_reflection__", base_backlinks_reflections
+            ):
+                obj_name = type_name.as_python_code(
+                    schema_path, parametric_type_name
+                )
+                self.write(f"name = {obj_name}")
+                self.write(f"type_name = {obj_name}")
+                self._write_backlinks_pointers_reflection(
+                    object_backlinks, base_backlinks_models
+                )
+
+            for backlink_name in object_backlinks:
+                backlink_t = f"{computed_multi_link}[{std_base_object_t}]"
+                self.write(f"{backlink_name}: {backlink_t}")
+
+            self.export(backlinks_model_name)
+
+        self.write()
+        self.write()
+
+    def _write_backlinks_pointers_reflection(
+        self,
+        object_backlinks: Mapping[str, Sequence[Backlink]],
+        base_backlinks_models: Sequence[str],
+    ) -> None:
+        dict_ = self.import_name(
+            "builtins", "dict", import_time=ImportTime.typecheck
+        )
+        str_ = self.import_name(
+            "builtins", "str", import_time=ImportTime.typecheck
+        )
+        gel_ptr_ref = self.import_name(
+            BASE_IMPL,
+            "GelPointerReflection",
+            import_time=ImportTime.runtime
+            if object_backlinks
+            else ImportTime.typecheck,
+        )
+        lazyclassproperty = self.import_name(BASE_IMPL, "LazyClassProperty")
+        ptr_ref_t = f"{dict_}[{str_}, {gel_ptr_ref}]"
+        with self._classmethod_def(
+            "pointers",
+            [],
+            ptr_ref_t,
+            decorators=(f'{lazyclassproperty}["{ptr_ref_t}"]',),
+        ):
+            if object_backlinks:
+                self.write(f"my_ptrs: {ptr_ref_t} = {{")
+                classes = {
+                    "SchemaPath": self.import_name(BASE_IMPL, "SchemaPath"),
+                    "ParametricTypeName": self.import_name(
+                        BASE_IMPL, "ParametricTypeName"
+                    ),
+                    "GelPointerReflection": gel_ptr_ref,
+                    "Cardinality": self.import_name(BASE_IMPL, "Cardinality"),
+                    "PointerKind": self.import_name(BASE_IMPL, "PointerKind"),
+                    "StdBaseObject": self.get_object(
+                        SchemaPath.from_segments("std", "BaseObject"),
+                        aspect=ModuleAspect.SHAPES,
+                    ),
+                }
+                with self.indented():
+                    for (
+                        backlink_name,
+                        backlink_values,
+                    ) in object_backlinks.items():
+                        r = self._reflect_backlink(
+                            backlink_name, backlink_values, classes
+                        )
+                        self.write(f"{backlink_name!r}: {r},")
+                self.write("}")
+            else:
+                self.write(f"my_ptrs: {ptr_ref_t} = {{}}")
+
+            if base_backlinks_models:
+                pp = "__gel_reflection__.pointers"
+                ret = self.format_list(
+                    "return ({list})",
+                    [
+                        "my_ptrs",
+                        *_map_name(
+                            lambda s: f"{s}.{pp}", base_backlinks_models
+                        ),
+                    ],
+                    separator=" | ",
+                    carry_separator=True,
+                )
+            else:
+                ret = "return my_ptrs"
+
+            self.write(ret)
+
+        self.write()
+
+    def _reflect_backlink(
+        self,
+        name: str,
+        backlinks: Sequence[Backlink],
+        classes: dict[str, str],
+    ) -> str:
+        kwargs: dict[str, str] = {
+            "name": repr(name),
+            "type": classes["StdBaseObject"],
+            "kind": (
+                f"{classes['PointerKind']}({str(reflection.PointerKind.Link)!r})"
+            ),
+            "cardinality": (
+                f"{classes['Cardinality']}({str(reflection.Cardinality.Many)!r})"
+            ),
+            "computed": "True",
+            "readonly": "True",
+            "has_default": "False",
+            "mutable": "False",
+        }
+
+        # For now don't get any back link props
+        kwargs["properties"] = "None"
+
+        return self.format_list(
+            f"{classes['GelPointerReflection']}({{list}})",
+            [f"{k}={v}" for k, v in kwargs.items()],
+        )
 
     @contextlib.contextmanager
     def _object_type_variant(

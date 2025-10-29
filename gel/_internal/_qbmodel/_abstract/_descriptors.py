@@ -32,8 +32,9 @@ from gel._internal import _utils
 
 from ._base import (
     GelType,
-    AbstractGelModel,
     AbstractGelLinkModel,
+    AbstractGelModel,
+    AbstractGelObjectBacklinksModel,
     is_gel_type,
     maybe_collapse_object_type_variant_union,
     LITERAL_TAG_FIELDS,
@@ -170,10 +171,14 @@ class ModelFieldDescriptor(_qb.AbstractFieldDescriptor):
             return _UNRESOLVED_TYPE
         else:
             source: _qb.Expr
+            is_backlink = False
             if expr is not None:
                 source = expr.__gel_metadata__
             elif _qb.is_expr_compatible(owner):
                 source = _qb.edgeql_qb_expr(owner)
+                is_backlink = issubclass(
+                    owner, AbstractGelObjectBacklinksModel
+                )
             else:
                 return t
             try:
@@ -188,6 +193,7 @@ class ModelFieldDescriptor(_qb.AbstractFieldDescriptor):
                 source=source,
                 name=self.__gel_name__,
                 is_lprop=False,
+                is_backlink=is_backlink,
             )
             return _qb.AnnotatedPath(t, metadata)
 
@@ -896,3 +902,77 @@ def proxy_link(
         new=proxy_type.__gel_validate__(new),
         proxy_type=proxy_type,
     )
+
+
+_OBMT_co = TypeVar(
+    "_OBMT_co", bound=AbstractGelObjectBacklinksModel, covariant=True
+)
+"""Derived model type"""
+
+
+class AbstractGelObjectModel(AbstractGelModel):
+    __backlinks__: GelObjectBacklinksModelDescriptor[
+        AbstractGelObjectBacklinksModel
+    ]
+
+
+class GelObjectBacklinksModelDescriptor(
+    _typing_parametric.PickleableClassParametricType,
+    _qb.AbstractFieldDescriptor,
+    Generic[_OBMT_co],
+):
+    _backlinks_model_class: ClassVar[type[_OBMT_co]]  # type: ignore [misc]
+
+    def __set_name__(self, owner: type[Any], name: str) -> None:
+        self._backlinks_model_attr = name
+
+    @overload
+    def __get__(
+        self, instance: None, owner: type[Any], /
+    ) -> type[_OBMT_co]: ...
+
+    @overload
+    def __get__(
+        self, instance: Any, owner: type[Any] | None = None, /
+    ) -> _OBMT_co: ...
+
+    def __get__(
+        self,
+        instance: Any | None,
+        owner: type[Any] | None = None,
+        /,
+    ) -> type[_OBMT_co] | _OBMT_co:
+        if instance is None:
+            return self._backlinks_model_class
+        else:
+            attr = self._backlinks_model_attr
+            backlinks: _OBMT_co | None = instance.__dict__.get(attr)
+            if backlinks is None:
+                backlinks = (
+                    self._backlinks_model_class.__gel_model_construct__({})
+                )
+                instance.__dict__[attr] = backlinks
+
+            return backlinks
+
+    def get(
+        self,
+        owner: type[AbstractGelObjectModel],
+        expr: _qb.BaseAlias | None = None,
+    ) -> Any:
+        source: _qb.Expr
+        if expr is not None:
+            source = expr.__gel_metadata__
+        else:
+            raise AssertionError("missing source for backlink path")
+
+        if (
+            not isinstance(source, _qb.PathPrefix)
+            or source.source_link is None
+        ):
+            raise AttributeError(
+                "__backlinks__", name="__backlinks__", obj=owner
+            )
+
+        prefix = dataclasses.replace(source, lprop_pivot=True)
+        return _qb.AnnotatedExpr(owner.__backlinks__, prefix)  # pyright: ignore [reportGeneralTypeIssues]

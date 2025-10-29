@@ -1323,9 +1323,33 @@ class GelModel(
         return copied
 
 
-class GelObjectModel(GelModel):
+class GelObjectModel(
+    GelModel,
+    _abstract.AbstractGelObjectModel,
+    __gel_root_class__=True,
+):
     # Base class for object classes.
     pass
+
+
+class GelObjectBacklinksModel(
+    GelSourceModel,
+    _abstract.AbstractGelObjectBacklinksModel,
+    __gel_root_class__=True,
+):
+    # Base class for __backlinks__ classes.
+    __slots__ = ("__gel_copied_by_ref__",)
+
+    def __getstate__(self) -> dict[Any, Any]:
+        state = super().__getstate__()
+        state["__gel_copied_by_ref__"] = getattr(
+            self, "__gel_copied_by_ref__", False
+        )
+        return state
+
+    def __setstate__(self, state: dict[Any, Any]) -> None:
+        super().__setstate__(state)
+        self.__gel_copied_by_ref__ = state["__gel_copied_by_ref__"]
 
 
 class GelLinkModel(

@@ -156,6 +156,7 @@ class PathExpr(AtomicExpr):
     name: str
     is_lprop: bool = False
     is_link: bool = False
+    is_backlink: bool = False
 
     def subnodes(self) -> Iterable[Node]:
         return (self.source,)
