@@ -11,6 +11,7 @@ from ._base import (
     AbstractGelLinkModel,
     AbstractGelModel,
     AbstractGelModelMeta,
+    AbstractGelObjectBacklinksModel,
     AbstractGelSourceModel,
     DefaultValue,
     GelType,
@@ -19,6 +20,7 @@ from ._base import (
 )
 
 from ._descriptors import (
+    AbstractGelObjectModel,
     AbstractGelProxyModel,
     AnyLinkDescriptor,
     AnyPropertyDescriptor,
@@ -27,6 +29,7 @@ from ._descriptors import (
     ComputedMultiPropertyDescriptor,
     ComputedPropertyDescriptor,
     GelLinkModelDescriptor,
+    GelObjectBacklinksModelDescriptor,
     LinkDescriptor,
     ModelFieldDescriptor,
     MultiLinkDescriptor,
@@ -117,6 +120,8 @@ __all__ = (
     "AbstractGelLinkModel",
     "AbstractGelModel",
     "AbstractGelModelMeta",
+    "AbstractGelObjectBacklinksModel",
+    "AbstractGelObjectModel",
     "AbstractGelProxyModel",
     "AbstractGelSourceModel",
     "AbstractLinkSet",
@@ -143,6 +148,7 @@ __all__ = (
     "DateTimeLike",
     "DefaultValue",
     "GelLinkModelDescriptor",
+    "GelObjectBacklinksModelDescriptor",
     "GelPrimitiveType",
     "GelScalarType",
     "GelType",
