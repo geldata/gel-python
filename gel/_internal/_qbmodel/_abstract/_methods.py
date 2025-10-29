@@ -20,6 +20,7 @@ from gel._internal import _qb
 from gel._internal._schemapath import (
     TypeNameIntersection,
 )
+from gel._internal import _type_expression
 from gel._internal._xmethod import classonlymethod
 
 from ._base import AbstractGelModel
@@ -246,6 +247,7 @@ _T_Rhs = TypeVar("_T_Rhs", bound="type[AbstractGelModel]")
 
 class BaseGelModelIntersection(
     BaseGelModel,
+    _type_expression.Intersection,
     Generic[_T_Lhs, _T_Rhs],
 ):
     __gel_type_class__: ClassVar[type]
