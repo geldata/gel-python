@@ -277,23 +277,60 @@ insert Inh_AXA {
     axa := 10002,
 };
 
+insert Link_Inh_A { n := -1 };
+insert Link_Inh_A2 { n := -2 };
+insert Link_Inh_A3 { n := -3 };
+
 insert Link_Inh_A {
     n := 1,
     l := assert_exists((select Inh_A filter .a = 1 limit 1)),
 };
-insert Link_Inh_A {
+insert Link_Inh_A2 {
     n := 4,
     l := assert_exists((select Inh_AB filter .a = 4 limit 1)),
 };
-insert Link_Inh_A {
+insert Link_Inh_A2 {
     n := 7,
     l := assert_exists((select Inh_AC filter .a = 7 limit 1)),
 };
-insert Link_Inh_A {
+insert Link_Inh_A3 {
     n := 13,
     l := assert_exists((select Inh_ABC filter .a = 13 limit 1)),
 };
-insert Link_Inh_A {
+insert Link_Inh_A3 {
     n := 17,
     l := assert_exists((select Inh_AB_AC filter .a = 17 limit 1)),
+};
+
+insert Link_Inh_AB { n := -1 };
+insert Link_Inh_AB {
+    n := 1004,
+    l := assert_exists((select Inh_AB filter .a = 4 limit 1)),
+};
+insert Link_Inh_AB {
+    n := 1017,
+    l := assert_exists((select Inh_AB_AC filter .a = 17 limit 1)),
+};
+
+insert Link_Link_Inh_A { n := -1 };
+
+insert Link_Link_Inh_A {
+    n := 1,
+    l := assert_exists((select Link_Inh_A filter .n = 1 limit 1)),
+};
+insert Link_Link_Inh_A {
+    n := 4,
+    l := assert_exists((select Link_Inh_A filter .n = 4 limit 1)),
+};
+insert Link_Link_Inh_A {
+    n := 7,
+    l := assert_exists((select Link_Inh_A filter .n = 7 limit 1)),
+};
+insert Link_Link_Inh_A {
+    n := 13,
+    l := assert_exists((select Link_Inh_A filter .n = 13 limit 1)),
+};
+insert Link_Link_Inh_A {
+    n := 17,
+    l := assert_exists((select Link_Inh_A filter .n = 17 limit 1)),
 };
