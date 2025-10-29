@@ -34,6 +34,7 @@ import types
 import typing
 
 from gel._internal import _namespace
+from gel._internal import _type_expression
 from gel._internal import _typing_eval
 from gel._internal import _typing_inspect
 from gel._internal import _typing_parametric
@@ -66,6 +67,10 @@ def _issubclass(lhs: Any, tp: Any, fn: Any) -> bool:
     # subtypes of the variable bounds.
     # This lets us handle cases like:
     # std.array[Object] <: std.array[_T_anytype].
+
+    if issubclass(lhs, _type_expression.Intersection):
+        return any(_issubclass(c, tp, fn) for c in (lhs.lhs, lhs.rhs))
+
     if _typing_inspect.is_generic_alias(tp):
         origin = typing.get_origin(tp)
         args = typing.get_args(tp)
