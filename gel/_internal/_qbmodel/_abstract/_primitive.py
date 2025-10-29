@@ -817,6 +817,15 @@ _py_type_to_literal: dict[type[PyConstType], type[_qb.Literal]] = {
     decimal.Decimal: _qb.DecimalLiteral,
 }
 
+_py_type_name_to_literal_name: dict[tuple[str, str], str] = {
+    ("builtins", "bool"): "BoolLiteral",
+    ("builtins", "int"): "IntLiteral",
+    ("builtins", "float"): "FloatLiteral",
+    ("builtins", "str"): "StringLiteral",
+    ("builtins", "bytes"): "BytesLiteral",
+    ("decimal", "Decimal"): "DecimalLiteral",
+}
+
 
 _PT_co = TypeVar("_PT_co", bound=PyConstType, covariant=True)
 _ST = TypeVar("_ST", bound=GelScalarType, default=GelScalarType)
@@ -848,6 +857,12 @@ def get_literal_for_scalar(
             expr=_qb.StringLiteral(val=str(v)),
             type_=t.__gel_reflection__.type_name,
         )
+
+
+def get_literal_name_for_py_type(
+    py_type_name: tuple[str, str],
+) -> str | None:
+    return _py_type_name_to_literal_name.get(py_type_name)
 
 
 class PyTypeScalar(

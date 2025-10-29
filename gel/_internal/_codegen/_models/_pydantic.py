@@ -2575,17 +2575,38 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         aexpr = self.import_name(BASE_IMPL, "AnnotatedExpr")
         cast_op = self.import_name(BASE_IMPL, "CastOp")
 
+        py_to_gel_casts = self._get_scalar_py_to_gel_casts(stype)
+        if not py_to_gel_casts:
+            return
+
+        arg_name: str = "expr"
+        arg_types: list[str] = [expr_compat, *py_to_gel_casts.keys()]
+
         with self._classmethod_def(
             "cast",
-            [f"expr: {expr_compat}"],
+            [f"{arg_name}: {' | '.join(arg_types)}"],
             type_self,
         ):
+            self.write()
+            self.write(f"match {arg_name}:")
+            with self.indented():
+                for py_type, gel_cast in py_to_gel_casts.items():
+                    self.write(f"case {py_type}():")
+                    with self.indented():
+                        cast_text: str
+                        if isinstance(gel_cast, str):
+                            cast_text = f"{gel_cast}({arg_name})"
+                        else:
+                            cast_text = gel_cast(arg_name)
+                        self.write(f"{arg_name} = {cast_text}")
+
+            self.write()
             self.write(f"return {aexpr}(  # type: ignore [return-value]")
             with self.indented():
                 self.write("cls,")
                 self.write(f"{cast_op}(")
                 with self.indented():
-                    self.write("expr=expr,")
+                    self.write(f"expr={arg_name},")
                     self.write("type_=cls.__gel_reflection__.type_name,")
                 self.write(")")
             self.write(")")
@@ -2818,25 +2839,38 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         self_ = self.import_name("typing_extensions", "Self")
         type_self = f"{type_}[{self_}]"
 
-        if signature_only:
-            self.write()
-            with self._classmethod_def(
-                "cast",
-                [f"expr: {expr_compat}"],
-                type_self,
-            ):
+        py_to_gel_casts = self._get_scalar_py_to_gel_casts(stype)
+        if not py_to_gel_casts:
+            return
+
+        arg_name: str = "expr"
+        arg_types: list[str] = [expr_compat, *py_to_gel_casts.keys()]
+
+        with self._classmethod_def(
+            "cast",
+            [f"{arg_name}: {' | '.join(arg_types)}"],
+            type_self,
+        ):
+            if signature_only:
                 self.write("...")
 
-        else:
-            aexpr = self.import_name(BASE_IMPL, "AnnotatedExpr")
-            cast_op = self.import_name(BASE_IMPL, "CastOp")
+            else:
+                aexpr = self.import_name(BASE_IMPL, "AnnotatedExpr")
+                cast_op = self.import_name(BASE_IMPL, "CastOp")
 
-            self.write()
-            with self._classmethod_def(
-                "cast",
-                [f"expr: {expr_compat}"],
-                type_self,
-            ):
+                self.write(f"match {arg_name}:")
+                with self.indented():
+                    for py_type, gel_cast in py_to_gel_casts.items():
+                        self.write(f"case {py_type}():")
+                        with self.indented():
+                            cast_text: str
+                            if isinstance(gel_cast, str):
+                                cast_text = f"{gel_cast}({arg_name})"
+                            else:
+                                cast_text = gel_cast(arg_name)
+                            self.write(f"{arg_name} = {cast_text}")
+
+                self.write()
                 self.write(f"return {aexpr}(  # type: ignore [return-value]")
                 with self.indented():
                     self.write("cls,")
@@ -2846,6 +2880,98 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                         self.write("type_=cls.__gel_reflection__.type_name,")
                     self.write(")")
                 self.write(")")
+
+    def _get_scalar_py_to_gel_casts(
+        self,
+        stype: reflection.ScalarType,
+    ) -> dict[str, str | Callable[[str], str]] | None:
+        if not (explicit_casts := self._casts.explicit_casts_to.get(stype.id)):
+            return None
+
+        py_to_gel_casts: dict[str, str | Callable[[str], str]] = {}
+
+        # Determine if the result type can be directly cast from a literal
+        direct_py_type_name: tuple[str, str] | None = None
+
+        if py_type_names := _qbmodel.get_py_type_for_scalar(
+            stype.name,
+            consider_generic=False,
+        ):
+            # with consider_generic=False, there should be 1 value
+            direct_py_type_name = py_type_names[0]
+            if literal_name := _qbmodel.get_literal_name_for_py_type(
+                direct_py_type_name
+            ):
+                py_type = self.import_name(*direct_py_type_name)
+                literal = self.import_name(BASE_IMPL, literal_name)
+
+                py_to_gel_casts[py_type] = lambda x: (
+                    f"{literal}("
+                    f"val={x},"
+                    f"type_=cls.__gel_reflection__.type_name,"
+                    f")"
+                )
+
+        # Determine what python types can converted to a gel type before cast
+
+        # Get the gel types that can be cast to result type
+        scalar_arg_types = [
+            arg_type
+            for arg_type_id in explicit_casts
+            if (arg_type := self._types.get(arg_type_id))
+            if reflection.is_scalar_type(arg_type)
+            if arg_type.schemapath not in GENERIC_TYPES
+        ]
+
+        # Find the python types associated with the gel types
+        py_to_scalar_types: dict[
+            tuple[str, str], list[reflection.ScalarType]
+        ] = {}
+        for scalar_arg_type in scalar_arg_types:
+            if py_type_names := _qbmodel.get_py_type_for_scalar(
+                scalar_arg_type.name,
+                consider_generic=False,
+            ):
+                # with consider_generic=False, there should be 1 value
+                py_type_name = py_type_names[0]
+
+                if py_type_name == direct_py_type_name:
+                    # Skip the directly converted type
+                    continue
+
+                if py_type_name not in py_to_scalar_types:
+                    py_to_scalar_types[py_type_name] = []
+
+                py_to_scalar_types[py_type_name].append(scalar_arg_type)
+
+        # Pick the best gel type to convert to
+        for py_type_name, scalar_types in py_to_scalar_types.items():
+            py_type = self.import_name(*py_type_name)
+
+            scalars_with_rank: list[tuple[reflection.ScalarType, int]] = []
+            for scalar_type in scalar_types:
+                rank = _qbmodel.get_py_type_scalar_match_rank(
+                    py_type_name, scalar_type.name
+                )
+                if rank is None:
+                    continue
+                scalars_with_rank.append((scalar_type, rank))
+
+            if not scalars_with_rank:
+                # This can happen for scalars which don't convert to simple
+                # python primitives. eg. ext::pgvector::halfvec
+                continue
+
+            best_scalar_type = min(
+                scalars_with_rank, key=operator.itemgetter(1)
+            )[0]
+            gel_type = self.get_type(
+                best_scalar_type, import_time=ImportTime.typecheck_runtime
+            )
+
+            py_to_gel_casts[py_type] = gel_type
+
+        return py_to_gel_casts
 
     def render_callable_return_type(
         self,

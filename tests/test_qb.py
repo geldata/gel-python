@@ -1356,6 +1356,14 @@ class TestQueryBuilder(tb.ModelTestCase):
         result = self.client.get(std.str.cast(std.int64(1)))
         self.assertEqual(result, "1")
 
+        # python scalar to scalar
+        from models.orm_qb import std
+
+        result = self.client.get(std.str.cast(1))
+        self.assertEqual(result, "1")
+        result = self.client.get(std.str.cast("1"))
+        self.assertEqual(result, "1")
+
     def test_qb_cast_scalar_02(self):
         # enum to scalar
         from models.orm_qb import default, std
@@ -1368,6 +1376,10 @@ class TestQueryBuilder(tb.ModelTestCase):
         from models.orm_qb import default, std
 
         result = self.client.get(default.Color.cast(std.str("Red")))
+        self.assertEqual(result, default.Color.Red)
+
+        # python scalar to enum
+        result = self.client.get(default.Color.cast("Red"))
         self.assertEqual(result, default.Color.Red)
 
     def test_qb_cast_array_01(self):

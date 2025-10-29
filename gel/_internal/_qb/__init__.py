@@ -18,6 +18,7 @@ from ._abstract import (
 )
 
 from ._expressions import (
+    BigIntLiteral,
     BinaryOp,
     BoolLiteral,
     BytesLiteral,
@@ -112,6 +113,7 @@ __all__ = (
     "AnnotatedPath",
     "AnnotatedVar",
     "BaseAlias",
+    "BigIntLiteral",
     "BinaryOp",
     "BoolLiteral",
     "BytesLiteral",
