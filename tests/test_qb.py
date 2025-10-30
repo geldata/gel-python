@@ -2101,6 +2101,114 @@ class TestQueryBuilder(tb.ModelTestCase):
         )
         self.assertEqual(sorted(result), [6, 13, 20])
 
+    def test_qb_std_coalesce_01(self):
+        from models.orm_qb import default, std
+
+        query = std.coalesce(default.Inh_AB_AC, default.Inh_ABC).select('*')
+        result = self.client.query(query)
+
+        self._assertObjectsWithFields(
+            result,
+            "a",
+            [
+                (
+                    default.Inh_AB_AC,
+                    {
+                        "a": 17,
+                        "b": 18,
+                        "c": 19,
+                    },
+                ),
+            ],
+            excluded_fields={'ab', 'ac', 'bc', 'abc', 'ab_ac'},
+        )
+
+    def test_qb_std_coalesce_02(self):
+        from models.orm_qb import default, std
+
+        query = std.coalesce(
+            default.Inh_AB.is_(default.Inh_AC), default.Inh_ABC
+        ).select('*')
+        result = self.client.query(query)
+
+        self._assertObjectsWithFields(
+            result,
+            "a",
+            [
+                (
+                    default.Inh_AB_AC,
+                    {
+                        "a": 17,
+                        "b": 18,
+                        "c": 19,
+                    },
+                ),
+            ],
+            excluded_fields={'ab', 'ac', 'bc', 'abc', 'ab_ac'},
+        )
+
+    def test_qb_std_union_01(self):
+        from models.orm_qb import default, std
+
+        query = std.union(default.Inh_ABC, default.Inh_AB_AC).select('*')
+        result = self.client.query(query)
+
+        self._assertObjectsWithFields(
+            result,
+            "a",
+            [
+                (
+                    default.Inh_ABC,
+                    {
+                        "a": 13,
+                        "b": 14,
+                        "c": 15,
+                    },
+                ),
+                (
+                    default.Inh_AB_AC,
+                    {
+                        "a": 17,
+                        "b": 18,
+                        "c": 19,
+                    },
+                ),
+            ],
+            excluded_fields={'ab', 'ac', 'bc', 'abc', 'ab_ac'},
+        )
+
+    def test_qb_std_union_02(self):
+        from models.orm_qb import default, std
+
+        query = std.union(
+            default.Inh_ABC, default.Inh_AB.is_(default.Inh_AC)
+        ).select('*')
+        result = self.client.query(query)
+
+        self._assertObjectsWithFields(
+            result,
+            "a",
+            [
+                (
+                    default.Inh_ABC,
+                    {
+                        "a": 13,
+                        "b": 14,
+                        "c": 15,
+                    },
+                ),
+                (
+                    default.Inh_AB_AC,
+                    {
+                        "a": 17,
+                        "b": 18,
+                        "c": 19,
+                    },
+                ),
+            ],
+            excluded_fields={'ab', 'ac', 'bc', 'abc', 'ab_ac'},
+        )
+
 
 class TestQueryBuilderModify(tb.ModelTestCase):
     """This test suite is for data manipulation using QB."""
