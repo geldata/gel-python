@@ -304,7 +304,7 @@ class TypeNameIntersection:
 
     @property
     def name(self) -> str:
-        return f"_{'_AND_'.join(a.name for a in self.args)}_"
+        return f"{'_AND_'.join(a.name for a in self.args)}"
 
 
 @dataclasses.dataclass(frozen=True, kw_only=True)
@@ -319,7 +319,7 @@ class TypeNameUnion:
 
     @property
     def name(self) -> str:
-        return f"_{'_OR_'.join(a.name for a in self.args)}_"
+        return f"{'_OR_'.join(a.name for a in self.args)}"
 
 
 TypeNameExpr = TypeAliasType(
