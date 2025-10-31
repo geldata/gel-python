@@ -171,14 +171,11 @@ class ModelFieldDescriptor(_qb.AbstractFieldDescriptor):
             return _UNRESOLVED_TYPE
         else:
             source: _qb.Expr
-            is_backlink = False
+            is_backlink = issubclass(owner, AbstractGelObjectBacklinksModel)
             if expr is not None:
                 source = expr.__gel_metadata__
             elif _qb.is_expr_compatible(owner):
                 source = _qb.edgeql_qb_expr(owner)
-                is_backlink = issubclass(
-                    owner, AbstractGelObjectBacklinksModel
-                )
             else:
                 return t
             try:
@@ -963,16 +960,9 @@ class GelObjectBacklinksModelDescriptor(
         source: _qb.Expr
         if expr is not None:
             source = expr.__gel_metadata__
+        elif _qb.is_expr_compatible(owner):
+            source = _qb.edgeql_qb_expr(owner)
         else:
             raise AssertionError("missing source for backlink path")
 
-        if (
-            not isinstance(source, _qb.PathPrefix)
-            or source.source_link is None
-        ):
-            raise AttributeError(
-                "__backlinks__", name="__backlinks__", obj=owner
-            )
-
-        prefix = dataclasses.replace(source, lprop_pivot=True)
-        return _qb.AnnotatedExpr(owner.__backlinks__, prefix)  # pyright: ignore [reportGeneralTypeIssues]
+        return _qb.AnnotatedExpr(owner.__backlinks__, source)  # pyright: ignore [reportGeneralTypeIssues]

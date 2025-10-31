@@ -1329,7 +1329,11 @@ class GelObjectModel(
     __gel_root_class__=True,
 ):
     # Base class for object classes.
-    pass
+    __gel_proxied_dunders__: ClassVar[frozenset[str]] = frozenset(
+        {
+            "__backlinks__",
+        }
+    )
 
 
 class GelObjectBacklinksModel(
