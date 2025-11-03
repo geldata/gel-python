@@ -184,6 +184,20 @@ class GelModelMeta(
         else:
             cls.__gel_id_shape__ = None
 
+        # Add any proxied dunders from base classes
+        proxied_dunders: frozenset[str] | None = None
+        if cls_proxied_dunders := getattr(cls, "__gel_proxied_dunders__", ()):
+            proxied_dunders = cls_proxied_dunders
+        for base in bases:
+            if base_proxied_dunders := getattr(
+                base, "__gel_proxied_dunders__", ()
+            ):
+                if proxied_dunders is None:
+                    proxied_dunders = frozenset()
+                proxied_dunders |= base_proxied_dunders
+        if proxied_dunders:
+            cls.__gel_proxied_dunders__ = proxied_dunders
+
         return cls
 
     def __setattr__(cls, name: str, value: Any, /) -> None:  # noqa: N805
