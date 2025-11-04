@@ -4401,30 +4401,46 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             aspect=ModuleAspect.SHAPES,
         )
 
-        backlinks_model_name = self._mangle_backlinks_model_name(name)
-
-        base_object_types = [
+        objtype_bases = [
             base_type
             for base_ref in objtype.bases
             if (base_type := self._types.get(base_ref.id, None))
             if isinstance(base_type, reflection.ObjectType)
         ]
+        objtype_name = type_name.as_python_code(
+            schema_path, parametric_type_name
+        )
 
-        backlinks_base_types: list[str]
-        base_backlinks_reflections: list[str]
-        base_backlinks_models: list[str]
+        backlinks_model_name = self._mangle_backlinks_model_name(name)
+
+        backlinks_class_bases: list[str]
+        backlinks_reflection_class_bases: list[str]
+
+        # Backlinks' reflections' pointers combine the current types
+        # backlinks with those of their base types.
+        #
+        # Eg. With `type A` and `type B extending A`,
+        #   - __A_backlinks__.__gel_reflection__.pointers will contain
+        #     all backlinks to A (and BaseObject)
+        #   - __B_backlinks__.__gel_reflection__.pointers will contain
+        #     all backlinks to B, backlinks to A.
+        #
+        # No base type backlinks are needed for BaseObject.
+        backlinks_reflection_pointer_bases: list[str]
 
         if objtype.name == "std::BaseObject":
+            # __BaseObject_backlinks__ derives from GelObjectBacklinksModel
+            # while all other backlinks derive from it directly on indirectly.
             object_backlinks_model = self.import_name(
                 BASE_IMPL, "GelObjectBacklinksModel"
             )
-            backlinks_base_types = [object_backlinks_model]
-            base_backlinks_reflections = [
+            backlinks_class_bases = [object_backlinks_model]
+            backlinks_reflection_class_bases = [
                 f"{object_backlinks_model}.__gel_reflection__"
             ]
-            base_backlinks_models = []
+            backlinks_reflection_pointer_bases = []
         else:
-            backlinks_base_types = [
+            backlinks_class_bases = [
                 self.get_object(
                     SchemaPath(
                         base_type.schemapath.parent,
@@ -4434,27 +4450,24 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                     ),
                     aspect=ModuleAspect.SHAPES,
                 )
-                for base_type in base_object_types
+                for base_type in objtype_bases
             ]
-            base_backlinks_reflections = [
-                f"{bbt}.__gel_reflection__" for bbt in backlinks_base_types
+            backlinks_reflection_class_bases = [
+                f"{bbt}.__gel_reflection__" for bbt in backlinks_class_bases
             ]
-            base_backlinks_models = backlinks_base_types
+            backlinks_reflection_pointer_bases = backlinks_class_bases
 
         object_backlinks = self._backlinks.get(objtype, {})
 
         # The backlinks model class
-        with self._class_def(backlinks_model_name, backlinks_base_types):
+        with self._class_def(backlinks_model_name, backlinks_class_bases):
             with self._class_def(
-                "__gel_reflection__", base_backlinks_reflections
+                "__gel_reflection__", backlinks_reflection_class_bases
             ):
-                obj_name = type_name.as_python_code(
-                    schema_path, parametric_type_name
-                )
-                self.write(f"name = {obj_name}")
-                self.write(f"type_name = {obj_name}")
+                self.write(f"name = {objtype_name}")
+                self.write(f"type_name = {objtype_name}")
                 self._write_backlinks_pointers_reflection(
-                    object_backlinks, base_backlinks_models
+                    object_backlinks, backlinks_reflection_pointer_bases
                 )
 
             for backlink_name in object_backlinks:
@@ -4468,7 +4481,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
     def _write_backlinks_pointers_reflection(
         self,
         object_backlinks: Mapping[str, Sequence[Backlink]],
-        base_backlinks_models: Sequence[str],
+        backlinks_reflection_pointer_bases: Sequence[str],
     ) -> None:
         dict_ = self.import_name(
             "builtins", "dict", import_time=ImportTime.typecheck
@@ -4519,14 +4532,15 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             else:
                 self.write(f"my_ptrs: {ptr_ref_t} = {{}}")
 
-            if base_backlinks_models:
+            if backlinks_reflection_pointer_bases:
                 pp = "__gel_reflection__.pointers"
                 ret = self.format_list(
                     "return ({list})",
                     [
                         "my_ptrs",
                         *_map_name(
-                            lambda s: f"{s}.{pp}", base_backlinks_models
+                            lambda s: f"{s}.{pp}",
+                            backlinks_reflection_pointer_bases,
                         ),
                     ],
                     separator=" | ",
