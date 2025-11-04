@@ -2600,6 +2600,121 @@ class TestQueryBuilder(tb.ModelTestCase):
         with self.assertRaisesRegex(ValueError, "unsupported query type"):
             self.client.query(query)
 
+    def test_qb_backlinks_error_02(self):
+        # Unions don't have backlinks
+        from models.orm_qb import default, std
+
+        with self.assertRaisesRegex(
+            AttributeError, "has no attribute '__backlinks__'"
+        ):
+            std.union(default.Inh_ABC, default.Inh_AB_AC).__backlinks__
+
+    def test_qb_std_coalesce_scalar_01(self):
+        from models.orm_qb import std
+
+        query = std.coalesce(1, 2)
+        result = self.client.query(query)
+
+        self.assertEqual(result, [1])
+
+    def test_qb_std_coalesce_scalar_02(self):
+        from models.orm_qb import std
+
+        query = std.coalesce(None, 2)
+        result = self.client.query(query)
+
+        self.assertEqual(result, [2])
+
+    def test_qb_std_coalesce_object_01(self):
+        from models.orm_qb import default, std
+
+        inh_a_objs = {
+            obj.a: obj
+            for obj in self.client.query(default.Inh_A.select(a=True))
+        }
+
+        query = std.coalesce(default.Inh_AB_AC, default.Inh_ABC)
+        result = self.client.query(query)
+        self._assertListEqualUnordered([inh_a_objs[17]], result)
+
+    def test_qb_std_coalesce_object_02(self):
+        from models.orm_qb import default, std
+
+        inh_a_objs = {
+            obj.a: obj
+            for obj in self.client.query(default.Inh_A.select(a=True))
+        }
+
+        query = std.coalesce(None, default.Inh_ABC)
+        result = self.client.query(query)
+
+        self._assertListEqualUnordered([inh_a_objs[13]], result)
+
+    def test_qb_std_coalesce_object_03(self):
+        from models.orm_qb import default, std
+
+        inh_a_objs = {
+            obj.a: obj
+            for obj in self.client.query(default.Inh_A.select(a=True))
+        }
+
+        query = std.coalesce(
+            default.Inh_AB.is_(default.Inh_AC), default.Inh_ABC
+        )
+        result = self.client.query(query)
+        self._assertListEqualUnordered([inh_a_objs[17]], result)
+
+    def test_qb_std_union_scalar_01(self):
+        from models.orm_qb import std
+
+        query = std.union(1, 2)
+        result = self.client.query(query)
+        self._assertListEqualUnordered(result, [1, 2])
+
+    def test_qb_std_union_scalar_02(self):
+        from models.orm_qb import std
+
+        query = std.union(1, [2, 3])
+        result = self.client.query(query)
+        self._assertListEqualUnordered(result, [1, 2, 3])
+
+    def test_qb_std_union_scalar_03(self):
+        from models.orm_qb import std
+
+        query = std.union([1, 2], [2, 3])
+        result = self.client.query(query)
+        self._assertListEqualUnordered(result, [1, 2, 2, 3])
+
+    def test_qb_std_union_object_01(self):
+        from models.orm_qb import default, std
+
+        inh_a_objs = {
+            obj.a: obj
+            for obj in self.client.query(default.Inh_A.select(a=True))
+        }
+
+        query = std.union(default.Inh_ABC, default.Inh_AB_AC).select('*')
+        result = self.client.query(query)
+        self._assertListEqualUnordered(
+            [inh_a_objs[13], inh_a_objs[17]], result
+        )
+
+    def test_qb_std_union_object_02(self):
+        from models.orm_qb import default, std
+
+        inh_a_objs = {
+            obj.a: obj
+            for obj in self.client.query(default.Inh_A.select(a=True))
+        }
+
+        query = std.union(
+            default.Inh_ABC, default.Inh_AB.is_(default.Inh_AC)
+        ).select('*')
+        result = self.client.query(query)
+        self._assertListEqualUnordered(
+            [inh_a_objs[13], inh_a_objs[17]], result
+        )
+
 
 class TestQueryBuilderModify(tb.ModelTestCase):
     """This test suite is for data manipulation using QB."""
