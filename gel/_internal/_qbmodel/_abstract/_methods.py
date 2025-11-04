@@ -19,12 +19,18 @@ import weakref
 from gel._internal import _qb
 from gel._internal._schemapath import (
     TypeNameIntersection,
+    TypeNameExpr,
 )
 from gel._internal import _type_expression
 from gel._internal._xmethod import classonlymethod
 
-from ._base import AbstractGelModel
+from ._base import AbstractGelModel, AbstractGelObjectBacklinksModel
 
+from ._descriptors import (
+    GelObjectBacklinksModelDescriptor,
+    ModelFieldDescriptor,
+    field_descriptor,
+)
 from ._expressions import (
     add_filter,
     add_limit,
@@ -241,8 +247,8 @@ class BaseGelModel(AbstractGelModel):
         return _qb.SchemaSet(type_=this_type)
 
 
-_T_Lhs = TypeVar("_T_Lhs", bound="type[AbstractGelModel]")
-_T_Rhs = TypeVar("_T_Rhs", bound="type[AbstractGelModel]")
+_T_Lhs = TypeVar("_T_Lhs", bound="AbstractGelModel")
+_T_Rhs = TypeVar("_T_Rhs", bound="AbstractGelModel")
 
 
 class BaseGelModelIntersection(
@@ -254,6 +260,14 @@ class BaseGelModelIntersection(
 
     lhs: ClassVar[type[AbstractGelModel]]
     rhs: ClassVar[type[AbstractGelModel]]
+
+
+class BaseGelModelIntersectionBacklinks(
+    AbstractGelObjectBacklinksModel,
+    _type_expression.Intersection,
+):
+    lhs: ClassVar[type[AbstractGelObjectBacklinksModel]]
+    rhs: ClassVar[type[AbstractGelObjectBacklinksModel]]
 
 
 T = TypeVar('T')
@@ -308,18 +322,14 @@ _type_intersection_cache: weakref.WeakKeyDictionary[
     type[AbstractGelModel],
     weakref.WeakKeyDictionary[
         type[AbstractGelModel],
-        type[
-            BaseGelModelIntersection[
-                type[AbstractGelModel], type[AbstractGelModel]
-            ]
-        ],
+        type[BaseGelModelIntersection[AbstractGelModel, AbstractGelModel]],
     ],
 ] = weakref.WeakKeyDictionary()
 
 
 def create_intersection(
-    lhs: _T_Lhs,
-    rhs: _T_Rhs,
+    lhs: type[_T_Lhs],
+    rhs: type[_T_Rhs],
 ) -> type[BaseGelModelIntersection[_T_Lhs, _T_Rhs]]:
     """Create a runtime intersection type which acts like a GelModel."""
 
@@ -347,7 +357,6 @@ def create_intersection(
                 rhs.__gel_reflection__.type_name,
             )
         )
-
         pointers = ptr_reflections
 
         @classmethod
@@ -358,6 +367,7 @@ def create_intersection(
                 "Type expressions schema objects are inaccessible"
             )
 
+    # Create the resulting intersection type
     result = type(
         f"({lhs.__name__} & {rhs.__name__})",
         (BaseGelModelIntersection,),
@@ -365,45 +375,18 @@ def create_intersection(
             'lhs': lhs,
             'rhs': rhs,
             '__gel_reflection__': __gel_reflection__,
+            "__gel_proxied_dunders__": frozenset(
+                {
+                    "__backlinks__",
+                }
+            ),
         },
     )
 
-    # Generate path aliases for pointers.
-    #
-    # These are used to generate the appropriate path prefix when getting
-    # pointers in shapes.
-    #
-    # For example, doing `Foo.select(foo=lambda x: x.is_(Bar).bar)`
-    # will produce the query:
-    #    select Foo { [is Bar].bar }
-    lhs_prefix = _qb.PathTypeIntersectionPrefix(
-        type_=__gel_reflection__.type_name,
-        type_filter=lhs.__gel_reflection__.type_name,
-    )
-    rhs_prefix = _qb.PathTypeIntersectionPrefix(
-        type_=__gel_reflection__.type_name,
-        type_filter=rhs.__gel_reflection__.type_name,
-    )
-
-    def process_path_alias(
-        p_name: str,
-        p_refl: _qb.GelPointerReflection,
-        path_alias: _qb.PathAlias,
-        source: _qb.Expr,
-    ) -> _qb.PathAlias:
-        return _qb.PathAlias(
-            path_alias.__gel_origin__,
-            _qb.Path(
-                type_=p_refl.type,
-                source=source,
-                name=p_name,
-                is_lprop=False,
-            ),
-        )
-
-    path_aliases: dict[str, _qb.PathAlias] = combine_dicts(
+    # Generate field descriptors.
+    descriptors: dict[str, ModelFieldDescriptor] = combine_dicts(
         {
-            p_name: process_path_alias(p_name, p_refl, path_alias, lhs_prefix)
+            p_name: field_descriptor(result, p_name, path_alias.__gel_origin__)
             for p_name, p_refl in lhs.__gel_reflection__.pointers.items()
             if (
                 hasattr(lhs, p_name)
@@ -412,7 +395,7 @@ def create_intersection(
             )
         },
         {
-            p_name: process_path_alias(p_name, p_refl, path_alias, rhs_prefix)
+            p_name: field_descriptor(result, p_name, path_alias.__gel_origin__)
             for p_name, p_refl in rhs.__gel_reflection__.pointers.items()
             if (
                 hasattr(rhs, p_name)
@@ -421,11 +404,99 @@ def create_intersection(
             )
         },
     )
-    for p_name, path_alias in path_aliases.items():
-        setattr(result, p_name, path_alias)
+    for p_name, descriptor in descriptors.items():
+        setattr(result, p_name, descriptor)
+
+    # Generate backlinks if required (they should generally be)
+    if (lhs_backlinks := getattr(lhs, "__backlinks__", None)) and (
+        rhs_backlinks := getattr(rhs, "__backlinks__", None)
+    ):
+        backlinks_model = create_intersection_backlinks(
+            lhs_backlinks,
+            rhs_backlinks,
+            result,
+            __gel_reflection__.type_name,
+        )
+        setattr(  # noqa: B010
+            result,
+            "__backlinks__",
+            GelObjectBacklinksModelDescriptor[backlinks_model](),  # type: ignore [valid-type]
+        )
 
     if lhs not in _type_intersection_cache:
         _type_intersection_cache[lhs] = weakref.WeakKeyDictionary()
     _type_intersection_cache[lhs][rhs] = result
 
     return result
+
+
+def _order_base_types(lhs: type, rhs: type) -> tuple[type, ...]:
+    if lhs == rhs:
+        return (lhs,)
+    elif issubclass(lhs, rhs):
+        return (lhs, rhs)
+    elif issubclass(rhs, lhs):
+        return (rhs, lhs)
+    else:
+        return (lhs, rhs)
+
+
+def create_intersection_backlinks(
+    lhs_backlinks: type[AbstractGelObjectBacklinksModel],
+    rhs_backlinks: type[AbstractGelObjectBacklinksModel],
+    result: type[BaseGelModelIntersection[Any, Any]],
+    result_type_name: TypeNameExpr,
+) -> type[AbstractGelObjectBacklinksModel]:
+    reflection = type(
+        "__gel_reflection__",
+        _order_base_types(
+            lhs_backlinks.__gel_reflection__,
+            rhs_backlinks.__gel_reflection__,
+        ),
+        {
+            "name": result_type_name,
+            "type_name": result_type_name,
+            "pointers": (
+                lhs_backlinks.__gel_reflection__.pointers
+                | rhs_backlinks.__gel_reflection__.pointers
+            ),
+        },
+    )
+
+    # Generate field descriptors for backlinks.
+    field_descriptors: dict[str, ModelFieldDescriptor] = combine_dicts(
+        {
+            p_name: field_descriptor(result, p_name, path_alias.__gel_origin__)
+            for p_name in lhs_backlinks.__gel_reflection__.pointers
+            if (
+                hasattr(lhs_backlinks, p_name)
+                and (path_alias := getattr(lhs_backlinks, p_name, None))
+                is not None
+                and isinstance(path_alias, _qb.PathAlias)
+            )
+        },
+        {
+            p_name: field_descriptor(result, p_name, path_alias.__gel_origin__)
+            for p_name in rhs_backlinks.__gel_reflection__.pointers
+            if (
+                hasattr(rhs_backlinks, p_name)
+                and (path_alias := getattr(rhs_backlinks, p_name, None))
+                is not None
+                and isinstance(path_alias, _qb.PathAlias)
+            )
+        },
+    )
+
+    backlinks = type(
+        f"__{result_type_name.name}_backlinks__",
+        (BaseGelModelIntersectionBacklinks,),
+        {
+            'lhs': lhs_backlinks,
+            'rhs': rhs_backlinks,
+            '__gel_reflection__': reflection,
+            '__module__': __name__,
+            **field_descriptors,
+        },
+    )
+
+    return backlinks

@@ -184,6 +184,20 @@ class GelModelMeta(
         else:
             cls.__gel_id_shape__ = None
 
+        # Add any proxied dunders from base classes
+        proxied_dunders: frozenset[str] | None = None
+        if cls_proxied_dunders := getattr(cls, "__gel_proxied_dunders__", ()):
+            proxied_dunders = cls_proxied_dunders
+        for base in bases:
+            if base_proxied_dunders := getattr(
+                base, "__gel_proxied_dunders__", ()
+            ):
+                if proxied_dunders is None:
+                    proxied_dunders = frozenset()
+                proxied_dunders |= base_proxied_dunders
+        if proxied_dunders:
+            cls.__gel_proxied_dunders__ = proxied_dunders
+
         return cls
 
     def __setattr__(cls, name: str, value: Any, /) -> None:  # noqa: N805
@@ -1321,6 +1335,39 @@ class GelModel(
         if update:
             ll_setattr(copied, "__gel_new__", ll_getattr(self, "__gel_new__"))
         return copied
+
+
+class GelObjectModel(
+    GelModel,
+    _abstract.AbstractGelObjectModel,
+    __gel_root_class__=True,
+):
+    # Base class for object classes.
+    __gel_proxied_dunders__: ClassVar[frozenset[str]] = frozenset(
+        {
+            "__backlinks__",
+        }
+    )
+
+
+class GelObjectBacklinksModel(
+    GelSourceModel,
+    _abstract.AbstractGelObjectBacklinksModel,
+    __gel_root_class__=True,
+):
+    # Base class for __backlinks__ classes.
+    __slots__ = ("__gel_copied_by_ref__",)
+
+    def __getstate__(self) -> dict[Any, Any]:
+        state = super().__getstate__()
+        state["__gel_copied_by_ref__"] = getattr(
+            self, "__gel_copied_by_ref__", False
+        )
+        return state
+
+    def __setstate__(self, state: dict[Any, Any]) -> None:
+        super().__setstate__(state)
+        self.__gel_copied_by_ref__ = state["__gel_copied_by_ref__"]
 
 
 class GelLinkModel(
