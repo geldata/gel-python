@@ -18,8 +18,9 @@ import weakref
 
 from gel._internal import _qb
 from gel._internal._schemapath import (
-    TypeNameIntersection,
     TypeNameExpr,
+    TypeNameIntersection,
+    TypeNameUnion,
 )
 from gel._internal import _type_expression
 from gel._internal._xmethod import classonlymethod
@@ -270,6 +271,17 @@ class BaseGelModelIntersectionBacklinks(
     rhs: ClassVar[type[AbstractGelObjectBacklinksModel]]
 
 
+class BaseGelModelUnion(
+    BaseGelModel,
+    _type_expression.Union,
+    Generic[_T_Lhs, _T_Rhs],
+):
+    __gel_type_class__: ClassVar[type]
+
+    lhs: ClassVar[type[AbstractGelModel]]
+    rhs: ClassVar[type[AbstractGelModel]]
+
+
 T = TypeVar('T')
 U = TypeVar('U')
 
@@ -316,6 +328,17 @@ def combine_dicts(
     }
 
     return result
+
+
+def _order_base_types(lhs: type, rhs: type) -> tuple[type, ...]:
+    if lhs == rhs:
+        return (lhs,)
+    elif issubclass(lhs, rhs):
+        return (lhs, rhs)
+    elif issubclass(rhs, lhs):
+        return (rhs, lhs)
+    else:
+        return (lhs, rhs)
 
 
 _type_intersection_cache: weakref.WeakKeyDictionary[
@@ -430,17 +453,6 @@ def create_intersection(
     return result
 
 
-def _order_base_types(lhs: type, rhs: type) -> tuple[type, ...]:
-    if lhs == rhs:
-        return (lhs,)
-    elif issubclass(lhs, rhs):
-        return (lhs, rhs)
-    elif issubclass(rhs, lhs):
-        return (rhs, lhs)
-    else:
-        return (lhs, rhs)
-
-
 def create_intersection_backlinks(
     lhs_backlinks: type[AbstractGelObjectBacklinksModel],
     rhs_backlinks: type[AbstractGelObjectBacklinksModel],
@@ -500,3 +512,106 @@ def create_intersection_backlinks(
     )
 
     return backlinks
+
+
+_type_union_cache: weakref.WeakKeyDictionary[
+    type[AbstractGelModel],
+    weakref.WeakKeyDictionary[
+        type[AbstractGelModel],
+        type[BaseGelModelUnion[AbstractGelModel, AbstractGelModel]],
+    ],
+] = weakref.WeakKeyDictionary()
+
+
+def create_optional_union(
+    lhs: type[_T_Lhs] | None,
+    rhs: type[_T_Rhs] | None,
+) -> type[BaseGelModelUnion[_T_Lhs, _T_Rhs] | AbstractGelModel] | None:
+    if lhs is None:
+        return rhs
+    elif rhs is None:
+        return lhs
+    else:
+        return create_union(lhs, rhs)
+
+
+def create_union(
+    lhs: type[_T_Lhs],
+    rhs: type[_T_Rhs],
+) -> type[BaseGelModelUnion[_T_Lhs, _T_Rhs]]:
+    """Create a runtime union type which acts like a GelModel."""
+
+    if (lhs_entry := _type_union_cache.get(lhs)) and (
+        rhs_entry := lhs_entry.get(rhs)
+    ):
+        return rhs_entry  # type: ignore[return-value]
+
+    # Combine pointer reflections from args
+    ptr_reflections: dict[str, _qb.GelPointerReflection] = {
+        p_name: p_refl
+        for p_name, p_refl in lhs.__gel_reflection__.pointers.items()
+        if p_name in rhs.__gel_reflection__.pointers
+    }
+
+    # Create type reflection for union type
+    class __gel_reflection__(_qb.GelObjectTypeExprMetadata.__gel_reflection__):  # noqa: N801
+        expr_object_types: set[type[AbstractGelModel]] = getattr(
+            lhs.__gel_reflection__, 'expr_object_types', {lhs}
+        ) | getattr(rhs.__gel_reflection__, 'expr_object_types', {rhs})
+
+        type_name = TypeNameUnion(
+            args=(
+                lhs.__gel_reflection__.type_name,
+                rhs.__gel_reflection__.type_name,
+            )
+        )
+
+        pointers = ptr_reflections
+
+        @classmethod
+        def object(
+            cls,
+        ) -> Any:
+            raise NotImplementedError(
+                "Type expressions schema objects are inaccessible"
+            )
+
+    # Create the resulting union type
+    result = type(
+        f"({lhs.__name__} | {rhs.__name__})",
+        (BaseGelModelUnion,),
+        {
+            'lhs': lhs,
+            'rhs': rhs,
+            '__gel_reflection__': __gel_reflection__,
+            "__gel_proxied_dunders__": frozenset(
+                {
+                    "__backlinks__",
+                }
+            ),
+        },
+    )
+
+    # Generate field descriptors.
+    descriptors: dict[str, ModelFieldDescriptor] = {
+        p_name: field_descriptor(result, p_name, l_path_alias.__gel_origin__)
+        for p_name, p_refl in lhs.__gel_reflection__.pointers.items()
+        if (
+            hasattr(lhs, p_name)
+            and (l_path_alias := getattr(lhs, p_name, None)) is not None
+            and isinstance(l_path_alias, _qb.PathAlias)
+        )
+        if (
+            hasattr(rhs, p_name)
+            and (r_path_alias := getattr(rhs, p_name, None)) is not None
+            and isinstance(r_path_alias, _qb.PathAlias)
+        )
+    }
+    for p_name, descriptor in descriptors.items():
+        setattr(result, p_name, descriptor)
+
+    if lhs not in _type_union_cache:
+        _type_union_cache[lhs] = weakref.WeakKeyDictionary()
+    _type_union_cache[lhs][rhs] = result
+
+    return result

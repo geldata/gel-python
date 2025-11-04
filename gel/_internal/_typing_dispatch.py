@@ -70,6 +70,8 @@ def _issubclass(lhs: Any, tp: Any, fn: Any) -> bool:
 
     if issubclass(lhs, _type_expression.Intersection):
         return any(_issubclass(c, tp, fn) for c in (lhs.lhs, lhs.rhs))
+    elif issubclass(lhs, _type_expression.Union):
+        return all(_issubclass(c, tp, fn) for c in (lhs.lhs, lhs.rhs))
 
     if _typing_inspect.is_generic_alias(tp):
         origin = typing.get_origin(tp)
