@@ -2158,627 +2158,317 @@ class TestQueryBuilder(tb.ModelTestCase):
     def test_qb_backlinks_01(self):
         from models.orm_qb import default
 
-        inh_a_objs = self.client.query(default.Inh_A.select(a=True))
-        possible_targets = {obj.a: obj for obj in inh_a_objs}
+        link_inh_a_objs = {
+            obj.n: obj
+            for obj in self.client.query(default.Link_Inh_A.select(n=True))
+        }
 
-        query = default.Inh_A.__backlinks__.l.is_(default.Link_Inh_A).select(
-            n=True, l=True
-        )
+        query = default.Inh_A.__backlinks__.l.is_(default.Link_Inh_A)
         result = self.client.query(query)
-
-        self._assertObjectsWithFields(
-            result,
-            "n",
+        self._assertListEqualUnordered(
             [
-                (
-                    default.Link_Inh_A,
-                    {
-                        "n": 1,
-                        "l": possible_targets[1],
-                    },
-                ),
-                (
-                    default.Link_Inh_A2,
-                    {
-                        "n": 4,
-                        "l": possible_targets[4],
-                    },
-                ),
-                (
-                    default.Link_Inh_A2,
-                    {
-                        "n": 7,
-                        "l": possible_targets[7],
-                    },
-                ),
-                (
-                    default.Link_Inh_A3,
-                    {
-                        "n": 13,
-                        "l": possible_targets[13],
-                    },
-                ),
-                (
-                    default.Link_Inh_A3,
-                    {
-                        "n": 17,
-                        "l": possible_targets[17],
-                    },
-                ),
+                link_inh_a_objs[1],
+                link_inh_a_objs[4],
+                link_inh_a_objs[7],
+                link_inh_a_objs[13],
+                link_inh_a_objs[17],
             ],
+            result,
         )
 
     def test_qb_backlinks_02(self):
         # Two unrelated links with the same name
-        import uuid
-        from models.orm_qb import default, std
+        from models.orm_qb import default
+
+        link_inh_a_objs = {
+            obj.n: obj
+            for obj in self.client.query(default.Link_Inh_A.select(n=True))
+        }
+        link_inh_ab_objs = {
+            obj.n: obj
+            for obj in self.client.query(default.Link_Inh_AB.select(n=True))
+        }
 
         # Check the ids of the un-typed backlinks
-        expected_base: list[uuid.UUID] = [
-            obj.id
-            for obj in self.client.query(
-                std.union(
-                    default.Link_Inh_A.filter(lambda x: std.in_(x.n, {4, 17})),
-                    default.Link_Inh_AB.filter(
-                        lambda x: std.in_(x.n, {1004, 1017})
-                    ),
-                )
-            )
-        ]
-
         query_base = default.Inh_AB.__backlinks__.l
-        result_base = [obj.id for obj in self.client.query(query_base)]
-        self.assertEqual(set(expected_base), set(result_base))
+        result_base = self.client.query(query_base)
+        expected_base = [
+            link_inh_a_objs[4],
+            link_inh_a_objs[17],
+            link_inh_ab_objs[1004],
+            link_inh_ab_objs[1017],
+        ]
+        self._assertListEqualUnordered(expected_base, result_base)
 
         # with [is Link_Inh_A]
-        inh_a_objs = self.client.query(default.Inh_A.select(a=True))
-        possible_targets = {obj.a: obj for obj in inh_a_objs}
-
-        query_a = default.Inh_AB.__backlinks__.l.is_(
-            default.Link_Inh_A
-        ).select(n=True, l=True)
+        query_a = default.Inh_AB.__backlinks__.l.is_(default.Link_Inh_A)
         result_a = self.client.query(query_a)
-
-        self._assertObjectsWithFields(
-            result_a,
-            "n",
-            [
-                (
-                    default.Link_Inh_A2,
-                    {
-                        "n": 4,
-                        "l": possible_targets[4],
-                    },
-                ),
-                (
-                    default.Link_Inh_A3,
-                    {
-                        "n": 17,
-                        "l": possible_targets[17],
-                    },
-                ),
-            ],
+        self._assertListEqualUnordered(
+            [link_inh_a_objs[4], link_inh_a_objs[17]], result_a
         )
 
         # with [is Link_Inh_AB]
-        query_ab = default.Inh_AB.__backlinks__.l.is_(
-            default.Link_Inh_AB
-        ).select(n=True, l=True)
+        query_ab = default.Inh_AB.__backlinks__.l.is_(default.Link_Inh_AB)
         result_ab = self.client.query(query_ab)
-
-        self._assertObjectsWithFields(
-            result_ab,
-            "n",
-            [
-                (
-                    default.Link_Inh_AB,
-                    {
-                        "n": 1004,
-                        "l": possible_targets[4],
-                    },
-                ),
-                (
-                    default.Link_Inh_AB,
-                    {
-                        "n": 1017,
-                        "l": possible_targets[17],
-                    },
-                ),
-            ],
+        self._assertListEqualUnordered(
+            [link_inh_ab_objs[1004], link_inh_ab_objs[1017]], result_ab
         )
 
     def test_qb_backlinks_03(self):
         # Filter -> Backlink
         from models.orm_qb import default, std
 
-        inh_a_objs = self.client.query(default.Inh_A.select(a=True))
-        possible_targets = {obj.a: obj for obj in inh_a_objs}
+        link_inh_a_objs = {
+            obj.n: obj
+            for obj in self.client.query(default.Link_Inh_A.select(n=True))
+        }
 
-        query = (
-            default.Inh_A.filter(lambda x: std.in_(x.a, {1, 4}))
-            .__backlinks__.l.is_(default.Link_Inh_A)
-            .select(n=True, l=True)
-        )
+        query = default.Inh_A.filter(
+            lambda x: std.in_(x.a, {1, 4})
+        ).__backlinks__.l.is_(default.Link_Inh_A)
         result = self.client.query(query)
-
-        self._assertObjectsWithFields(
-            result,
-            "n",
-            [
-                (
-                    default.Link_Inh_A,
-                    {
-                        "n": 1,
-                        "l": possible_targets[1],
-                    },
-                ),
-                (
-                    default.Link_Inh_A2,
-                    {
-                        "n": 4,
-                        "l": possible_targets[4],
-                    },
-                ),
-            ],
+        self._assertListEqualUnordered(
+            [link_inh_a_objs[1], link_inh_a_objs[4]], result
         )
 
     def test_qb_backlinks_04(self):
         # Intersection -> Backlink
         from models.orm_qb import default
 
-        inh_a_objs = self.client.query(default.Inh_A.select(a=True))
-        possible_targets = {obj.a: obj for obj in inh_a_objs}
+        link_inh_a_objs = {
+            obj.n: obj
+            for obj in self.client.query(default.Link_Inh_A.select(n=True))
+        }
 
-        query = (
-            default.Inh_B.is_(default.Inh_A)
-            .__backlinks__.l.is_(default.Link_Inh_A)
-            .select(n=True, l=True)
+        query = default.Inh_B.is_(default.Inh_A).__backlinks__.l.is_(
+            default.Link_Inh_A
         )
         result = self.client.query(query)
-
-        self._assertObjectsWithFields(
+        self._assertListEqualUnordered(
+            [link_inh_a_objs[4], link_inh_a_objs[13], link_inh_a_objs[17]],
             result,
-            "n",
-            [
-                (
-                    default.Link_Inh_A2,
-                    {
-                        "n": 4,
-                        "l": possible_targets[4],
-                    },
-                ),
-                (
-                    default.Link_Inh_A3,
-                    {
-                        "n": 13,
-                        "l": possible_targets[13],
-                    },
-                ),
-                (
-                    default.Link_Inh_A3,
-                    {
-                        "n": 17,
-                        "l": possible_targets[17],
-                    },
-                ),
-            ],
         )
 
     def test_qb_backlinks_05(self):
         # Filter ->Intersection -> Backlink
         from models.orm_qb import default, std
 
-        inh_a_objs = self.client.query(default.Inh_A.select(a=True))
-        possible_targets = {obj.a: obj for obj in inh_a_objs}
+        link_inh_a_objs = {
+            obj.n: obj
+            for obj in self.client.query(default.Link_Inh_A.select(n=True))
+        }
 
         query = (
             default.Inh_B.filter(lambda x: std.in_(x.b, {5, 14}))
             .is_(default.Inh_A)
             .__backlinks__.l.is_(default.Link_Inh_A)
-            .select(n=True, l=True)
         )
         result = self.client.query(query)
-
-        self._assertObjectsWithFields(
-            result,
-            "n",
-            [
-                (
-                    default.Link_Inh_A2,
-                    {
-                        "n": 4,
-                        "l": possible_targets[4],
-                    },
-                ),
-                (
-                    default.Link_Inh_A3,
-                    {
-                        "n": 13,
-                        "l": possible_targets[13],
-                    },
-                ),
-            ],
+        self._assertListEqualUnordered(
+            [link_inh_a_objs[4], link_inh_a_objs[13]], result
         )
 
     def test_qb_backlinks_06(self):
         # Intersection -> Filter -> Backlink
         from models.orm_qb import default, std
 
-        inh_a_objs = self.client.query(default.Inh_A.select(a=True))
-        possible_targets = {obj.a: obj for obj in inh_a_objs}
+        link_inh_a_objs = {
+            obj.n: obj
+            for obj in self.client.query(default.Link_Inh_A.select(n=True))
+        }
 
         query = (
             default.Inh_B.is_(default.Inh_A)
             .filter(lambda x: std.in_(x.a, {4, 13}))
             .__backlinks__.l.is_(default.Link_Inh_A)
-            .select(n=True, l=True)
         )
         result = self.client.query(query)
-
-        self._assertObjectsWithFields(
-            result,
-            "n",
-            [
-                (
-                    default.Link_Inh_A2,
-                    {
-                        "n": 4,
-                        "l": possible_targets[4],
-                    },
-                ),
-                (
-                    default.Link_Inh_A3,
-                    {
-                        "n": 13,
-                        "l": possible_targets[13],
-                    },
-                ),
-            ],
+        self._assertListEqualUnordered(
+            [link_inh_a_objs[4], link_inh_a_objs[13]], result
         )
 
     def test_qb_backlinks_07(self):
         # Intersection -> Intersection -> Backlink
         from models.orm_qb import default
 
-        inh_a_objs = self.client.query(default.Inh_A.select(a=True))
-        possible_targets = {obj.a: obj for obj in inh_a_objs}
+        link_inh_a_objs = {
+            obj.n: obj
+            for obj in self.client.query(default.Link_Inh_A.select(n=True))
+        }
 
         query = (
             default.Inh_B.is_(default.Inh_C)
             .is_(default.Inh_A)
             .__backlinks__.l.is_(default.Link_Inh_A)
-            .select(n=True, l=True)
         )
         result = self.client.query(query)
-
-        self._assertObjectsWithFields(
-            result,
-            "n",
-            [
-                (
-                    default.Link_Inh_A3,
-                    {
-                        "n": 13,
-                        "l": possible_targets[13],
-                    },
-                ),
-                (
-                    default.Link_Inh_A3,
-                    {
-                        "n": 17,
-                        "l": possible_targets[17],
-                    },
-                ),
-            ],
+        self._assertListEqualUnordered(
+            [link_inh_a_objs[13], link_inh_a_objs[17]], result
         )
 
     def test_qb_backlinks_08(self):
         # Link -> Backlink
         from models.orm_qb import default
 
-        inh_a_objs = self.client.query(default.Inh_A.select(a=True))
-        possible_targets = {obj.a: obj for obj in inh_a_objs}
+        link_inh_a_objs = {
+            obj.n: obj
+            for obj in self.client.query(default.Link_Inh_A.select(n=True))
+        }
 
-        query = default.Link_Inh_AB.l.__backlinks__.l.is_(
-            default.Link_Inh_A
-        ).select(n=True, l=True)
+        query = default.Link_Inh_AB.l.__backlinks__.l.is_(default.Link_Inh_A)
         result = self.client.query(query)
-
-        self._assertObjectsWithFields(
-            result,
-            "n",
-            [
-                (
-                    default.Link_Inh_A2,
-                    {
-                        "n": 4,
-                        "l": possible_targets[4],
-                    },
-                ),
-                (
-                    default.Link_Inh_A3,
-                    {
-                        "n": 17,
-                        "l": possible_targets[17],
-                    },
-                ),
-            ],
+        self._assertListEqualUnordered(
+            [link_inh_a_objs[4], link_inh_a_objs[17]], result
         )
 
     def test_qb_backlinks_09(self):
         # Link -> Filter -> Backlink
         from models.orm_qb import default
 
-        inh_a_objs = self.client.query(default.Inh_A.select(a=True))
-        possible_targets = {obj.a: obj for obj in inh_a_objs}
+        link_inh_a_objs = {
+            obj.n: obj
+            for obj in self.client.query(default.Link_Inh_A.select(n=True))
+        }
 
-        query = (
-            default.Link_Inh_AB.l.filter(a=4)
-            .__backlinks__.l.is_(default.Link_Inh_A)
-            .select(n=True, l=True)
+        query = default.Link_Inh_AB.l.filter(a=4).__backlinks__.l.is_(
+            default.Link_Inh_A
         )
         result = self.client.query(query)
-
-        self._assertObjectsWithFields(
-            result,
-            "n",
-            [
-                (
-                    default.Link_Inh_A2,
-                    {
-                        "n": 4,
-                        "l": possible_targets[4],
-                    },
-                ),
-            ],
-        )
+        self._assertListEqualUnordered([link_inh_a_objs[4]], result)
 
     def test_qb_backlinks_10(self):
         # Filter -> Link -> Backlink
         from models.orm_qb import default
 
-        inh_a_objs = self.client.query(default.Inh_A.select(a=True))
-        possible_targets = {obj.a: obj for obj in inh_a_objs}
+        link_inh_a_objs = {
+            obj.n: obj
+            for obj in self.client.query(default.Link_Inh_A.select(n=True))
+        }
 
-        query = (
-            default.Link_Inh_AB.filter(n=1004)
-            .l.__backlinks__.l.is_(default.Link_Inh_A)
-            .select(n=True, l=True)
+        query = default.Link_Inh_AB.filter(n=1004).l.__backlinks__.l.is_(
+            default.Link_Inh_A
         )
         result = self.client.query(query)
-
-        self._assertObjectsWithFields(
-            result,
-            "n",
-            [
-                (
-                    default.Link_Inh_A2,
-                    {
-                        "n": 4,
-                        "l": possible_targets[4],
-                    },
-                ),
-            ],
-        )
+        self._assertListEqualUnordered([link_inh_a_objs[4]], result)
 
     def test_qb_backlinks_11(self):
         # Link -> Intersection -> Backlink
         from models.orm_qb import default
 
-        inh_a_objs = self.client.query(default.Inh_A.select(a=True))
-        possible_targets = {obj.a: obj for obj in inh_a_objs}
+        link_inh_a_objs = {
+            obj.n: obj
+            for obj in self.client.query(default.Link_Inh_A.select(n=True))
+        }
 
-        query = (
-            default.Link_Inh_AB.l.is_(default.Inh_AC)
-            .__backlinks__.l.is_(default.Link_Inh_A)
-            .select(n=True, l=True)
+        query = default.Link_Inh_AB.l.is_(default.Inh_AC).__backlinks__.l.is_(
+            default.Link_Inh_A
         )
         result = self.client.query(query)
-
-        self._assertObjectsWithFields(
-            result,
-            "n",
-            [
-                (
-                    default.Link_Inh_A3,
-                    {
-                        "n": 17,
-                        "l": possible_targets[17],
-                    },
-                ),
-            ],
-        )
+        self._assertListEqualUnordered([link_inh_a_objs[17]], result)
 
     def test_qb_backlinks_12(self):
         # Intersection -> Link -> Backlink
         from models.orm_qb import default
 
-        inh_a_objs = self.client.query(default.Inh_A.select(a=True))
-        possible_targets = {obj.a: obj for obj in inh_a_objs}
+        link_inh_a_objs = {
+            obj.n: obj
+            for obj in self.client.query(default.Link_Inh_A.select(n=True))
+        }
 
-        query = (
-            default.Link_Inh_A.is_(default.Link_Inh_A2)
-            .l.__backlinks__.l.is_(default.Link_Inh_A)
-            .select(n=True, l=True)
-        )
+        query = default.Link_Inh_A.is_(
+            default.Link_Inh_A2
+        ).l.__backlinks__.l.is_(default.Link_Inh_A)
         result = self.client.query(query)
-
-        self._assertObjectsWithFields(
-            result,
-            "n",
+        self._assertListEqualUnordered(
             [
-                (
-                    default.Link_Inh_A2,
-                    {
-                        "n": 4,
-                        "l": possible_targets[4],
-                    },
-                ),
-                (
-                    default.Link_Inh_A2,
-                    {
-                        "n": 7,
-                        "l": possible_targets[7],
-                    },
-                ),
-                (
-                    default.Link_Inh_A3,
-                    {
-                        "n": 13,
-                        "l": possible_targets[13],
-                    },
-                ),
-                (
-                    default.Link_Inh_A3,
-                    {
-                        "n": 17,
-                        "l": possible_targets[17],
-                    },
-                ),
+                link_inh_a_objs[4],
+                link_inh_a_objs[7],
+                link_inh_a_objs[13],
+                link_inh_a_objs[17],
             ],
+            result,
         )
 
     def test_qb_backlinks_13(self):
         # Backlink -> Backlink
         from models.orm_qb import default
 
-        inh_a_objs = self.client.query(default.Link_Inh_A.select(n=True))
-        possible_targets = {obj.n: obj for obj in inh_a_objs}
+        link_link_inh_a_objs = {
+            obj.n: obj
+            for obj in self.client.query(
+                default.Link_Link_Inh_A.select(n=True)
+            )
+        }
 
-        query = (
-            default.Inh_AB.__backlinks__.l.is_(default.Link_Inh_A)
-            .__backlinks__.l.is_(default.Link_Link_Inh_A)
-            .select(n=True, l=True)
-        )
+        query = default.Inh_AB.__backlinks__.l.is_(
+            default.Link_Inh_A
+        ).__backlinks__.l.is_(default.Link_Link_Inh_A)
         result = self.client.query(query)
-
-        self._assertObjectsWithFields(
-            result,
-            "n",
-            [
-                (
-                    default.Link_Link_Inh_A,
-                    {
-                        "n": 4,
-                        "l": possible_targets[4],
-                    },
-                ),
-                (
-                    default.Link_Link_Inh_A,
-                    {
-                        "n": 17,
-                        "l": possible_targets[17],
-                    },
-                ),
-            ],
+        self._assertListEqualUnordered(
+            [link_link_inh_a_objs[4], link_link_inh_a_objs[17]], result
         )
 
     def test_qb_backlinks_14(self):
         # Filter -> Backlink -> Backlink
         from models.orm_qb import default, std
 
-        inh_a_objs = self.client.query(default.Link_Inh_A.select(n=True))
-        possible_targets = {obj.n: obj for obj in inh_a_objs}
+        link_link_inh_a_objs = {
+            obj.n: obj
+            for obj in self.client.query(
+                default.Link_Link_Inh_A.select(n=True)
+            )
+        }
 
         query = (
             default.Inh_A.filter(lambda x: std.in_(x.a, {4, 13}))
             .__backlinks__.l.is_(default.Link_Inh_A)
             .__backlinks__.l.is_(default.Link_Link_Inh_A)
-            .select(n=True, l=True)
         )
         result = self.client.query(query)
-
-        self._assertObjectsWithFields(
-            result,
-            "n",
-            [
-                (
-                    default.Link_Link_Inh_A,
-                    {
-                        "n": 4,
-                        "l": possible_targets[4],
-                    },
-                ),
-                (
-                    default.Link_Link_Inh_A,
-                    {
-                        "n": 13,
-                        "l": possible_targets[13],
-                    },
-                ),
-            ],
+        self._assertListEqualUnordered(
+            [link_link_inh_a_objs[4], link_link_inh_a_objs[13]], result
         )
 
     def test_qb_backlinks_15(self):
         # Backlink -> Filter -> Backlink
         from models.orm_qb import default, std
 
-        inh_a_objs = self.client.query(default.Link_Inh_A.select(n=True))
-        possible_targets = {obj.n: obj for obj in inh_a_objs}
+        link_link_inh_a_objs = {
+            obj.n: obj
+            for obj in self.client.query(
+                default.Link_Link_Inh_A.select(n=True)
+            )
+        }
 
         query = (
             default.Inh_A.__backlinks__.l.is_(default.Link_Inh_A)
             .filter(lambda x: std.in_(x.n, {4, 13}))
             .__backlinks__.l.is_(default.Link_Link_Inh_A)
-            .select(n=True, l=True)
         )
         result = self.client.query(query)
-
-        self._assertObjectsWithFields(
-            result,
-            "n",
-            [
-                (
-                    default.Link_Link_Inh_A,
-                    {
-                        "n": 4,
-                        "l": possible_targets[4],
-                    },
-                ),
-                (
-                    default.Link_Link_Inh_A,
-                    {
-                        "n": 13,
-                        "l": possible_targets[13],
-                    },
-                ),
-            ],
+        self._assertListEqualUnordered(
+            [link_link_inh_a_objs[4], link_link_inh_a_objs[13]], result
         )
 
     def test_qb_backlinks_16(self):
         # Backlink -> Backlink -> Filter
         from models.orm_qb import default, std
 
-        inh_a_objs = self.client.query(default.Link_Inh_A.select(n=True))
-        possible_targets = {obj.n: obj for obj in inh_a_objs}
+        link_link_inh_a_objs = {
+            obj.n: obj
+            for obj in self.client.query(
+                default.Link_Link_Inh_A.select(n=True)
+            )
+        }
 
         query = (
             default.Inh_A.__backlinks__.l.is_(default.Link_Inh_A)
             .__backlinks__.l.is_(default.Link_Link_Inh_A)
             .filter(lambda x: std.in_(x.n, {4, 13}))
-            .select(n=True, l=True)
         )
         result = self.client.query(query)
-
-        self._assertObjectsWithFields(
-            result,
-            "n",
-            [
-                (
-                    default.Link_Link_Inh_A,
-                    {
-                        "n": 4,
-                        "l": possible_targets[4],
-                    },
-                ),
-                (
-                    default.Link_Link_Inh_A,
-                    {
-                        "n": 13,
-                        "l": possible_targets[13],
-                    },
-                ),
-            ],
+        self._assertListEqualUnordered(
+            [link_link_inh_a_objs[4], link_link_inh_a_objs[13]], result
         )
 
     def test_qb_backlinks_17(self):

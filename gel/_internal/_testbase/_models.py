@@ -39,6 +39,7 @@ import warnings
 from gel._internal import _dirhash
 from gel._internal import _import_extras
 from gel._internal._codegen._models import PydanticModelsGenerator
+from gel._internal._qbmodel._pydantic._models import GelModel
 
 from ._base import (
     AsyncQueryTestCase,
@@ -76,7 +77,6 @@ __all__ = (
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator, Mapping, Sequence
     import pydantic
-    from gel._internal._qbmodel._pydantic._models import GelModel
 
 
 _unset = object()
@@ -531,6 +531,30 @@ class BaseModelTestCase(BranchTestCase):
         self.assertEqual(
             getattr(model, "__gel_changed_fields__", ...),
             getattr(model2, "__gel_changed_fields__", ...),
+        )
+
+    def _assertListEqualUnordered(
+        self,
+        expected: list[Any],
+        actual: list[Any],
+    ) -> None:
+        """Test that two collections have equal contents, though the order
+        may be different.
+
+        Compares using the id of elements. Comparing lists of lists will not
+        work.
+        """
+
+        def key(value: Any) -> Any:
+            if isinstance(value, GelModel) and (
+                model_id := getattr(value, "id", None)
+            ):
+                return model_id
+            else:
+                return id(value)
+
+        return self.assertEqual(
+            sorted(expected, key=key), sorted(actual, key=key)
         )
 
     def _assertObjectsWithFields(
