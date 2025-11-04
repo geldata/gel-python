@@ -4120,7 +4120,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
         if proplinks:
             self.write_object_type_link_models(objtype)
 
-        if name != "std::FreeObject":
+        if objtype.name != "std::FreeObject":
             self._write_object_backlinks(objtype)
 
         anyobject_meta = self.get_object(
@@ -4251,7 +4251,7 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             if objtype.name == "std::BaseObject":
                 write_id_attr(objtype, "RequiredId")
 
-            if name != "std::FreeObject":
+            if objtype.name != "std::FreeObject":
                 backlinks_model_name = self._mangle_backlinks_model_name(name)
                 g_oblm_desc = self.import_name(
                     BASE_IMPL, "GelObjectBacklinksModelDescriptor"
@@ -4463,7 +4463,6 @@ class GeneratedSchemaModule(BaseGeneratedModule):
 
             self.export(backlinks_model_name)
 
-        self.write()
         self.write()
 
     def _write_backlinks_pointers_reflection(
