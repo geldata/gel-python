@@ -45,6 +45,7 @@ from gel._internal._qb import (
     PathAlias,
     SetLiteral,
     StringLiteral,
+    TernaryOp,
     UnaryOp,
     construct_infix_op_chain,
 )
@@ -205,6 +206,7 @@ __all__ = (
     "SchemaPath",
     "SetLiteral",
     "StringLiteral",
+    "TernaryOp",
     "TimeDeltaImpl",
     "TimeImpl",
     "Tuple",
