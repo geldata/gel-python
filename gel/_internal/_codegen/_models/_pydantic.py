@@ -2021,6 +2021,14 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                 if op.schemapath.parent == self.canonical_modpath
             ]
         )
+        self.write_non_magic_ternary_operators(
+            [
+                op
+                for op in self._operators.other_ops
+                if op.schemapath.parent == self.canonical_modpath
+                if op.operator_kind == reflection.OperatorKind.Ternary
+            ]
+        )
         self.write_globals(mod["globals"])
 
     def reexport_module(self, mod: GeneratedSchemaModule) -> None:
@@ -3438,6 +3446,71 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             node_ctor=lambda op: node_ctor(op, swapped=op in swapped_ops),
             excluded_param_types=excluded_param_types,
         )
+
+    def write_non_magic_ternary_operators(
+        self,
+        ops: list[reflection.Operator],
+    ) -> bool:
+        # Filter to unary operators without Python magic method equivalents
+        ternary_ops = [op for op in ops if op.py_magic is None]
+        if not ternary_ops:
+            return False
+        else:
+            self._write_callables(
+                ternary_ops,
+                style="function",
+                type_ignore=("override", "unused-ignore"),
+                node_ctor=self._write_ternary_op_func_node_ctor,
+            )
+            return True
+
+    def _write_ternary_op_func_node_ctor(
+        self,
+        op: reflection.Operator,
+    ) -> None:
+        """Generate the query node constructor for a ternary operator function.
+
+        Creates the code that builds a TernaryOp query node for ternary
+        operator functions. Unlike method versions, this takes the operand from
+        function arguments and applies special type casting for tuple
+        parameters.
+
+        Args:
+            op: The operator reflection object containing metadata
+        """
+        node_cls = self.import_name(BASE_IMPL, "TernaryOp")
+        expr_compat = self.import_name(BASE_IMPL, "ExprCompatible")
+        cast_ = self.import_name("typing", "cast")
+
+        op_1: str
+        op_2: str
+        if op.schemapath == SchemaPath("std", "IF"):
+            op_1 = op.schemapath.name
+            op_2 = '"ELSE"'
+
+        else:
+            raise NotImplementedError(f"Unknown operator {op.schemapath}")
+
+        if_true = "__args__[0]"
+        condition = "__args__[1]"
+        if_false = "__args__[2]"
+        # Tuple parameters need ExprCompatible casting
+        # due to a possible mypy bug.
+        if reflection.is_tuple_type(op.params[0].get_type(self._types)):
+            if_true = f"{cast_}({expr_compat!r}, {if_true})"
+        if reflection.is_tuple_type(op.params[2].get_type(self._types)):
+            if_false = f"{cast_}({expr_compat!r}, {if_false})"
+
+        args = [
+            f"lexpr={if_true}",
+            f'op_1="{op_1}"',  # Gel operator name (e.g., "IF")
+            f"mexpr={condition}",
+            f"op_2={op_2}",
+            f"rexpr={if_false}",
+            "type_=__rtype__.__gel_reflection__.type_name",  # Result type info
+        ]
+
+        self.write(self.format_list(f"{node_cls}({{list}}),", args))
 
     def _partition_nominal_overloads(
         self,
