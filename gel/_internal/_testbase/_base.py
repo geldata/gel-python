@@ -356,9 +356,17 @@ class InstanceFixture:
         if self._instance is not None:
             return
 
-        if self._server_addr is not None:
+        server_addr = self._server_addr
+        if server_addr is None:
+            server_addr = {
+                "host": "localhost",
+                "port": 5656,
+                "tls_ca_file": "/home/dnwpark/work/dev-3.12/edgedb/tmp/devdatadir/edbtlscert.pem",
+            }
+
+        if server_addr is not None:
             await self._set_up_running_instance(
-                self._server_addr,
+                server_addr,
                 self._server_version,
             )
         else:
@@ -634,6 +642,7 @@ class BranchTestCase(InstanceTestCase):
     # of 10s.
     DEFAULT_CONNECT_TIMEOUT = 30
 
+    CLIENT_TYPE: ClassVar[type[TestClient | TestAsyncIOClient] | None]
     client: ClassVar[TestClient | TestAsyncIOClient]
 
     @classmethod
@@ -682,7 +691,9 @@ class BranchTestCase(InstanceTestCase):
         if self.ISOLATED_TEST_BRANCHES:
             cls = type(self)
             testdb = cls.loop.run_until_complete(self.setup_branch_copy())
-            client = cls.make_test_client(database=testdb)._with_debug(
+            client = cls.make_test_client(
+                database=testdb, client_class=self.CLIENT_TYPE
+            )._with_debug(
                 save_postcheck=True,
             )
             self.client = client  # type: ignore[misc]
@@ -721,6 +732,7 @@ class BranchTestCase(InstanceTestCase):
     def make_test_client(
         cls,
         *,
+        client_class: type[TestClient | TestAsyncIOClient] | None = None,
         connection_class: type[
             asyncio_client.AsyncIOConnection
             | blocking_client.BlockingIOConnection
@@ -762,14 +774,17 @@ class BranchTestCase(InstanceTestCase):
         cls,
         *,
         instance: _server.BaseInstance,
+        client_class: type[TestClient] | None = None,
         connection_class: type[blocking_client.BlockingIOConnection]
         | None = None,
         **kwargs: Any,
     ) -> TestClient:
+        if client_class is None:
+            client_class = TestClient
         if connection_class is None:
             connection_class = blocking_client.BlockingIOConnection
         client = instance.create_blocking_client(
-            client_class=TestClient,
+            client_class=client_class,
             connection_class=connection_class,
             **cls.get_connect_args(instance, **kwargs),
         )
@@ -805,13 +820,16 @@ class BranchTestCase(InstanceTestCase):
         cls,
         *,
         instance: _server.BaseInstance,
+        client_class: type[TestAsyncIOClient] | None = None,
         connection_class: type[asyncio_client.AsyncIOConnection] | None = None,
         **kwargs: Any,
     ) -> TestAsyncIOClient:
+        if client_class is None:
+            client_class = TestAsyncIOClient
         if connection_class is None:
             connection_class = asyncio_client.AsyncIOConnection
         client = instance.create_async_client(
-            client_class=TestAsyncIOClient,
+            client_class=client_class,
             connection_class=connection_class,
             **cls.get_connect_args(instance, **kwargs),
         )
@@ -889,7 +907,9 @@ class BranchTestCase(InstanceTestCase):
                 await cls._create_empty_branch(dbname)
 
         if not cls.ISOLATED_TEST_BRANCHES:
-            cls.client = cls.make_test_client(database=dbname)
+            cls.client = cls.make_test_client(
+                database=dbname, client_class=cls.CLIENT_TYPE
+            )
             if isinstance(cls.client, gel.AsyncIOClient):
                 await cls.client.ensure_connected()
             else:
@@ -1029,11 +1049,13 @@ class AsyncQueryTestCase(BranchTestCase):
     def make_test_client(  # pyright: ignore [reportIncompatibleMethodOverride]
         cls,
         *,
+        client_class: type[TestAsyncIOClient] | None = None,
         connection_class: type[asyncio_client.AsyncIOConnection] | None = None,  # type: ignore [override]
         **kwargs: str,
     ) -> TestAsyncIOClient:
         return cls.make_async_test_client(
             instance=cls.instance,
+            client_class=client_class,
             connection_class=connection_class,
             **kwargs,
         )
@@ -1070,12 +1092,14 @@ class SyncQueryTestCase(BranchTestCase):
     def make_test_client(  # pyright: ignore [reportIncompatibleMethodOverride]
         cls,
         *,
+        client_class: type[TestClient] | None = None,
         connection_class: type[blocking_client.BlockingIOConnection]  # type: ignore [override]
         | None = None,
         **kwargs: str,
     ) -> TestClient:
         return cls.make_blocking_test_client(
             instance=cls.instance,
+            client_class=client_class,
             connection_class=connection_class,
             **kwargs,
         )

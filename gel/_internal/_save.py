@@ -1175,13 +1175,14 @@ def make_save_executor_constructor(
     refetch: bool,
     warn_on_large_sync_set: bool = False,
     save_postcheck: bool = False,
+    executor_type: type,
 ) -> Callable[[], SaveExecutor]:
     plan = make_plan(
         objs,
         refetch=refetch,
         warn_on_large_sync_set=warn_on_large_sync_set,
     )
-    return lambda: SaveExecutor(
+    return lambda: executor_type(
         objs=objs,
         create_batches=plan.create_batches,
         updates=plan.update_batch,
