@@ -45,6 +45,7 @@ from gel._internal._qb import (
     PathAlias,
     SetLiteral,
     StringLiteral,
+    TernaryOp,
     UnaryOp,
     construct_infix_op_chain,
 )
@@ -76,6 +77,8 @@ from gel._internal._qbmodel._abstract import (
     PyTypeScalarConstraint,
     RangeMeta,
     UUIDImpl,
+    create_optional_union,
+    create_union,
     empty_set_if_none,
 )
 
@@ -203,6 +206,7 @@ __all__ = (
     "SchemaPath",
     "SetLiteral",
     "StringLiteral",
+    "TernaryOp",
     "TimeDeltaImpl",
     "TimeImpl",
     "Tuple",
@@ -215,6 +219,8 @@ __all__ = (
     "classonlymethod",
     "computed_field",
     "construct_infix_op_chain",
+    "create_optional_union",
+    "create_union",
     "dispatch_overload",
     "empty_set_if_none",
 )

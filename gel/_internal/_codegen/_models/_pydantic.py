@@ -2021,6 +2021,14 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                 if op.schemapath.parent == self.canonical_modpath
             ]
         )
+        self.write_non_magic_ternary_operators(
+            [
+                op
+                for op in self._operators.other_ops
+                if op.schemapath.parent == self.canonical_modpath
+                if op.operator_kind == reflection.OperatorKind.Ternary
+            ]
+        )
         self.write_globals(mod["globals"])
 
     def reexport_module(self, mod: GeneratedSchemaModule) -> None:
@@ -3439,6 +3447,71 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             excluded_param_types=excluded_param_types,
         )
 
+    def write_non_magic_ternary_operators(
+        self,
+        ops: list[reflection.Operator],
+    ) -> bool:
+        # Filter to unary operators without Python magic method equivalents
+        ternary_ops = [op for op in ops if op.py_magic is None]
+        if not ternary_ops:
+            return False
+        else:
+            self._write_callables(
+                ternary_ops,
+                style="function",
+                type_ignore=("override", "unused-ignore"),
+                node_ctor=self._write_ternary_op_func_node_ctor,
+            )
+            return True
+
+    def _write_ternary_op_func_node_ctor(
+        self,
+        op: reflection.Operator,
+    ) -> None:
+        """Generate the query node constructor for a ternary operator function.
+
+        Creates the code that builds a TernaryOp query node for ternary
+        operator functions. Unlike method versions, this takes the operand from
+        function arguments and applies special type casting for tuple
+        parameters.
+
+        Args:
+            op: The operator reflection object containing metadata
+        """
+        node_cls = self.import_name(BASE_IMPL, "TernaryOp")
+        expr_compat = self.import_name(BASE_IMPL, "ExprCompatible")
+        cast_ = self.import_name("typing", "cast")
+
+        op_1: str
+        op_2: str
+        if op.schemapath == SchemaPath("std", "IF"):
+            op_1 = op.schemapath.name
+            op_2 = '"ELSE"'
+
+        else:
+            raise NotImplementedError(f"Unknown operator {op.schemapath}")
+
+        if_true = "__args__[0]"
+        condition = "__args__[1]"
+        if_false = "__args__[2]"
+        # Tuple parameters need ExprCompatible casting
+        # due to a possible mypy bug.
+        if reflection.is_tuple_type(op.params[0].get_type(self._types)):
+            if_true = f"{cast_}({expr_compat!r}, {if_true})"
+        if reflection.is_tuple_type(op.params[2].get_type(self._types)):
+            if_false = f"{cast_}({expr_compat!r}, {if_false})"
+
+        args = [
+            f"lexpr={if_true}",
+            f'op_1="{op_1}"',  # Gel operator name (e.g., "IF")
+            f"mexpr={condition}",
+            f"op_2={op_2}",
+            f"rexpr={if_false}",
+            "type_=__rtype__.__gel_reflection__.type_name",  # Result type info
+        ]
+
+        self.write(self.format_list(f"{node_cls}({{list}}),", args))
+
     def _partition_nominal_overloads(
         self,
         callables: Iterable[_Callable_T],
@@ -3649,9 +3722,52 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             # SEE ABOVE: This is what we actually want.
             # key=lambda o: (generality_key(o), o.edgeql_signature),  # noqa: ERA001, E501
         )
+        base_generic_overload: dict[_Callable_T, _Callable_T] = {}
 
         for overload in overloads:
             overload_signatures[overload] = {}
+
+            if overload.schemapath == SchemaPath('std', 'IF'):
+                # HACK: Pretend the base overload of std::IF is generic on
+                # anyobject.
+                #
+                # The base overload of std::IF is
+                #   (anytype, std::bool, anytype) -> anytype
+                #
+                # However, this causes an overlap with overloading for bool
+                # arguments since
+                #   (anytype, builtin.bool, anytype) -> anytype
+                # overlaps with
+                #   (std::bool, builtin.bool, std::bool) -> std::bool
+                #
+                # We resolve this by generating the specializations for anytype
+                # but using anyobject as the base generic type.
+
+                def anytype_to_anyobject(
+                    refl_type: reflection.Type,
+                    default: reflection.Type | reflection.TypeRef,
+                ) -> reflection.Type | reflection.TypeRef:
+                    if isinstance(refl_type, reflection.PseudoType):
+                        return self._types_by_name["anyobject"]
+                    return default
+
+                base_generic_overload[overload] = dataclasses.replace(
+                    overload,
+                    params=[
+                        dataclasses.replace(
+                            param,
+                            type=anytype_to_anyobject(
+                                param.get_type(self._types), param.type
+                            ),
+                        )
+                        for param in overload.params
+                    ],
+                    return_type=anytype_to_anyobject(
+                        overload.get_return_type(self._types),
+                        overload.return_type,
+                    ),
+                )
+
             for param in param_getter(overload):
                 param_overload_map[param.key].add(overload)
                 param_type = param.get_type(self._types)
@@ -3659,6 +3775,14 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                 if param.kind is reflection.CallableParamKind.Variadic:
                     if reflection.is_array_type(param_type):
                         param_type = param_type.get_element_type(self._types)
+
+                if (
+                    overload.schemapath == SchemaPath('std', 'IF')
+                    and param_type.is_pseudo
+                ):
+                    # Also generate the base signature using anyobject
+                    param_type = self._types_by_name["anyobject"]
+
                 # Start with the base parameter type
                 overload_signatures[overload][param.key] = [param_type]
 
@@ -3770,7 +3894,10 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             for overload in overloads:
                 if overload_specs := overloads_specializations.get(overload):
                     expanded_overloads.extend(overload_specs)
-                expanded_overloads.append(overload)
+                if overload in base_generic_overload:
+                    expanded_overloads.append(base_generic_overload[overload])
+                else:
+                    expanded_overloads.append(overload)
             overloads = expanded_overloads
 
         overload_order = {overload: i for i, overload in enumerate(overloads)}
@@ -6169,6 +6296,45 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                             f"{gtvar} = {t}  "
                             f"# type: ignore [assignment, misc, unused-ignore]"
                         )
+
+                    if function.schemapath in {
+                        SchemaPath('std', 'UNION'),
+                        SchemaPath('std', 'IF'),
+                        SchemaPath('std', '??'),
+                    }:
+                        # Special case for the UNION, IF and ?? operators
+                        # Produce a union type instead of just taking the first
+                        # valid type.
+                        #
+                        # See gel: edb.compiler.func.compile_operator
+                        create_union = self.import_name(
+                            BASE_IMPL, "create_optional_union"
+                        )
+
+                        tvars: list[str] = []
+                        for param, path in sources:
+                            if (
+                                param.name in required_generic_params
+                                or param.name in optional_generic_params
+                            ):
+                                pn = param_vars[param.name]
+                                tvar = f"__t_{pn}__"
+
+                                resolve(pn, path, tvar)
+                                tvars.append(tvar)
+
+                        self.write(
+                            f"{gtvar} = {tvars[0]}  "
+                            f"# type: ignore [assignment, misc, unused-ignore]"
+                        )
+                        for tvar in tvars[1:]:
+                            self.write(
+                                f"{gtvar} = {create_union}({gtvar}, {tvar})  "
+                                f"# type: ignore ["
+                                f"assignment, misc, unused-ignore]"
+                            )
+
+                        continue
 
                     # Try to infer generic type from required params first
                     for param, path in sources:

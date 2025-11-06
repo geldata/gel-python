@@ -426,6 +426,57 @@ class IndexOp(BinaryOp):
 
 
 @dataclass(kw_only=True, frozen=True)
+class TernaryOp(TypedExpr):
+    lexpr: Expr
+    op_1: _edgeql.Token
+    mexpr: Expr
+    op_2: _edgeql.Token
+    rexpr: Expr
+
+    def __init__(
+        self,
+        *,
+        lexpr: ExprCompatible,
+        op_1: _edgeql.Token | str,
+        mexpr: ExprCompatible,
+        op_2: _edgeql.Token | str,
+        rexpr: ExprCompatible,
+        type_: TypeNameExpr,
+    ) -> None:
+        object.__setattr__(self, "lexpr", edgeql_qb_expr(lexpr))
+        if not isinstance(op_1, _edgeql.Token):
+            op_1 = _edgeql.Token.from_str(op_1)
+        object.__setattr__(self, "op_1", op_1)
+        object.__setattr__(self, "mexpr", edgeql_qb_expr(mexpr))
+        if not isinstance(op_2, _edgeql.Token):
+            op_2 = _edgeql.Token.from_str(op_2)
+        object.__setattr__(self, "op_2", op_2)
+        object.__setattr__(self, "rexpr", edgeql_qb_expr(rexpr))
+        super().__init__(type_=type_)
+
+    def subnodes(self) -> Iterable[Node]:
+        return (self.lexpr, self.mexpr, self.rexpr)
+
+    def __edgeql_expr__(self, *, ctx: ScopeContext) -> str:
+        left = edgeql(self.lexpr, ctx=ctx)
+        if self.lexpr.precedence <= self.precedence:
+            left = f"({left})"
+        middle = edgeql(self.mexpr, ctx=ctx)
+        if self.mexpr.precedence <= self.precedence:
+            middle = f"({middle})"
+        right = edgeql(self.rexpr, ctx=ctx)
+        if self.mexpr.precedence <= self.precedence:
+            right = f"({right})"
+        return f"{left} {self.op_1} {middle} {self.op_2} {right}"
+
+    @property
+    def precedence(self) -> _edgeql.Precedence:
+        return max(
+            _edgeql.PRECEDENCE[self.op_1], _edgeql.PRECEDENCE[self.op_2]
+        )
+
+
+@dataclass(kw_only=True, frozen=True)
 class FuncCall(TypedExpr):
     fname: str
     args: list[Expr] | None = None
