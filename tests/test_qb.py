@@ -2715,6 +2715,259 @@ class TestQueryBuilder(tb.ModelTestCase):
             [inh_a_objs[13], inh_a_objs[17]], result
         )
 
+    def test_qb_std_if_else_scalar_01a(self):
+        from models.orm_qb import std
+
+        lhs = [1, 2, 3]
+        rhs = [4, 5, 6]
+
+        query = std.if_else(lhs, True, rhs)
+        result = self.client.query(query)
+        self._assertListEqualUnordered([1, 2, 3], result)
+
+        query = std.if_else(lhs, False, rhs)
+        result = self.client.query(query)
+        self._assertListEqualUnordered([4, 5, 6], result)
+
+        query = std.if_else(lhs, std.bool(True), rhs)
+        result = self.client.query(query)
+        self._assertListEqualUnordered([1, 2, 3], result)
+
+        query = std.if_else(lhs, std.bool(False), rhs)
+        result = self.client.query(query)
+        self._assertListEqualUnordered([4, 5, 6], result)
+
+    def test_qb_std_if_else_scalar_01b(self):
+        from models.orm_qb import std
+
+        lhs = [1, 2, 3]
+        rhs = [std.int64(4), std.int64(5), std.int64(6)]
+
+        query = std.if_else(lhs, True, rhs)
+        result = self.client.query(query)
+        self._assertListEqualUnordered([1, 2, 3], result)
+
+        query = std.if_else(lhs, False, rhs)
+        result = self.client.query(query)
+        self._assertListEqualUnordered([4, 5, 6], result)
+
+        query = std.if_else(lhs, std.bool(True), rhs)
+        result = self.client.query(query)
+        self._assertListEqualUnordered([1, 2, 3], result)
+
+        query = std.if_else(lhs, std.bool(False), rhs)
+        result = self.client.query(query)
+        self._assertListEqualUnordered([4, 5, 6], result)
+
+    def test_qb_std_if_else_scalar_01c(self):
+        from models.orm_qb import std
+
+        lhs = [std.int64(1), std.int64(2), std.int64(3)]
+        rhs = [4, 5, 6]
+
+        query = std.if_else(lhs, True, rhs)
+        result = self.client.query(query)
+        self._assertListEqualUnordered([1, 2, 3], result)
+
+        query = std.if_else(lhs, False, rhs)
+        result = self.client.query(query)
+        self._assertListEqualUnordered([4, 5, 6], result)
+
+        query = std.if_else(lhs, std.bool(True), rhs)
+        result = self.client.query(query)
+        self._assertListEqualUnordered([1, 2, 3], result)
+
+        query = std.if_else(lhs, std.bool(False), rhs)
+        result = self.client.query(query)
+        self._assertListEqualUnordered([4, 5, 6], result)
+
+    def test_qb_std_if_else_scalar_01d(self):
+        from models.orm_qb import std
+
+        lhs = [std.int64(1), std.int64(2), std.int64(3)]
+        rhs = [std.int64(4), std.int64(5), std.int64(6)]
+
+        query = std.if_else(lhs, True, rhs)
+        result = self.client.query(query)
+        self._assertListEqualUnordered([1, 2, 3], result)
+
+        query = std.if_else(lhs, False, rhs)
+        result = self.client.query(query)
+        self._assertListEqualUnordered([4, 5, 6], result)
+
+        query = std.if_else(lhs, std.bool(True), rhs)
+        result = self.client.query(query)
+        self._assertListEqualUnordered([1, 2, 3], result)
+
+        query = std.if_else(lhs, std.bool(False), rhs)
+        result = self.client.query(query)
+        self._assertListEqualUnordered([4, 5, 6], result)
+
+    def test_qb_std_if_else_scalar_02a(self):
+        from models.orm_qb import std
+
+        lhs = [True, True, True]
+        rhs = [False, False, False]
+
+        query = std.if_else(lhs, True, rhs)
+        result = self.client.query(query)
+        self._assertListEqualUnordered([True, True, True], result)
+
+        query = std.if_else(lhs, False, rhs)
+        result = self.client.query(query)
+        self._assertListEqualUnordered([False, False, False], result)
+
+        query = std.if_else(lhs, std.bool(True), rhs)
+        result = self.client.query(query)
+        self._assertListEqualUnordered([True, True, True], result)
+
+        query = std.if_else(lhs, std.bool(False), rhs)
+        result = self.client.query(query)
+        self._assertListEqualUnordered([False, False, False], result)
+
+    def test_qb_std_if_else_scalar_02b(self):
+        from models.orm_qb import std
+
+        lhs = [True, True, True]
+        rhs = [std.bool(False), std.bool(False), std.bool(False)]
+
+        query = std.if_else(lhs, True, rhs)
+        result = self.client.query(query)
+        self._assertListEqualUnordered([True, True, True], result)
+
+        query = std.if_else(lhs, False, rhs)
+        result = self.client.query(query)
+        self._assertListEqualUnordered([False, False, False], result)
+
+        query = std.if_else(lhs, std.bool(True), rhs)
+        result = self.client.query(query)
+        self._assertListEqualUnordered([True, True, True], result)
+
+        query = std.if_else(lhs, std.bool(False), rhs)
+        result = self.client.query(query)
+        self._assertListEqualUnordered([False, False, False], result)
+
+    def test_qb_std_if_else_scalar_02c(self):
+        from models.orm_qb import std
+
+        lhs = [std.bool(True), std.bool(True), std.bool(True)]
+        rhs = [False, False, False]
+
+        query = std.if_else(lhs, True, rhs)
+        result = self.client.query(query)
+        self._assertListEqualUnordered([True, True, True], result)
+
+        query = std.if_else(lhs, False, rhs)
+        result = self.client.query(query)
+        self._assertListEqualUnordered([False, False, False], result)
+
+        query = std.if_else(lhs, std.bool(True), rhs)
+        result = self.client.query(query)
+        self._assertListEqualUnordered([True, True, True], result)
+
+        query = std.if_else(lhs, std.bool(False), rhs)
+        result = self.client.query(query)
+        self._assertListEqualUnordered([False, False, False], result)
+
+    def test_qb_std_if_else_scalar_02d(self):
+        from models.orm_qb import std
+
+        lhs = [std.bool(True), std.bool(True), std.bool(True)]
+        rhs = [std.bool(False), std.bool(False), std.bool(False)]
+
+        query = std.if_else(lhs, True, rhs)
+        result = self.client.query(query)
+        self._assertListEqualUnordered([True, True, True], result)
+
+        query = std.if_else(lhs, False, rhs)
+        result = self.client.query(query)
+        self._assertListEqualUnordered([False, False, False], result)
+
+        query = std.if_else(lhs, std.bool(True), rhs)
+        result = self.client.query(query)
+        self._assertListEqualUnordered([True, True, True], result)
+
+        query = std.if_else(lhs, std.bool(False), rhs)
+        result = self.client.query(query)
+        self._assertListEqualUnordered([False, False, False], result)
+
+    def test_qb_std_if_else_object_01(self):
+        from models.orm_qb import default, std
+
+        inh_a_objs = {
+            obj.a: obj
+            for obj in self.client.query(default.Inh_A.select(a=True))
+        }
+
+        query = std.if_else(default.Inh_ABC, True, default.Inh_AB_AC)
+        result = self.client.query(query)
+        self._assertListEqualUnordered([inh_a_objs[13]], result)
+
+        query = std.if_else(default.Inh_ABC, False, default.Inh_AB_AC)
+        result = self.client.query(query)
+        self._assertListEqualUnordered([inh_a_objs[17]], result)
+
+        query = std.if_else(default.Inh_ABC, std.bool(True), default.Inh_AB_AC)
+        result = self.client.query(query)
+        self._assertListEqualUnordered([inh_a_objs[13]], result)
+
+        query = std.if_else(
+            default.Inh_ABC, std.bool(False), default.Inh_AB_AC
+        )
+        result = self.client.query(query)
+        self._assertListEqualUnordered([inh_a_objs[17]], result)
+
+    def test_qb_std_if_else_object_02(self):
+        from models.orm_qb import default, std
+
+        query = default.Inh_A.select(
+            a=lambda x: std.if_else(x.a, x.a < 10, x.a + 100)
+        )
+        result = self.client.query(query)
+
+        self._assertObjectsWithFields(
+            result,
+            "a",
+            [
+                (
+                    default.Inh_A,
+                    {
+                        "a": 1,
+                    },
+                ),
+                (
+                    default.Inh_AB,
+                    {
+                        "a": 4,
+                    },
+                ),
+                (
+                    default.Inh_AC,
+                    {
+                        "a": 7,
+                    },
+                ),
+                (
+                    default.Inh_ABC,
+                    {
+                        "a": 113,
+                    },
+                ),
+                (
+                    default.Inh_AB_AC,
+                    {
+                        "a": 117,
+                    },
+                ),
+                (
+                    default.Inh_AXA,
+                    {
+                        "a": 1101,
+                    },
+                ),
+            ],
+        )
+
 
 class TestQueryBuilderModify(tb.ModelTestCase):
     """This test suite is for data manipulation using QB."""
