@@ -3722,9 +3722,52 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             # SEE ABOVE: This is what we actually want.
             # key=lambda o: (generality_key(o), o.edgeql_signature),  # noqa: ERA001, E501
         )
+        base_generic_overload: dict[_Callable_T, _Callable_T] = {}
 
         for overload in overloads:
             overload_signatures[overload] = {}
+
+            if overload.schemapath == SchemaPath('std', 'IF'):
+                # HACK: Pretend the base overload of std::IF is generic on
+                # anyobject.
+                #
+                # The base overload of std::IF is
+                #   (anytype, std::bool, anytype) -> anytype
+                #
+                # However, this causes an overlap with overloading for bool
+                # arguments since
+                #   (anytype, builtin.bool, anytype) -> anytype
+                # overlaps with
+                #   (std::bool, builtin.bool, std::bool) -> std::bool
+                #
+                # We resolve this by generating the specializations for anytype
+                # but using anyobject as the base generic type.
+
+                def anytype_to_anyobject(
+                    refl_type: reflection.Type,
+                    default: reflection.Type | reflection.TypeRef,
+                ) -> reflection.Type | reflection.TypeRef:
+                    if isinstance(refl_type, reflection.PseudoType):
+                        return self._types_by_name["anyobject"]
+                    return default
+
+                base_generic_overload[overload] = dataclasses.replace(
+                    overload,
+                    params=[
+                        dataclasses.replace(
+                            param,
+                            type=anytype_to_anyobject(
+                                param.get_type(self._types), param.type
+                            ),
+                        )
+                        for param in overload.params
+                    ],
+                    return_type=anytype_to_anyobject(
+                        overload.get_return_type(self._types),
+                        overload.return_type,
+                    ),
+                )
+
             for param in param_getter(overload):
                 param_overload_map[param.key].add(overload)
                 param_type = param.get_type(self._types)
@@ -3732,6 +3775,14 @@ class GeneratedSchemaModule(BaseGeneratedModule):
                 if param.kind is reflection.CallableParamKind.Variadic:
                     if reflection.is_array_type(param_type):
                         param_type = param_type.get_element_type(self._types)
+
+                if (
+                    overload.schemapath == SchemaPath('std', 'IF')
+                    and param_type.is_pseudo
+                ):
+                    # Also generate the base signature using anyobject
+                    param_type = self._types_by_name["anyobject"]
+
                 # Start with the base parameter type
                 overload_signatures[overload][param.key] = [param_type]
 
@@ -3843,7 +3894,10 @@ class GeneratedSchemaModule(BaseGeneratedModule):
             for overload in overloads:
                 if overload_specs := overloads_specializations.get(overload):
                     expanded_overloads.extend(overload_specs)
-                expanded_overloads.append(overload)
+                if overload in base_generic_overload:
+                    expanded_overloads.append(base_generic_overload[overload])
+                else:
+                    expanded_overloads.append(overload)
             overloads = expanded_overloads
 
         overload_order = {overload: i for i, overload in enumerate(overloads)}
